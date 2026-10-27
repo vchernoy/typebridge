@@ -172,3 +172,50 @@ test('touch interactions on a narrow viewport', async ({ browser }) => {
   await expect(field).toHaveValue('ёx');
   await context.close();
 });
+
+test('toolbar Undo and Redo track multiple edits, preserve selection and keyboard history', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  const undo = page.getByRole('button', { name: 'Undo', exact: true });
+  const redo = page.getByRole('button', { name: 'Redo', exact: true });
+  await expect(undo).toBeDisabled();
+  await expect(redo).toBeDisabled();
+  await field.pressSequentially('abc');
+  await expect(field).toHaveValue('абц');
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(field).toHaveValue('аб');
+  await expect(field).toBeFocused();
+  await undo.click();
+  await expect(field).toHaveValue('а');
+  await redo.click();
+  await expect(field).toHaveValue('аб');
+  await field.press('ControlOrMeta+Shift+z');
+  await expect(field).toHaveValue('абц');
+  await expect(redo).toBeDisabled();
+  await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 2));
+  await field.pressSequentially('sh');
+  await expect(field).toHaveValue('шц');
+  await undo.click();
+  await expect(field).toHaveValue('сц');
+  await undo.click();
+  await expect(field).toHaveValue('абц');
+  expect(await field.evaluate(el => [(el as HTMLTextAreaElement).selectionStart, (el as HTMLTextAreaElement).selectionEnd])).toEqual([0, 2]);
+  await redo.click();
+  await expect(field).toHaveValue('сц');
+  await field.pressSequentially('x');
+  await expect(redo).toBeDisabled();
+});
+
+test('toolbar history undoes block clear and supports multiple steps', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('privet');
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(field).toHaveValue('');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(field).toHaveValue('привет');
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(field).toHaveValue('');
+});
