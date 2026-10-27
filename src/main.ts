@@ -34,7 +34,7 @@ function matches(): Array<[number, number]> {
   const query = findInput.value;
   if (!query) return [];
   const flags = matchCase.checked ? 'g' : 'gi';
-  const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\\\' + char : char).join('');
+  const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
   const pattern = new RegExp(escaped, flags);
   return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
 }
