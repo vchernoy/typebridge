@@ -32,12 +32,15 @@ test('toggle, paste and composition preserve text', async ({ page }) => {
   await expect(field).toHaveValue('');
 });
 
-test('paste and undo preserve clipboard content and caret', async ({ context, page }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+test('paste and undo preserve clipboard content and caret', async ({ page }) => {
   await page.goto('/typebridge/');
   const field = page.getByRole('textbox', { name: 'Your text' });
+  await page.evaluate(() => { const seed = document.createElement('textarea'); seed.id = 'clipboard-seed'; seed.value = 'ABC 🙂'; document.body.append(seed); });
+  const seed = page.locator('#clipboard-seed');
+  await seed.selectText();
+  await seed.press('ControlOrMeta+c');
+  await seed.evaluate(el => el.remove());
   await field.pressSequentially('privet');
-  await page.evaluate(() => navigator.clipboard.writeText('ABC 🙂'));
   await field.press('ControlOrMeta+v');
   await expect(field).toHaveValue('приветABC 🙂');
   await field.press('ControlOrMeta+z');
@@ -70,8 +73,7 @@ test('composition keyboard undo is not intercepted by editor', async ({ page }) 
   expect(result).toEqual({ prevented:false, value:'а' });
 });
 
-test('cut and selection replacement are undoable with selections intact', async ({ context, page }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+test('cut and selection replacement are undoable with selections intact', async ({ page }) => {
   await page.goto('/typebridge/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await page.getByLabel('Transliteration on').uncheck();
