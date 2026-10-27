@@ -24,8 +24,10 @@ export function newDraft(text = ''): Draft { return { id: crypto.randomUUID(), t
 export function autosaveEnabled(): boolean { return localStorage.getItem(ENABLED) !== 'off'; }
 export function setAutosaveEnabled(enabled: boolean): void { localStorage.setItem(ENABLED, enabled ? 'on' : 'off'); }
 export function getActiveDraftId(): string | null {
-  // A new tab gets its own blank draft; reload retains the current tab's draft.
-  const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-  return navigation?.type === 'reload' ? sessionStorage.getItem(TAB) : null;
+  // Preserve each tab's selection on reload; a fresh tab opens the most
+  // recently edited saved draft rather than creating an empty document.
+  const selected = sessionStorage.getItem(TAB);
+  if (selected && getDraft(selected)) return selected;
+  return listDrafts()[0]?.id ?? null;
 }
 export function setActiveDraftId(id: string): void { sessionStorage.setItem(TAB, id); }
