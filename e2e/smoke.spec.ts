@@ -137,3 +137,36 @@ test('non-cancelable native history discards stale custom snapshots', async ({ p
   await field.press('ControlOrMeta+z');
   await expect(field).toHaveValue('а');
 });
+
+test('toggle while editing and undo clear', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('sh');
+  await expect(field).toHaveValue('ш');
+  await page.getByLabel('Transliteration on').uncheck();
+  await field.pressSequentially('ab');
+  await expect(field).toHaveValue('шab');
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(field).toHaveValue('');
+  await field.focus();
+  await field.press('ControlOrMeta+z');
+  await expect(field).toHaveValue('шab');
+  await field.press('ControlOrMeta+Shift+z');
+  await expect(field).toHaveValue('');
+});
+
+test('touch interactions on a narrow viewport', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true });
+  const page = await context.newPage();
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.tap();
+  await field.pressSequentially('yo');
+  await expect(field).toHaveValue('ё');
+  await page.getByLabel('Transliteration on').tap();
+  await field.tap();
+  await field.pressSequentially('x');
+  await expect(field).toHaveValue('ёx');
+  await context.close();
+});
