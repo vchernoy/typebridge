@@ -45,12 +45,13 @@ function renderDrafts(): void {
 }
 function showDraft(): void {
   editor.load(active.text);
+  editor.restoreHistory(active.history);
   draftTitle.value = active.title;
   renderDrafts();
 }
 function persist(): void {
   if (!autosave.checked) return;
-  active = { ...active, text: field.value, title: draftTitle.value.trim() || 'Untitled draft', updatedAt: Date.now() };
+  active = { ...active, text: field.value, title: draftTitle.value.trim() || 'Untitled draft', history: editor.exportHistory(), updatedAt: Date.now() };
   try { saveDraft(active); status.textContent = 'Saved locally'; renderDrafts(); }
   catch { status.textContent = 'Save failed — check browser storage'; }
 }
@@ -60,6 +61,7 @@ function scheduleSave(): void {
   if (autosave.checked) { status.textContent = 'Saving…'; saveTimer = setTimeout(persist, 300); }
 }
 field.addEventListener('input', scheduleSave);
+field.addEventListener('historychange', scheduleSave);
 draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', () => {
   setAutosaveEnabled(autosave.checked);
