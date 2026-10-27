@@ -220,7 +220,7 @@ test('toolbar history undoes block clear and supports multiple steps', async ({ 
   await expect(field).toHaveValue('');
 });
 
-test('autosave restores text after reload and creates independent drafts in a new tab', async ({ page, context }) => {
+test('autosave restores text after reload and opens latest draft in a new tab', async ({ page, context }) => {
   await page.goto('/typebridge/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
@@ -229,7 +229,8 @@ test('autosave restores text after reload and creates independent drafts in a ne
   await expect(field).toHaveValue('привет');
   const second = await context.newPage();
   await second.goto('/typebridge/');
-  await expect(second.getByRole('textbox', { name: 'Your text' })).toHaveValue('');
+  await expect(second.getByRole('textbox', { name: 'Your text' })).toHaveValue('привет');
+  await second.getByRole('button', { name: 'New draft' }).click();
   await second.getByRole('textbox', { name: 'Your text' }).pressSequentially('mir');
   await expect(second.getByRole('status')).toContainText('Saved locally');
   await page.reload();
@@ -289,4 +290,39 @@ test('undo and redo survive refresh and stay isolated per draft', async ({ page 
   await page.getByRole('combobox', { name: 'Drafts' }).selectOption({ label: 'First' });
   await expect(field).toHaveValue('привет');
   await expect(undo).toBeEnabled();
+});
+
+test('editor can shrink to five lines and resize horizontally', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  const sizes = await field.evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    const initial = node.getBoundingClientRect();
+    const styles = getComputedStyle(node);
+    node.style.height = '160px';
+    node.style.width = '1200px';
+    const resized = node.getBoundingClientRect();
+    return { initialHeight: initial.height, height: resized.height, width: resized.width, resize: styles.resize };
+  });
+  expect(sizes.initialHeight).toBeGreaterThan(sizes.height);
+  expect(sizes.height).toBeLessThan(200);
+  expect(sizes.width).toBeGreaterThan(1000);
+  expect(sizes.resize).toBe('both');
+});
+
+test('fresh page opens latest saved draft, reload keeps current tab selection', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.fill('First draft');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.getByRole('button', { name: 'New draft' }).click();
+  await field.fill('Latest draft');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  const fresh = await context.newPage();
+  await fresh.goto('/typebridge/');
+  await expect(fresh.getByRole('textbox', { name: 'Your text' })).toHaveValue('Latest draft');
+  await page.reload();
+  await expect(field).toHaveValue('Latest draft');
+  await fresh.close();
 });
