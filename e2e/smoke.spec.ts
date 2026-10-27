@@ -31,3 +31,26 @@ test('toggle, paste and composition preserve text', async ({ page }) => {
   await page.getByRole('button', { name:'Clear' }).click();
   await expect(field).toHaveValue('');
 });
+
+test('paste and undo preserve clipboard content and caret', async ({ context, page }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('privet');
+  await page.evaluate(() => navigator.clipboard.writeText('ABC 🙂'));
+  await field.press('ControlOrMeta+v');
+  await expect(field).toHaveValue('приветABC 🙂');
+  await field.press('ControlOrMeta+z');
+  await expect(field).toHaveValue('привет');
+  await field.press('ControlOrMeta+Shift+z');
+  await expect(field).toHaveValue('приветABC 🙂');
+});
+
+test('small screen retains an accessible editor and toggle', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 650 });
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('yozh');
+  await expect(field).toHaveValue('ёж');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
