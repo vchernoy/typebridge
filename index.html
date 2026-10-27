@@ -1,18 +1,6 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="TypeBridge transliteration editor, under development." />
-    <title>TypeBridge</title>
-  </head>
-  <body>
-    <main class="welcome">
-      <p class="eyebrow">Open-source transliteration editor</p>
-      <h1>TypeBridge</h1>
-      <p>Write across alphabets, right in your browser.</p>
-      <p class="status">The editor is under development.</p>
-    </main>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
-</html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>TypeBridge</title></head>
+<body><main class="workspace"><header><p class="eyebrow">WRITE ACROSS ALPHABETS</p><h1>TypeBridge</h1><p>Type Russian using your Latin keyboard.</p></header>
+<section aria-label="Editor"><div class="toolbar"><label class="toggle"><input id="enabled" type="checkbox" checked> Transliteration on</label><div><button id="copy" type="button">Copy</button> <button id="clear" type="button">Clear</button></div></div>
+<label for="editor">Your text</label><textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea><div class="bottom"><span id="count">0 characters</span><span id="status" role="status" aria-live="polite"></span></div>
+<p class="hint">Text stays in this tab. Draft saving is not available yet.</p></section></main><script type="module" src="/src/main.ts"></script></body></html>
