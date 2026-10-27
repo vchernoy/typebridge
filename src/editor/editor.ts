@@ -166,11 +166,11 @@ export class Editor {
     const selection = direction === 'undo' ? d[3] : d[4];
     this.field.focus({ preventScroll: true });
     this.field.setSelectionRange(selection[0], selection[1], selection[2]);
-    this.revealEdit(d[0], direction === 'undo' ? d[1].length : d[2].length);
+    this.revealEdit(d[0]);
     this.pending = null; this.before = null; this.known = this.capture();
     this.notifyHistory(); this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  private revealEdit(position: number, _length: number): void {
+  private revealEdit(position: number): void {
     // A textarea scrolls its *contents* independently of the page. Changing
     // selectionRange does not reliably reveal the edit in Chromium or WebKit.
     // Measure the caret's wrapped line with an off-screen layout mirror.
