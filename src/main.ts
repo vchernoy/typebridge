@@ -25,6 +25,66 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', (
   if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); status.textContent = 'Cleared'; }
 });
 
+
+const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
+const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
+const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
+const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+function matches(): Array<[number, number]> {
+  const query = findInput.value;
+  if (!query) return [];
+  const flags = matchCase.checked ? 'g' : 'gi';
+  const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
+  const pattern = new RegExp(escaped, flags);
+  return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+}
+function findNext(backwards = false): void {
+  const found = matches();
+  if (!found.length) { findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
+  const position = backwards ? field.selectionStart : field.selectionEnd;
+  const match = backwards
+    ? [...found].reverse().find(([start]) => start < position) ?? found[found.length - 1]
+    : found.find(([start]) => start >= position) ?? found[0];
+  field.focus({ preventScroll: true });
+  field.setSelectionRange(match[0], match[1]);
+  // The browser scrolls textarea contents to the selected match.
+  findStatus.textContent = `${found.length} match${found.length === 1 ? '' : 'es'}`;
+}
+document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
+document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
+document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
+  const found = matches();
+  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  const match = found.find(([start, end]) => start === field.selectionStart && end === field.selectionEnd)
+    ?? found.find(([start]) => start >= field.selectionEnd) ?? found[0];
+  editor.replaceRange(match[0], match[1], replaceInput.value);
+  findStatus.textContent = 'Replaced 1 match';
+  field.focus({ preventScroll: true });
+});
+document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('click', () => {
+  const found = matches();
+  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  const original = field.value;
+  let result = '';
+  let offset = 0;
+  for (const [start, end] of found) {
+    result += original.slice(offset, start) + replaceInput.value;
+    offset = end;
+  }
+  result += original.slice(offset);
+  editor.replaceRange(0, original.length, result);
+  findStatus.textContent = `Replaced ${found.length} matches`;
+  field.focus({ preventScroll: true });
+});
+findInput.addEventListener('keydown', event => {
+  if (event.key === 'Enter') { event.preventDefault(); findNext(event.shiftKey); }
+});
+document.addEventListener('keydown', event => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+    event.preventDefault(); findInput.focus(); findInput.select();
+  }
+});
+
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;

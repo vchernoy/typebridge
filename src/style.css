@@ -7,3 +7,7 @@ button:disabled { opacity:.45; cursor:not-allowed }
 .draft-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px }
 .draft-bar select,.draft-bar input[type=text] { min-height:40px; max-width:100%; padding:6px 10px; border:1px solid #aab8cd; border-radius:8px; background:transparent; color:inherit; font:inherit }
 .draft-bar input[type=text] { width:190px }
+
+.find-bar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:16px }
+.find-bar input[type=text] { width:160px; max-width:100%; min-height:40px; padding:6px 10px; border:1px solid #aab8cd; border-radius:8px; background:transparent; color:inherit; font:inherit }
+.find-bar #find-status { font-size:.85rem; color:#50627a }
