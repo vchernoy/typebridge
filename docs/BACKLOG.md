@@ -27,7 +27,7 @@ Editable source, derived read-only output, direction control, copy, responsive s
 Preset selection, validated custom rules, conflicts, preview, reset and accessible reference. Acceptance: errors explain conflicts; edits do not mutate the default preset. Depends on 2 and 4.
 
 ## 9. Implement versioned local persistence
-Save settings and editor dimensions; opt-in draft separately, deletion and error handling. Acceptance: reload, corrupt data, unavailable storage and opt-in privacy tests. Depends on 4.
+Save settings/editor dimensions and versioned per-draft records in localStorage; auto-save enabled by default, disableable in Settings. New independent tab starts blank; reload restores its draft; Drafts list supports open/rename/delete. Handle duplicated tabs, same-draft concurrent edits and conflicts without silent overwrites. Debounced saves, quota/storage errors, corrupt data, explicit retain/delete choice on disabling auto-save, local-only privacy messaging. Acceptance: multi-tab independence, reload, conflict, quota, corrupted data and toggle tests. Depends on 4.
 
 ## 10. Add keyboard-accessible editor resizing
 Pointer and keyboard resize, viewport bounds, reset and saved size. Acceptance: small screen and zoom tests, size persists only when storage works. Depends on 4 and 9.
