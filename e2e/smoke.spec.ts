@@ -260,3 +260,33 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   await page.getByRole('button', { name: 'Delete draft' }).click();
   await expect(field).toHaveValue('');
 });
+
+test('undo and redo survive refresh and stay isolated per draft', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  const undo = page.getByRole('button', { name: 'Undo', exact: true });
+  const redo = page.getByRole('button', { name: 'Redo', exact: true });
+  await field.pressSequentially('privet');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(field).toHaveValue('привет');
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(field).toHaveValue('приве');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(field).toHaveValue('приве');
+  await expect(redo).toBeEnabled();
+  await redo.click();
+  await expect(field).toHaveValue('привет');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.getByRole('textbox', { name: 'Draft title' }).fill('First');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.getByRole('button', { name: 'New draft' }).click();
+  await expect(undo).toBeDisabled();
+  await field.pressSequentially('mir');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.getByRole('combobox', { name: 'Drafts' }).selectOption({ label: 'First' });
+  await expect(field).toHaveValue('привет');
+  await expect(undo).toBeEnabled();
+});
