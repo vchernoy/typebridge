@@ -32,16 +32,19 @@ test('Undo does not scroll when the edited line is already visible', async ({ pa
   await page.goto('/typebridge/');
   await page.getByLabel('Transliteration on').uncheck();
   const field = page.getByRole('textbox', { name: 'Your text' });
-  await field.fill('First line\nSecond line\nThird line');
+  const original = 'First line\\nSecond line\\nThird line';
+  await field.fill(original);
+  // A single undo may group adjacent typing, so make a non-typing edit
+  // (selection replacement) to ensure this is an independent history step.
   await field.evaluate(el => {
     const node = el as HTMLTextAreaElement;
     node.focus();
-    node.setSelectionRange(node.value.length, node.value.length);
+    node.setSelectionRange(0, 5);
   });
   await field.pressSequentially('X');
-  await expect(field).toHaveValue('First line\nSecond line\nThird lineX');
+  await expect(field).toHaveValue('X line\\nSecond line\\nThird line');
   await field.evaluate(el => { (el as HTMLTextAreaElement).scrollTop = 0; });
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(field).toHaveValue('First line\nSecond line\nThird line');
+  await expect(field).toHaveValue(original);
   expect(await field.evaluate(el => (el as HTMLTextAreaElement).scrollTop)).toBe(0);
 });
