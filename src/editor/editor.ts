@@ -13,6 +13,11 @@ export class Editor {
   private nativeHistory = false;
   private known: Snapshot;
   enabled = true;
+  get canUndo(): boolean { return this.undoStack.length > 0; }
+  get canRedo(): boolean { return this.redoStack.length > 0; }
+  private notifyHistory(): void { this.field.dispatchEvent(new Event('historychange')); }
+  undo(): void { this.history('undo'); }
+  redo(): void { this.history('redo'); }
   constructor(readonly field: HTMLTextAreaElement) {
     this.known = this.snapshot();
     field.addEventListener('compositionstart', () => { this.composing = true; this.pending = null; this.compositionStart = this.snapshot(); });
@@ -33,22 +38,22 @@ export class Editor {
     field.addEventListener('cut', () => { this.pending = null; });
   }
   private snapshot(): Snapshot { return { value: this.field.value, start: this.field.selectionStart, end: this.field.selectionEnd }; }
-  private record(snapshot: Snapshot): void { this.undoStack.push(snapshot); if (this.undoStack.length > 500) this.undoStack.shift(); this.redoStack = []; }
+  private record(snapshot: Snapshot): void { this.undoStack.push(snapshot); if (this.undoStack.length > 500) this.undoStack.shift(); this.redoStack = []; this.notifyHistory(); }
   private history(direction: 'undo' | 'redo'): void {
     this.nativeHistory = false;
-    if (this.known.value !== this.field.value) { this.undoStack = []; this.redoStack = []; this.known = this.snapshot(); return; }
+    if (this.known.value !== this.field.value) { this.undoStack = []; this.redoStack = []; this.known = this.snapshot(); this.notifyHistory(); return; }
     const from = direction === 'undo' ? this.undoStack : this.redoStack;
     const to = direction === 'undo' ? this.redoStack : this.undoStack;
     const next = from.pop(); if (!next) return;
     to.push(this.snapshot()); this.field.value = next.value; this.field.setSelectionRange(next.start, next.end);
-    this.pending = null; this.before = null; this.known = this.snapshot(); this.field.dispatchEvent(new Event('input', { bubbles: true }));
+    this.pending = null; this.before = null; this.known = this.snapshot(); this.notifyHistory(); this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
   private onInput(event: Event): void {
     if (this.composing || (event instanceof InputEvent && event.isComposing)) return;
     const current = this.snapshot();
     if (this.nativeHistory) { this.undoStack = []; this.redoStack = []; this.pending = null; }
     else if (current.value !== this.known.value) this.record(this.before ?? this.known);
-    this.nativeHistory = false; this.before = null; this.known = current;
+    this.nativeHistory = false; this.before = null; this.known = current; this.notifyHistory();
   }
   private beforeInput(event: InputEvent): void {
     if (this.composing || event.isComposing || event.inputType.includes('Composition')) return;
@@ -58,7 +63,7 @@ export class Editor {
       return;
     }
     this.nativeHistory = false;
-    if (this.known.value !== this.field.value) { this.undoStack = []; this.redoStack = []; this.known = this.snapshot(); }
+    if (this.known.value !== this.field.value) { this.undoStack = []; this.redoStack = []; this.known = this.snapshot(); this.notifyHistory(); }
     this.before = this.snapshot();
     const { selectionStart: start, selectionEnd: end } = this.field;
     if (this.enabled && event.inputType === 'insertText' && event.data && /^[A-Za-z'#+]$/.test(event.data) && event.cancelable) {
