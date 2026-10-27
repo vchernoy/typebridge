@@ -54,3 +54,18 @@ test('small screen retains an accessible editor and toggle', async ({ page }) =>
   await expect(field).toHaveValue('ёж');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test('composition keyboard undo is not intercepted by editor', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('a');
+  const result = await field.evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles:true }));
+    const event = new KeyboardEvent('keydown', { key:'z', ctrlKey:true, isComposing:true, bubbles:true, cancelable:true });
+    node.dispatchEvent(event);
+    node.dispatchEvent(new CompositionEvent('compositionend', { bubbles:true }));
+    return { prevented:event.defaultPrevented, value:node.value };
+  });
+  expect(result).toEqual({ prevented:false, value:'а' });
+});

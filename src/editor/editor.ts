@@ -14,6 +14,7 @@ export class Editor {
     field.addEventListener('compositionend', () => { this.composing = false; this.pending = null; });
     field.addEventListener('beforeinput', event => this.beforeInput(event));
     field.addEventListener('keydown', event => {
+      if (this.composing || event.isComposing) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z') {
         event.preventDefault(); this.history(event.shiftKey ? 'redo' : 'undo');
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); this.history('redo'); }
@@ -30,8 +31,8 @@ export class Editor {
     this.pending = null; this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
   private beforeInput(event: InputEvent): void {
-    if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); this.history(event.inputType === 'historyUndo' ? 'undo' : 'redo'); return; }
     if (this.composing || event.isComposing || event.inputType.includes('Composition')) return;
+    if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { if (event.cancelable) { event.preventDefault(); this.history(event.inputType === 'historyUndo' ? 'undo' : 'redo'); } return; }
     const { selectionStart: start, selectionEnd: end } = this.field;
     this.remember();
     if (this.enabled && event.inputType === 'insertText' && event.data && /^[A-Za-z'#+]$/.test(event.data) && event.cancelable) {
