@@ -1,4 +1,5 @@
-export type Draft = { id: string; title: string; text: string; updatedAt: number };
+import type { EditorHistory } from './editor';
+export type Draft = { id: string; title: string; text: string; updatedAt: number; history?: EditorHistory };
 const KEY = 'typebridge.drafts.v1';
 const TAB = 'typebridge.activeDraft.v1';
 const ENABLED = 'typebridge.autosave.v1';
