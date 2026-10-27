@@ -76,8 +76,8 @@ export class Editor {
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
   exportHistory(): EditorHistory {
-    return { v: 1, undo: this.undoStack.map(d => [...d, [...d[3]], [...d[4]]] as Delta),
-      redo: this.redoStack.map(d => [...d, [...d[3]], [...d[4]]] as Delta), current: this.field.value };
+    return { v: 1, undo: this.undoStack.map(d => [d[0], d[1], d[2], [...d[3]], [...d[4]]] as Delta),
+      redo: this.redoStack.map(d => [d[0], d[1], d[2], [...d[3]], [...d[4]]] as Delta), current: this.field.value };
   }
   restoreHistory(history?: EditorHistory): void {
     this.undoStack = []; this.redoStack = [];
@@ -88,8 +88,8 @@ export class Editor {
         history.undo.every(deltaValid) && history.redo.every(deltaValid) &&
         validateChain(this.field.value, history.undo, true) &&
         validateChain(this.field.value, history.redo, false)) {
-        this.undoStack = history.undo.map(d => [...d, [...d[3]], [...d[4]]] as Delta);
-        this.redoStack = history.redo.map(d => [...d, [...d[3]], [...d[4]]] as Delta);
+        this.undoStack = history.undo.map(d => [d[0], d[1], d[2], [...d[3]], [...d[4]]] as Delta);
+        this.redoStack = history.redo.map(d => [d[0], d[1], d[2], [...d[3]], [...d[4]]] as Delta);
       } else if (!('v' in history) && history.undo.every(legacyValid) && history.redo.every(legacyValid)) {
         const current = this.capture();
         const s: Snapshot = { value: current.value, start: current.selection[0], end: current.selection[1] };
@@ -188,7 +188,9 @@ export class Editor {
     else if (current.value !== this.known.value) {
       const b = this.before ?? this.known;
       const inputType = event instanceof InputEvent ? event.inputType : '';
-      const group = inputType === 'insertText' || (!!this.pending && !inputType);
+      // Transliteration changes earlier letters (e.g. sh -> ш); preserve its per-key undo semantics.
+      const group = !this.enabled && inputType === 'insertText' && !!this.before &&
+        this.before.selection[0] === this.before.selection[1];
       this.record(b, current, group);
     }
     this.nativeHistory = false; this.before = null; this.known = current; this.notifyHistory();
