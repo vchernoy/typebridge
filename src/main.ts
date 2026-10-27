@@ -15,6 +15,21 @@ for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor
   button.addEventListener('click', () => { action(); field.focus({ preventScroll: true }); });
 }
 syncHistory();
+for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-latin', 'to-latin']] as const) {
+  const button = document.querySelector<HTMLButtonElement>('#' + id)!;
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (!editor.convertSelection(direction)) status.textContent = 'Select text to convert';
+  });
+}
+field.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (key !== 'l' && key !== 'k') return;
+  if (field.selectionStart === field.selectionEnd) return;
+  event.preventDefault();
+  editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
+});
 field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
 enabled.addEventListener('change', () => { editor.setEnabled(enabled.checked); });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {

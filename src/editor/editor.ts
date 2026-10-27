@@ -1,5 +1,6 @@
 import { createTransliterator } from '../core/transliterate';
 import { russianPack } from '../core/russian';
+import { cyrillicToLatin } from '../core/reverse-russian';
 
 const convert = createTransliterator(russianPack);
 type Selection = [start: number, end: number, direction: 'forward' | 'backward' | 'none'];
@@ -258,6 +259,17 @@ export class Editor {
       this.pending = { start: begin, end: begin + translated.length, raw };
       this.field.dispatchEvent(new Event('input', { bubbles: true }));
     } else this.pending = null;
+  }
+  convertSelection(direction: 'to-cyrillic' | 'to-latin'): boolean {
+    const start = this.field.selectionStart;
+    const end = this.field.selectionEnd;
+    if (start === end) return false;
+    const original = this.field.value.slice(start, end);
+    const converted = direction === 'to-cyrillic' ? convert(original) : cyrillicToLatin(original);
+    if (original === converted) return false;
+    this.replaceRange(start, end, converted);
+    this.field.focus({ preventScroll: true });
+    return true;
   }
   replaceRange(start: number, end: number, replacement: string): void {
     if (start < 0 || end < start || end > this.field.value.length) return;
