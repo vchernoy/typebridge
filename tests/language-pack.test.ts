@@ -1,28 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { validateLanguagePack, type LanguagePack } from '../src/core/language-pack';
+import { validateLanguagePack } from '../src/core/language-pack';
 import { russianPack } from '../src/core/russian';
 
-describe('language pack contract', () => {
-  it('accepts the default pack and overlapping prefixes', () => {
+describe('language pack', () => {
+  it('defines a valid pack covering all 33 Russian letters', () => {
     expect(validateLanguagePack(russianPack)).toEqual([]);
-    expect(russianPack.mappings).toContainEqual({ input: 'sh', output: 'ш' });
-    expect(russianPack.mappings).toContainEqual({ input: 'shch', output: 'щ' });
+    expect(new Set(russianPack.mappings.map(rule => rule.output)).size).toBe(33);
   });
-  it('reports conflicting identical inputs but allows aliases', () => {
-    const pack = { ...russianPack, mappings: [{ input: 'a', output: 'а' }, { input: 'a', output: 'б' }] };
-    expect(validateLanguagePack(pack)).toEqual([expect.objectContaining({ code: 'conflict' })]);
-    expect(validateLanguagePack({ ...pack, mappings: [{ input: 'a', output: 'а' }, { input: 'aa', output: 'а' }] })).toEqual([]);
+  it.each([['e','е'],['je','э'],['sh','ш'],['sch','щ'],['shh','щ'],['shch','щ'],['w','щ'],['q','я'],['x','х'],['h','х']])('maps %s to %s', (input, output) => {
+    expect(russianPack.mappings).toContainEqual({ input, output });
   });
-  it.each(['', 'A', 'a+b', 'a'.repeat(17)])('rejects invalid input %s', (input) => {
-    expect(validateLanguagePack({ ...russianPack, mappings: [{ input, output: 'а' }] }).some(e => e.code === 'mapping')).toBe(true);
+  it('keeps unsupported Latin letters unmapped', () => {
+    expect(russianPack.mappings.some(rule => rule.input === 'U')).toBe(false);
   });
-  it.each(['', 'A', 'а'.repeat(17)])('rejects invalid output %s', (output) => {
-    expect(validateLanguagePack({ ...russianPack, mappings: [{ input: 'a', output }] }).some(e => e.code === 'mapping')).toBe(true);
+  it('reports conflicts after Unicode normalization and accepts prefix overlap', () => {
+    expect(validateLanguagePack({ ...russianPack, mappings: [{ input: 'e\u0301', output: 'а' }, { input: 'é', output: 'б' }] })).toContainEqual(expect.objectContaining({ code: 'conflict' }));
+    expect(validateLanguagePack({ ...russianPack, mappings: [{ input: 's', output: 'с' }, { input: 'sh', output: 'ш' }] })).toEqual([]);
   });
-  it('rejects invalid metadata and unbounded or empty mappings', () => {
-    expect(validateLanguagePack({ ...russianPack, id: '', version: 0 }).some(e => e.code === 'metadata')).toBe(true);
-    expect(validateLanguagePack({ ...russianPack, mappings: [] })).toHaveLength(1);
-    expect(validateLanguagePack({ ...russianPack, mappings: Array(513).fill({ input: 'a', output: 'а' }) })).toHaveLength(1);
-    expect(validateLanguagePack({ ...russianPack, separator: '-' } as LanguagePack).some(e => e.code === 'metadata')).toBe(true);
+  it('supports non-Russian scripts and another separator', () => {
+    expect(validateLanguagePack({ id:'el', version:1, sourceScript:'Latn', targetScript:'Grek', separator:'·', casePolicy:'preserve', mappings:[{input:'th',output:'θ'}] })).toEqual([]);
+  });
+  it.each([{input:'',output:'а'}, {input:'a+b',output:'а'}, {input:'a'.repeat(17),output:'а'}, {input:'a',output:''}])('rejects invalid rules', rule => {
+    expect(validateLanguagePack({ ...russianPack, mappings:[rule] })).toContainEqual(expect.objectContaining({code:'mapping'}));
+  });
+  it('rejects bad metadata and empty or excessive mappings', () => {
+    expect(validateLanguagePack({ ...russianPack, id:'', version:0 })).toContainEqual(expect.objectContaining({code:'metadata'}));
+    expect(validateLanguagePack({ ...russianPack, mappings:[] })).toContainEqual(expect.objectContaining({code:'mapping'}));
+    expect(validateLanguagePack({ ...russianPack, mappings:Array(513).fill({input:'a',output:'а'}) })).toContainEqual(expect.objectContaining({code:'mapping'}));
   });
 });
