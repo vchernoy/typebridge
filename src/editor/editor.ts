@@ -170,16 +170,53 @@ export class Editor {
     this.pending = null; this.before = null; this.known = this.capture();
     this.notifyHistory(); this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  private revealEdit(position: number, length: number): void {
-    // A textarea's selection may be far from the actual edit; use a temporary
-    // caret at the edit to ask the browser to scroll there, then restore selection.
-    const { selectionStart: start, selectionEnd: end, selectionDirection: direction } = this.field;
-    const p = Math.min(position + Math.min(length, 1), this.field.value.length);
-    this.field.setSelectionRange(p, p);
-    this.field.setSelectionRange(start, end, direction);
-    // Also reveal the editor element itself if the page is scrolled away.
-    const rect = this.field.getBoundingClientRect();
-    if (rect.bottom < 0 || rect.top > window.innerHeight) this.field.scrollIntoView({ block: 'nearest' });
+  private revealEdit(position: number, _length: number): void {
+    // A textarea scrolls its *contents* independently of the page. Changing
+    // selectionRange does not reliably reveal the edit in Chromium or WebKit.
+    // Measure the caret's wrapped line with an off-screen layout mirror.
+    const field = this.field;
+    const style = getComputedStyle(field);
+    const mirror = document.createElement('div');
+    const properties = [
+      'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontVariant',
+      'fontStretch', 'lineHeight', 'letterSpacing', 'wordSpacing',
+      'textTransform', 'textIndent', 'tabSize', 'textAlign',
+      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'boxSizing', 'direction'
+    ] as const;
+    for (const property of properties) mirror.style[property] = style[property];
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.pointerEvents = 'none';
+    mirror.style.top = '0';
+    mirror.style.left = '-100000px';
+    mirror.style.width = field.getBoundingClientRect().width + 'px';
+    mirror.style.height = 'auto';
+    mirror.style.minHeight = '0';
+    mirror.style.maxHeight = 'none';
+    mirror.style.overflow = 'hidden';
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.overflowWrap = 'break-word';
+
+    const marker = document.createElement('span');
+    marker.textContent = '\\u200b';
+    mirror.append(document.createTextNode(field.value.slice(0, position)), marker);
+    document.body.append(mirror);
+    const lineTop = marker.offsetTop;
+    const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 20;
+    mirror.remove();
+
+    const top = field.scrollTop;
+    const viewport = field.clientHeight;
+    const margin = Math.min(lineHeight, viewport / 4);
+    if (lineTop < top + margin || lineTop + lineHeight > top + viewport - margin) {
+      field.scrollTop = Math.max(0, lineTop - viewport / 2);
+    }
+    const rect = field.getBoundingClientRect();
+    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+      field.scrollIntoView({ block: 'nearest' });
+    }
   }
   private onInput(event: Event): void {
     if (this.composing || (event instanceof InputEvent && event.isComposing)) return;
