@@ -2,7 +2,8 @@ import { createTransliterator } from '../core/transliterate';
 import { russianPack } from '../core/russian';
 
 const convert = createTransliterator(russianPack);
-type Snapshot = { value: string; start: number; end: number };
+export type Snapshot = { value: string; start: number; end: number };
+export type EditorHistory = { undo: Snapshot[]; redo: Snapshot[]; current: string };
 export class Editor {
   private undoStack: Snapshot[] = [];
   private redoStack: Snapshot[] = [];
@@ -15,6 +16,14 @@ export class Editor {
   enabled = true;
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
+  exportHistory(): EditorHistory { return { undo: this.undoStack.slice(), redo: this.redoStack.slice(), current: this.field.value }; }
+  restoreHistory(history?: EditorHistory): void {
+    const valid = (value: unknown): value is Snapshot => !!value && typeof value === 'object' && typeof (value as Snapshot).value === 'string' && Number.isInteger((value as Snapshot).start) && Number.isInteger((value as Snapshot).end) && (value as Snapshot).start >= 0 && (value as Snapshot).end >= (value as Snapshot).start && (value as Snapshot).end <= (value as Snapshot).value.length;
+    if (history && history.current === this.field.value && Array.isArray(history.undo) && Array.isArray(history.redo) && history.undo.length <= 500 && history.redo.length <= 500 && history.undo.every(valid) && history.redo.every(valid)) {
+      this.undoStack = history.undo.slice(); this.redoStack = history.redo.slice();
+    } else { this.undoStack = []; this.redoStack = []; }
+    this.pending = null; this.before = null; this.known = this.snapshot(); this.notifyHistory();
+  }
   private notifyHistory(): void { this.field.dispatchEvent(new Event('historychange')); }
   undo(): void { this.history('undo'); }
   redo(): void { this.history('redo'); }
