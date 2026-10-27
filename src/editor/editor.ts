@@ -185,7 +185,10 @@ export class Editor {
       'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
       'boxSizing', 'direction'
     ] as const;
-    for (const property of properties) mirror.style[property] = style[property];
+    for (const property of properties) {
+      const cssName = property.replace(/[A-Z]/g, char => '-' + char.toLowerCase());
+      mirror.style.setProperty(cssName, style.getPropertyValue(cssName));
+    }
     mirror.style.position = 'absolute';
     mirror.style.visibility = 'hidden';
     mirror.style.pointerEvents = 'none';
