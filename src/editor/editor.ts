@@ -8,11 +8,21 @@ export class Editor {
   private redoStack: Snapshot[] = [];
   private pending: { start: number; end: number; raw: string } | null = null;
   private composing = false;
+  private compositionStart: Snapshot | null = null;
+  private before: Snapshot | null = null;
+  private nativeHistory = false;
+  private known: Snapshot;
   enabled = true;
   constructor(readonly field: HTMLTextAreaElement) {
-    field.addEventListener('compositionstart', () => { this.composing = true; this.pending = null; this.remember(); });
-    field.addEventListener('compositionend', () => { this.composing = false; this.pending = null; });
+    this.known = this.snapshot();
+    field.addEventListener('compositionstart', () => { this.composing = true; this.pending = null; this.compositionStart = this.snapshot(); });
+    field.addEventListener('compositionend', () => {
+      this.composing = false; this.pending = null;
+      if (this.compositionStart && this.compositionStart.value !== this.field.value) this.record(this.compositionStart);
+      this.compositionStart = null; this.before = null; this.known = this.snapshot();
+    });
     field.addEventListener('beforeinput', event => this.beforeInput(event));
+    field.addEventListener('input', event => this.onInput(event));
     field.addEventListener('keydown', event => {
       if (this.composing || event.isComposing) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z') {
@@ -20,21 +30,37 @@ export class Editor {
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); this.history('redo'); }
     });
     field.addEventListener('paste', () => { this.pending = null; });
+    field.addEventListener('cut', () => { this.pending = null; });
   }
   private snapshot(): Snapshot { return { value: this.field.value, start: this.field.selectionStart, end: this.field.selectionEnd }; }
-  private remember(): void { this.undoStack.push(this.snapshot()); if (this.undoStack.length > 500) this.undoStack.shift(); this.redoStack = []; }
+  private record(snapshot: Snapshot): void { this.undoStack.push(snapshot); if (this.undoStack.length > 500) this.undoStack.shift(); this.redoStack = []; }
   private history(direction: 'undo' | 'redo'): void {
+    this.nativeHistory = false;
+    if (this.known.value !== this.field.value) { this.undoStack = []; this.redoStack = []; this.known = this.snapshot(); return; }
     const from = direction === 'undo' ? this.undoStack : this.redoStack;
     const to = direction === 'undo' ? this.redoStack : this.undoStack;
     const next = from.pop(); if (!next) return;
     to.push(this.snapshot()); this.field.value = next.value; this.field.setSelectionRange(next.start, next.end);
-    this.pending = null; this.field.dispatchEvent(new Event('input', { bubbles: true }));
+    this.pending = null; this.before = null; this.known = this.snapshot(); this.field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  private onInput(event: Event): void {
+    if (this.composing || (event instanceof InputEvent && event.isComposing)) return;
+    const current = this.snapshot();
+    if (this.nativeHistory) { this.undoStack = []; this.redoStack = []; this.pending = null; }
+    else if (current.value !== this.known.value) this.record(this.before ?? this.known);
+    this.nativeHistory = false; this.before = null; this.known = current;
   }
   private beforeInput(event: InputEvent): void {
     if (this.composing || event.isComposing || event.inputType.includes('Composition')) return;
-    if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { if (event.cancelable) { event.preventDefault(); this.history(event.inputType === 'historyUndo' ? 'undo' : 'redo'); } return; }
+    if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+      if (event.cancelable) { event.preventDefault(); this.history(event.inputType === 'historyUndo' ? 'undo' : 'redo'); }
+      else { this.nativeHistory = true; this.before = null; }
+      return;
+    }
+    this.nativeHistory = false;
+    if (this.known.value !== this.field.value) { this.undoStack = []; this.redoStack = []; this.known = this.snapshot(); }
+    this.before = this.snapshot();
     const { selectionStart: start, selectionEnd: end } = this.field;
-    this.remember();
     if (this.enabled && event.inputType === 'insertText' && event.data && /^[A-Za-z'#+]$/.test(event.data) && event.cancelable) {
       event.preventDefault();
       const active = start === end && this.pending && this.pending.end === start ? this.pending : null;
@@ -47,5 +73,5 @@ export class Editor {
     } else this.pending = null;
   }
   setEnabled(value: boolean): void { this.enabled = value; this.pending = null; }
-  clear(): void { if (!this.field.value) return; this.remember(); this.field.value = ''; this.pending = null; this.field.dispatchEvent(new Event('input', { bubbles: true })); }
+  clear(): void { if (!this.field.value) return; this.before = this.snapshot(); this.field.value = ''; this.pending = null; this.field.dispatchEvent(new Event('input', { bubbles: true })); }
 }

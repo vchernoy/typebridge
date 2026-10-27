@@ -69,3 +69,71 @@ test('composition keyboard undo is not intercepted by editor', async ({ page }) 
   });
   expect(result).toEqual({ prevented:false, value:'а' });
 });
+
+test('cut and selection replacement are undoable with selections intact', async ({ context, page }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await page.getByLabel('Transliteration on').uncheck();
+  await field.pressSequentially('abcdef');
+  await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(1, 4));
+  await field.press('ControlOrMeta+x');
+  await expect(field).toHaveValue('aef');
+  await field.press('ControlOrMeta+z');
+  await expect(field).toHaveValue('abcdef');
+  expect(await field.evaluate(el => [(el as HTMLTextAreaElement).selectionStart, (el as HTMLTextAreaElement).selectionEnd])).toEqual([1,4]);
+  await field.pressSequentially('X');
+  await expect(field).toHaveValue('aXef');
+  await field.press('ControlOrMeta+z');
+  await expect(field).toHaveValue('abcdef');
+});
+
+test('non-cancelable input records actual mutation and ignores no-op beforeinput', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('a');
+  await field.evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.dispatchEvent(new InputEvent('beforeinput', { bubbles:true, cancelable:false, inputType:'insertText', data:'b' }));
+    node.value += 'b';
+    node.setSelectionRange(node.value.length,node.value.length);
+    node.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'insertText', data:'b' }));
+    node.dispatchEvent(new InputEvent('beforeinput', { bubbles:true, cancelable:true, inputType:'deleteContentBackward' }));
+  });
+  await field.press('ControlOrMeta+z');
+  await expect(field).toHaveValue('а');
+  await field.press('ControlOrMeta+Shift+z');
+  await expect(field).toHaveValue('аb');
+});
+
+test('composition updates form one undoable edit', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name:'Your text' });
+  await field.pressSequentially('a');
+  await field.evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles:true }));
+    node.value += '漢';
+    node.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'insertCompositionText', data:'漢', isComposing:true }));
+    node.dispatchEvent(new CompositionEvent('compositionend', { bubbles:true, data:'漢' }));
+    node.setSelectionRange(node.value.length,node.value.length);
+  });
+  await field.press('ControlOrMeta+z');
+  await expect(field).toHaveValue('а');
+  await field.press('ControlOrMeta+Shift+z');
+  await expect(field).toHaveValue('а漢');
+});
+
+test('non-cancelable native history discards stale custom snapshots', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('ab');
+  await field.evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.dispatchEvent(new InputEvent('beforeinput', { bubbles:true, cancelable:false, inputType:'historyUndo' }));
+    node.value = 'а';
+    node.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'historyUndo' }));
+  });
+  await field.press('ControlOrMeta+z');
+  await expect(field).toHaveValue('а');
+});
