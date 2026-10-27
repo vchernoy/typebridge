@@ -33,6 +33,7 @@ test('Undo does not scroll when the edited line is already visible', async ({ pa
   await page.getByLabel('Transliteration on').uncheck();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('First line\nSecond line\nThird line');
+  await field.press('End');
   await field.pressSequentially('X');
   await field.evaluate(el => { (el as HTMLTextAreaElement).scrollTop = 0; });
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
