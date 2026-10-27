@@ -219,3 +219,44 @@ test('toolbar history undoes block clear and supports multiple steps', async ({ 
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(field).toHaveValue('');
 });
+
+test('autosave restores text after reload and creates independent drafts in a new tab', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('privet');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(field).toHaveValue('привет');
+  const second = await context.newPage();
+  await second.goto('/typebridge/');
+  await expect(second.getByRole('textbox', { name: 'Your text' })).toHaveValue('');
+  await second.getByRole('textbox', { name: 'Your text' }).pressSequentially('mir');
+  await expect(second.getByRole('status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(field).toHaveValue('привет');
+  await expect(page.getByRole('combobox', { name: 'Drafts' }).locator('option')).toHaveCount(2);
+  await second.close();
+});
+
+test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.pressSequentially('privet');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.getByRole('textbox', { name: 'Draft title' }).fill('First post');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.getByRole('button', { name: 'New draft' }).click();
+  await expect(field).toHaveValue('');
+  await field.pressSequentially('mir');
+  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await page.getByRole('combobox', { name: 'Drafts' }).selectOption({ label: 'First post' });
+  await expect(field).toHaveValue('привет');
+  page.once('dialog', d => d.dismiss());
+  await page.getByRole('checkbox', { name: 'Autosave' }).uncheck();
+  await field.pressSequentially('a');
+  await page.reload();
+  await expect(field).toHaveValue('привет');
+  page.once('dialog', d => d.accept());
+  await page.getByRole('button', { name: 'Delete draft' }).click();
+  await expect(field).toHaveValue('');
+});
