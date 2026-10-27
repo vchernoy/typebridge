@@ -1,6 +1,9 @@
 name: Deploy Pages
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/editor-live-russian
 permissions:
   contents: read
 concurrency:
