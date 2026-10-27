@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feat/editor-live-russian
+      - main
 permissions:
   contents: read
 concurrency:
