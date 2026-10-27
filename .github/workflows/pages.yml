@@ -1,18 +1,36 @@
-name: Deploy Pages (staged)
+name: Deploy Pages
 on:
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
-  deployment-not-enabled:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'Deployment is intentionally disabled until the app and release checks exist.'
-  # Replace this placeholder after release approval: configure-pages, setup-node,
-  # npm ci, npm run build, upload-pages-artifact (dist), deploy-pages with
-  # environment github-pages. Set Pages source to GitHub Actions in settings.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
