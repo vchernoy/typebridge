@@ -12,7 +12,7 @@ The editor maintains its own snapshot history because transformed text uses prog
 
 ## Test coverage and limitations
 
-Playwright exercises desktop Chromium typing, selection replacement, deletion, paste, cut, undo/redo and a narrow mobile viewport. The non-cancelable input and IME sequences are synthetic events, not a real IME or virtual keyboard. A mobile viewport does not emulate mobile Safari or Android Chrome input methods. No real iOS Safari or Android Chrome device testing has been performed.
+Playwright exercises desktop Chromium, Firefox and WebKit typing, selection replacement, deletion, keyboard paste and cut, undo/redo, clear and a narrow touch-enabled viewport. The three engine projects passed in CI run 23 on commit a0a3c54. Playwright WebKit on Linux is not Safari on an Apple device. The non-cancelable input and IME sequences are synthetic events, not a real IME or virtual keyboard. A mobile viewport does not emulate mobile Safari or Android Chrome input methods. No real iOS Safari or Android Chrome device testing has been performed.
 
 - Test real iOS Safari and Android Chrome keyboards, including predictive text, multi-character input, autocorrect, selection, deletion and virtual keyboard undo/redo. Live conversion currently handles single-character cancelable insertText; multi-character and non-cancelable insertions remain unchanged.
 - Test real Japanese/Chinese and other IMEs, cancellation and commit, caret and undo after composition, and event ordering around compositionend.
