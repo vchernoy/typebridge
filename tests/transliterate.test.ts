@@ -12,3 +12,16 @@ describe('transliteration', () => {
     expect(convert('th t·h TH')).toBe('θ τη TH');
   });
 });
+
+describe('longest match regressions', () => {
+  it.each([['sh','ш'],['shch','щ'],['sch','щ'],['ch','ч'],['zh','ж'],['yo','ё'],['ya','я'],['yu','ю'],['SHCH','Щ'],['sHch','щ'],['s+ch','сч'],['j+o','йо'],['s++h','с++х'],['🙂漢字','🙂漢字']])('%s → %s', (input, expected) => expect(transliterate(input)).toBe(expected));
+  it('prefers longer rules regardless of declaration order', () => {
+    const convert = createTransliterator({ id:'test', version:1, sourceScript:'Latn', targetScript:'Grek', separator:null, casePolicy:'preserve', mappings:[{input:'a',output:'α'},{input:'abc',output:'γ'},{input:'ab',output:'β'}] });
+    expect(convert('abcabax')).toBe('γβαx');
+  });
+  it('rejects case-folded conflicts', () => expect(() => createTransliterator({ ...russianPack, mappings:[{input:'a',output:'а'},{input:'A',output:'б'}] })).toThrow('ambiguous case mapping'));
+  it('matches canonically equivalent mapped input without changing unmatched text', () => {
+    const convert = createTransliterator({ id:'accent',version:1,sourceScript:'Latn',targetScript:'Grek',separator:null,casePolicy:'preserve',mappings:[{input:'é',output:'ε'}] });
+    expect(convert('e\u0301 🙂')).toBe('ε 🙂');
+  });
+});
