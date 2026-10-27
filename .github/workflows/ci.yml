@@ -7,10 +7,19 @@ on:
 permissions:
   contents: read
 jobs:
-  scaffold-pending:
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - run: echo 'Planning-only repository: tests are not configured yet. Implement backlog issue 1 before release.'
-  # Replace the planning job when issue 1 adds package-lock.json and scripts:
-  # npm ci; npm run typecheck; npm run test:unit; npx playwright install --with-deps chromium;
-  # npm run test:e2e; npm run build. The planning job is not a test pass.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

@@ -1,0 +1,19 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #18233b;
+  background: #f6f8fc;
+  line-height: 1.5;
+  color-scheme: light dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+.welcome { max-width: 56rem; margin: 0 auto; padding: clamp(2rem, 8vw, 6rem) 1.5rem; }
+h1 { margin: 0; font-size: clamp(2.5rem, 7vw, 4.5rem); letter-spacing: -0.04em; }
+.eyebrow { color: #2854a4; font-weight: 650; }
+.status { color: #43536d; }
+@media (prefers-color-scheme: dark) {
+  :root { color: #edf2fb; background: #151b29; }
+  .eyebrow { color: #a9c5ff; }
+  .status { color: #c4d0e3; }
+}
