@@ -112,3 +112,35 @@ test('a failed migration transaction rolls back and can be retried', async ({ pa
   expect(result.recovery.backups).toHaveLength(1);
   expect(result.rawStill).toBe(true);
 });
+
+test('a blocked upgrade reports the blocker and closes a late connection', async ({ page, context }) => {
+  const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const blocker = await context.newPage();
+  await blocker.goto('/typebridge/');
+  await expect(blocker.locator('#editor')).toBeEnabled();
+  await blocker.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', 1);
+    open.onsuccess = () => { (window as unknown as { held: IDBDatabase }).held = open.result; resolve(); };
+    open.onerror = () => reject(open.error);
+  }));
+  await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
+  const message = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const original = indexedDB.open.bind(indexedDB);
+    indexedDB.open = ((name: string) => original(name, 2)) as typeof indexedDB.open;
+    try { await api.openDraftDatabase(); return 'unexpected success'; }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
+    finally { indexedDB.open = original; }
+  });
+  expect(message).toContain('Close other TypeBridge tabs');
+  await blocker.evaluate(() => (window as unknown as { held: IDBDatabase }).held.close());
+  const nextUpgrade = await page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', 3);
+    open.onblocked = () => resolve(false);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => { open.result.close(); resolve(true); };
+  }));
+  expect(nextUpgrade).toBe(true);
+});
