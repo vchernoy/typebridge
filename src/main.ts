@@ -36,6 +36,7 @@ const status = document.querySelector<HTMLElement>('#status')!;
 type StatusKind = 'progress' | 'action' | 'conflict' | 'failure';
 const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
+const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
 let statusKind: StatusKind = 'progress';
 let saveFailed = false;
 function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'progress'): void {
@@ -471,13 +472,16 @@ autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {
   let prefix = '';
-  try { setAutosaveEnabled(autosave.checked); } catch { prefix = 'Could not save preference. '; notify('Could not save preference'); }
-  // Report a preference error together with the save state; keep a
-  // storage-unavailable message, which no save can resolve.
-  const announce = (text: string): void => { if (db) setSaveStatus(prefix + text); };
+  try { setAutosaveEnabled(autosave.checked); } catch { prefix = 'Could not save preference. '; }
+  // Always show the accurate save state, with any preference error in front.
+  // Without storage, no save can succeed: keep saying so.
+  const announce = (text: string): void => {
+    if (!db) setSaveStatus(prefix + (dirty ? SAVE_FAILED_NO_STORAGE : STORAGE_UNAVAILABLE), 'failure');
+    else setSaveStatus(prefix + text);
+  };
   if (autosave.checked) {
-    if (dirty) { announce('Saving…'); journalEdit(); void persist(); }
-    else announce('Autosave on');
+    announce(dirty ? 'Saving…' : 'Autosave on');
+    if (dirty) { journalEdit(); void persist(); }
   }
   else {
     clearTimeout(saveTimer);
@@ -515,6 +519,8 @@ async function switchDraft(id?: string): Promise<boolean> {
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
     showDraft();
+    // The new draft has no unsaved changes; don't keep the previous draft's state.
+    if (statusKind === 'progress') setSaveStatus(autosave.checked ? 'Saved locally' : 'Autosave off');
     void refreshDrafts().catch(() => { notify('Could not refresh drafts'); });
     return true;
   } catch { notify('Could not open draft — current text was kept'); return false; }
@@ -683,7 +689,7 @@ async function initializeDrafts(): Promise<void> {
     db?.close(); db = undefined;
     const pending = readPending();
     if (pending) { active = pending; showDraft(); dirty = true; generation++; saveFailed = true; }
-    setSaveStatus(error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : 'Storage unavailable. Copy or export unsaved text before closing.', 'failure');
+    setSaveStatus(error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE, 'failure');
     renderDrafts();
   } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; void renderRecovery(); }
 }

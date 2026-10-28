@@ -15,6 +15,7 @@ function storedTexts(page: Page): Promise<string[]> {
   }));
 }
 const status = (page: Page) => page.locator('#status');
+const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
 // The draft list is re-rendered only after a save has updated the status line,
 // so waiting for it orders a negative status assertion after the save.
 async function watchDraftListRenders(page: Page): Promise<() => Promise<number>> {
@@ -66,26 +67,30 @@ test('a background autosave does not replace newer conversion guidance', async (
 });
 
 test('a failed save stays visible after later action feedback until a save succeeds', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
   await field.fill('Сохранено');
+  await page.clock.runFor(400);
   await expect(status(page)).toHaveText('Saved locally');
   await breakSaves(page);
   await field.press('End');
   await field.pressSequentially(' несохранено');
-  await expect(status(page)).toContainText('Save failed');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(SAVE_FAILED);
   await page.locator('#export-txt').click();
-  await expect(status(page)).toContainText('Text exported');
-  await expect(status(page)).toContainText('Save failed — your text is unsaved');
+  await expect(status(page)).toHaveText('Text exported. ' + SAVE_FAILED);
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
   await page.getByRole('button', { name: '→ ABC' }).click();
-  await expect(status(page)).toContainText('Select text to convert');
-  await expect(status(page)).toContainText('Save failed');
+  await expect(status(page)).toHaveText('Select text to convert. ' + SAVE_FAILED);
   await restoreSaves(page);
   await field.press('End');
   await field.pressSequentially('!');
-  await expect(status(page)).toHaveText('Saved locally');
+  await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Сохранено несохранено!');
+  await expect(status(page)).toHaveText('Saved locally');
   await page.locator('#export-txt').click();
   await expect(status(page)).toHaveText('Text exported');
 });
@@ -310,4 +315,47 @@ test('a failed delete with autosave off does not promise another save', async ({
   await page.locator('#delete-draft').click();
   await expect(status(page)).toHaveText('Could not delete draft — your changes are unsaved; autosave is off');
   await expect(field).toHaveValue('Сохранено правка');
+});
+
+test('without browser storage, toggling autosave keeps the storage warning', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+      if (key === 'typebridge.autosave.v1') throw new DOMException('Blocked', 'SecurityError');
+      return setItem.call(this, key, value);
+    };
+  });
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Could not save preference. Storage unavailable. Copy or export unsaved text before closing.');
+  await field.fill('Нельзя потерять');
+  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  await page.locator('#autosave').check();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toContainText('browser storage is unavailable');
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Could not save preference. Save failed — browser storage is unavailable. Copy or export your text before closing.');
+});
+
+test('switching to a clean draft with autosave off does not report unsaved changes', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Первый');
+  await expect(status(page)).toHaveText('Saved locally');
+  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await field.press('End');
+  await field.pressSequentially(' черновик');
+  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  page.once('dialog', dialog => dialog.accept()); // Discard unsaved changes.
+  await page.locator('#new-draft').click();
+  await expect(field).toHaveValue('');
+  await expect(status(page)).toHaveText('Autosave off');
 });
