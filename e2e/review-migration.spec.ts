@@ -97,3 +97,28 @@ test('canceling deletion retains pending edits and autosave', async ({ page }) =
   await page.reload();
   await expect(page.locator('#editor')).toHaveValue('Оставить текст');
 });
+
+test('failed deletion keeps the text and allows retry', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Не потерять');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.delete;
+    (window as unknown as { restoreDelete: () => void }).restoreDelete = () => { IDBObjectStore.prototype.delete = original; };
+    IDBObjectStore.prototype.delete = function (...args: Parameters<IDBObjectStore['delete']>) {
+      if (this.name === 'documents') throw new DOMException('write failed', 'QuotaExceededError');
+      return original.apply(this, args);
+    };
+  });
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('Could not delete draft');
+  await expect(editor).toHaveValue('Не потерять');
+  await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toHaveText('Draft deleted');
+  await expect(editor).toHaveValue('');
+});
