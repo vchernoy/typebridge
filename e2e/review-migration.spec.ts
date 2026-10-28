@@ -180,3 +180,30 @@ test('post-delete list failure does not pretend deleted text is still saved', as
   await page.reload();
   await expect(editor).toHaveValue('');
 });
+
+test('repeated old-tab writes reuse one recovery draft and preserve intermediate versions', async ({ page, context }) => {
+  const malformed = { id: 'bad', text: 'невалидный' };
+  const original = { ...valid, text: 'Оригинал', updatedAt: 1 };
+  await page.addInitScript(raw => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('typebridge.drafts.v1', raw); sessionStorage.setItem('seeded', '1'); } }, JSON.stringify([original, malformed]));
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toHaveValue('Оригинал');
+  const old = await context.newPage();
+  await old.goto('/typebridge/');
+  await expect(old.locator('#editor')).toBeEnabled();
+  for (let i = 1; i <= 10; i++) {
+    await old.evaluate(([record, bad, n]) => localStorage.setItem('typebridge.drafts.v1', JSON.stringify([{ ...record, text: `Русский вариант ${n} 🙂`, updatedAt: n + 1 }, bad])), [original, malformed, i] as const);
+  }
+  await expect.poll(async () => page.evaluate(() => new Promise<string[]>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', 1);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => { const db = open.result; const tx = db.transaction('documents'); const req = tx.objectStore('documents').getAll(); req.onsuccess = () => { db.close(); resolve(req.result.map((d: { text: string }) => d.text)); }; req.onerror = () => reject(req.error); };
+  }))).toContain('Русский вариант 10 🙂');
+  await expect(page.locator('#drafts option')).toHaveCount(2);
+  await expect(page.getByRole('alert')).toContainText('1 legacy record(s)');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export legacy backup' }).click()]);
+  const fs = await import('node:fs/promises');
+  const archive = JSON.parse(await fs.readFile((await download.path())!, 'utf8')) as Array<{ kind: string; draft?: { text: string } }>;
+  expect(archive.filter(item => item.kind === 'legacy-backup')).toHaveLength(1);
+  for (let i = 1; i < 10; i++) expect(archive.some(item => item.draft?.text === `Русский вариант ${i} 🙂`)).toBe(true);
+  await expect(page.locator('#editor')).toHaveValue('Оригинал');
+});

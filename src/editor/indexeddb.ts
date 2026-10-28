@@ -75,12 +75,13 @@ export function parseLegacyDrafts(raw: string): Array<Omit<StoredDraft, 'revisio
 }
 
 type LegacyRecord = Omit<StoredDraft, 'revision'>;
-type LegacyMarker = { raw?: string | null; seen?: string[]; rejected?: number; olderChanges?: number };
+type LegacyMarker = { raw?: string | null; seen?: string[]; rejected?: number; olderChanges?: number; signatures?: Record<string, string>; recoverySlots?: Record<string, { id: string; revision: number }>; rejectedSignature?: string; archiveBytes?: number };
+const MAX_LEGACY_ARCHIVE_BYTES = 8 * 1024 * 1024;
 export type LegacyBackup = { kind: 'legacy-backup'; raw: string; rejected: number[]; createdAt: number };
 
 /** Import safe records and retain every unparseable payload for export, atomically. */
-export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
-  const raw = localStorage.getItem(LEGACY_KEY);
+export async function migrateLegacyDrafts(db: IDBDatabase, observedRaw?: string | null): Promise<number> {
+  const raw = observedRaw === undefined ? localStorage.getItem(LEGACY_KEY) : observedRaw;
   if (raw === null) {
     const tx = db.transaction(MIGRATION, 'readwrite');
     const done = finished(tx);
@@ -104,13 +105,22 @@ export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
     const metadata = tx.objectStore(MIGRATION);
     const marker = await request(metadata.get(MIGRATION_KEY)) as LegacyMarker | undefined;
     if (marker?.raw === raw) { await done; return 0; }
-    const seen = new Set(marker?.seen ?? []);
+    const oldSeen = new Set(marker?.seen ?? []);
+    const signatures: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, marker?.signatures);
+    const slots: Record<string, { id: string; revision: number }> = Object.assign(Object.create(null) as Record<string, { id: string; revision: number }>, marker?.recoverySlots);
     const documents = tx.objectStore(STORE);
+    let archiveBytes = marker?.archiveBytes ?? 0;
+    const archive = async (key: string, value: unknown): Promise<void> => {
+      const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+      if (archiveBytes + bytes > MAX_LEGACY_ARCHIVE_BYTES) throw new Error('Legacy recovery archive is full');
+      await request(metadata.add(value, key));
+      archiveBytes += bytes;
+    };
     let imported = 0;
     let olderChanges = marker?.olderChanges ?? 0;
     for (const legacy of valid) {
       const signature = JSON.stringify(legacy);
-      if (seen.has(signature)) continue;
+      if (signatures[legacy.id] === signature || oldSeen.has(signature)) { signatures[legacy.id] = signature; continue; }
       const existing = await request(documents.get(legacy.id)) as StoredDraft | undefined;
       const same = existing && existing.title === legacy.title && existing.text === legacy.text &&
         existing.updatedAt === legacy.updatedAt && JSON.stringify(existing.history) === JSON.stringify(legacy.history);
@@ -118,17 +128,31 @@ export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
         await request(documents.add({ ...legacy, revision: 1 }));
         imported++;
       } else if (!same) {
-        await request(documents.add({ ...legacy, id: crypto.randomUUID(), title: legacy.title + ' (legacy recovery)', revision: 1 }));
+        const slot = slots[legacy.id];
+        const previous = slot ? await request(documents.get(slot.id)) as StoredDraft | undefined : undefined;
+        if (previous && previous.revision === slot.revision) {
+          // Keep the complete prior text and undo history before replacing the slot.
+          await archive('legacy-version:' + crypto.randomUUID(), { kind: 'legacy-version', draft: previous });
+          const next = { ...legacy, id: previous.id, title: legacy.title + ' (legacy recovery)', revision: previous.revision + 1 };
+          await request(documents.put(next));
+          slots[legacy.id] = { id: next.id, revision: next.revision };
+        } else {
+          // A user may have edited or deleted the recovery document: never overwrite it.
+          const next = { ...legacy, id: crypto.randomUUID(), title: legacy.title + ' (legacy recovery)', revision: 1 };
+          await request(documents.add(next));
+          slots[legacy.id] = { id: next.id, revision: next.revision };
+        }
         imported++;
       }
       if (marker && !same) olderChanges++;
-      seen.add(signature);
+      signatures[legacy.id] = signature;
     }
-    if (rejected.length) {
+    const rejectedSignature = JSON.stringify(rejected.map(index => index < 0 ? raw : entries[index]));
+    if (rejected.length && marker?.rejectedSignature !== rejectedSignature) {
       const backup: LegacyBackup = { kind: 'legacy-backup', raw, rejected, createdAt: Date.now() };
-      await request(metadata.add(backup, 'legacy-backup:' + crypto.randomUUID()));
+      await archive('legacy-backup:' + crypto.randomUUID(), backup);
     }
-    await request(metadata.put({ raw, seen: [...seen], rejected: (marker?.rejected ?? 0) + rejected.length, olderChanges }, MIGRATION_KEY));
+    await request(metadata.put({ raw, signatures, recoverySlots: slots, rejected: rejected.length, rejectedSignature, olderChanges, archiveBytes }, MIGRATION_KEY));
     await done;
     return imported;
   } catch (error) {
@@ -138,15 +162,16 @@ export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
   }
 }
 
-export async function legacyRecoveryInfo(db: IDBDatabase): Promise<{ rejected: number; olderChanges: number; backups: LegacyBackup[] }> {
+export async function legacyRecoveryInfo(db: IDBDatabase): Promise<{ rejected: number; olderChanges: number; backups: LegacyBackup[]; versions: StoredDraft[] }> {
   const tx = db.transaction(MIGRATION, 'readonly');
   const done = finished(tx);
   const store = tx.objectStore(MIGRATION);
   const marker = await request(store.get(MIGRATION_KEY)) as LegacyMarker | undefined;
-  const records = await request(store.getAll()) as Array<LegacyMarker | LegacyBackup>;
+  const records = await request(store.getAll()) as Array<LegacyMarker | LegacyBackup | { kind: 'legacy-version'; draft: StoredDraft }>;
   await done;
   return { rejected: marker?.rejected ?? 0, olderChanges: marker?.olderChanges ?? 0,
-    backups: records.filter((record): record is LegacyBackup => 'kind' in record && record.kind === 'legacy-backup') };
+    backups: records.filter((record): record is LegacyBackup => 'kind' in record && record.kind === 'legacy-backup'),
+    versions: records.filter((record): record is { kind: 'legacy-version'; draft: StoredDraft } => 'kind' in record && record.kind === 'legacy-version').map(record => record.draft) };
 }
 
 export async function listStoredDrafts(db: IDBDatabase): Promise<StoredDraft[]> {

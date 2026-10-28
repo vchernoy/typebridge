@@ -424,12 +424,12 @@ async function showLegacyWarning(): Promise<void> {
   recoveryNotice.hidden = false;
   recoveryNotice.append(document.createTextNode(
     (info.rejected ? `${info.rejected} legacy record(s) could not be imported; a backup was kept. ` : '') +
-    (info.olderChanges ? 'Changes from an older TypeBridge tab were preserved in Drafts. ' : '')
+    (info.olderChanges ? 'Changes from an older TypeBridge tab were preserved in Drafts. Earlier versions can be exported. ' : '')
   ));
-  if (info.backups.length) {
+  if (info.backups.length || info.versions.length) {
     const button = document.createElement('button');
     button.textContent = 'Export legacy backup';
-    button.addEventListener('click', () => downloadText('typebridge-legacy-recovery.json', JSON.stringify(info.backups, null, 2), 'application/json'));
+    button.addEventListener('click', () => downloadText('typebridge-legacy-recovery.json', JSON.stringify(info.backups.length ? [...info.backups, ...info.versions.map(draft => ({ kind: 'legacy-version', draft }))] : info.versions.map(draft => ({ kind: 'legacy-version', draft })), null, 2), 'application/json'));
     recoveryNotice.append(button);
   }
 }
@@ -438,10 +438,17 @@ window.addEventListener('storage', event => {
   if (event.key !== 'typebridge.drafts.v1' || !db) return;
   legacySync = legacySync.then(async () => {
     if (!db) return;
-    await migrateLegacyDrafts(db);
+    await migrateLegacyDrafts(db, event.newValue);
     await refreshDrafts();
     await showLegacyWarning();
-  }).catch(() => { recoveryNotice.hidden = false; recoveryNotice.textContent = 'Could not import changes from an older tab. Legacy data is unchanged; reload to retry.'; });
+  }).catch(() => {
+    recoveryNotice.hidden = false;
+    recoveryNotice.replaceChildren(document.createTextNode('Could not import older-tab changes (storage or recovery archive may be full). Stop editing the older tab and export its current data before retrying. '));
+    const button = document.createElement('button');
+    button.textContent = 'Export current legacy data';
+    button.addEventListener('click', () => { try { downloadText('typebridge-legacy-current.json', localStorage.getItem('typebridge.drafts.v1') ?? '', 'application/json'); } catch { status.textContent = 'Cannot read legacy storage'; } });
+    recoveryNotice.append(button);
+  });
 });
 async function initializeDrafts(): Promise<void> {
   try {
