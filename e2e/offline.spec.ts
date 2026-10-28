@@ -26,6 +26,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
       draftCount: JSON.parse(localStorage.getItem('typebridge.drafts.v1') ?? '[]').length,
       resources: performance.getEntriesByType('resource').map(entry => entry.name),
       cacheNames: await caches.keys(),
+      entries: await Promise.all((await caches.keys()).map(async name => ({ name, requests: (await (await caches.open(name)).keys()).map(request => request.url) }))),
     }));
     throw new Error(`Offline restoration failed: ${JSON.stringify({ diagnostics, errors })}`, { cause: error });
   }
