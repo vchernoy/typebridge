@@ -137,13 +137,21 @@ test('confirmed discard removes only the selected unsaved snapshot', async ({ pa
 test('active tab snapshots are not presented as lost; closing exposes them', async ({ page, context }) => {
   await page.goto('/typebridge/');
   const other = await context.newPage(); await other.goto('/typebridge/');
+  await expect(other.locator('#editor')).toBeEnabled();
+  await other.evaluate(() => {
+    const observed = document.querySelector('[aria-label="Recover unsaved drafts"]')!;
+    (window as unknown as { recoveryMutations: number }).recoveryMutations = 0;
+    new MutationObserver(() => { (window as unknown as { recoveryMutations: number }).recoveryMutations++; }).observe(observed, { childList: true, subtree: true });
+  });
   await page.evaluate(() => {
     IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); };
     IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); };
   });
   await page.locator('#editor').fill('Важный черновик');
   await expect(page.locator('#status')).toContainText('Save failed');
+  await other.waitForTimeout(1600); // Allow the coalesced journal notification to be processed.
   await expect(other.getByRole('button', { name: /Recover Untitled draft/ })).toHaveCount(0);
+  expect(await other.evaluate(() => (window as unknown as { recoveryMutations: number }).recoveryMutations)).toBe(0);
   await page.close();
   const check = other.getByRole('button', { name: 'Check emergency backups' });
   await expect.poll(async () => await check.isVisible() || await other.getByRole('button', { name: /Recover Untitled draft/ }).isVisible(), { timeout: 10000 }).toBe(true);
