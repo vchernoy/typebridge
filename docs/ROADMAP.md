@@ -4,6 +4,23 @@ TypeBridge is a **local-first, desktop-first writing editor** for long-form text
 
 This document tracks ideas and priorities. A feature is **not shipped** until merged to `main` and verified in production. PR status may change; check linked PRs for current CI results.
 
+## Feature tracking
+
+Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/issues) with **Feature status** (`Research`, `Ready for implementation`, `Implemented in PR`, `Shipped`), priority, description, and PR link when applicable. Issues are the canonical feature records; this document is the high-level overview.
+
+| Issue | Feature | Current stage |
+| --- | --- | --- |
+| [#32](https://github.com/vchernoy/typebridge/issues/32) | Offline refresh | Implemented in PR #30 |
+| [#33](https://github.com/vchernoy/typebridge/issues/33) | Draft backup | Implemented in PR #27 |
+| [#34](https://github.com/vchernoy/typebridge/issues/34) | Custom mappings | Implemented in PR #25 |
+| [#35](https://github.com/vchernoy/typebridge/issues/35) | Regex replace | Implemented in PR #26 |
+| [#36](https://github.com/vchernoy/typebridge/issues/36) | Word statistics | Implemented in PR #28 |
+| [#37](https://github.com/vchernoy/typebridge/issues/37) | Draft recovery / version history | Research |
+| [#38](https://github.com/vchernoy/typebridge/issues/38) | Customizable UI/UX | Research |
+| [#39](https://github.com/vchernoy/typebridge/issues/39) | Portable share links | Ready for implementation |
+| [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Ready for implementation |
+| [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
+
 ## P0 — Reliability and unfinished work
 
 | Feature | Why / acceptance criteria | Tracking |
