@@ -35,3 +35,12 @@ test('replace and replace all support undo, redo, case matching and literal punc
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(field).toHaveValue('fund etf fund (test)');
 });
+
+test('word statistics count Cyrillic, Latin, punctuation and update on undo', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.fill('Привет, мир! Hello 2026.');
+  await expect(page.locator('#count')).toHaveText('24 characters · 4 words · 1 min read');
+  await field.fill('');
+  await expect(page.locator('#count')).toHaveText('0 characters · 0 words · 0 min read');
+});
