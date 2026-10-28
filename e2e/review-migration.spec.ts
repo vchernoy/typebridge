@@ -85,3 +85,15 @@ test('database version change closes the old connection and warns the editor', a
   expect(upgraded).toBe(true);
   await expect(page.getByRole('alert')).toContainText('upgraded in another tab');
 });
+
+test('canceling deletion retains pending edits and autosave', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Оставить текст');
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#editor')).toHaveValue('Оставить текст');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(page.locator('#editor')).toHaveValue('Оставить текст');
+});
