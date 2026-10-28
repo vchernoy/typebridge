@@ -51,7 +51,16 @@ field.addEventListener('keydown', event => {
   editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
 });
 field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
-enabled.addEventListener('change', () => { editor.setEnabled(enabled.checked); });
+// Plain-text writing is a first-class mode. Remember the choice per browser.
+const TRANSLITERATION_KEY = 'typebridge.transliteration.enabled.v1';
+try { enabled.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; }
+catch { /* Storage may be unavailable; keep the default enabled mode. */ }
+editor.setEnabled(enabled.checked);
+enabled.addEventListener('change', () => {
+  editor.setEnabled(enabled.checked);
+  try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); }
+  catch { /* Editing must continue even when browser storage is blocked. */ }
+});
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); status.textContent = 'Copied'; }
   catch { field.focus(); field.select(); status.textContent = 'Copy unavailable. Text selected; use your device’s copy command.'; }
