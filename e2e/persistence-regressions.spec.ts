@@ -146,7 +146,7 @@ test('a failed IndexedDB deletion retries pending autosave without further typin
   await editor.fill('Новая несохранённая правка 🙂');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(page.locator('#status')).toContainText('Saved locally');
+  await expect(page.locator('#status')).toContainText('Could not delete draft');
   await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
   await page.reload();
   await expect(editor).toHaveValue('Новая несохранённая правка 🙂');
