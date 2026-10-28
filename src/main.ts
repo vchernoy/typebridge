@@ -184,7 +184,7 @@ function downloadText(filename: string, content: string, mime: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function safeFilename(title: string): string {
-  return (title.trim().replace(/[\\/:*?"<>|\x00-\x1f]/g, '-').slice(0, 80) || 'draft');
+  return (title.trim().split('').map(char => char.charCodeAt(0) < 32 || '/\\\\:*?"<>|'.includes(char) ? '-' : char).join('').slice(0, 80) || 'draft');
 }
 document.querySelector<HTMLButtonElement>('#export-txt')!.addEventListener('click', () => {
   downloadText(safeFilename(draftTitle.value) + '.txt', field.value, 'text/plain;charset=utf-8');
