@@ -456,13 +456,15 @@ async function persist(): Promise<boolean> {
         active = result.draft;
         if (generation !== version && autosave.checked) journalEdit();
         rememberActive();
+        saveFailed = false;
+        dirty = generation !== version;
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
-          setSaveStatus('Another tab changed this draft. Your edits were saved as a conflict copy.', 'conflict');
+          const conflictNotice = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
+          // Storage may have become unusable while the copy was written.
+          setSaveStatus(storageProblem ? conflictNotice + ' ' + riskText() : conflictNotice, 'conflict');
         }
-        saveFailed = false;
-        dirty = generation !== version;
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
         if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure')) {
@@ -602,8 +604,9 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     try { await refreshDrafts(); notify('Draft deleted'); }
     catch { notify('Draft deleted, but the draft list could not be refreshed'); }
   } catch {
-    if (dirty && !saveFailed && autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
-    else if (dirty && !autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; autosave is off');
+    // Without storage, notify() adds the storage warning; no save will follow.
+    if (dirty && !saveFailed && autosave.checked && !storageProblem) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
+    else if (dirty && !autosave.checked && !storageProblem) setSaveStatus('Could not delete draft — your changes are unsaved; autosave is off');
     else notify(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
