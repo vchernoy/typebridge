@@ -69,15 +69,307 @@ function replacementFor(match: RegExpExecArray, original: string): string {
   if (!regexMode.checked) return replaceInput.value;
   const start = match.index;
   const end = start + match[0].length;
+  // Use the browser's native replacement expansion ($&, $1, $<name>, $$, import './style.css';
+import { Editor } from './editor/editor';
+import { autosaveEnabled, deleteDraft, getActiveDraftId, getDraft, listDrafts, newDraft, saveDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
+const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const editor = new Editor(field);
+const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
+const status = document.querySelector<HTMLElement>('#status')!;
+const count = document.querySelector<HTMLElement>('#count')!;
+const undo = document.querySelector<HTMLButtonElement>('#undo')!;
+const redo = document.querySelector<HTMLButtonElement>('#redo')!;
+const syncHistory = () => { undo.disabled = !editor.canUndo; redo.disabled = !editor.canRedo; };
+field.addEventListener('historychange', syncHistory);
+for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => { action(); field.focus({ preventScroll: true }); });
+}
+syncHistory();
+for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-latin', 'to-latin']] as const) {
+  const button = document.querySelector<HTMLButtonElement>('#' + id)!;
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (!editor.convertSelection(direction)) status.textContent = 'Select text to convert';
+  });
+}
+field.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (key !== 'l' && key !== 'k') return;
+  if (field.selectionStart === field.selectionEnd) return;
+  event.preventDefault();
+  editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
+});
+field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
+enabled.addEventListener('change', () => { editor.setEnabled(enabled.checked); });
+document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(field.value); status.textContent = 'Copied'; }
+  catch { field.focus(); field.select(); status.textContent = 'Copy unavailable. Text selected; use your device’s copy command.'; }
+});
+document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', () => {
+  if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); status.textContent = 'Cleared'; }
+});
+
+
+const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
+const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
+const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
+const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
+const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+function searchPattern(): RegExp | null {
+  const query = findInput.value;
+  if (!query) { findStatus.textContent = ''; return null; }
+  const flags = matchCase.checked ? 'g' : 'gi';
+  const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
+  try {
+    const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
+    findStatus.textContent = '';
+    return pattern;
+  } catch (error) {
+    findStatus.textContent = 'Invalid regex: ' + (error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+function matches(): Array<[number, number]> {
+  const pattern = searchPattern();
+  if (!pattern) return [];
+  return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+}
+function replacementFor(match: RegExpExecArray, original: string): string {
+  if (!regexMode.checked) return replaceInput.value;
+  const start = match.index;
+  const end = start + match[0].length;
+  // Use the browser's native replacement expansion ($&, $1, $<name>, $$,  and $').
+  // The callback is necessary for context-sensitive tokens (import './style.css';
+import { Editor } from './editor/editor';
+import { autosaveEnabled, deleteDraft, getActiveDraftId, getDraft, listDrafts, newDraft, saveDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
+const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const editor = new Editor(field);
+const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
+const status = document.querySelector<HTMLElement>('#status')!;
+const count = document.querySelector<HTMLElement>('#count')!;
+const undo = document.querySelector<HTMLButtonElement>('#undo')!;
+const redo = document.querySelector<HTMLButtonElement>('#redo')!;
+const syncHistory = () => { undo.disabled = !editor.canUndo; redo.disabled = !editor.canRedo; };
+field.addEventListener('historychange', syncHistory);
+for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => { action(); field.focus({ preventScroll: true }); });
+}
+syncHistory();
+for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-latin', 'to-latin']] as const) {
+  const button = document.querySelector<HTMLButtonElement>('#' + id)!;
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (!editor.convertSelection(direction)) status.textContent = 'Select text to convert';
+  });
+}
+field.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (key !== 'l' && key !== 'k') return;
+  if (field.selectionStart === field.selectionEnd) return;
+  event.preventDefault();
+  editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
+});
+field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
+enabled.addEventListener('change', () => { editor.setEnabled(enabled.checked); });
+document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(field.value); status.textContent = 'Copied'; }
+  catch { field.focus(); field.select(); status.textContent = 'Copy unavailable. Text selected; use your device’s copy command.'; }
+});
+document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', () => {
+  if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); status.textContent = 'Cleared'; }
+});
+
+
+const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
+const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
+const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
+const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
+const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+function searchPattern(): RegExp | null {
+  const query = findInput.value;
+  if (!query) { findStatus.textContent = ''; return null; }
+  const flags = matchCase.checked ? 'g' : 'gi';
+  const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
+  try {
+    const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
+    findStatus.textContent = '';
+    return pattern;
+  } catch (error) {
+    findStatus.textContent = 'Invalid regex: ' + (error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+function matches(): Array<[number, number]> {
+  const pattern = searchPattern();
+  if (!pattern) return [];
+  return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+}
+function replacementFor(match: RegExpExecArray, original: string): string {
+  if (!regexMode.checked) return replaceInput.value;
+  const start = match.index;
+  const end = start + match[0].length;
   // Use the browser's native replacement expansion ($&, $1, $<name>, $$, $\` and $').
-  const anchored = new RegExp('^(?:' + searchPattern()!.source + ')$', matchCase.checked ? '' : 'i');
-  const segment = original.slice(start, end);
+  // The callback is necessary for context-sensitive tokens ( and $').
+  const template = replaceInput.value;
+  return template.replace(/\$\$|\$&|\import './style.css';
+import { Editor } from './editor/editor';
+import { autosaveEnabled, deleteDraft, getActiveDraftId, getDraft, listDrafts, newDraft, saveDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
+const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const editor = new Editor(field);
+const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
+const status = document.querySelector<HTMLElement>('#status')!;
+const count = document.querySelector<HTMLElement>('#count')!;
+const undo = document.querySelector<HTMLButtonElement>('#undo')!;
+const redo = document.querySelector<HTMLButtonElement>('#redo')!;
+const syncHistory = () => { undo.disabled = !editor.canUndo; redo.disabled = !editor.canRedo; };
+field.addEventListener('historychange', syncHistory);
+for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => { action(); field.focus({ preventScroll: true }); });
+}
+syncHistory();
+for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-latin', 'to-latin']] as const) {
+  const button = document.querySelector<HTMLButtonElement>('#' + id)!;
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (!editor.convertSelection(direction)) status.textContent = 'Select text to convert';
+  });
+}
+field.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (key !== 'l' && key !== 'k') return;
+  if (field.selectionStart === field.selectionEnd) return;
+  event.preventDefault();
+  editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
+});
+field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
+enabled.addEventListener('change', () => { editor.setEnabled(enabled.checked); });
+document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(field.value); status.textContent = 'Copied'; }
+  catch { field.focus(); field.select(); status.textContent = 'Copy unavailable. Text selected; use your device’s copy command.'; }
+});
+document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', () => {
+  if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); status.textContent = 'Cleared'; }
+});
+
+
+const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
+const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
+const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
+const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
+const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+function searchPattern(): RegExp | null {
+  const query = findInput.value;
+  if (!query) { findStatus.textContent = ''; return null; }
+  const flags = matchCase.checked ? 'g' : 'gi';
+  const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
+  try {
+    const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
+    findStatus.textContent = '';
+    return pattern;
+  } catch (error) {
+    findStatus.textContent = 'Invalid regex: ' + (error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+function matches(): Array<[number, number]> {
+  const pattern = searchPattern();
+  if (!pattern) return [];
+  return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+}
+function replacementFor(match: RegExpExecArray, original: string): string {
+  if (!regexMode.checked) return replaceInput.value;
+  const start = match.index;
+  const end = start + match[0].length;
+  // Use the browser's native replacement expansion ($&, $1, $<name>, $$, $\` and $').
+  // The callback is necessary for context-sensitive tokens ($\` and $').
+  const template = replaceInput.value;
+  return template.replace(/\$\$|\$&|\|\$'|\$<([^>]+)>|\$(\d{1,2})/g, (token, name: string | undefined, digits: string | undefined) => {
+    if (token === '$$') return '$';
+    if (token === '$&') return match[0];
+    if (token === 'import './style.css';
+import { Editor } from './editor/editor';
+import { autosaveEnabled, deleteDraft, getActiveDraftId, getDraft, listDrafts, newDraft, saveDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
+const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const editor = new Editor(field);
+const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
+const status = document.querySelector<HTMLElement>('#status')!;
+const count = document.querySelector<HTMLElement>('#count')!;
+const undo = document.querySelector<HTMLButtonElement>('#undo')!;
+const redo = document.querySelector<HTMLButtonElement>('#redo')!;
+const syncHistory = () => { undo.disabled = !editor.canUndo; redo.disabled = !editor.canRedo; };
+field.addEventListener('historychange', syncHistory);
+for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => { action(); field.focus({ preventScroll: true }); });
+}
+syncHistory();
+for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-latin', 'to-latin']] as const) {
+  const button = document.querySelector<HTMLButtonElement>('#' + id)!;
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (!editor.convertSelection(direction)) status.textContent = 'Select text to convert';
+  });
+}
+field.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (key !== 'l' && key !== 'k') return;
+  if (field.selectionStart === field.selectionEnd) return;
+  event.preventDefault();
+  editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
+});
+field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
+enabled.addEventListener('change', () => { editor.setEnabled(enabled.checked); });
+document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(field.value); status.textContent = 'Copied'; }
+  catch { field.focus(); field.select(); status.textContent = 'Copy unavailable. Text selected; use your device’s copy command.'; }
+});
+document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', () => {
+  if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); status.textContent = 'Cleared'; }
+});
+
+
+const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
+const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
+const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
+const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
+const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+function searchPattern(): RegExp | null {
+  const query = findInput.value;
+  if (!query) { findStatus.textContent = ''; return null; }
+  const flags = matchCase.checked ? 'g' : 'gi';
+  const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
+  try {
+    const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
+    findStatus.textContent = '';
+    return pattern;
+  } catch (error) {
+    findStatus.textContent = 'Invalid regex: ' + (error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+function matches(): Array<[number, number]> {
+  const pattern = searchPattern();
+  if (!pattern) return [];
+  return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+}
+function replacementFor(match: RegExpExecArray, original: string): string {
+  if (!regexMode.checked) return replaceInput.value;
+  const start = match.index;
+  const end = start + match[0].length;
+  // Use the browser's native replacement expansion ($&, $1, $<name>, $$, $\` and $').
   // The callback is necessary for context-sensitive tokens ($\` and $').
   const template = replaceInput.value;
   return template.replace(/\$\$|\$&|\$\`|\$'|\$<([^>]+)>|\$(\d{1,2})/g, (token, name: string | undefined, digits: string | undefined) => {
     if (token === '$$') return '$';
     if (token === '$&') return match[0];
-    if (token === '$\`') return original.slice(0, start);
+    if (token === '') return original.slice(0, start);
     if (token === "$'") return original.slice(end);
     if (name !== undefined) return match.groups ? (match.groups[name] ?? '') : token;
     const index = Number(digits);
