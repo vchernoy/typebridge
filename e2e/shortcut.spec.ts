@@ -74,3 +74,29 @@ test('macOS Command shortcut works while unrelated fields are ignored', async ({
   await expect(page.locator('#enabled')).not.toBeChecked();
   await expect(page.locator('#mode-announcement')).toHaveText('Transliteration off');
 });
+
+test('Focus Mode keeps transliteration feedback visible and hides settings', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.focus();
+  await page.keyboard.press('Control+Shift+E');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(page.locator('.shortcut-panel')).toBeHidden();
+  await expect(page.locator('.rules-panel')).toBeHidden();
+  await expect(page.locator('#find-text')).toBeHidden();
+  await page.keyboard.press('Control+Shift+Space');
+  const announcement = page.locator('#mode-announcement');
+  await expect(announcement).toBeVisible();
+  await expect(announcement).toHaveAttribute('aria-live', 'polite');
+  await expect(announcement).toHaveText('Transliteration off');
+  await editor.pressSequentially('privet');
+  await expect(editor).toHaveValue('privet');
+  await page.keyboard.press('Control+Shift+Space');
+  await expect(announcement).toHaveText('Transliteration on');
+  await editor.pressSequentially(' mir');
+  await expect(editor).toHaveValue('privet мир');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await expect(page.locator('.shortcut-panel')).toBeVisible();
+});
