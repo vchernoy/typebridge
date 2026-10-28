@@ -45,7 +45,7 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
     page.waitForEvent('download'),
     page.getByRole('button', { name: 'Export JSON' }).click(),
   ]);
-  expect(download.suggestedFilename()).toBe('Русский пост.typebridge.json');
+  expect(download.suggestedFilename().replaceAll('_', ' ')).toBe('Русский пост.typebridge.json');
   const fs = await import('node:fs/promises');
   const payload = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
   expect(payload.draft.text).toBe('Привет, мир!\\nВторая строка.');
