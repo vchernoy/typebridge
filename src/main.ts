@@ -29,6 +29,54 @@ document.addEventListener('keydown', event => {
 const editor = new Editor(field);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const status = document.querySelector<HTMLElement>('#status')!;
+// One status line carries both save state and action feedback (#52).
+// 'progress' is save state that a later save may replace; 'action' is
+// feedback the user caused; 'conflict' and 'failure' come from saving and
+// must not be hidden by a later background success.
+type StatusKind = 'progress' | 'action' | 'conflict' | 'failure';
+const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
+const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
+const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
+const AUTOSAVE_OFF_UNSAVED = 'Autosave off — changes are unsaved';
+let statusKind: StatusKind = 'progress';
+let saveFailed = false;
+// Non-empty while browser storage cannot be used (failed or blocked
+// initialization, or an upgrade in another tab). Nothing in this page
+// restores it; only a reload can.
+let storageProblem = '';
+function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'progress'): void {
+  status.textContent = text; statusKind = kind;
+}
+/** The warning that must stay visible while text or storage is at risk. */
+function riskText(): string {
+  if (storageProblem) {
+    if (!dirty) return storageProblem;
+    return storageProblem === STORAGE_UNAVAILABLE ? SAVE_FAILED_NO_STORAGE : 'Changes are unsaved. ' + storageProblem;
+  }
+  if (saveFailed && autosave.checked) return SAVE_FAILED;
+  if (dirty && !autosave.checked) return AUTOSAVE_OFF_UNSAVED;
+  return '';
+}
+const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
+/** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
+function showSaving(prefix = ''): void {
+  if (storageProblem) setSaveStatus(prefix + riskText(), 'failure'); // No save can succeed.
+  else if (saveFailed) setSaveStatus(prefix + RETRYING, 'failure');  // Cleared only by a commit.
+  else setSaveStatus(prefix + 'Saving…');
+}
+/** Show the save state alone, e.g. after loading a draft. */
+function showSaveState(): void {
+  const risk = riskText();
+  if (risk) setSaveStatus(risk, risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure');
+  else setSaveStatus(autosave.checked ? 'Saved locally' : 'Autosave off');
+}
+function notify(text: string): void {
+  // Action feedback never hides a warning about unsaved text or storage.
+  // Copying or exporting does not save the draft, so the warning stays.
+  const risk = riskText();
+  if (risk) { setSaveStatus(text.replace(/[.…]$/, '') + '. ' + risk, risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure'); return; }
+  status.textContent = text; statusKind = 'action';
+}
 const count = document.querySelector<HTMLElement>('#count')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
@@ -43,7 +91,7 @@ for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-la
   const button = document.querySelector<HTMLButtonElement>('#' + id)!;
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
-    if (!editor.convertSelection(direction)) status.textContent = 'Select text to convert';
+    if (!editor.convertSelection(direction)) notify('Select text to convert');
   });
 }
 field.addEventListener('keydown', event => {
@@ -117,11 +165,11 @@ enabled.addEventListener('change', () => {
   catch { /* Editing must continue even when browser storage is blocked. */ }
 });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(field.value); status.textContent = 'Copied'; }
-  catch { field.focus(); field.select(); status.textContent = 'Copy unavailable. Text selected; use your device’s copy command.'; }
+  try { await navigator.clipboard.writeText(field.value); notify('Copied'); }
+  catch { field.focus(); field.select(); notify('Copy unavailable. Text selected; use your device’s copy command.'); }
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', () => {
-  if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); status.textContent = 'Cleared'; }
+  if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); notify('Cleared'); }
 });
 
 
@@ -357,7 +405,7 @@ function sameContent(a: StoredDraft, b: StoredDraft): boolean {
 function savePending(): void {
   if (!dirty || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
-  catch { status.textContent = 'Unsaved text could not be backed up for reload. Copy or export it.'; }
+  catch { setSaveStatus('Unsaved text could not be backed up for reload. Copy or export it.'); }
 }
 function clearPending(saved: StoredDraft): void {
   try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
@@ -386,6 +434,7 @@ function showDraft(): void {
     editor.restoreHistory(active.history);
     draftTitle.value = active.title;
     dirty = false;
+    saveFailed = false; // The editor no longer holds the unsaved text.
   } finally { loadingDraft = false; }
   renderDrafts();
   updateStats();
@@ -410,23 +459,31 @@ async function persist(): Promise<boolean> {
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
-          status.textContent = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
+          setSaveStatus('Another tab changed this draft. Your edits were saved as a conflict copy.', 'conflict');
         }
+        saveFailed = false;
         dirty = generation !== version;
-        if (!dirty && !result.conflict) status.textContent = 'Saved locally';
+        // A background save must not replace newer action feedback or a conflict
+        // notice, but it must replace progress and an earlier failure it resolved.
+        if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure')) {
+          // Storage can become unusable while this save was in flight (an
+          // upgrade in another tab); never replace that warning.
+          const risk = riskText();
+          if (risk) setSaveStatus(risk, 'failure'); else setSaveStatus('Saved locally');
+        }
       }
       try { await refreshDrafts(); }
-      catch { if (!dirty) status.textContent += ' — draft list could not be refreshed'; }
+      catch { if (!dirty && (statusKind === 'progress' || statusKind === 'conflict')) status.textContent += ' — draft list could not be refreshed'; }
       return !dirty;
     } catch {
-      status.textContent = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
+      saveFailed = true; setSaveStatus(riskText() || SAVE_FAILED, 'failure');
       return false;
     }
   })();
   try { return await saving; } finally {
     saving = undefined;
     // An edit can arrive while the post-commit draft list is loading.
-    if (!deleting && dirty && autosave.checked && !status.textContent?.startsWith('Save failed')) {
+    if (!deleting && dirty && autosave.checked && !saveFailed) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => { void persist(); }, 300);
     }
@@ -438,8 +495,8 @@ function scheduleSave(): void {
   generation++;
   journalEdit();
   clearTimeout(saveTimer);
-  if (autosave.checked) { status.textContent = 'Saving…'; saveTimer = setTimeout(() => { void persist(); }, 300); }
-  else status.textContent = 'Autosave off — changes are unsaved';
+  if (autosave.checked) { showSaving(); saveTimer = setTimeout(() => { void persist(); }, 300); }
+  else showSaveState();
 }
 field.addEventListener('input', scheduleSave);
 field.addEventListener('historychange', scheduleSave);
@@ -447,8 +504,19 @@ draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {
-  try { setAutosaveEnabled(autosave.checked); } catch { status.textContent = 'Could not save preference'; }
-  if (autosave.checked) { if (dirty) { journalEdit(); void persist(); } }
+  let prefix = '';
+  try { setAutosaveEnabled(autosave.checked); } catch { prefix = 'Could not save preference. '; }
+  // Always show the accurate save state, with any preference error in front.
+  // Without storage, no save can succeed: keep saying so.
+  const announce = (text: string): void => {
+    // storageProblem, not !db: db is also unset while initialization runs.
+    if (storageProblem) setSaveStatus(prefix + riskText(), 'failure');
+    else setSaveStatus(prefix + text);
+  };
+  if (autosave.checked) {
+    if (dirty) showSaving(prefix); else announce('Autosave on');
+    if (dirty) { journalEdit(); void persist(); }
+  }
   else {
     clearTimeout(saveTimer);
     if (saving) await saving;
@@ -458,9 +526,9 @@ autosave.addEventListener('change', async () => {
         active = { ...active, revision: 0 };
         dirty = true;
         await refreshDrafts();
-      } catch { status.textContent = 'Could not delete saved draft; current text is kept'; return; }
+      } catch { notify('Could not delete saved draft; current text is kept'); return; }
     }
-    status.textContent = 'Autosave off — changes are unsaved';
+    announce(dirty ? 'Autosave off — changes are unsaved' : 'Autosave off');
   }
   } finally { autosave.disabled = false; }
 });
@@ -474,7 +542,7 @@ async function switchDraft(id?: string): Promise<boolean> {
     while (true) {
       while (dirty && autosave.checked) {
         const saved = await persist();
-        if (!saved && status.textContent?.startsWith('Save failed')) return false;
+        if (!saved && saveFailed) return false;
       }
       if (dirty && !autosave.checked && !window.confirm('Discard unsaved changes? Copy or export them first to keep them.')) return false;
       const version = generation;
@@ -485,9 +553,11 @@ async function switchDraft(id?: string): Promise<boolean> {
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
     showDraft();
-    void refreshDrafts().catch(() => { status.textContent = 'Could not refresh drafts'; });
+    // The new draft has no unsaved changes; don't keep the previous draft's state.
+    if (statusKind === 'progress' || statusKind === 'failure') showSaveState();
+    void refreshDrafts().catch(() => { notify('Could not refresh drafts'); });
     return true;
-  } catch { status.textContent = 'Could not open draft — current text was kept'; return false; }
+  } catch { notify('Could not open draft — current text was kept'); return false; }
   finally { transitioning = false; renderDrafts(); }
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
@@ -512,7 +582,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
       savedBeforeDelete = true;
     }
     if (active.id !== requestedId) {
-      status.textContent = 'Could not delete original — your changes were saved as a conflict copy.';
+      notify('Could not delete original — your changes were saved as a conflict copy.');
       return;
     }
     deleting = true;
@@ -523,10 +593,12 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     rememberActive();
     // The deletion is durable; clear the editor before a fallible list refresh.
     showDraft();
-    try { await refreshDrafts(); status.textContent = 'Draft deleted'; }
-    catch { status.textContent = 'Draft deleted, but the draft list could not be refreshed'; }
+    try { await refreshDrafts(); notify('Draft deleted'); }
+    catch { notify('Draft deleted, but the draft list could not be refreshed'); }
   } catch {
-    status.textContent = dirty ? 'Could not delete draft — your changes are unsaved; saving again…' : savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.';
+    if (dirty && !saveFailed && autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
+    else if (dirty && !autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; autosave is off');
+    else notify(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
     if (!committed && dirty && autosave.checked) {
@@ -607,17 +679,17 @@ async function renderRecovery(): Promise<void> {
         if (!result.ok && (!result.current || result.current.title !== copy.title || result.current.text !== copy.text)) throw new Error('Recovery copy already changed');
         clearRecovery(localStorage, item);
         await refreshDrafts();
-        status.textContent = 'Recovered a copy in Drafts. Your current draft was kept.';
+        notify('Recovered a copy in Drafts. Your current draft was kept.');
         panelSignature = ''; await renderRecovery();
-      } catch { status.textContent = 'Recovery failed. The emergency backup was kept; retry or copy your text.'; button.disabled = false; }
+      } catch { notify('Recovery failed. The emergency backup was kept; retry or copy your text.'); button.disabled = false; }
     });
     const discard = document.createElement('button');
     discard.type = 'button'; discard.textContent = `Discard backup for ${item.title}`;
     discard.addEventListener('click', async () => {
-      if (await ownerIsActive(item.tab) === true) { status.textContent = 'The original tab is still open; backup kept.'; queueRecovery(); return; }
+      if (await ownerIsActive(item.tab) === true) { notify('The original tab is still open; backup kept.'); queueRecovery(); return; }
       if (!window.confirm('Discard this emergency backup? Unsaved text in this backup will be lost.')) return;
       try { clearRecovery(localStorage, item); panelSignature = ''; await renderRecovery(); }
-      catch { status.textContent = 'Could not discard backup; it was kept.'; }
+      catch { notify('Could not discard backup; it was kept.'); }
     });
     group.append(button, discard); recoveryPanel.append(group);
   }
@@ -629,8 +701,10 @@ async function initializeDrafts(): Promise<void> {
   try {
     db = await openDraftDatabase(() => {
       db = undefined;
+      storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
       recoveryNotice.hidden = false;
-      recoveryNotice.textContent = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
+      recoveryNotice.textContent = storageProblem;
+      setSaveStatus(riskText(), 'failure');
     });
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
@@ -644,14 +718,15 @@ async function initializeDrafts(): Promise<void> {
     showDraft();
     if (restorePending) {
       dirty = true; generation++;
-      if (autosave.checked) { status.textContent = 'Recovered unsaved text; saving…'; await persist(); }
-      else status.textContent = 'Recovered unsaved text; autosave is off';
+      if (autosave.checked) { setSaveStatus('Recovered unsaved text; saving…'); await persist(); }
+      else setSaveStatus('Recovered unsaved text; autosave is off');
     }
   } catch (error) {
     db?.close(); db = undefined;
     const pending = readPending();
-    if (pending) { active = pending; showDraft(); dirty = true; generation++; }
-    status.textContent = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : 'Storage unavailable. Copy or export unsaved text before closing.';
+    if (pending) { active = pending; showDraft(); dirty = true; generation++; saveFailed = true; }
+    storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
+    setSaveStatus(storageProblem, 'failure');
     renderDrafts();
   } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; void renderRecovery(); }
 }
@@ -672,12 +747,12 @@ function safeFilename(title: string): string {
 }
 document.querySelector<HTMLButtonElement>('#export-txt')!.addEventListener('click', () => {
   downloadText(safeFilename(draftTitle.value) + '.txt', field.value, 'text/plain;charset=utf-8');
-  status.textContent = 'Text exported';
+  notify('Text exported');
 });
 document.querySelector<HTMLButtonElement>('#export-json')!.addEventListener('click', () => {
   const draft = { title: draftTitle.value.trim() || 'Untitled draft', text: field.value };
   downloadText(safeFilename(draft.title) + '.typebridge.json', JSON.stringify({ format: 'typebridge-draft', version: 1, draft }, null, 2), 'application/json;charset=utf-8');
-  status.textContent = 'Draft exported';
+  notify('Draft exported');
 });
 const importFile = document.querySelector<HTMLInputElement>('#import-file')!;
 document.querySelector<HTMLButtonElement>('#import-draft')!.addEventListener('click', () => importFile.click());
@@ -699,12 +774,12 @@ importFile.addEventListener('change', async () => {
     if (!window.confirm('Import as a new draft? Your current draft will be kept.')) return;
     const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported draft' };
     // Save even when autosave is off: importing is an explicit save action.
-    if (!db) throw new Error('Storage unavailable');
+    if (!db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
-    if (await switchDraft(result.draft.id)) status.textContent = 'Imported as a new draft';
-    else status.textContent = 'Import saved in Drafts; current text was kept';
+    if (await switchDraft(result.draft.id)) notify('Imported as a new draft');
+    else notify('Import saved in Drafts; current text was kept');
   } catch (error) {
-    status.textContent = 'Import failed: ' + (error instanceof Error ? error.message : String(error));
+    notify('Import failed: ' + (error instanceof Error ? error.message : String(error)));
   }
 });
 
