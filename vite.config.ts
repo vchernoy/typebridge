@@ -47,7 +47,7 @@ self.addEventListener('fetch', event => {
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(async () => {
       const cache = await caches.open(CACHE);
-      return (await cache.match(HOME)) || Response.error();
+      return (await cache.match(HOME + 'index.html')) || Response.error();
     }));
     return;
   }
