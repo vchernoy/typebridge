@@ -14,8 +14,10 @@ test('custom rules affect new typing, persist, and leave existing text intact', 
   await field.pressSequentially(' w');
   await expect(field).toHaveValue('щ в');
   await page.reload();
-  await page.getByRole('textbox', { name: 'Your text' }).pressSequentially(' w');
-  await expect(page.getByRole('textbox', { name: 'Your text' })).toHaveValue('щ в в');
+  const restored = page.getByRole('textbox', { name: 'Your text' });
+  await restored.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange((el as HTMLTextAreaElement).value.length, (el as HTMLTextAreaElement).value.length));
+  await restored.pressSequentially(' w');
+  await expect(restored).toHaveValue('щ в в');
   await page.locator('.rules-panel summary').click();
   await page.getByRole('button', { name: 'Reset to defaults' }).click();
   await expect(page.locator('#rules-status')).toContainText('Default rules restored');
