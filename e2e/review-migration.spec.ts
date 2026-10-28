@@ -251,3 +251,26 @@ test('an older tab never overwrites a user-edited recovery draft', async ({ page
   await page.reload();
   await expect(page.locator('#editor')).toHaveValue('Моя важная правка');
 });
+
+test('a failed IndexedDB deletion retries pending autosave without further typing', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Сохранённый текст');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.delete;
+    (window as unknown as { restoreDelete: () => void }).restoreDelete = () => { IDBObjectStore.prototype.delete = original; };
+    IDBObjectStore.prototype.delete = function (...args: Parameters<IDBObjectStore['delete']>) {
+      if (this.name === 'documents') throw new DOMException('write failed', 'QuotaExceededError');
+      return original.apply(this, args);
+    };
+  });
+  await editor.fill('Новая несохранённая правка 🙂');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
+  await page.reload();
+  await expect(editor).toHaveValue('Новая несохранённая правка 🙂');
+});
