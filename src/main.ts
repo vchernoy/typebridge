@@ -304,7 +304,8 @@ async function persist(): Promise<boolean> {
         dirty = generation !== version;
         if (!dirty && !result.conflict) status.textContent = 'Saved locally';
       }
-      await refreshDrafts();
+      try { await refreshDrafts(); }
+      catch { if (!dirty) status.textContent = 'Saved locally — draft list could not be refreshed'; }
       return !dirty;
     } catch {
       status.textContent = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
@@ -489,7 +490,10 @@ importFile.addEventListener('change', async () => {
 });
 
 window.addEventListener('pagehide', () => { clearTimeout(saveTimer); void persist(); });
-window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('beforeunload', event => {
+  if (dirty) { clearTimeout(saveTimer); void persist(); event.preventDefault(); event.returnValue = ''; }
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
 updateStats();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

@@ -119,3 +119,84 @@ test('old localStorage drafts are ignored and left untouched while IndexedDB sav
   await expect(field).toHaveValue('Новый пост 🙂\nВторая строка');
   expect(await page.evaluate(() => localStorage.getItem('typebridge.drafts.v1'))).toBe(changed);
 });
+
+for (const operation of ['reload', 'navigation'] as const) {
+  test(`immediate ${operation} starts saving the pending edit`, async ({ page }) => {
+    await page.goto('/typebridge/');
+    const field = page.locator('#editor');
+    await expect(field).toBeEnabled();
+    await field.fill('Начало поста');
+    await expect(page.locator('#status')).toContainText('Saved locally');
+    await field.fill('Начало поста — последняя фраза 🙂');
+    page.once('dialog', dialog => dialog.accept());
+    if (operation === 'reload') await page.reload();
+    else await page.goto('/typebridge/?navigation=1');
+    await expect(field).toHaveValue('Начало поста — последняя фраза 🙂');
+  });
+}
+
+test('a committed save stays successful if refreshing the draft list fails', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Текст');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.getAll;
+    (window as unknown as { restoreGetAll: () => void }).restoreGetAll = () => { IDBObjectStore.prototype.getAll = original; };
+    IDBObjectStore.prototype.getAll = function (...args: Parameters<IDBObjectStore['getAll']>) {
+      if (this.name === 'documents') throw new Error('list unavailable');
+      return original.apply(this, args);
+    };
+  });
+  await field.fill('Текст ещё');
+  await expect(page.locator('#status')).toContainText('Saved locally — draft list could not be refreshed');
+  await page.locator('#new-draft').click();
+  await expect(field).toHaveValue('');
+  await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
+  await page.reload();
+  await expect(field).toHaveValue('Текст ещё');
+});
+
+test('JSON export and import round trip preserves Cyrillic, newlines and emoji', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  const content = 'Русский пост 🙂\nВторая строка\nТретья строка 🌍';
+  await field.fill(content);
+  await page.locator('#draft-title').fill('Проверка');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#export-json').click()]);
+  const fs = await import('node:fs/promises');
+  const bytes = await fs.readFile((await download.path())!);
+  expect(JSON.parse(bytes.toString()).draft.text).toBe(content);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#import-file').setInputFiles({ name: 'post.typebridge.json', mimeType: 'application/json', buffer: bytes });
+  await expect(page.locator('#status')).toContainText('Imported as a new draft');
+  await expect(field).toHaveValue(content);
+  await page.reload();
+  await expect(field).toHaveValue(content);
+});
+
+test('long editing history survives draft switching and reload', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.locator('#enabled').uncheck();
+  const original = 'Длинный русский текст 🙂\n'.repeat(200);
+  await field.fill(original);
+  await field.fill(original + 'Первая правка');
+  await field.fill(original + 'Вторая правка');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.locator('#draft-title').fill('Длинный пост');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.locator('#new-draft').click();
+  await expect(field).toHaveValue('');
+  await page.locator('#drafts').selectOption({ label: 'Длинный пост' });
+  await expect(field).toHaveValue(original + 'Вторая правка');
+  await page.locator('#undo').click();
+  await expect(field).toHaveValue(original + 'Первая правка');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(field).toHaveValue(original + 'Первая правка');
+  await page.locator('#redo').click();
+  await expect(field).toHaveValue(original + 'Вторая правка');
+});
