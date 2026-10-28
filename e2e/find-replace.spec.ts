@@ -132,13 +132,13 @@ test('Find supports selection replacement and leaves IME composition untouched',
   const find = page.locator('#find-text');
   await find.pressSequentially('mir');
   await find.evaluate((el: HTMLInputElement) => el.setSelectionRange(0, 2));
-  await page.keyboard.insertText('sh');
-  await expect(find).toHaveValue('shр');
+  await page.keyboard.type('sh');
+  await expect(find).toHaveValue('шр');
   await find.evaluate((el: HTMLInputElement) => {
     el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
     el.value += '日本';
     el.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
     el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
   });
-  await expect(find).toHaveValue('shр日本');
+  await expect(find).toHaveValue('шр日本');
 });
