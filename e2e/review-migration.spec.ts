@@ -231,3 +231,23 @@ test('archive limit stops legacy imports visibly and keeps editor usable after r
   await page.locator('#editor').fill('Новая запись после ошибки');
   await expect(page.locator('#status')).toContainText('Saved locally');
 });
+
+test('an older tab never overwrites a user-edited recovery draft', async ({ page, context }) => {
+  await page.addInitScript(raw => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('typebridge.drafts.v1', raw); sessionStorage.setItem('seeded', '1'); } }, JSON.stringify([valid]));
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const old = await context.newPage();
+  await old.goto('/typebridge/');
+  await expect(old.locator('#editor')).toBeEnabled();
+  await old.evaluate(record => localStorage.setItem('typebridge.drafts.v1', JSON.stringify([{ ...record, text: 'Старая вкладка 1', updatedAt: 101 }])), valid);
+  await expect(page.locator('#drafts option')).toHaveCount(2);
+  await page.locator('#drafts').selectOption({ label: 'Важный пост (legacy recovery)' });
+  await expect(page.locator('#editor')).toHaveValue('Старая вкладка 1');
+  await page.locator('#editor').fill('Моя важная правка');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await old.evaluate(record => localStorage.setItem('typebridge.drafts.v1', JSON.stringify([{ ...record, text: 'Старая вкладка 2', updatedAt: 102 }])), valid);
+  await expect(page.locator('#drafts option')).toHaveCount(3);
+  await expect(page.locator('#editor')).toHaveValue('Моя важная правка');
+  await page.reload();
+  await expect(page.locator('#editor')).toHaveValue('Моя важная правка');
+});

@@ -433,10 +433,10 @@ async function showLegacyWarning(): Promise<void> {
   if (!db || legacyStopped) return;
   const info = await legacyRecoveryInfo(db);
   recoveryNotice.replaceChildren();
-  if (!info.rejected && !info.olderChanges) { recoveryNotice.hidden = true; return; }
+  if (!info.rejected && !info.olderChanges && !info.backups.length && !info.versions.length) { recoveryNotice.hidden = true; return; }
   recoveryNotice.hidden = false;
   recoveryNotice.append(document.createTextNode(
-    (info.rejected ? `${info.rejected} legacy record(s) could not be imported; a backup was kept. ` : '') +
+    (info.rejected ? `${info.rejected} legacy record(s) could not be imported; a backup was kept. ` : info.backups.length ? 'Earlier legacy backups remain available. ' : '') +
     (info.olderChanges ? 'Changes from an older TypeBridge tab were preserved in Drafts. Earlier versions can be exported. ' : '')
   ));
   if (info.backups.length || info.versions.length) {
