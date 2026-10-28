@@ -184,3 +184,22 @@ export async function commitOrCreateConflictCopy(
     throw error;
   }
 }
+
+
+/** Delete only the exact revision selected by the user. */
+export async function deleteStoredDraft(db: IDBDatabase, id: string, revision: number): Promise<boolean> {
+  const tx = db.transaction(STORE, 'readwrite');
+  const done = finished(tx);
+  try {
+    const store = tx.objectStore(STORE);
+    const current = await request(store.get(id)) as StoredDraft | undefined;
+    if ((current?.revision ?? 0) !== revision) { await done; return false; }
+    if (current) await request(store.delete(id));
+    await done;
+    return true;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}

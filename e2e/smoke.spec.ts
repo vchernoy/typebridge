@@ -255,6 +255,7 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   page.once('dialog', d => d.dismiss());
   await page.getByRole('checkbox', { name: 'Autosave' }).uncheck();
   await field.pressSequentially('a');
+  page.once('dialog', d => d.accept());
   await page.reload();
   await expect(field).toHaveValue('привет');
   page.once('dialog', d => d.accept());

@@ -5,6 +5,7 @@ import { expect, test } from '@playwright/test';
 test('IndexedDB migration is atomic, restartable and preserves legacy data and conflicts', async ({ page }) => {
   const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
   const result = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
@@ -35,6 +36,7 @@ test('IndexedDB migration is atomic, restartable and preserves legacy data and c
 test('migration collision aborts all changes without overwriting legacy data', async ({ page }) => {
   const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
   const result = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
@@ -64,6 +66,7 @@ test('migration collision aborts all changes without overwriting legacy data', a
 test('stale edits are committed as a separate complete conflict draft', async ({ page }) => {
   const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
   const result = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
