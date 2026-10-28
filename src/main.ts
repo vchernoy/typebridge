@@ -486,6 +486,7 @@ draftSelect.addEventListener('change', () => { void switchDraft(draftSelect.valu
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (transitioning) return;
   clearTimeout(saveTimer);
+  const requestedId = active.id;
   if (!window.confirm('Permanently delete this saved draft?')) {
     if (dirty && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
     return;
@@ -495,7 +496,6 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   draftTitle.readOnly = true;
   let committed = false;
   let savedBeforeDelete = false;
-  const requestedId = active.id;
   try {
     if (saving && !await saving) throw new Error('Save failed');
     if (dirty && autosave.checked) {
