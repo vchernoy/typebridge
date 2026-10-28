@@ -494,9 +494,18 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   field.readOnly = true;
   draftTitle.readOnly = true;
   let committed = false;
+  let savedBeforeDelete = false;
+  const requestedId = active.id;
   try {
     if (saving && !await saving) throw new Error('Save failed');
-    if (dirty && autosave.checked && !await persist()) throw new Error('Save failed');
+    if (dirty && autosave.checked) {
+      if (!await persist()) throw new Error('Save failed');
+      savedBeforeDelete = true;
+    }
+    if (active.id !== requestedId) {
+      status.textContent = 'Could not delete original — your changes were saved as a conflict copy.';
+      return;
+    }
     deleting = true;
     if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed in another tab');
     committed = true;
@@ -508,7 +517,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     try { await refreshDrafts(); status.textContent = 'Draft deleted'; }
     catch { status.textContent = 'Draft deleted, but the draft list could not be refreshed'; }
   } catch {
-    status.textContent = dirty ? 'Could not delete draft — your changes are unsaved; saving again…' : 'Could not delete draft — your text is kept.';
+    status.textContent = dirty ? 'Could not delete draft — your changes are unsaved; saving again…' : savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.';
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
     if (!committed && dirty && autosave.checked) {

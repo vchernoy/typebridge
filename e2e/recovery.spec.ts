@@ -30,7 +30,7 @@ test('recovery keeps a newer version from another tab and does not clear a newer
   const other = await context.newPage(); await other.goto('/typebridge/');
   await other.locator('#editor').fill('Новая версия');
   await expect(other.locator('#status')).toContainText('Saved locally');
-  await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; });
+  await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Несохранённая версия');
   await expect(page.locator('#status')).toContainText('Save failed');
   const third = await context.newPage(); await third.goto('/typebridge/');
@@ -66,7 +66,7 @@ test('journal quota failures are visible while editing remains available', async
 
 test('retry after committed recovery with failed journal cleanup does not duplicate copies', async ({ page, context }) => {
   await page.goto('/typebridge/');
-  await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; });
+  await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Сохранить эту запись');
   await expect(page.locator('#status')).toContainText('Save failed');
   const other = await context.newPage(); await other.goto('/typebridge/');
