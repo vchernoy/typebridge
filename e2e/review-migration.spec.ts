@@ -207,3 +207,27 @@ test('repeated old-tab writes reuse one recovery draft and preserve intermediate
   for (let i = 1; i < 10; i++) expect(archive.some(item => item.draft?.text === `Русский вариант ${i} 🙂`)).toBe(true);
   await expect(page.locator('#editor')).toHaveValue('Оригинал');
 });
+
+test('archive limit stops legacy imports visibly and keeps editor usable after reload', async ({ page, context }) => {
+  const initial = JSON.stringify([valid]);
+  await page.addInitScript(raw => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('typebridge.drafts.v1', raw); sessionStorage.setItem('seeded', '1'); } }, initial);
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const old = await context.newPage();
+  await old.goto('/typebridge/');
+  await expect(old.locator('#editor')).toBeEnabled();
+  await old.evaluate(record => localStorage.setItem('typebridge.drafts.v1', JSON.stringify([{ ...record, text: 'Промежуточная версия', updatedAt: 101 }])), valid);
+  await expect(page.locator('#drafts option')).toHaveCount(2);
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', 1);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => { const db = open.result; const tx = db.transaction('metadata', 'readwrite'); const store = tx.objectStore('metadata'); const get = store.get('localStorage-v1'); get.onsuccess = () => store.put({ ...get.result, archiveBytes: 8 * 1024 * 1024 }, 'localStorage-v1'); tx.oncomplete = () => { db.close(); resolve(); }; tx.onabort = () => reject(tx.error); };
+  }));
+  await old.evaluate(record => localStorage.setItem('typebridge.drafts.v1', JSON.stringify([{ ...record, text: 'Следующая версия', updatedAt: 102 }])), valid);
+  await expect(page.getByRole('alert')).toContainText('Stop editing the older tab');
+  await expect(page.getByRole('button', { name: 'Export pending legacy snapshot' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('alert')).toContainText('Stop editing the older tab');
+  await page.locator('#editor').fill('Новая запись после ошибки');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+});

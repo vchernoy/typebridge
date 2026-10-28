@@ -416,8 +416,21 @@ const recoveryNotice = document.createElement('div');
 recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
+let legacyStopped = false;
+function showLegacyFailure(raw: string | null): void {
+  legacyStopped = true;
+  recoveryNotice.hidden = false;
+  recoveryNotice.replaceChildren(document.createTextNode('Older-tab changes could not be saved (storage or the recovery archive may be full). Stop editing the older tab; export this pending snapshot and its current data before retrying. Later changes are not being imported. '));
+  const button = document.createElement('button');
+  button.textContent = 'Export pending legacy snapshot';
+  button.addEventListener('click', () => downloadText('typebridge-legacy-pending.json', raw ?? '', 'application/json'));
+  const current = document.createElement('button');
+  current.textContent = 'Export current legacy data';
+  current.addEventListener('click', () => { try { downloadText('typebridge-legacy-current.json', localStorage.getItem('typebridge.drafts.v1') ?? '', 'application/json'); } catch { status.textContent = 'Cannot read legacy storage'; } });
+  recoveryNotice.append(button, current);
+}
 async function showLegacyWarning(): Promise<void> {
-  if (!db) return;
+  if (!db || legacyStopped) return;
   const info = await legacyRecoveryInfo(db);
   recoveryNotice.replaceChildren();
   if (!info.rejected && !info.olderChanges) { recoveryNotice.hidden = true; return; }
@@ -436,19 +449,13 @@ async function showLegacyWarning(): Promise<void> {
 let legacySync: Promise<void> = Promise.resolve();
 window.addEventListener('storage', event => {
   if (event.key !== 'typebridge.drafts.v1' || !db) return;
+  const observed = event.newValue;
   legacySync = legacySync.then(async () => {
-    if (!db) return;
-    await migrateLegacyDrafts(db, event.newValue);
+    if (!db || legacyStopped) return;
+    await migrateLegacyDrafts(db, observed);
     await refreshDrafts();
     await showLegacyWarning();
-  }).catch(() => {
-    recoveryNotice.hidden = false;
-    recoveryNotice.replaceChildren(document.createTextNode('Could not import older-tab changes (storage or recovery archive may be full). Stop editing the older tab and export its current data before retrying. '));
-    const button = document.createElement('button');
-    button.textContent = 'Export current legacy data';
-    button.addEventListener('click', () => { try { downloadText('typebridge-legacy-current.json', localStorage.getItem('typebridge.drafts.v1') ?? '', 'application/json'); } catch { status.textContent = 'Cannot read legacy storage'; } });
-    recoveryNotice.append(button);
-  });
+  }).catch(() => { if (!legacyStopped) showLegacyFailure(observed); });
 });
 async function initializeDrafts(): Promise<void> {
   try {
@@ -457,7 +464,11 @@ async function initializeDrafts(): Promise<void> {
       recoveryNotice.hidden = false;
       recoveryNotice.textContent = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
     });
-    await migrateLegacyDrafts(db);
+    try { await migrateLegacyDrafts(db); }
+    catch (error) {
+      if (!(error instanceof Error) || error.message !== 'Legacy recovery archive is full') throw error;
+      showLegacyFailure(localStorage.getItem('typebridge.drafts.v1'));
+    }
     await showLegacyWarning();
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
