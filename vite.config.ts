@@ -51,7 +51,7 @@ self.addEventListener('fetch', event => {
     }));
     return;
   }
-  event.respondWith(caches.match(request).then(cached => cached || fetch(request)));
+  event.respondWith(caches.open(CACHE).then(cache => cache.match(url.href)).then(cached => cached || fetch(request)));
 });`;
       await writeFile(join(root, 'sw.js'), worker);
     },
