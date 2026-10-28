@@ -98,3 +98,17 @@ test('repeated edits during autosave persist the latest text', async ({ page }) 
   await page.reload();
   await expect(field).toHaveValue('Раз два три 🙂');
 });
+
+test('imports a text file into its own saved document', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#import-file').setInputFiles({
+    name: 'post.txt', mimeType: 'text/plain', buffer: Buffer.from('Русский текст 🙂\nВторая строка'),
+  });
+  await expect(page.locator('#status')).toContainText('Imported as a new draft');
+  await expect(page.locator('#editor')).toHaveValue('Русский текст 🙂\nВторая строка');
+  await expect(page.locator('#draft-title')).toHaveValue('post');
+  await page.reload();
+  await expect(page.locator('#editor')).toHaveValue('Русский текст 🙂\nВторая строка');
+});

@@ -438,14 +438,14 @@ importFile.addEventListener('change', async () => {
   try {
     if (file.size > 5 * 1024 * 1024) throw new Error('File exceeds 5 MB');
     const content = await file.text();
-    let title = file.name.replace(/(\\.typebridge)?\\.(json|txt)$/i, '');
+    let title = file.name.replace(/(\.typebridge)?\.(json|txt)$/i, '');
     let text = content;
-    if (/\\.json$/i.test(file.name)) {
+    if (/\.json$/i.test(file.name)) {
       const parsed: unknown = JSON.parse(content);
       if (!parsed || typeof parsed !== 'object' || !('format' in parsed) || parsed.format !== 'typebridge-draft' || !('version' in parsed) || parsed.version !== 1 || !('draft' in parsed) || !parsed.draft || typeof parsed.draft !== 'object' || !('title' in parsed.draft) || typeof parsed.draft.title !== 'string' || !('text' in parsed.draft) || typeof parsed.draft.text !== 'string') throw new Error('Not a supported TypeBridge draft');
       title = parsed.draft.title;
       text = parsed.draft.text;
-    } else if (!/\\.txt$/i.test(file.name)) throw new Error('Choose a .txt or .typebridge.json file');
+    } else if (!/\.txt$/i.test(file.name)) throw new Error('Choose a .txt or .typebridge.json file');
     if (!window.confirm('Import as a new draft? Your current draft will be kept.')) return;
     const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported draft' };
     // Save even when autosave is off: importing is an explicit save action.
