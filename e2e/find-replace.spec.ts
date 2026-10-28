@@ -59,3 +59,18 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
   await expect(page.getByRole('textbox', { name: 'Draft title' })).toHaveValue('Русский пост');
   await expect(page.locator('#find-status')).not.toContainText('Import failed');
 });
+
+test('focus mode preserves text, selection and editor undo history', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.fill('Привет, мир');
+  await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(2, 5));
+  await page.getByRole('button', { name: 'Focus mode', exact: true }).click();
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(page.locator('.find-bar')).toBeHidden();
+  expect(await field.evaluate(el => [(el as HTMLTextAreaElement).selectionStart, (el as HTMLTextAreaElement).selectionEnd])).toEqual([2, 5]);
+  await field.press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await expect(field).toHaveValue('Привет, мир');
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
+});
