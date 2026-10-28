@@ -201,7 +201,7 @@ test('long editing history survives draft switching and reload', async ({ page }
   await expect(field).toHaveValue(original + 'Вторая правка');
 });
 
-test('closing a tab immediately after editing starts a save', async ({ page, context }) => {
+test('closing a tab immediately after editing saves or offers recovery', async ({ page, context }) => {
   await page.goto('/typebridge/');
   const field = page.locator('#editor');
   await field.fill('Начало');
@@ -213,6 +213,11 @@ test('closing a tab immediately after editing starts a save', async ({ page, con
   await closed;
   const next = await context.newPage();
   await next.goto('/typebridge/');
+  await expect(next.locator('#editor')).toBeEnabled();
+  if (await next.locator('#editor').inputValue() !== 'Начало — последняя фраза') {
+    await next.getByRole('button', { name: /Recover Untitled draft/ }).click();
+    await next.locator('#drafts').selectOption({ label: 'Untitled draft (recovered)' });
+  }
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза');
 });
 
