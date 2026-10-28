@@ -1,3 +1,5 @@
+import { russianPack } from './core/russian';
+import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from './core/custom-rules';
 import './style.css';
 import { Editor } from './editor/editor';
 import { autosaveEnabled, deleteDraft, getActiveDraftId, getDraft, listDrafts, newDraft, saveDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
@@ -81,18 +83,47 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', (
 const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
 const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
 const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
+const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
 const findStatus = document.querySelector<HTMLElement>('#find-status')!;
-function matches(): Array<[number, number]> {
+function searchPattern(): RegExp | null {
   const query = findInput.value;
-  if (!query) return [];
+  if (!query) { findStatus.textContent = ''; return null; }
   const flags = matchCase.checked ? 'g' : 'gi';
   const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
-  const pattern = new RegExp(escaped, flags);
+  try {
+    const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
+    findStatus.textContent = '';
+    return pattern;
+  } catch (error) {
+    findStatus.textContent = 'Invalid regex: ' + (error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+function matches(): Array<[number, number]> {
+  const pattern = searchPattern();
+  if (!pattern) return [];
   return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+}
+function replacementFor(match: RegExpExecArray, original: string): string {
+  if (!regexMode.checked) return replaceInput.value;
+  const start = match.index;
+  const end = start + match[0].length;
+  return replaceInput.value.replace(/\$\$|\$&|\$\x60|\$'|\$<([^>]+)>|\$(\d{1,2})/g, (token, name: string | undefined, index: string | undefined) => {
+    if (token === '$$') return '$';
+    if (token === '$&') return match[0];
+    if (token === '$\x60') return original.slice(0, start);
+    if (token === "$'") return original.slice(end);
+    if (name !== undefined) return match.groups ? (name in match.groups ? match.groups[name] ?? '' : token) : token;
+    if (index !== undefined) {
+      const n = Number(index);
+      if (n > 0 && n < match.length) return match[n] ?? '';
+    }
+    return token;
+  });
 }
 function findNext(backwards = false): void {
   const found = matches();
-  if (!found.length) { findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
+  if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
   const position = backwards ? field.selectionStart : field.selectionEnd;
   const match = backwards
     ? [...found].reverse().find(([start]) => start < position) ?? found[found.length - 1]
@@ -106,24 +137,31 @@ document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click
 document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
 document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
   const found = matches();
-  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = 'No matches'; return; }
   const match = found.find(([start, end]) => start === field.selectionStart && end === field.selectionEnd)
     ?? found.find(([start]) => start >= field.selectionEnd) ?? found[0];
-  editor.replaceRange(match[0], match[1], replaceInput.value);
+  const pattern = searchPattern()!;
+  pattern.lastIndex = match[0];
+  const capture = pattern.exec(field.value);
+  if (!capture || capture.index !== match[0]) return;
+  editor.replaceRange(match[0], match[1], replacementFor(capture, field.value));
   findStatus.textContent = 'Replaced 1 match';
   field.focus({ preventScroll: true });
 });
 document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('click', () => {
-  const found = matches();
-  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  const pattern = searchPattern();
+  if (!pattern) return;
   const original = field.value;
-  let result = '';
-  let offset = 0;
-  for (const [start, end] of found) {
-    result += original.slice(offset, start) + replaceInput.value;
-    offset = end;
-  }
-  result += original.slice(offset);
+  const found = Array.from(original.matchAll(pattern));
+  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  const result = original.replace(pattern, (...args) => {
+    const text = args[0] as string;
+    const offset = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null ? args[args.length - 3] as number : args[args.length - 2] as number;
+    const groups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null ? args[args.length - 1] as Record<string, string> : undefined;
+    const captures = args.slice(1, groups ? -3 : -2) as string[];
+    const match = Object.assign([text, ...captures], { index: offset, input: original, groups }) as RegExpExecArray;
+    return replacementFor(match, original);
+  });
   editor.replaceRange(0, original.length, result);
   findStatus.textContent = `Replaced ${found.length} matches`;
   field.focus({ preventScroll: true });
@@ -136,6 +174,68 @@ document.addEventListener('keydown', event => {
     event.preventDefault(); findInput.focus(); findInput.select();
   }
 });
+
+
+const rulesText = document.querySelector<HTMLTextAreaElement>('#rules-text')!;
+const rulesStatus = document.querySelector<HTMLElement>('#rules-status')!;
+let overrides: Overrides = loadOverrides();
+function renderRules(): void {
+  rulesText.value = effectivePack(overrides).mappings.map(rule => rule.input + ' = ' + rule.output).join('\n');
+}
+function parseRules(text: string): Overrides {
+  const proposed: Overrides = Object.create(null) as Overrides;
+  const seen = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const match = /^\s*([^=]+?)\s*=\s*([^=]+?)\s*$/.exec(line);
+    if (!match) throw new Error('Use Latin = Cyrillic, one rule per line');
+    const input = match[1].trim(), output = match[2].trim();
+    if (seen.has(input)) throw new Error('Duplicate rule: ' + input);
+    seen.add(input);
+    proposed[input] = output;
+  }
+  // Missing default rules retain their built-in mapping; explicit edits override it.
+  const defaults = new Map(russianPack.mappings.map(rule => [rule.input, rule.output]));
+  const changes: Overrides = Object.create(null) as Overrides;
+  for (const [input, output] of Object.entries(proposed)) {
+    if (defaults.get(input) !== output) changes[input] = output;
+  }
+  return changes;
+}
+document.querySelector<HTMLButtonElement>('#rules-save')!.addEventListener('click', () => {
+  try {
+    const next = parseRules(rulesText.value);
+    saveOverrides(next);
+    overrides = next;
+    editor.setRules(overrides);
+    renderRules();
+    rulesStatus.textContent = 'Rules saved locally';
+  } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules'; }
+});
+document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', () => {
+  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
+  catch { rulesStatus.textContent = 'Unable to save rules'; }
+});
+document.querySelector<HTMLButtonElement>('#rules-export')!.addEventListener('click', () => {
+  const blob = new Blob([exportRules(overrides)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = 'typebridge-rules.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+document.querySelector<HTMLInputElement>('#rules-import')!.addEventListener('change', async event => {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    if (file.size > 65536) throw new Error('Rules file is too large');
+    const next = importRules(await file.text());
+    saveOverrides(next); overrides = next; editor.setRules(overrides); renderRules();
+    rulesStatus.textContent = 'Rules imported';
+  } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Import failed'; }
+  finally { input.value = ''; }
+});
+renderRules();
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
