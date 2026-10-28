@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('editor types transliteration, edits selections and supports history', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
   await expect(field).toHaveValue('привет');
@@ -20,6 +21,7 @@ test('editor types transliteration, edits selections and supports history', asyn
 
 test('toggle, paste and composition preserve text', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await page.getByLabel('Transliteration on').uncheck();
   await field.pressSequentially('hello');
@@ -34,6 +36,7 @@ test('toggle, paste and composition preserve text', async ({ page }) => {
 
 test('paste and undo preserve clipboard content and caret', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await page.evaluate(() => { const seed = document.createElement('textarea'); seed.id = 'clipboard-seed'; seed.value = 'ABC 🙂'; document.body.append(seed); });
   const seed = page.locator('#clipboard-seed');
@@ -52,6 +55,7 @@ test('paste and undo preserve clipboard content and caret', async ({ page }) => 
 test('small screen retains an accessible editor and toggle', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 650 });
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('yozh');
   await expect(field).toHaveValue('ёж');
@@ -60,7 +64,9 @@ test('small screen retains an accessible editor and toggle', async ({ page }) =>
 
 test('composition keyboard undo is not intercepted by editor', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
+  await expect(field).toBeEnabled();
   await field.pressSequentially('a');
   const result = await field.evaluate(el => {
     const node = el as HTMLTextAreaElement;
@@ -75,6 +81,7 @@ test('composition keyboard undo is not intercepted by editor', async ({ page }) 
 
 test('cut and selection replacement are undoable with selections intact', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await page.getByLabel('Transliteration on').uncheck();
   await field.pressSequentially('abcdef');
@@ -92,6 +99,7 @@ test('cut and selection replacement are undoable with selections intact', async 
 
 test('non-cancelable input records actual mutation and ignores no-op beforeinput', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('a');
   await field.evaluate(el => {
@@ -110,6 +118,7 @@ test('non-cancelable input records actual mutation and ignores no-op beforeinput
 
 test('composition updates form one undoable edit', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name:'Your text' });
   await field.pressSequentially('a');
   await field.evaluate(el => {
@@ -128,6 +137,7 @@ test('composition updates form one undoable edit', async ({ page }) => {
 
 test('non-cancelable native history discards stale custom snapshots', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('ab');
   await field.evaluate(el => {
@@ -142,6 +152,7 @@ test('non-cancelable native history discards stale custom snapshots', async ({ p
 
 test('toggle while editing and undo clear', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('sh');
   await expect(field).toHaveValue('ш');
@@ -162,6 +173,7 @@ test('touch interactions on a narrow viewport', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true });
   const page = await context.newPage();
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.tap();
   await field.pressSequentially('yo');
@@ -175,6 +187,7 @@ test('touch interactions on a narrow viewport', async ({ browser }) => {
 
 test('toolbar Undo and Redo track multiple edits, preserve selection and keyboard history', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const undo = page.getByRole('button', { name: 'Undo', exact: true });
   const redo = page.getByRole('button', { name: 'Redo', exact: true });
@@ -209,6 +222,7 @@ test('toolbar Undo and Redo track multiple edits, preserve selection and keyboar
 
 test('toolbar history undoes block clear and supports multiple steps', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
   page.once('dialog', dialog => dialog.accept());
@@ -222,6 +236,7 @@ test('toolbar history undoes block clear and supports multiple steps', async ({ 
 
 test('autosave restores text after reload and opens latest draft in a new tab', async ({ page, context }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
   await expect(page.getByRole('status')).toContainText('Saved locally');
@@ -241,6 +256,7 @@ test('autosave restores text after reload and opens latest draft in a new tab', 
 
 test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
   await expect(page.getByRole('status')).toContainText('Saved locally');
@@ -255,6 +271,7 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   page.once('dialog', d => d.dismiss());
   await page.getByRole('checkbox', { name: 'Autosave' }).uncheck();
   await field.pressSequentially('a');
+  page.once('dialog', d => d.accept());
   await page.reload();
   await expect(field).toHaveValue('привет');
   page.once('dialog', d => d.accept());
@@ -264,6 +281,7 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
 
 test('undo and redo survive refresh and stay isolated per draft', async ({ page }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const undo = page.getByRole('button', { name: 'Undo', exact: true });
   const redo = page.getByRole('button', { name: 'Redo', exact: true });
@@ -295,6 +313,7 @@ test('undo and redo survive refresh and stay isolated per draft', async ({ page 
 test('editor can shrink to five lines and resize horizontally', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const sizes = await field.evaluate(el => {
     const node = el as HTMLTextAreaElement;
@@ -313,6 +332,7 @@ test('editor can shrink to five lines and resize horizontally', async ({ page })
 
 test('fresh page opens latest saved draft, reload keeps current tab selection', async ({ page, context }) => {
   await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('First draft');
   await expect(page.getByRole('status')).toContainText('Saved locally');

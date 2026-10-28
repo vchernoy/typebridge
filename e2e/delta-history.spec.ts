@@ -40,18 +40,3 @@ test('paste, delete and selection are reversible', async ({ page }) => {
   await expect(field).toHaveValue('one FOUR three');
 });
 
-test('legacy snapshot history migrates without losing undo', async ({ page }) => {
-  await page.evaluate(() => {
-    const id = 'legacy-test';
-    localStorage.setItem('typebridge.drafts.v1', JSON.stringify([{
-      id, title: 'Legacy', text: 'hello!', updatedAt: Date.now(),
-      history: { current: 'hello!', undo: [{ value: 'hello', start: 5, end: 5 }], redo: [] }
-    }]));
-    sessionStorage.setItem('typebridge.activeDraft.v1', id);
-  });
-  await page.reload();
-  const field = page.locator('#editor');
-  await expect(field).toHaveValue('hello!');
-  await page.locator('#undo').click();
-  await expect(field).toHaveValue('hello');
-});

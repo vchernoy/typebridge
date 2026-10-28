@@ -49,15 +49,18 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
   const fs = await import('node:fs/promises');
   const payload = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
   expect(payload.draft.text).toBe('Привет, мир!\\nВторая строка.');
+  payload.draft.text = 'Импортировано 🙂';
   page.on('dialog', dialog => dialog.accept());
   await page.locator('#import-file').setInputFiles({
     name: 'backup.typebridge.json',
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(payload)),
   });
-  await expect(field).toHaveValue('Привет, мир!\\nВторая строка.');
-  await expect(page.getByRole('textbox', { name: 'Draft title' })).toHaveValue('Русский пост');
-  await expect(page.locator('#find-status')).not.toContainText('Import failed');
+  await expect(page.locator('#status')).toContainText('Imported as a new draft');
+  await expect(field).toHaveValue('Импортировано 🙂');
+  await page.reload();
+  await expect(field).toHaveValue('Импортировано 🙂');
+  await expect(page.locator('#drafts option')).toHaveCount(2);
 });
 
 test('word statistics count Cyrillic, Latin, punctuation and update on undo', async ({ page }) => {

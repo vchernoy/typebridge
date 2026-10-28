@@ -14,7 +14,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
   });
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет! Это мой длинный пост.\nВторая строка.');
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('typebridge.drafts.v1') ?? '[]').some((draft: { text: string }) => draft.text === 'Привет! Это мой длинный пост.\nВторая строка.'))).toBe(true);
+  await expect(page.getByRole('status')).toContainText('Saved locally');
   await context.setOffline(true);
   await page.reload();
   try {
@@ -23,7 +23,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
     const diagnostics = await page.evaluate(async () => ({
       controller: !!navigator.serviceWorker.controller,
       activeDraft: sessionStorage.getItem('typebridge.activeDraft.v1'),
-      draftCount: JSON.parse(localStorage.getItem('typebridge.drafts.v1') ?? '[]').length,
+      draftCount: document.querySelectorAll('#drafts option').length,
       resources: performance.getEntriesByType('resource').map(entry => entry.name),
       cacheNames: await caches.keys(),
       entries: await Promise.all((await caches.keys()).map(async name => ({ name, requests: (await (await caches.open(name)).keys()).map(request => request.url) }))),
@@ -31,7 +31,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
     throw new Error(`Offline restoration failed: ${JSON.stringify({ diagnostics, errors })}`, { cause: error });
   }
   await field.fill('Редактирую без интернета');
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('typebridge.drafts.v1') ?? '[]').some((draft: { text: string }) => draft.text === 'Редактирую без интернета'))).toBe(true);
+  await expect(page.getByRole('status')).toContainText('Saved locally');
   await page.reload();
   await expect(field).toHaveValue('Редактирую без интернета');
   await context.setOffline(false);

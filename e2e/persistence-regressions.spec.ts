@@ -1,0 +1,153 @@
+import { expect, test } from '@playwright/test';
+
+for (const saved of [false, true]) for (const delay of [0, 800]) {
+  test(`delete pending edits: saved=${saved}, confirmation delay=${delay}`, async ({ page }) => {
+    await page.goto('/typebridge/');
+    const editor = page.locator('#editor');
+    await expect(editor).toBeEnabled();
+    if (saved) { await editor.fill('Saved'); await expect(page.locator('#status')).toContainText('Saved locally'); }
+    await editor.fill('Pending');
+    page.once('dialog', async dialog => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); await dialog.accept(); });
+    await page.locator('#delete-draft').click();
+    await expect(page.locator('#status')).toHaveText('Draft deleted');
+    await page.waitForTimeout(600);
+    await expect(editor).toHaveValue('');
+    await expect(page.locator('#drafts option')).toHaveCount(1);
+    await page.reload();
+    await expect(editor).toHaveValue('');
+    await expect(page.locator('#drafts option')).toHaveCount(1);
+  });
+}
+
+test('database version change closes the old connection and warns the editor', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const second = await context.newPage();
+  await second.goto('/typebridge/');
+  await expect(second.locator('#editor')).toBeEnabled();
+  const upgraded = await second.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const request = indexedDB.open('typebridge', 2);
+    request.onsuccess = () => { request.result.close(); resolve(true); };
+    request.onerror = () => reject(request.error);
+  }));
+  expect(upgraded).toBe(true);
+  await expect(page.getByRole('alert')).toContainText('upgraded in another tab');
+});
+
+test('canceling deletion retains pending edits and autosave', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Оставить текст');
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#editor')).toHaveValue('Оставить текст');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(page.locator('#editor')).toHaveValue('Оставить текст');
+});
+
+test('failed deletion keeps the text and allows retry', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Не потерять');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.delete;
+    (window as unknown as { restoreDelete: () => void }).restoreDelete = () => { IDBObjectStore.prototype.delete = original; };
+    IDBObjectStore.prototype.delete = function (...args: Parameters<IDBObjectStore['delete']>) {
+      if (this.name === 'documents') throw new DOMException('write failed', 'QuotaExceededError');
+      return original.apply(this, args);
+    };
+  });
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('Could not delete draft');
+  await expect(editor).toHaveValue('Не потерять');
+  await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toHaveText('Draft deleted');
+  await expect(editor).toHaveValue('');
+});
+
+test('stale deletion retries saving pending edits as a conflict copy', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Исходный длинный пост');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  const other = await context.newPage();
+  await other.goto('/typebridge/');
+  await expect(other.locator('#editor')).toHaveValue('Исходный длинный пост');
+  await other.locator('#editor').fill('Версия другой вкладки');
+  await expect(other.locator('#status')).toContainText('Saved locally');
+  await editor.fill('Важная правка первой вкладки 🙂');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('conflict copy');
+  await page.reload();
+  await expect(editor).toHaveValue('Важная правка первой вкладки 🙂');
+  await expect(page.locator('#drafts option')).toHaveCount(2);
+});
+
+test('selecting current draft preserves pending text and undo history', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await page.locator('#enabled').uncheck();
+  await editor.fill('Первая версия');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await editor.fill('Первая версия плюс новое');
+  await page.locator('#drafts').dispatchEvent('change');
+  await expect(editor).toHaveValue('Первая версия плюс новое');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.locator('#undo').click();
+  await expect(editor).toHaveValue('Первая версия');
+});
+
+test('post-delete list failure does not pretend deleted text is still saved', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Русский пост и история');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.getAll;
+    (window as unknown as { restoreGetAll: () => void }).restoreGetAll = () => { IDBObjectStore.prototype.getAll = original; };
+    IDBObjectStore.prototype.getAll = function (...args: Parameters<IDBObjectStore['getAll']>) {
+      if (this.name === 'documents') throw new Error('list unavailable');
+      return original.apply(this, args);
+    };
+  });
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('Draft deleted, but');
+  await expect(editor).toHaveValue('');
+  await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
+  await page.reload();
+  await expect(editor).toHaveValue('');
+});
+
+test('a failed IndexedDB deletion retries pending autosave without further typing', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Сохранённый текст');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.delete;
+    (window as unknown as { restoreDelete: () => void }).restoreDelete = () => { IDBObjectStore.prototype.delete = original; };
+    IDBObjectStore.prototype.delete = function (...args: Parameters<IDBObjectStore['delete']>) {
+      if (this.name === 'documents') throw new DOMException('write failed', 'QuotaExceededError');
+      return original.apply(this, args);
+    };
+  });
+  await editor.fill('Новая несохранённая правка 🙂');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
+  await page.reload();
+  await expect(editor).toHaveValue('Новая несохранённая правка 🙂');
+});
