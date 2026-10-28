@@ -249,6 +249,7 @@ let generation = 0;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let saving: Promise<boolean> | undefined;
 let transitioning = false;
+let loadingDraft = false;
 field.disabled = true;
 draftSelect.disabled = true;
 draftTitle.disabled = true;
@@ -271,10 +272,13 @@ async function refreshDrafts(): Promise<void> {
   renderDrafts();
 }
 function showDraft(): void {
-  editor.load(active.text);
-  editor.restoreHistory(active.history);
-  draftTitle.value = active.title;
-  dirty = false;
+  loadingDraft = true;
+  try {
+    editor.load(active.text);
+    editor.restoreHistory(active.history);
+    draftTitle.value = active.title;
+    dirty = false;
+  } finally { loadingDraft = false; }
   renderDrafts();
   updateStats();
 }
@@ -309,6 +313,7 @@ async function persist(): Promise<boolean> {
   try { return await saving; } finally { saving = undefined; }
 }
 function scheduleSave(): void {
+  if (loadingDraft) return;
   dirty = true;
   generation++;
   clearTimeout(saveTimer);
@@ -338,21 +343,23 @@ autosave.addEventListener('change', async () => {
 async function switchDraft(id?: string): Promise<boolean> {
   if (transitioning) return false;
   transitioning = true;
-  field.readOnly = true;
-  draftTitle.readOnly = true;
   try {
-    clearTimeout(saveTimer);
-    if (dirty && autosave.checked && !await persist()) return false;
-    if (dirty && !autosave.checked && !window.confirm('Discard unsaved changes? Copy or export them first to keep them.')) return false;
     const next = id && db ? await getStoredDraft(db, id) : undefined;
     if (id && !next) throw new Error('Draft no longer exists');
+    clearTimeout(saveTimer);
+    while (dirty && autosave.checked) {
+      const saved = await persist();
+      if (!saved && status.textContent?.startsWith('Save failed')) return false;
+    }
+    if (dirty && !autosave.checked && !window.confirm('Discard unsaved changes? Copy or export them first to keep them.')) return false;
+    // No asynchronous work between the final dirty check and replacing the buffer.
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
-    await refreshDrafts();
     showDraft();
+    void refreshDrafts().catch(() => { status.textContent = 'Could not refresh drafts'; });
     return true;
   } catch { status.textContent = 'Could not open draft — current text was kept'; return false; }
-  finally { field.readOnly = false; draftTitle.readOnly = false; transitioning = false; renderDrafts(); }
+  finally { transitioning = false; renderDrafts(); }
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
 draftSelect.addEventListener('change', () => { void switchDraft(draftSelect.value); });

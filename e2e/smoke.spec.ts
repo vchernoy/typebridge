@@ -61,6 +61,7 @@ test('small screen retains an accessible editor and toggle', async ({ page }) =>
 test('composition keyboard undo is not intercepted by editor', async ({ page }) => {
   await page.goto('/typebridge/');
   const field = page.getByRole('textbox', { name: 'Your text' });
+  await expect(field).toBeEnabled();
   await field.pressSequentially('a');
   const result = await field.evaluate(el => {
     const node = el as HTMLTextAreaElement;

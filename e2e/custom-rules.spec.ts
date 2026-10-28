@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 test('custom rules affect new typing, persist, and leave existing text intact', async ({ page }) => {
   await page.goto('/typebridge/');
   const field = page.getByRole('textbox', { name: 'Your text' });
+  await expect(field).toBeEnabled();
   await field.pressSequentially('w');
   await expect(field).toHaveValue('щ');
   await page.locator('.rules-panel summary').click();
@@ -13,8 +14,10 @@ test('custom rules affect new typing, persist, and leave existing text intact', 
   await expect(field).toHaveValue('щ');
   await field.pressSequentially(' w');
   await expect(field).toHaveValue('щ в');
+  await expect(page.locator('#status')).toContainText('Saved locally');
   await page.reload();
   const restored = page.getByRole('textbox', { name: 'Your text' });
+  await expect(restored).toHaveValue('щ в');
   await restored.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange((el as HTMLTextAreaElement).value.length, (el as HTMLTextAreaElement).value.length));
   await restored.pressSequentially(' w');
   await expect(restored).toHaveValue('щ в в');
