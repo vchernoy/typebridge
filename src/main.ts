@@ -8,6 +8,9 @@ import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type Recov
 import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from './editor/search-settings';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
+const editorSizeWarning = document.createElement('span');
+editorSizeWarning.setAttribute('aria-live', 'polite');
+field.after(editorSizeWarning);
 try {
   const size: unknown = JSON.parse(localStorage.getItem(EDITOR_SIZE_KEY) ?? 'null');
   if (size && typeof size === 'object') {
@@ -19,7 +22,7 @@ try {
 field.addEventListener('pointerup', () => {
   if (document.body.classList.contains('focus-mode') || (!field.style.width && !field.style.height)) return;
   try { localStorage.setItem(EDITOR_SIZE_KEY, JSON.stringify({ width: field.style.width, height: field.style.height })); }
-  catch { /* Resizing remains usable even if preferences cannot be stored. */ }
+  catch { editorSizeWarning.textContent = 'Editor size could not be saved in this browser.'; }
 });
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
 const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
@@ -201,7 +204,7 @@ const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
 const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
 const findStatus = document.querySelector<HTMLElement>('#find-status')!;
 const searchStorageWarning = document.createElement('span');
-searchStorageWarning.setAttribute('role', 'status');
+searchStorageWarning.setAttribute('aria-live', 'polite');
 findStatus.before(searchStorageWarning);
 function searchStorageError(): void {
   searchStorageWarning.textContent = 'Find settings could not be saved or restored in this browser.';
