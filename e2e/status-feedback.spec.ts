@@ -144,6 +144,12 @@ test('discarding text after a failed save stops reporting unsaved text', async (
   await expect(field).toHaveValue('');
   await page.locator('#export-txt').click();
   await expect(status(page)).toHaveText('Text exported');
+  // With autosave back on, a stale failure would be appended to action feedback.
+  await page.locator('#autosave').check();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Autosave on');
+  await page.locator('#export-txt').click();
+  await expect(status(page)).toHaveText('Text exported');
 });
 
 test('a save that resolves an earlier failure reports success without a new edit', async ({ page }) => {
@@ -243,10 +249,16 @@ test('a failed autosave preference write stays visible when toggling', async ({ 
   page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await page.locator('#autosave').uncheck();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Could not save preference');
+  await expect(status(page)).toHaveText('Could not save preference. Autosave off');
   await page.locator('#autosave').check();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Could not save preference');
+  await expect(status(page)).toHaveText('Could not save preference. Autosave on');
+  // Deleting the saved copy leaves the text only in memory: say so.
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Could not save preference. Autosave off — changes are unsaved');
+  await expect.poll(() => storedTexts(page)).toEqual([]);
 });
 
 test('with autosave off after a failure, action feedback does not advise retrying by editing', async ({ page }) => {
@@ -264,4 +276,38 @@ test('with autosave off after a failure, action feedback does not advise retryin
   await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
   await page.locator('#export-txt').click();
   await expect(status(page)).toHaveText('Text exported');
+});
+
+test('without browser storage, failures do not advise retrying by editing', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+  });
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await expect(status(page)).toContainText('Storage unavailable');
+  await field.fill('Нельзя потерять');
+  await expect(status(page)).toHaveText('Save failed — browser storage is unavailable. Copy or export your text before closing.');
+  await page.locator('#export-txt').click();
+  await expect(status(page)).toHaveText('Text exported. Save failed — browser storage is unavailable. Copy or export your text before closing.');
+  await expect(field).toHaveValue('Нельзя потерять');
+});
+
+test('a failed delete with autosave off does not promise another save', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Сохранено');
+  await expect(status(page)).toHaveText('Saved locally');
+  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await field.press('End');
+  await field.pressSequentially(' правка');
+  await page.evaluate(() => {
+    IDBObjectStore.prototype.delete = function () { throw new DOMException('Unknown', 'UnknownError'); };
+  });
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(status(page)).toHaveText('Could not delete draft — your changes are unsaved; autosave is off');
+  await expect(field).toHaveValue('Сохранено правка');
 });

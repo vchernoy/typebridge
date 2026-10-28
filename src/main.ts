@@ -35,6 +35,7 @@ const status = document.querySelector<HTMLElement>('#status')!;
 // must not be hidden by a later background success.
 type StatusKind = 'progress' | 'action' | 'conflict' | 'failure';
 const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
+const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 let statusKind: StatusKind = 'progress';
 let saveFailed = false;
 function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'progress'): void {
@@ -44,7 +45,7 @@ function notify(text: string): void {
   // Text is still unsaved after a failed save: keep saying so. With autosave
   // off, "Autosave off — changes are unsaved" already says it, and editing
   // would not retry.
-  if (saveFailed && autosave.checked) { setSaveStatus(text.replace(/[.…]$/, '') + '. ' + SAVE_FAILED, 'failure'); return; }
+  if (saveFailed && autosave.checked) { setSaveStatus(text.replace(/[.…]$/, '') + '. ' + (db ? SAVE_FAILED : SAVE_FAILED_NO_STORAGE), 'failure'); return; }
   status.textContent = text; statusKind = 'action';
 }
 const count = document.querySelector<HTMLElement>('#count')!;
@@ -441,7 +442,7 @@ async function persist(): Promise<boolean> {
       catch { if (!dirty && (statusKind === 'progress' || statusKind === 'conflict')) status.textContent += ' — draft list could not be refreshed'; }
       return !dirty;
     } catch {
-      saveFailed = true; setSaveStatus(SAVE_FAILED, 'failure');
+      saveFailed = true; setSaveStatus(db ? SAVE_FAILED : SAVE_FAILED_NO_STORAGE, 'failure');
       return false;
     }
   })();
@@ -469,13 +470,14 @@ draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {
-  let preferenceSaved = true;
-  try { setAutosaveEnabled(autosave.checked); } catch { notify('Could not save preference'); preferenceSaved = false; }
-  // Keep a preference error or a storage-unavailable message visible.
-  const announce = preferenceSaved && !!db;
+  let prefix = '';
+  try { setAutosaveEnabled(autosave.checked); } catch { prefix = 'Could not save preference. '; notify('Could not save preference'); }
+  // Report a preference error together with the save state; keep a
+  // storage-unavailable message, which no save can resolve.
+  const announce = (text: string): void => { if (db) setSaveStatus(prefix + text); };
   if (autosave.checked) {
-    if (dirty) { if (announce) setSaveStatus('Saving…'); journalEdit(); void persist(); }
-    else if (announce) setSaveStatus('Autosave on');
+    if (dirty) { announce('Saving…'); journalEdit(); void persist(); }
+    else announce('Autosave on');
   }
   else {
     clearTimeout(saveTimer);
@@ -488,7 +490,7 @@ autosave.addEventListener('change', async () => {
         await refreshDrafts();
       } catch { notify('Could not delete saved draft; current text is kept'); return; }
     }
-    if (announce) setSaveStatus(dirty ? 'Autosave off — changes are unsaved' : 'Autosave off');
+    announce(dirty ? 'Autosave off — changes are unsaved' : 'Autosave off');
   }
   } finally { autosave.disabled = false; }
 });
@@ -554,7 +556,8 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     try { await refreshDrafts(); notify('Draft deleted'); }
     catch { notify('Draft deleted, but the draft list could not be refreshed'); }
   } catch {
-    if (dirty && !saveFailed) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
+    if (dirty && !saveFailed && autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
+    else if (dirty && !autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; autosave is off');
     else notify(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;

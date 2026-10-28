@@ -22,7 +22,7 @@ Drafts and their undo/redo histories are stored in IndexedDB. Existing localStor
 
 ### Status line
 
-The status line shows both save state and feedback from user actions. A background save replaces only save-progress messages such as "Saving…"; it never replaces newer action feedback (for example "Select text to convert") or a conflict-copy notice. A failed save stays visible: while autosave is on, later action feedback is shown together with the failure until a save succeeds or the unsaved text is discarded. Status messages never overwrite a preference-write error or a storage-unavailable message when autosave is toggled.
+The status line shows both save state and feedback from user actions. A background save replaces only save-progress messages such as "Saving…"; it never replaces newer action feedback (for example "Select text to convert") or a conflict-copy notice. A failed save stays visible: while autosave is on, later action feedback is shown together with the failure until a save succeeds or the unsaved text is discarded. When autosave is toggled, a preference-write error is shown together with the resulting save state, and a storage-unavailable message is kept.
 
 ### Emergency text recovery
 
