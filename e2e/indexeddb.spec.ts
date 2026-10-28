@@ -46,11 +46,17 @@ test('migration collision aborts all changes without overwriting legacy data', a
     try { await api.migrateLegacyDrafts(db); } catch { rejected = true; }
     const items = await api.listStoredDrafts(db);
     const legacyStill = localStorage.getItem('typebridge.drafts.v1') === raw;
+    const repaired = JSON.stringify([{ id: 'new', title: 'New', text: 'New text', updatedAt: 1 }]);
+    localStorage.setItem('typebridge.drafts.v1', repaired);
+    const importedAfterAbort = await api.migrateLegacyDrafts(db);
+    const afterRetry = await api.listStoredDrafts(db);
     db.close();
-    return { rejected, items, legacyStill };
+    return { rejected, items, legacyStill, importedAfterAbort, afterRetry };
   });
   expect(result.rejected).toBe(true);
   expect(result.legacyStill).toBe(true);
   expect(result.items.map(item => item.id)).toEqual(['collision']);
   expect(result.items[0].text).toBe('Keep');
+  expect(result.importedAfterAbort).toBe(1);
+  expect(result.afterRetry.map(item => item.id).sort()).toEqual(['collision', 'new']);
 });
