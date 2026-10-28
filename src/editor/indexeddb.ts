@@ -86,7 +86,11 @@ export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
     let imported = 0;
     for (const legacy of parsed) {
       const existing = await request(documents.get(legacy.id)) as StoredDraft | undefined;
-      if (!existing) {
+      if (existing) {
+        const same = existing.title === legacy.title && existing.text === legacy.text &&
+          existing.updatedAt === legacy.updatedAt && JSON.stringify(existing.history) === JSON.stringify(legacy.history);
+        if (!same) throw new Error('Legacy draft conflicts with an existing document; original data was not changed');
+      } else {
         await request(documents.add({ ...legacy, revision: 1 }));
         imported++;
       }
