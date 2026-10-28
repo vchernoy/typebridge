@@ -156,3 +156,31 @@ export async function saveRecoveryCopy(
   await request(tx.objectStore(RECOVERY).put({ tabId, documentId, text, updatedAt: Date.now() }));
   await done;
 }
+
+/** Commit the expected revision or atomically preserve the entire edit as a new draft. */
+export async function commitOrCreateConflictCopy(
+  db: IDBDatabase,
+  draft: Omit<StoredDraft, 'revision'>,
+  expectedRevision: number,
+  copyId: string
+): Promise<{ draft: StoredDraft; conflict: boolean }> {
+  if (!copyId || copyId === draft.id) throw new Error('Conflict copy requires a distinct ID');
+  const tx = db.transaction(STORE, 'readwrite');
+  const done = finished(tx);
+  try {
+    const store = tx.objectStore(STORE);
+    const current = await request(store.get(draft.id)) as StoredDraft | undefined;
+    const conflict = (current?.revision ?? 0) !== expectedRevision;
+    const next: StoredDraft = conflict
+      ? { ...draft, id: copyId, title: draft.title + ' (conflict copy)', revision: 1 }
+      : { ...draft, revision: expectedRevision + 1 };
+    if (conflict) await request(store.add(next));
+    else await request(store.put(next));
+    await done;
+    return { draft: next, conflict };
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}

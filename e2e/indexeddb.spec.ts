@@ -60,3 +60,25 @@ test('migration collision aborts all changes without overwriting legacy data', a
   expect(result.importedAfterAbort).toBe(1);
   expect(result.afterRetry.map(item => item.id).sort()).toEqual(['collision', 'new']);
 });
+
+test('stale edits are committed as a separate complete conflict draft', async ({ page }) => {
+  const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  await page.goto('/typebridge/');
+  await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const base = { id: 'doc', title: 'Русский', text: 'Первый', updatedAt: 1 };
+    const first = await api.commitDraft(db, base, 0);
+    if (!first.ok) throw new Error('initial write failed');
+    const saved = await api.commitOrCreateConflictCopy(db, { ...base, text: 'Новее' }, 1, 'copy-unused');
+    const conflict = await api.commitOrCreateConflictCopy(db, { ...base, text: 'Старый 🙂' }, 1, 'copy-1');
+    const docs = await api.listStoredDrafts(db);
+    db.close();
+    return { saved, conflict, docs };
+  });
+  expect(result.saved.conflict).toBe(false);
+  expect(result.conflict.conflict).toBe(true);
+  expect(result.docs.find(draft => draft.id === 'doc')?.text).toBe('Новее');
+  expect(result.docs.find(draft => draft.id === 'copy-1')?.text).toBe('Старый 🙂');
+});
