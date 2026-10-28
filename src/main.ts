@@ -448,7 +448,7 @@ async function initializeDrafts(): Promise<void> {
     showDraft();
   } catch (error) {
     db?.close(); db = undefined;
-    status.textContent = error instanceof Error && error.message.includes('blocked') ? error.message : 'Storage unavailable or migration failed. Your legacy drafts are unchanged; copy or export unsaved text.';
+    status.textContent = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : 'Storage unavailable or migration failed. Your legacy drafts are unchanged; copy or export unsaved text.';
     renderDrafts();
   } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; }
 }
