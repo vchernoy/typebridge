@@ -146,8 +146,8 @@ document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('cli
   if (!found.length) { findStatus.textContent = 'No matches'; return; }
   const result = original.replace(pattern, (...args) => {
     const text = args[0] as string;
-    const offset = args[args.length - 1] instanceof Object ? args[args.length - 3] as number : args[args.length - 2] as number;
-    const groups = args[args.length - 1] instanceof Object ? args[args.length - 1] as Record<string, string> : undefined;
+    const offset = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null ? args[args.length - 3] as number : args[args.length - 2] as number;
+    const groups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null ? args[args.length - 1] as Record<string, string> : undefined;
     const captures = args.slice(1, groups ? -3 : -2) as string[];
     const match = Object.assign([text, ...captures], { index: offset, input: original, groups }) as RegExpExecArray;
     return replacementFor(match, original);
