@@ -107,14 +107,14 @@ const rulesText = document.querySelector<HTMLTextAreaElement>('#rules-text')!;
 const rulesStatus = document.querySelector<HTMLElement>('#rules-status')!;
 let overrides: Overrides = loadOverrides();
 function renderRules(): void {
-  rulesText.value = effectivePack(overrides).mappings.map(rule => rule.input + ' = ' + rule.output).join('\\n');
+  rulesText.value = effectivePack(overrides).mappings.map(rule => rule.input + ' = ' + rule.output).join('\n');
 }
 function parseRules(text: string): Overrides {
   const proposed: Overrides = Object.create(null) as Overrides;
   const seen = new Set<string>();
-  for (const line of text.split(/\\r?\\n/)) {
+  for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const match = /^\\s*([^=]+?)\\s*=\\s*([^=]+?)\\s*$/.exec(line);
+    const match = /^\s*([^=]+?)\s*=\s*([^=]+?)\s*$/.exec(line);
     if (!match) throw new Error('Use Latin = Cyrillic, one rule per line');
     const input = match[1].trim(), output = match[2].trim();
     if (seen.has(input)) throw new Error('Duplicate rule: ' + input);
