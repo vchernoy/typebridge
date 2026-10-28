@@ -459,10 +459,8 @@ async function initializeDrafts(): Promise<void> {
     try { selected = sessionStorage.getItem('typebridge.activeDraft.v1'); } catch { /* Optional hint. */ }
     const pending = readPending();
     const committed = pending && drafts.find(d => d.id === pending.id);
-    if (pending && committed && (sameContent(pending, committed) || committed.updatedAt > pending.updatedAt)) {
-      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* Optional recovery backup. */ }
-    }
-    const restorePending = !!pending && (!committed || (!sameContent(pending, committed) && committed.updatedAt <= pending.updatedAt));
+    if (pending && committed && sameContent(pending, committed)) clearPending(pending);
+    const restorePending = !!pending && (!committed || !sameContent(pending, committed));
     active = restorePending ? pending! : drafts.find(d => d.id === selected) ?? drafts[0] ?? active;
     rememberActive();
     showDraft();
