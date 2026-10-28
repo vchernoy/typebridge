@@ -63,3 +63,39 @@ test('journal quota failures are visible while editing remains available', async
   await expect(page.locator('#editor')).toHaveValue('Мой текст');
   await expect(page.locator('#status')).toContainText('Saved locally');
 });
+
+test('retry after committed recovery with failed journal cleanup does not duplicate copies', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; });
+  await page.locator('#editor').fill('Сохранить эту запись');
+  await expect(page.locator('#status')).toContainText('Save failed');
+  const other = await context.newPage(); await other.goto('/typebridge/');
+  await other.evaluate(() => {
+    const original = Storage.prototype.removeItem;
+    (window as unknown as { restoreRemove: () => void }).restoreRemove = () => { Storage.prototype.removeItem = original; };
+    Storage.prototype.removeItem = function (key) {
+      if (key.startsWith('typebridge.recovery.v1.')) throw new Error('interrupted cleanup');
+      return original.call(this, key);
+    };
+  });
+  const recover = other.getByRole('button', { name: /Recover Untitled draft/ });
+  await recover.click();
+  await expect(other.locator('#status')).toContainText('Recovery failed');
+  await other.evaluate(() => (window as unknown as { restoreRemove: () => void }).restoreRemove());
+  await recover.click();
+  await expect(other.locator('#status')).toContainText('Recovered a copy');
+  await expect(other.locator('#drafts option')).toHaveCount(2);
+});
+
+test('immediate reload recovers text after a failed IndexedDB save', async ({ page }) => {
+  await page.addInitScript(() => {
+    IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); };
+  });
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await editor.fill('Быстрая строка 🙂');
+  page.once('dialog', dialog => dialog.accept());
+  await page.reload();
+  await expect(editor).toHaveValue('Быстрая строка 🙂');
+  await expect(page.locator('#status')).toContainText('Save failed');
+});

@@ -213,6 +213,7 @@ test('closing a tab immediately after editing saves or offers recovery', async (
   await closed;
   const next = await context.newPage();
   await next.goto('/typebridge/');
+  await expect(next.locator('#editor')).toBeEnabled();
   if (await next.locator('#editor').inputValue() !== 'Начало — последняя фраза') {
     await next.getByRole('button', { name: /Recover Untitled draft/ }).click();
     await next.locator('#drafts').selectOption({ label: 'Untitled draft (recovered)' });
