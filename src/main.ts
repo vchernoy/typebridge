@@ -44,18 +44,51 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', (
 const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
 const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
 const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
+const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
 const findStatus = document.querySelector<HTMLElement>('#find-status')!;
-function matches(): Array<[number, number]> {
+function searchPattern(): RegExp | null {
   const query = findInput.value;
-  if (!query) return [];
+  if (!query) { findStatus.textContent = ''; return null; }
   const flags = matchCase.checked ? 'g' : 'gi';
   const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
-  const pattern = new RegExp(escaped, flags);
+  try {
+    const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
+    findStatus.textContent = '';
+    return pattern;
+  } catch (error) {
+    findStatus.textContent = 'Invalid regex: ' + (error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+function matches(): Array<[number, number]> {
+  const pattern = searchPattern();
+  if (!pattern) return [];
   return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+}
+function replacementFor(match: RegExpExecArray, original: string): string {
+  if (!regexMode.checked) return replaceInput.value;
+  const start = match.index;
+  const end = start + match[0].length;
+  // Use the browser's native replacement expansion ($&, $1, $<name>, $$, $\` and $').
+  const anchored = new RegExp('^(?:' + searchPattern()!.source + ')$', matchCase.checked ? '' : 'i');
+  const segment = original.slice(start, end);
+  // The callback is necessary for context-sensitive tokens ($\` and $').
+  const template = replaceInput.value;
+  return template.replace(/\$\$|\$&|\$\`|\$'|\$<([^>]+)>|\$(\d{1,2})/g, (token, name: string | undefined, digits: string | undefined) => {
+    if (token === '$$') return '$';
+    if (token === '$&') return match[0];
+    if (token === '$\`') return original.slice(0, start);
+    if (token === "$'") return original.slice(end);
+    if (name !== undefined) return match.groups ? (match.groups[name] ?? '') : token;
+    const index = Number(digits);
+    if (index > 0 && index < match.length) return match[index] ?? '';
+    if (digits.length === 2 && Number(digits[0]) > 0 && Number(digits[0]) < match.length) return (match[Number(digits[0])] ?? '') + digits[1];
+    return token;
+  });
 }
 function findNext(backwards = false): void {
   const found = matches();
-  if (!found.length) { findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
+  if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
   const position = backwards ? field.selectionStart : field.selectionEnd;
   const match = backwards
     ? [...found].reverse().find(([start]) => start < position) ?? found[found.length - 1]
@@ -69,24 +102,31 @@ document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click
 document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
 document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
   const found = matches();
-  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = 'No matches'; return; }
   const match = found.find(([start, end]) => start === field.selectionStart && end === field.selectionEnd)
     ?? found.find(([start]) => start >= field.selectionEnd) ?? found[0];
-  editor.replaceRange(match[0], match[1], replaceInput.value);
+  const pattern = searchPattern()!;
+  pattern.lastIndex = match[0];
+  const capture = pattern.exec(field.value);
+  if (!capture || capture.index !== match[0]) return;
+  editor.replaceRange(match[0], match[1], replacementFor(capture, field.value));
   findStatus.textContent = 'Replaced 1 match';
   field.focus({ preventScroll: true });
 });
 document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('click', () => {
-  const found = matches();
-  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  const pattern = searchPattern();
+  if (!pattern) return;
   const original = field.value;
-  let result = '';
-  let offset = 0;
-  for (const [start, end] of found) {
-    result += original.slice(offset, start) + replaceInput.value;
-    offset = end;
-  }
-  result += original.slice(offset);
+  const found = Array.from(original.matchAll(pattern));
+  if (!found.length) { findStatus.textContent = 'No matches'; return; }
+  const result = original.replace(pattern, (...args) => {
+    const text = args[0] as string;
+    const offset = args[args.length - 1] instanceof Object ? args[args.length - 3] as number : args[args.length - 2] as number;
+    const groups = args[args.length - 1] instanceof Object ? args[args.length - 1] as Record<string, string> : undefined;
+    const captures = args.slice(1, groups ? -3 : -2) as string[];
+    const match = Object.assign([text, ...captures], { index: offset, input: original, groups }) as RegExpExecArray;
+    return replacementFor(match, original);
+  });
   editor.replaceRange(0, original.length, result);
   findStatus.textContent = `Replaced ${found.length} matches`;
   field.focus({ preventScroll: true });
