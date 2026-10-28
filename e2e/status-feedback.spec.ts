@@ -669,15 +669,24 @@ test('a failed delete without storage and with autosave off keeps the storage wa
 });
 
 test('a database upgrade while a conflict copy is written keeps the storage warning', async ({ page, context }) => {
+  // Paused fake clock: the whole edit below is one save, however slowly it is typed.
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  const renders = await watchDraftListRenders(page);
   await field.fill('Исходный');
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('Исходный');
+  await expect.poll(renders).toBeGreaterThan(0); // No save still in flight.
   await expect(status(page)).toHaveText('Saved locally');
   // Another tab saves a newer revision, so this tab's next save becomes a conflict copy.
   const other = await context.newPage();
   await other.goto('/typebridge/');
   await expect(other.locator('#editor')).toHaveValue('Исходный');
   await other.locator('#editor').fill('Версия другой вкладки');
+  await page.clock.runFor(400); // The fake clock is shared by both tabs.
   await expect(other.locator('#status')).toHaveText('Saved locally');
   await other.close();
   await page.evaluate(() => {
@@ -693,6 +702,7 @@ test('a database upgrade while a conflict copy is written keeps the storage warn
   });
   await field.press('End');
   await field.pressSequentially(' — правка');
+  await page.clock.runFor(400);
   const upgraded = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
   await expect(status(page)).toHaveText('Another tab changed this draft. Your edits were saved as a conflict copy. ' + upgraded);
