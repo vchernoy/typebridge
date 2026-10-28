@@ -19,6 +19,7 @@ const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, th
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
 const AUTOSAVE_OFF_UNSAVED = 'Autosave off — changes are unsaved';
+const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 // Copy may be refused by the headless clipboard; either message must keep the warning.
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 async function expectActionsKeep(page: Page, warning: string): Promise<void> {
@@ -226,7 +227,7 @@ test('action feedback during a successful retry does not leave a stale failure',
   await expect(status(page)).toContainText('Save failed');
   await restoreSaves(page);
   await field.pressSequentially('3');
-  await expect(status(page)).toHaveText('Saving…');
+  await expect(status(page)).toHaveText(RETRYING);
   await page.locator('#export-txt').click();
   await expect(status(page)).toContainText('Text exported');
   await page.clock.runFor(400);
@@ -539,4 +540,67 @@ test('importing without browser storage reports the storage warning once', async
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#import-file').setInputFiles({ name: 'post.txt', mimeType: 'text/plain', buffer: Buffer.from('Текст') });
   await expect(status(page)).toHaveText('Import failed: browser storage cannot be used. ' + STORAGE_UNAVAILABLE);
+});
+
+// Keystrokes 100 ms apart never let the 300 ms autosave debounce fire.
+async function typeFasterThanAutosave(page: Page, text: string, expected: string): Promise<void> {
+  const field = page.locator('#editor');
+  for (const char of text) {
+    await field.press(char === ' ' ? 'Space' : char);
+    await page.clock.runFor(100);
+    await expect(status(page)).toHaveText(expected);
+  }
+}
+
+test('continuous typing keeps an IndexedDB initialization failure visible', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+  });
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await expect(status(page)).toHaveText(STORAGE_UNAVAILABLE);
+  await field.focus();
+  await page.locator('#enabled').uncheck(); // Type Latin letters as they are.
+  await field.focus();
+  await typeFasterThanAutosave(page, 'abc def', SAVE_FAILED_NO_STORAGE);
+  // Typing stops and the debounced save runs: storage is still unavailable.
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
+  await expect(field).toHaveValue('abc def');
+});
+
+test('continuous typing keeps a failed save visible until a commit succeeds', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.locator('#enabled').uncheck();
+  await field.focus();
+  await field.pressSequentially('saved');
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('saved');
+  await expect(status(page)).toHaveText('Saved locally');
+  await breakSaves(page);
+  await field.pressSequentially(' x');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(SAVE_FAILED);
+  // Each keystroke would reset the debounce; the failure must stay visible.
+  await typeFasterThanAutosave(page, ' more', RETRYING);
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(SAVE_FAILED);
+  // Storage recovers, but no commit has happened yet: still unsaved.
+  await restoreSaves(page);
+  await typeFasterThanAutosave(page, ' text', RETRYING);
+  await expect.poll(() => storedTexts(page)).toContain('saved');
+  expect(await storedTexts(page)).not.toContain('saved x more text');
+  // Only a verified commit clears it.
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('saved x more text');
+  await expect(status(page)).toHaveText('Saved locally');
+  await field.pressSequentially('!');
+  await expect(status(page)).toHaveText('Saving…');
 });

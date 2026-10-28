@@ -57,6 +57,13 @@ function riskText(): string {
   if (dirty && !autosave.checked) return AUTOSAVE_OFF_UNSAVED;
   return '';
 }
+const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
+/** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
+function showSaving(prefix = ''): void {
+  if (storageProblem) setSaveStatus(prefix + riskText(), 'failure'); // No save can succeed.
+  else if (saveFailed) setSaveStatus(prefix + RETRYING, 'failure');  // Cleared only by a commit.
+  else setSaveStatus(prefix + 'Saving…');
+}
 /** Show the save state alone, e.g. after loading a draft. */
 function showSaveState(): void {
   const risk = riskText();
@@ -488,7 +495,7 @@ function scheduleSave(): void {
   generation++;
   journalEdit();
   clearTimeout(saveTimer);
-  if (autosave.checked) { setSaveStatus('Saving…'); saveTimer = setTimeout(() => { void persist(); }, 300); }
+  if (autosave.checked) { showSaving(); saveTimer = setTimeout(() => { void persist(); }, 300); }
   else showSaveState();
 }
 field.addEventListener('input', scheduleSave);
@@ -507,7 +514,7 @@ autosave.addEventListener('change', async () => {
     else setSaveStatus(prefix + text);
   };
   if (autosave.checked) {
-    announce(dirty ? 'Saving…' : 'Autosave on');
+    if (dirty) showSaving(prefix); else announce('Autosave on');
     if (dirty) { journalEdit(); void persist(); }
   }
   else {
