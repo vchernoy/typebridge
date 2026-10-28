@@ -482,3 +482,61 @@ test('recovered text with autosave off keeps the unsaved warning after actions',
   await expect.poll(() => storedTexts(page)).toContain('Восстановленный текст');
   await expect(status(page)).toHaveText('Saved locally');
 });
+
+test('toggling autosave before initialization finishes does not report unavailable storage', async ({ page }) => {
+  await page.addInitScript(() => {
+    // Hold initialization at its ownership lock until the test releases it.
+    const request = LockManager.prototype.request;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    (window as unknown as { releaseInit: () => void }).releaseInit = release;
+    LockManager.prototype.request = function (this: LockManager, ...args: unknown[]) {
+      return gate.then(() => (request as (...a: unknown[]) => Promise<unknown>).apply(this, args));
+    } as LockManager['request'];
+  });
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeDisabled();
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Autosave off');
+  await page.evaluate(() => (window as unknown as { releaseInit: () => void }).releaseInit());
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(status(page)).toHaveText('Autosave off');
+});
+
+test('a database upgrade during an in-flight save keeps the storage warning', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Сохранено');
+  await expect(status(page)).toHaveText('Saved locally');
+  await page.evaluate(() => {
+    // Simulate another tab upgrading the database while this save's write is in flight.
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      IDBObjectStore.prototype.put = put;
+      const db = this.transaction.db;
+      const result = put.apply(this, args);
+      db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 1, newVersion: 2 }));
+      return result;
+    };
+  });
+  await field.press('End');
+  await field.pressSequentially(' правка');
+  const upgraded = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
+  await expect.poll(() => storedTexts(page)).toContain('Сохранено правка');
+  await expect(status(page)).toHaveText(upgraded);
+  await page.locator('#export-txt').click();
+  await expect(status(page)).toHaveText('Text exported. ' + upgraded);
+});
+
+test('importing without browser storage reports the storage warning once', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+  });
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#import-file').setInputFiles({ name: 'post.txt', mimeType: 'text/plain', buffer: Buffer.from('Текст') });
+  await expect(status(page)).toHaveText('Import failed: browser storage cannot be used. ' + STORAGE_UNAVAILABLE);
+});

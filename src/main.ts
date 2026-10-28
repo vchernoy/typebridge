@@ -458,7 +458,12 @@ async function persist(): Promise<boolean> {
         dirty = generation !== version;
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
-        if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure')) setSaveStatus('Saved locally');
+        if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure')) {
+          // Storage can become unusable while this save was in flight (an
+          // upgrade in another tab); never replace that warning.
+          const risk = riskText();
+          if (risk) setSaveStatus(risk, 'failure'); else setSaveStatus('Saved locally');
+        }
       }
       try { await refreshDrafts(); }
       catch { if (!dirty && (statusKind === 'progress' || statusKind === 'conflict')) status.textContent += ' — draft list could not be refreshed'; }
@@ -497,7 +502,8 @@ autosave.addEventListener('change', async () => {
   // Always show the accurate save state, with any preference error in front.
   // Without storage, no save can succeed: keep saying so.
   const announce = (text: string): void => {
-    if (storageProblem || !db) setSaveStatus(prefix + (riskText() || STORAGE_UNAVAILABLE), 'failure');
+    // storageProblem, not !db: db is also unset while initialization runs.
+    if (storageProblem) setSaveStatus(prefix + riskText(), 'failure');
     else setSaveStatus(prefix + text);
   };
   if (autosave.checked) {
@@ -761,7 +767,7 @@ importFile.addEventListener('change', async () => {
     if (!window.confirm('Import as a new draft? Your current draft will be kept.')) return;
     const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported draft' };
     // Save even when autosave is off: importing is an explicit save action.
-    if (!db) throw new Error('Storage unavailable');
+    if (!db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
     if (await switchDraft(result.draft.id)) notify('Imported as a new draft');
     else notify('Import saved in Drafts; current text was kept');
