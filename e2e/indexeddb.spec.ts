@@ -1,10 +1,11 @@
-import { build } from 'esbuild';
+import ts from 'typescript';
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 test('IndexedDB migration is atomic, restartable and preserves legacy data and conflicts', async ({ page }) => {
-  const compiled = await build({ entryPoints: ['src/editor/indexeddb.ts'], bundle: true, write: false, format: 'iife', globalName: 'TypeBridgeDb', platform: 'browser' });
+  const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   await page.goto('/typebridge/');
-  await page.addScriptTag({ content: compiled.outputFiles[0].text });
+  await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
   const result = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
     const legacy = [{ id: 'legacy', title: 'Русский', text: 'Привет 🙂', updatedAt: 1 }];
@@ -32,9 +33,9 @@ test('IndexedDB migration is atomic, restartable and preserves legacy data and c
 });
 
 test('migration collision aborts all changes without overwriting legacy data', async ({ page }) => {
-  const compiled = await build({ entryPoints: ['src/editor/indexeddb.ts'], bundle: true, write: false, format: 'iife', globalName: 'TypeBridgeDb', platform: 'browser' });
+  const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   await page.goto('/typebridge/');
-  await page.addScriptTag({ content: compiled.outputFiles[0].text });
+  await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
   const result = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
     const db = await api.openDraftDatabase();
