@@ -33,7 +33,7 @@ test('IndexedDB migration is atomic, restartable and preserves legacy data and c
   expect(['First', 'Second']).toContain(result.current?.text);
 });
 
-test('migration collision aborts all changes without overwriting legacy data', async ({ page }) => {
+test('migration retains colliding documents and is idempotent', async ({ page }) => {
   const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   await page.goto('/typebridge/');
   await expect(page.locator('#editor')).toBeEnabled();
@@ -44,23 +44,17 @@ test('migration collision aborts all changes without overwriting legacy data', a
     await api.commitDraft(db, { id: 'collision', title: 'Existing', text: 'Keep', updatedAt: 1 }, 0);
     const raw = JSON.stringify([{ id: 'new', title: 'New', text: 'New text', updatedAt: 1 }, { id: 'collision', title: 'Legacy', text: 'Keep legacy', updatedAt: 2 }]);
     localStorage.setItem('typebridge.drafts.v1', raw);
-    let rejected = false;
-    try { await api.migrateLegacyDrafts(db); } catch { rejected = true; }
+    const count = await api.migrateLegacyDrafts(db);
+    const again = await api.migrateLegacyDrafts(db);
     const items = await api.listStoredDrafts(db);
-    const legacyStill = localStorage.getItem('typebridge.drafts.v1') === raw;
-    const repaired = JSON.stringify([{ id: 'new', title: 'New', text: 'New text', updatedAt: 1 }]);
-    localStorage.setItem('typebridge.drafts.v1', repaired);
-    const importedAfterAbort = await api.migrateLegacyDrafts(db);
-    const afterRetry = await api.listStoredDrafts(db);
     db.close();
-    return { rejected, items, legacyStill, importedAfterAbort, afterRetry };
+    return { count, again, items, legacyStill: localStorage.getItem('typebridge.drafts.v1') === raw };
   });
-  expect(result.rejected).toBe(true);
+  expect(result.count).toBe(2);
+  expect(result.again).toBe(0);
   expect(result.legacyStill).toBe(true);
-  expect(result.items.map(item => item.id)).toEqual(['collision']);
-  expect(result.items[0].text).toBe('Keep');
-  expect(result.importedAfterAbort).toBe(1);
-  expect(result.afterRetry.map(item => item.id).sort()).toEqual(['collision', 'new']);
+  expect(result.items.find(item => item.id === 'collision')?.text).toBe('Keep');
+  expect(result.items.some(item => item.text === 'Keep legacy' && item.title.includes('legacy recovery'))).toBe(true);
 });
 
 test('stale edits are committed as a separate complete conflict draft', async ({ page }) => {

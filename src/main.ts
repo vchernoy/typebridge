@@ -3,7 +3,7 @@ import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, 
 import './style.css';
 import { Editor } from './editor/editor';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
-import { openDraftDatabase, migrateLegacyDrafts, listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
+import { openDraftDatabase, migrateLegacyDrafts, legacyRecoveryInfo, listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
 const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
@@ -249,6 +249,7 @@ let generation = 0;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let saving: Promise<boolean> | undefined;
 let transitioning = false;
+let deleting = false;
 let loadingDraft = false;
 field.disabled = true;
 draftSelect.disabled = true;
@@ -284,7 +285,7 @@ function showDraft(): void {
 }
 async function persist(): Promise<boolean> {
   clearTimeout(saveTimer);
-  if (!autosave.checked || !dirty) return !dirty;
+  if (deleting || !autosave.checked || !dirty) return !dirty;
   if (saving) return saving;
   saving = (async () => {
     try {
@@ -313,7 +314,7 @@ async function persist(): Promise<boolean> {
   try { return await saving; } finally {
     saving = undefined;
     // An edit can arrive while the post-commit draft list is loading.
-    if (dirty && autosave.checked && !status.textContent?.startsWith('Save failed')) {
+    if (!deleting && dirty && autosave.checked && !status.textContent?.startsWith('Save failed')) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => { void persist(); }, 300);
     }
@@ -374,34 +375,80 @@ async function switchDraft(id?: string): Promise<boolean> {
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
 draftSelect.addEventListener('change', () => { void switchDraft(draftSelect.value); });
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
-  if (transitioning || !window.confirm('Permanently delete this saved draft?')) return;
+  if (transitioning) return;
+  clearTimeout(saveTimer);
+  if (!window.confirm('Permanently delete this saved draft?')) {
+    if (dirty && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
+    return;
+  }
   transitioning = true;
+  deleting = true;
   field.readOnly = true;
   draftTitle.readOnly = true;
   try {
     if (saving && !await saving) throw new Error('Save failed');
     if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed in another tab');
+    clearTimeout(saveTimer);
     active = { ...newDraft(), revision: 0 };
     rememberActive();
     await refreshDrafts();
     showDraft();
     status.textContent = 'Draft deleted';
   } catch { status.textContent = 'Could not delete draft — it may have changed in another tab. Your text is kept.'; }
-  finally { field.readOnly = false; draftTitle.readOnly = false; transitioning = false; }
+  finally {
+    field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
+    if (dirty && autosave.checked && !status.textContent?.startsWith('Could not delete')) saveTimer = setTimeout(() => { void persist(); }, 300);
+  }
+});
+const recoveryNotice = document.createElement('div');
+recoveryNotice.setAttribute('role', 'alert');
+recoveryNotice.hidden = true;
+status.parentElement?.before(recoveryNotice);
+async function showLegacyWarning(): Promise<void> {
+  if (!db) return;
+  const info = await legacyRecoveryInfo(db);
+  recoveryNotice.replaceChildren();
+  if (!info.rejected && !info.olderChanges) { recoveryNotice.hidden = true; return; }
+  recoveryNotice.hidden = false;
+  recoveryNotice.append(document.createTextNode(
+    (info.rejected ? `${info.rejected} legacy record(s) could not be imported; a backup was kept. ` : '') +
+    (info.olderChanges ? 'Changes from an older TypeBridge tab were preserved in Drafts. ' : '')
+  ));
+  if (info.backups.length) {
+    const button = document.createElement('button');
+    button.textContent = 'Export legacy backup';
+    button.addEventListener('click', () => downloadText('typebridge-legacy-recovery.json', JSON.stringify(info.backups, null, 2), 'application/json'));
+    recoveryNotice.append(button);
+  }
+}
+let legacySync: Promise<void> = Promise.resolve();
+window.addEventListener('storage', event => {
+  if (event.key !== 'typebridge.drafts.v1' || !db) return;
+  legacySync = legacySync.then(async () => {
+    if (!db) return;
+    await migrateLegacyDrafts(db);
+    await refreshDrafts();
+    await showLegacyWarning();
+  }).catch(() => { recoveryNotice.hidden = false; recoveryNotice.textContent = 'Could not import changes from an older tab. Legacy data is unchanged; reload to retry.'; });
 });
 async function initializeDrafts(): Promise<void> {
   try {
-    db = await openDraftDatabase();
+    db = await openDraftDatabase(() => {
+      db = undefined;
+      recoveryNotice.hidden = false;
+      recoveryNotice.textContent = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
+    });
     await migrateLegacyDrafts(db);
+    await showLegacyWarning();
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
     try { selected = sessionStorage.getItem('typebridge.activeDraft.v1'); } catch { /* Optional hint. */ }
     active = drafts.find(d => d.id === selected) ?? drafts[0] ?? active;
     rememberActive();
     showDraft();
-  } catch {
+  } catch (error) {
     db?.close(); db = undefined;
-    status.textContent = 'Storage unavailable or migration failed. Your legacy drafts are unchanged; copy or export unsaved text.';
+    status.textContent = error instanceof Error && error.message.includes('blocked') ? error.message : 'Storage unavailable or migration failed. Your legacy drafts are unchanged; copy or export unsaved text.';
     renderDrafts();
   } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; }
 }

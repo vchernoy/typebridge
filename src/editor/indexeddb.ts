@@ -34,8 +34,9 @@ function finished(tx: IDBTransaction): Promise<void> {
   });
 }
 
-export function openDraftDatabase(): Promise<IDBDatabase> {
+export function openDraftDatabase(onVersionChange?: () => void): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    let blocked = false;
     const open = indexedDB.open(DATABASE, 1);
     open.onupgradeneeded = () => {
       const db = open.result;
@@ -43,9 +44,14 @@ export function openDraftDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(RECOVERY)) db.createObjectStore(RECOVERY, { keyPath: ['tabId', 'documentId'] });
       if (!db.objectStoreNames.contains(MIGRATION)) db.createObjectStore(MIGRATION);
     };
-    open.onsuccess = () => resolve(open.result);
+    open.onsuccess = () => {
+      const db = open.result;
+      if (blocked) { db.close(); return; }
+      db.onversionchange = () => { db.close(); onVersionChange?.(); };
+      resolve(db);
+    };
     open.onerror = () => reject(open.error ?? new Error('Cannot open IndexedDB'));
-    open.onblocked = () => reject(new Error('IndexedDB upgrade blocked by another tab'));
+    open.onblocked = () => { blocked = true; reject(new Error('Database upgrade blocked. Close other TypeBridge tabs, then reload.')); };
   });
 }
 
@@ -68,34 +74,61 @@ export function parseLegacyDrafts(raw: string): Array<Omit<StoredDraft, 'revisio
   return parsed;
 }
 
-/**
- * Imports once, without ever removing the legacy key.
- * The migration marker and imported records commit in one transaction.
- * If a legacy record is invalid, fail closed rather than silently discard it.
- */
+type LegacyRecord = Omit<StoredDraft, 'revision'>;
+type LegacyMarker = { raw?: string | null; seen?: string[]; rejected?: number; olderChanges?: number };
+export type LegacyBackup = { kind: 'legacy-backup'; raw: string; rejected: number[]; createdAt: number };
+
+/** Import safe records and retain every unparseable payload for export, atomically. */
 export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
   const raw = localStorage.getItem(LEGACY_KEY);
-  if (raw === null) return 0;
-  const parsed = parseLegacyDrafts(raw);
+  if (raw === null) {
+    const tx = db.transaction(MIGRATION, 'readwrite');
+    const done = finished(tx);
+    const store = tx.objectStore(MIGRATION);
+    if (!await request(store.get(MIGRATION_KEY))) await request(store.put({ raw: null, seen: [], rejected: 0, olderChanges: 0 }, MIGRATION_KEY));
+    await done;
+    return 0;
+  }
+  let values: unknown;
+  try { values = JSON.parse(raw); } catch { values = null; }
+  const entries = Array.isArray(values) ? values : [];
+  const counts = new Map<string, number>();
+  for (const entry of entries) if (isLegacyDraft(entry)) counts.set(entry.id, (counts.get(entry.id) ?? 0) + 1);
+  const rejected = Array.isArray(values)
+    ? entries.flatMap((entry, i) => !isLegacyDraft(entry) || (counts.get(entry.id) ?? 0) > 1 ? [i] : [])
+    : [-1];
+  const valid = entries.filter((entry): entry is LegacyRecord => isLegacyDraft(entry) && counts.get(entry.id) === 1);
   const tx = db.transaction([STORE, MIGRATION], 'readwrite');
   const done = finished(tx);
   try {
-    const marker = await request(tx.objectStore(MIGRATION).get(MIGRATION_KEY));
-    if (marker) { await done; return 0; }
+    const metadata = tx.objectStore(MIGRATION);
+    const marker = await request(metadata.get(MIGRATION_KEY)) as LegacyMarker | undefined;
+    if (marker?.raw === raw) { await done; return 0; }
+    const seen = new Set(marker?.seen ?? []);
     const documents = tx.objectStore(STORE);
     let imported = 0;
-    for (const legacy of parsed) {
+    let olderChanges = marker?.olderChanges ?? 0;
+    for (const legacy of valid) {
+      const signature = JSON.stringify(legacy);
+      if (seen.has(signature)) continue;
       const existing = await request(documents.get(legacy.id)) as StoredDraft | undefined;
-      if (existing) {
-        const same = existing.title === legacy.title && existing.text === legacy.text &&
-          existing.updatedAt === legacy.updatedAt && JSON.stringify(existing.history) === JSON.stringify(legacy.history);
-        if (!same) throw new Error('Legacy draft conflicts with an existing document; original data was not changed');
-      } else {
+      const same = existing && existing.title === legacy.title && existing.text === legacy.text &&
+        existing.updatedAt === legacy.updatedAt && JSON.stringify(existing.history) === JSON.stringify(legacy.history);
+      if (!existing) {
         await request(documents.add({ ...legacy, revision: 1 }));
         imported++;
+      } else if (!same) {
+        await request(documents.add({ ...legacy, id: crypto.randomUUID(), title: legacy.title + ' (legacy recovery)', revision: 1 }));
+        imported++;
       }
+      if (marker && !same) olderChanges++;
+      seen.add(signature);
     }
-    await request(tx.objectStore(MIGRATION).put({ completedAt: Date.now() }, MIGRATION_KEY));
+    if (rejected.length) {
+      const backup: LegacyBackup = { kind: 'legacy-backup', raw, rejected, createdAt: Date.now() };
+      await request(metadata.add(backup, 'legacy-backup:' + crypto.randomUUID()));
+    }
+    await request(metadata.put({ raw, seen: [...seen], rejected: (marker?.rejected ?? 0) + rejected.length, olderChanges }, MIGRATION_KEY));
     await done;
     return imported;
   } catch (error) {
@@ -103,6 +136,17 @@ export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
     void done.catch(() => undefined);
     throw error;
   }
+}
+
+export async function legacyRecoveryInfo(db: IDBDatabase): Promise<{ rejected: number; olderChanges: number; backups: LegacyBackup[] }> {
+  const tx = db.transaction(MIGRATION, 'readonly');
+  const done = finished(tx);
+  const store = tx.objectStore(MIGRATION);
+  const marker = await request(store.get(MIGRATION_KEY)) as LegacyMarker | undefined;
+  const records = await request(store.getAll()) as Array<LegacyMarker | LegacyBackup>;
+  await done;
+  return { rejected: marker?.rejected ?? 0, olderChanges: marker?.olderChanges ?? 0,
+    backups: records.filter((record): record is LegacyBackup => 'kind' in record && record.kind === 'legacy-backup') };
 }
 
 export async function listStoredDrafts(db: IDBDatabase): Promise<StoredDraft[]> {
