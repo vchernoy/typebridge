@@ -282,7 +282,7 @@ function savePending(): void {
   catch { status.textContent = 'Unsaved text could not be backed up for reload. Copy or export it.'; }
 }
 function clearPending(saved: StoredDraft): void {
-  try { const pending = readPending(); if (pending && sameContent(pending, saved)) sessionStorage.removeItem(PENDING_KEY); }
+  try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
   catch { /* A stale backup is safer than removing one we cannot verify. */ }
 }
 function rememberActive(): void { try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
@@ -459,8 +459,10 @@ async function initializeDrafts(): Promise<void> {
     try { selected = sessionStorage.getItem('typebridge.activeDraft.v1'); } catch { /* Optional hint. */ }
     const pending = readPending();
     const committed = pending && drafts.find(d => d.id === pending.id);
-    if (pending && committed && sameContent(pending, committed)) clearPending(pending);
-    const restorePending = !!pending && (!committed || !sameContent(pending, committed));
+    if (pending && committed && (sameContent(pending, committed) || committed.updatedAt > pending.updatedAt)) {
+      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* Optional recovery backup. */ }
+    }
+    const restorePending = !!pending && (!committed || (!sameContent(pending, committed) && committed.updatedAt <= pending.updatedAt));
     active = restorePending ? pending! : drafts.find(d => d.id === selected) ?? drafts[0] ?? active;
     rememberActive();
     showDraft();
