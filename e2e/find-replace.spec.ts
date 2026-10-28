@@ -35,3 +35,27 @@ test('replace and replace all support undo, redo, case matching and literal punc
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(field).toHaveValue('fund etf fund (test)');
 });
+
+test('exports a Unicode draft and imports a JSON draft as a new document', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.fill('Привет, мир!\\nВторая строка.');
+  await page.getByRole('textbox', { name: 'Draft title' }).fill('Русский пост');
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Export JSON' }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('Русский пост.typebridge.json');
+  const fs = await import('node:fs/promises');
+  const payload = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
+  expect(payload.draft.text).toBe('Привет, мир!\\nВторая строка.');
+  page.on('dialog', dialog => dialog.accept());
+  await page.locator('#import-file').setInputFiles({
+    name: 'backup.typebridge.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(payload)),
+  });
+  await expect(field).toHaveValue('Привет, мир!\\nВторая строка.');
+  await expect(page.getByRole('textbox', { name: 'Draft title' })).toHaveValue('Русский пост');
+  await expect(page.locator('#find-status')).not.toContainText('Import failed');
+});
