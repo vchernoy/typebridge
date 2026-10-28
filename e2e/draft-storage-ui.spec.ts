@@ -200,3 +200,42 @@ test('long editing history survives draft switching and reload', async ({ page }
   await page.locator('#redo').click();
   await expect(field).toHaveValue(original + 'Вторая правка');
 });
+
+test('closing a tab immediately after editing starts a save', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Начало');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await field.fill('Начало — последняя фраза');
+  page.once('dialog', dialog => dialog.accept());
+  const closed = page.waitForEvent('close');
+  await page.close({ runBeforeUnload: true });
+  await closed;
+  const next = await context.newPage();
+  await next.goto('/typebridge/');
+  await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза');
+});
+
+test('reload recovery preserves another tab’s newer revision', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Исходный документ');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  const pending = await page.evaluate(() => new Promise<{ id: string; title: string; text: string; updatedAt: number; revision: number }>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', 1);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => { const db = open.result; const tx = db.transaction('documents'); const get = tx.objectStore('documents').getAll(); get.onsuccess = () => { db.close(); resolve({ ...get.result[0], text: 'Несохранённый вариант 🙂', history: undefined }); }; get.onerror = () => reject(get.error); };
+  }));
+  const other = await context.newPage();
+  await other.goto('/typebridge/');
+  await expect(other.locator('#editor')).toHaveValue('Исходный документ');
+  await other.locator('#editor').fill('Новая версия другой вкладки');
+  await expect(other.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(draft => sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify(draft)), pending);
+  await page.reload();
+  await expect(field).toHaveValue('Несохранённый вариант 🙂');
+  await expect(page.locator('#status')).toContainText('conflict copy');
+  await expect(page.locator('#drafts option')).toHaveCount(2);
+  await other.reload();
+  await expect(other.locator('#editor')).toHaveValue('Новая версия другой вкладки');
+});
