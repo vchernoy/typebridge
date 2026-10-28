@@ -194,3 +194,10 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
 });
 window.addEventListener('pagehide', () => { clearTimeout(saveTimer); persist(); });
 showDraft();
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/typebridge/sw.js', { scope: '/typebridge/' })
+      .catch(() => { /* Editor remains usable without service worker support. */ });
+  });
+}
