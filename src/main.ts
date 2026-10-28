@@ -33,7 +33,7 @@ field.addEventListener('keydown', event => {
 function updateStats(): void {
   const value = field.value;
   const characters = Array.from(value).length;
-  const words = (value.match(/[\\p{L}\\p{N}]+(?:['’\u2010-\u2015-][\\p{L}\\p{N}]+)*/gu) ?? []).length;
+  const words = (value.match(/[\p{L}\p{N}]+(?:['’\u2010-\u2015-][\p{L}\p{N}]+)*/gu) ?? []).length;
   const minutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 180));
   count.textContent = `${characters} characters · ${words} words · ${minutes} min read`;
 }
