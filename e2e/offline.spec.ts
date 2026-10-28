@@ -11,7 +11,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
   });
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет! Это мой длинный пост.\nВторая строка.');
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('typebridge.drafts.v1') ?? '[]').some((draft: { text: string }) => draft.text === 'Привет! Это мой длинный пост.\\nВторая строка.'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('typebridge.drafts.v1') ?? '[]').some((draft: { text: string }) => draft.text === 'Привет! Это мой длинный пост.\nВторая строка.'))).toBe(true);
   await context.setOffline(true);
   await page.reload();
   await expect(field).toHaveValue('Привет! Это мой длинный пост.\nВторая строка.');
