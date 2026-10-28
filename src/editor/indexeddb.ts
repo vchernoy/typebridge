@@ -57,6 +57,17 @@ function isLegacyDraft(value: unknown): value is Omit<StoredDraft, 'revision'> {
     typeof d.updatedAt === 'number' && Number.isFinite(d.updatedAt);
 }
 
+/** Validate the complete legacy payload before making any database changes. */
+export function parseLegacyDrafts(raw: string): Array<Omit<StoredDraft, 'revision'>> {
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || !parsed.every(isLegacyDraft)) {
+    throw new Error('Legacy drafts are malformed; original data was not changed');
+  }
+  const ids = new Set(parsed.map(draft => draft.id));
+  if (ids.size !== parsed.length) throw new Error('Legacy drafts have duplicate IDs; original data was not changed');
+  return parsed;
+}
+
 /**
  * Imports once, without ever removing the legacy key.
  * The migration marker and imported records commit in one transaction.
@@ -65,10 +76,7 @@ function isLegacyDraft(value: unknown): value is Omit<StoredDraft, 'revision'> {
 export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
   const raw = localStorage.getItem(LEGACY_KEY);
   if (raw === null) return 0;
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed) || !parsed.every(isLegacyDraft)) {
-    throw new Error('Legacy drafts are malformed; original data was not changed');
-  }
+  const parsed = parseLegacyDrafts(raw);
   const tx = db.transaction([STORE, MIGRATION], 'readwrite');
   const done = finished(tx);
   try {
@@ -87,7 +95,7 @@ export async function migrateLegacyDrafts(db: IDBDatabase): Promise<number> {
     await done;
     return imported;
   } catch (error) {
-    if (tx.readyState === 'active') tx.abort();
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
     void done.catch(() => undefined);
     throw error;
   }
@@ -129,7 +137,7 @@ export async function commitDraft(
     await done;
     return { ok: true, draft: next };
   } catch (error) {
-    if (tx.readyState === 'active') tx.abort();
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
     void done.catch(() => undefined);
     throw error;
   }
