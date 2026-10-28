@@ -69,6 +69,7 @@ catch { /* Storage may be unavailable; keep the default enabled mode. */ }
 editor.setEnabled(enabled.checked);
 enabled.addEventListener('change', () => {
   editor.setEnabled(enabled.checked);
+  syncSearchEditors();
   try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); }
   catch { /* Editing must continue even when browser storage is blocked. */ }
 });
@@ -85,6 +86,15 @@ const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
 const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
 const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
 const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
+const findEditor = new Editor(findInput);
+const replaceEditor = new Editor(replaceInput);
+function syncSearchEditors(): void {
+  const active = enabled.checked && !regexMode.checked;
+  findEditor.setEnabled(active);
+  replaceEditor.setEnabled(active);
+}
+regexMode.addEventListener('change', syncSearchEditors);
+syncSearchEditors();
 const findStatus = document.querySelector<HTMLElement>('#find-status')!;
 function searchPattern(): RegExp | null {
   const query = findInput.value;
@@ -208,13 +218,13 @@ document.querySelector<HTMLButtonElement>('#rules-save')!.addEventListener('clic
     const next = parseRules(rulesText.value);
     saveOverrides(next);
     overrides = next;
-    editor.setRules(overrides);
+    editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides);
     renderRules();
     rulesStatus.textContent = 'Rules saved locally';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', () => {
-  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
+  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
   catch { rulesStatus.textContent = 'Unable to save rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-export')!.addEventListener('click', () => {
@@ -231,7 +241,7 @@ document.querySelector<HTMLInputElement>('#rules-import')!.addEventListener('cha
   try {
     if (file.size > 65536) throw new Error('Rules file is too large');
     const next = importRules(await file.text());
-    saveOverrides(next); overrides = next; editor.setRules(overrides); renderRules();
+    saveOverrides(next); overrides = next; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules();
     rulesStatus.textContent = 'Rules imported';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Import failed'; }
   finally { input.value = ''; }

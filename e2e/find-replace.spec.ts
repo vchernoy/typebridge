@@ -102,3 +102,41 @@ test('focus mode preserves text, selection and editor undo history', async ({ pa
   await expect(field).toHaveValue('Привет, мир');
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
 });
+
+test('Find and Replace share the global transliteration mode and bypass regex', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const find = page.locator('#find-text');
+  const replacement = page.locator('#replace-text');
+  await find.pressSequentially('privet');
+  await replacement.pressSequentially('mir');
+  await expect(find).toHaveValue('привет');
+  await expect(replacement).toHaveValue('мир');
+  await page.locator('#enabled').uncheck();
+  await find.pressSequentially(' xyz');
+  await expect(find).toHaveValue('привет xyz');
+  await page.locator('#enabled').check();
+  await page.locator('#regex-mode').check();
+  await find.fill('');
+  await find.pressSequentially('sh');
+  await replacement.fill('$1');
+  await expect(find).toHaveValue('sh');
+  await expect(replacement).toHaveValue('$1');
+});
+
+test('Find supports selection replacement and leaves IME composition untouched', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const find = page.locator('#find-text');
+  await find.pressSequentially('mir');
+  await find.evaluate((el: HTMLInputElement) => el.setSelectionRange(0, 2));
+  await page.keyboard.insertText('sh');
+  await expect(find).toHaveValue('shр');
+  await find.evaluate((el: HTMLInputElement) => {
+    el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    el.value += '日本';
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
+    el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+  });
+  await expect(find).toHaveValue('shр日本');
+});
