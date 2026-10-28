@@ -18,6 +18,7 @@ test('custom rules affect new typing, persist, and leave existing text intact', 
   await page.reload();
   const restored = page.getByRole('textbox', { name: 'Your text' });
   await expect(restored).toHaveValue('щ в');
+  await expect(restored).toBeEnabled();
   await restored.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange((el as HTMLTextAreaElement).value.length, (el as HTMLTextAreaElement).value.length));
   await restored.pressSequentially(' w');
   await expect(restored).toHaveValue('щ в в');
