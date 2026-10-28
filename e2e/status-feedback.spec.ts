@@ -15,6 +15,25 @@ function storedTexts(page: Page): Promise<string[]> {
   }));
 }
 const status = (page: Page) => page.locator('#status');
+// The draft list is re-rendered only after a save has updated the status line,
+// so waiting for it orders a negative status assertion after the save.
+async function watchDraftListRenders(page: Page): Promise<() => Promise<number>> {
+  await page.evaluate(() => {
+    const w = window as unknown as { draftListRenders: number };
+    w.draftListRenders = 0;
+    new MutationObserver(() => { w.draftListRenders++; })
+      .observe(document.querySelector('#drafts')!, { childList: true });
+  });
+  return () => page.evaluate(() => (window as unknown as { draftListRenders: number }).draftListRenders);
+}
+function breakSaves(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    (window as unknown as { restorePut: () => void }).restorePut = () => { IDBObjectStore.prototype.put = put; };
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  });
+}
+const restoreSaves = (page: Page) => page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
 
 test('a background autosave does not replace newer conversion guidance', async ({ page }) => {
   await page.clock.install();
@@ -32,8 +51,10 @@ test('a background autosave does not replace newer conversion guidance', async (
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
   await page.getByRole('button', { name: '→ ABC' }).click();
   await expect(status(page)).toHaveText('Select text to convert');
+  const renders = await watchDraftListRenders(page);
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('жук');
+  await expect.poll(renders).toBeGreaterThan(0);
   await expect(status(page)).toHaveText('Select text to convert');
   // The next edit returns the line to save progress.
   await field.press('End');
@@ -47,11 +68,7 @@ test('a failed save stays visible after later action feedback until a save succe
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
-  await page.evaluate(() => {
-    const put = IDBObjectStore.prototype.put;
-    (window as unknown as { restorePut: () => void }).restorePut = () => { IDBObjectStore.prototype.put = put; };
-    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
-  });
+  await breakSaves(page);
   await field.press('End');
   await field.pressSequentially(' несохранено');
   await expect(status(page)).toContainText('Save failed');
@@ -62,7 +79,7 @@ test('a failed save stays visible after later action feedback until a save succe
   await page.getByRole('button', { name: '→ ABC' }).click();
   await expect(status(page)).toContainText('Select text to convert');
   await expect(status(page)).toContainText('Save failed');
-  await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
+  await restoreSaves(page);
   await field.press('End');
   await field.pressSequentially('!');
   await expect(status(page)).toHaveText('Saved locally');
@@ -113,9 +130,7 @@ test('discarding text after a failed save stops reporting unsaved text', async (
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
-  await page.evaluate(() => {
-    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
-  });
+  await breakSaves(page);
   await field.press('End');
   await field.pressSequentially(' несохранено');
   await expect(status(page)).toContainText('Save failed');
@@ -127,4 +142,64 @@ test('discarding text after a failed save stops reporting unsaved text', async (
   await expect(field).toHaveValue('');
   await page.locator('#export-txt').click();
   await expect(status(page)).toHaveText('Text exported');
+});
+
+test('a save that resolves an earlier failure reports success without a new edit', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Первый');
+  await expect(status(page)).toHaveText('Saved locally');
+  await breakSaves(page);
+  await field.press('End');
+  await field.pressSequentially(' два');
+  await expect(status(page)).toContainText('Save failed');
+  // Switching drafts saves the failed text first.
+  await restoreSaves(page);
+  await page.locator('#new-draft').click();
+  await expect(field).toHaveValue('');
+  await expect.poll(() => storedTexts(page)).toContain('Первый два');
+  await expect(status(page)).toHaveText('Saved locally');
+});
+
+test('a background save on hiding the page clears an earlier failure', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Первый');
+  await expect(status(page)).toHaveText('Saved locally');
+  await breakSaves(page);
+  await field.press('End');
+  await field.pressSequentially(' два');
+  await expect(status(page)).toContainText('Save failed');
+  await page.locator('#export-txt').click();
+  await expect(status(page)).toContainText('Text exported');
+  await restoreSaves(page);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => storedTexts(page)).toContain('Первый два');
+  await expect(status(page)).toHaveText('Saved locally');
+});
+
+test('action feedback during a successful retry does not leave a stale failure', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Первый');
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('Первый');
+  await breakSaves(page);
+  await field.press('End');
+  await field.pressSequentially('2');
+  await page.clock.runFor(400);
+  await expect(status(page)).toContainText('Save failed');
+  await restoreSaves(page);
+  await field.pressSequentially('3');
+  await expect(status(page)).toHaveText('Saving…');
+  await page.locator('#export-txt').click();
+  await expect(status(page)).toContainText('Text exported');
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('Первый23');
+  await expect(status(page)).toHaveText('Saved locally');
 });

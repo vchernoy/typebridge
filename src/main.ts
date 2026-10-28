@@ -431,8 +431,9 @@ async function persist(): Promise<boolean> {
         }
         saveFailed = false;
         dirty = generation !== version;
-        // A background save must not replace newer action feedback or a conflict notice.
-        if (!dirty && !result.conflict && statusKind === 'progress') setSaveStatus('Saved locally');
+        // A background save must not replace newer action feedback or a conflict
+        // notice, but it must replace progress and an earlier failure it resolved.
+        if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure')) setSaveStatus('Saved locally');
       }
       try { await refreshDrafts(); }
       catch { if (!dirty && (statusKind === 'progress' || statusKind === 'conflict')) status.textContent += ' — draft list could not be refreshed'; }
