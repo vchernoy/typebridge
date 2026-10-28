@@ -3,7 +3,8 @@ import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, 
 import './style.css';
 import { Editor } from './editor/editor';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
-import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
+import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
+import { clearRecovery, listRecovery, writeRecovery, type RecoverySnapshot } from './editor/recovery';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
 const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
@@ -303,6 +304,16 @@ let saving: Promise<boolean> | undefined;
 let transitioning = false;
 let deleting = false;
 let loadingDraft = false;
+const journalTab = crypto.randomUUID();
+let currentJournal: RecoverySnapshot | undefined;
+const journalWarning = document.createElement('p');
+journalWarning.setAttribute('role', 'alert');
+journalWarning.hidden = true;
+status.parentElement?.before(journalWarning);
+const recoveryPanel = document.createElement('section');
+recoveryPanel.setAttribute('aria-label', 'Recover unsaved drafts');
+status.parentElement?.before(recoveryPanel);
+
 field.disabled = true;
 draftSelect.disabled = true;
 draftTitle.disabled = true;
@@ -324,6 +335,12 @@ function readPending(): StoredDraft | undefined {
 }
 function snapshot(): StoredDraft {
   return { ...active, text: field.value, title: draftTitle.value.trim() || 'Untitled draft', history: editor.exportHistory(), updatedAt: Date.now() };
+}
+function journalEdit(): void {
+  if (!autosave.checked) return;
+  const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || 'Untitled draft', text: field.value };
+  try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
+  catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
 }
 function sameContent(a: StoredDraft, b: StoredDraft): boolean {
   return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
@@ -374,9 +391,12 @@ async function persist(): Promise<boolean> {
       while (dirty && autosave.checked) {
         const version = generation;
         const saved = snapshot();
+        const journal = currentJournal && currentJournal.documentId === saved.id && currentJournal.revision === active.revision && currentJournal.text === saved.text && currentJournal.title === saved.title ? currentJournal : undefined;
         const result = await commitOrCreateConflictCopy(db, saved, active.revision, crypto.randomUUID());
         clearPending(saved);
+        if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         active = result.draft;
+        if (generation !== version && autosave.checked) journalEdit();
         rememberActive();
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
@@ -407,6 +427,7 @@ function scheduleSave(): void {
   if (loadingDraft) return;
   dirty = true;
   generation++;
+  journalEdit();
   clearTimeout(saveTimer);
   if (autosave.checked) { status.textContent = 'Saving…'; saveTimer = setTimeout(() => { void persist(); }, 300); }
   else status.textContent = 'Autosave off — changes are unsaved';
@@ -418,7 +439,7 @@ autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {
   try { setAutosaveEnabled(autosave.checked); } catch { status.textContent = 'Could not save preference'; }
-  if (autosave.checked) { if (dirty) void persist(); }
+  if (autosave.checked) { if (dirty) { journalEdit(); void persist(); } }
   else {
     clearTimeout(saveTimer);
     if (saving) await saving;
@@ -470,12 +491,13 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     return;
   }
   transitioning = true;
-  deleting = true;
   field.readOnly = true;
   draftTitle.readOnly = true;
   let committed = false;
   try {
     if (saving && !await saving) throw new Error('Save failed');
+    if (dirty && autosave.checked && !await persist()) throw new Error('Save failed');
+    deleting = true;
     if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed in another tab');
     committed = true;
     clearTimeout(saveTimer);
@@ -499,6 +521,38 @@ const recoveryNotice = document.createElement('div');
 recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
+async function renderRecovery(): Promise<void> {
+  recoveryPanel.replaceChildren();
+  let entries: RecoverySnapshot[];
+  try { entries = listRecovery(localStorage).filter(item => item.tab !== journalTab); }
+  catch { journalWarning.textContent = 'Emergency backups cannot be read. Copy or export unsaved text.'; journalWarning.hidden = false; return; }
+  if (!entries.length) return;
+  const heading = document.createElement('p');
+  heading.textContent = 'Unsaved emergency backups found. Recover a copy without changing your current draft:';
+  recoveryPanel.append(heading);
+  for (const item of entries) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `Recover ${item.title} (${new Date(item.timestamp).toLocaleString()})`;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        if (!db) throw new Error('Storage unavailable');
+        // The snapshot token is a stable ID: retrying after interruption cannot
+        // create another copy. A recovery never replaces an existing draft.
+        const copy = { id: 'recovery-' + item.token, title: item.title + ' (recovered)', text: item.text, updatedAt: item.timestamp };
+        const result = await commitDraft(db, copy, 0);
+        if (!result.ok && (!result.current || result.current.title !== copy.title || result.current.text !== copy.text)) throw new Error('Recovery copy already changed');
+        clearRecovery(localStorage, item);
+        await refreshDrafts();
+        status.textContent = 'Recovered a copy in Drafts. Your current draft was kept.';
+        await renderRecovery();
+      } catch { status.textContent = 'Recovery failed. The emergency backup was kept; retry or copy your text.'; button.disabled = false; }
+    });
+    recoveryPanel.append(button);
+  }
+}
+window.addEventListener('storage', () => { void renderRecovery(); });
 async function initializeDrafts(): Promise<void> {
   try {
     db = await openDraftDatabase(() => {
@@ -527,7 +581,7 @@ async function initializeDrafts(): Promise<void> {
     if (pending) { active = pending; showDraft(); dirty = true; generation++; }
     status.textContent = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : 'Storage unavailable. Copy or export unsaved text before closing.';
     renderDrafts();
-  } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; }
+  } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; void renderRecovery(); }
 }
 void initializeDrafts();
 
