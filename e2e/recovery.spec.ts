@@ -124,11 +124,13 @@ test('confirmed discard removes only the selected unsaved snapshot', async ({ pa
   await page.reload();
   const check = page.getByRole('button', { name: 'Check emergency backups' });
   if (await check.isVisible()) await check.click();
-  page.once('dialog', dialog => dialog.dismiss());
+  const firstDialog = page.waitForEvent('dialog');
   await page.getByRole('button', { name: 'Discard backup for a' }).click();
+  await (await firstDialog).dismiss();
   await expect(page.getByRole('button', { name: 'Discard backup for a' })).toBeVisible();
-  page.once('dialog', dialog => dialog.accept());
+  const secondDialog = page.waitForEvent('dialog');
   await page.getByRole('button', { name: 'Discard backup for a' }).click();
+  await (await secondDialog).accept();
   await expect(page.getByRole('button', { name: 'Discard backup for a' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Discard backup for b' })).toBeVisible();
   await expect(page.locator('#drafts option')).toHaveCount(1);
