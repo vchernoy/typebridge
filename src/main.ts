@@ -183,3 +183,4 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
 });
 window.addEventListener('pagehide', () => { clearTimeout(saveTimer); persist(); });
 showDraft();
+updateStats();
