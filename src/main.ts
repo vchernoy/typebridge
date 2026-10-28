@@ -310,7 +310,14 @@ async function persist(): Promise<boolean> {
       return false;
     }
   })();
-  try { return await saving; } finally { saving = undefined; }
+  try { return await saving; } finally {
+    saving = undefined;
+    // An edit can arrive while the post-commit draft list is loading.
+    if (dirty && autosave.checked && !status.textContent?.startsWith('Save failed')) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { void persist(); }, 300);
+    }
+  }
 }
 function scheduleSave(): void {
   if (loadingDraft) return;
@@ -324,6 +331,8 @@ field.addEventListener('input', scheduleSave);
 field.addEventListener('historychange', scheduleSave);
 draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', async () => {
+  autosave.disabled = true;
+  try {
   try { setAutosaveEnabled(autosave.checked); } catch { status.textContent = 'Could not save preference'; }
   if (autosave.checked) { if (dirty) void persist(); }
   else {
@@ -339,6 +348,7 @@ autosave.addEventListener('change', async () => {
     }
     status.textContent = 'Autosave off — changes are unsaved';
   }
+  } finally { autosave.disabled = false; }
 });
 async function switchDraft(id?: string): Promise<boolean> {
   if (transitioning) return false;

@@ -85,3 +85,16 @@ test('failed writes keep current text and can be retried without switching away'
   await page.reload();
   await expect(page.locator('#editor')).toHaveValue('Сохраните мои изменения!');
 });
+
+test('repeated edits during autosave persist the latest text', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  for (const text of ['Раз', 'Раз два', 'Раз два три 🙂']) {
+    await field.fill(text);
+    await page.waitForTimeout(180);
+  }
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(field).toHaveValue('Раз два три 🙂');
+});
