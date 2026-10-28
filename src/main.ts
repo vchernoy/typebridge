@@ -413,7 +413,7 @@ async function persist(): Promise<boolean> {
           status.textContent = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
         }
         dirty = generation !== version;
-        if (!dirty && !result.conflict) status.textContent = 'Saved locally';
+        if (!dirty && !result.conflict && status.textContent === 'Saving…') status.textContent = 'Saved locally';
       }
       try { await refreshDrafts(); }
       catch { if (!dirty) status.textContent += ' — draft list could not be refreshed'; }
