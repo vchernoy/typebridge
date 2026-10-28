@@ -2,6 +2,26 @@ import './style.css';
 import { Editor } from './editor/editor';
 import { autosaveEnabled, deleteDraft, getActiveDraftId, getDraft, listDrafts, newDraft, saveDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
+const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
+function setFocusMode(enabled: boolean): void {
+  document.body.classList.toggle('focus-mode', enabled);
+  focusButton.setAttribute('aria-pressed', String(enabled));
+  exitFocusButton.hidden = !enabled;
+  field.focus({ preventScroll: true });
+}
+focusButton.addEventListener('click', () => setFocusMode(!document.body.classList.contains('focus-mode')));
+exitFocusButton.addEventListener('click', () => setFocusMode(false));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) {
+    event.preventDefault();
+    setFocusMode(false);
+  }
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'e') {
+    event.preventDefault();
+    setFocusMode(!document.body.classList.contains('focus-mode'));
+  }
+});
 const editor = new Editor(field);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const status = document.querySelector<HTMLElement>('#status')!;
