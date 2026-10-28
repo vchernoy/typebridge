@@ -476,7 +476,13 @@ async function persist(): Promise<boolean> {
       catch { if (!dirty && (statusKind === 'progress' || statusKind === 'conflict')) status.textContent += ' — draft list could not be refreshed'; }
       return !dirty;
     } catch {
-      saveFailed = true; setSaveStatus(riskText() || SAVE_FAILED, 'failure');
+      saveFailed = true;
+      // Keep newer action feedback that already carries this exact warning;
+      // otherwise show the warning derived from persistence state.
+      const risk = riskText() || SAVE_FAILED;
+      const shown = status.textContent ?? '';
+      if (!(shown.endsWith('. ' + risk) && statusKind !== 'conflict')) setSaveStatus(risk, 'failure');
+      else statusKind = 'failure';
       return false;
     }
   })();
