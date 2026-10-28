@@ -30,7 +30,15 @@ field.addEventListener('keydown', event => {
   event.preventDefault();
   editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
 });
-field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
+function updateStats(): void {
+  const value = field.value;
+  const characters = Array.from(value).length;
+  const words = (value.match(/[\\p{L}\\p{N}]+(?:['’\u2010-\u2015-][\\p{L}\\p{N}]+)*/gu) ?? []).length;
+  const minutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 180));
+  count.textContent = `${characters} characters · ${words} words · ${minutes} min read`;
+}
+field.addEventListener('input', updateStats);
+field.addEventListener('historychange', updateStats);
 enabled.addEventListener('change', () => { editor.setEnabled(enabled.checked); });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); status.textContent = 'Copied'; }
@@ -156,6 +164,7 @@ function switchDraft(draft: typeof active): void {
   active = draft;
   setActiveDraftId(active.id);
   showDraft();
+updateStats();
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => switchDraft(newDraft()));
 draftSelect.addEventListener('change', () => {
