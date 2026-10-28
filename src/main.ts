@@ -310,6 +310,57 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     status.textContent = 'Draft deleted';
   } catch { status.textContent = 'Could not delete draft'; }
 });
+
+function downloadText(filename: string, content: string, mime: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function safeFilename(title: string): string {
+  return (title.trim().split('').map(char => char.charCodeAt(0) < 32 || '/\\\\:*?"<>|'.includes(char) ? '-' : char).join('').slice(0, 80) || 'draft');
+}
+document.querySelector<HTMLButtonElement>('#export-txt')!.addEventListener('click', () => {
+  downloadText(safeFilename(draftTitle.value) + '.txt', field.value, 'text/plain;charset=utf-8');
+  status.textContent = 'Text exported';
+});
+document.querySelector<HTMLButtonElement>('#export-json')!.addEventListener('click', () => {
+  const draft = { title: draftTitle.value.trim() || 'Untitled draft', text: field.value };
+  downloadText(safeFilename(draft.title) + '.typebridge.json', JSON.stringify({ format: 'typebridge-draft', version: 1, draft }, null, 2), 'application/json;charset=utf-8');
+  status.textContent = 'Draft exported';
+});
+const importFile = document.querySelector<HTMLInputElement>('#import-file')!;
+document.querySelector<HTMLButtonElement>('#import-draft')!.addEventListener('click', () => importFile.click());
+importFile.addEventListener('change', async () => {
+  const file = importFile.files?.[0];
+  importFile.value = '';
+  if (!file) return;
+  try {
+    if (file.size > 5 * 1024 * 1024) throw new Error('File exceeds 5 MB');
+    const content = await file.text();
+    let title = file.name.replace(/(\\.typebridge)?\\.(json|txt)$/i, '');
+    let text = content;
+    if (/\\.json$/i.test(file.name)) {
+      const parsed: unknown = JSON.parse(content);
+      if (!parsed || typeof parsed !== 'object' || !('format' in parsed) || parsed.format !== 'typebridge-draft' || !('version' in parsed) || parsed.version !== 1 || !('draft' in parsed) || !parsed.draft || typeof parsed.draft !== 'object' || !('title' in parsed.draft) || typeof parsed.draft.title !== 'string' || !('text' in parsed.draft) || typeof parsed.draft.text !== 'string') throw new Error('Not a supported TypeBridge draft');
+      title = parsed.draft.title;
+      text = parsed.draft.text;
+    } else if (!/\\.txt$/i.test(file.name)) throw new Error('Choose a .txt or .typebridge.json file');
+    if (!window.confirm('Import as a new draft? Your current draft will be kept.')) return;
+    const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported draft' };
+    // Save even when autosave is off: importing is an explicit save action.
+    saveDraft(imported);
+    switchDraft(imported);
+    status.textContent = 'Imported as a new draft';
+  } catch (error) {
+    status.textContent = 'Import failed: ' + (error instanceof Error ? error.message : String(error));
+  }
+});
+
 window.addEventListener('pagehide', () => { clearTimeout(saveTimer); persist(); });
 showDraft();
 updateStats();
