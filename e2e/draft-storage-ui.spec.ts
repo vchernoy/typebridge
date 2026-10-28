@@ -63,3 +63,25 @@ test('switching immediately after typing saves the previous document', async ({ 
   await page.locator('#drafts').selectOption({ label: 'Untitled draft' });
   await expect(page.locator('#editor')).toHaveValue('Быстрый набор 🙂');
 });
+
+test('failed writes keep current text and can be retried without switching away', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    (window as unknown as { restorePut: () => void }).restorePut = () => { IDBObjectStore.prototype.put = original; };
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (this.name === 'documents') throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return original.apply(this, args);
+    };
+  });
+  await page.locator('#editor').fill('Сохраните мои изменения');
+  await expect(page.locator('#status')).toContainText('Save failed');
+  await page.locator('#new-draft').click();
+  await expect(page.locator('#editor')).toHaveValue('Сохраните мои изменения');
+  await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
+  await page.locator('#editor').fill('Сохраните мои изменения!');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(page.locator('#editor')).toHaveValue('Сохраните мои изменения!');
+});

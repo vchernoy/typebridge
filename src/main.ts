@@ -293,7 +293,7 @@ async function persist(): Promise<boolean> {
         rememberActive();
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
-          if (generation === version) draftTitle.value = active.title;
+          if ((draftTitle.value.trim() || 'Untitled draft') === snapshot.title) draftTitle.value = active.title;
           status.textContent = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
         }
         dirty = generation !== version;
@@ -433,13 +433,9 @@ importFile.addEventListener('change', async () => {
     const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported draft' };
     // Save even when autosave is off: importing is an explicit save action.
     if (!db) throw new Error('Storage unavailable');
-    if (!await switchDraft()) return;
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
-    active = result.draft;
-    rememberActive();
-    await refreshDrafts();
-    showDraft();
-    status.textContent = 'Imported as a new draft';
+    if (await switchDraft(result.draft.id)) status.textContent = 'Imported as a new draft';
+    else status.textContent = 'Import saved in Drafts; current text was kept';
   } catch (error) {
     status.textContent = 'Import failed: ' + (error instanceof Error ? error.message : String(error));
   }
