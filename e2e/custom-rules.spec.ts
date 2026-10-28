@@ -35,6 +35,7 @@ test('invalid rules are rejected without affecting conversion', async ({ page })
   await page.getByRole('button', { name: 'Save rules' }).click();
   await expect(page.locator('#rules-status')).toContainText('Rules must map');
   const field = page.getByRole('textbox', { name: 'Your text' });
+  await expect(field).toBeEnabled();
   await field.pressSequentially('w');
   await expect(field).toHaveValue('щ');
 });

@@ -152,7 +152,9 @@ export async function migrateLegacyDrafts(db: IDBDatabase, observedRaw?: string 
       const backup: LegacyBackup = { kind: 'legacy-backup', raw, rejected, createdAt: Date.now() };
       await archive('legacy-backup:' + crypto.randomUUID(), backup);
     }
-    await request(metadata.put({ raw, signatures, recoverySlots: slots, rejected: rejected.length, rejectedSignature, olderChanges, archiveBytes }, MIGRATION_KEY));
+    const nextMarker = { raw, signatures, recoverySlots: slots, rejected: rejected.length, rejectedSignature, olderChanges, archiveBytes };
+    if (new TextEncoder().encode(JSON.stringify(nextMarker)).byteLength > 12 * 1024 * 1024) throw new Error('Legacy recovery archive is full');
+    await request(metadata.put(nextMarker, MIGRATION_KEY));
     await done;
     return imported;
   } catch (error) {
