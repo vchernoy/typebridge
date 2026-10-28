@@ -1,27 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-test('legacy draft is migrated into the editor without changing its source', async ({ page }) => {
-  const legacy = JSON.stringify([{ id: 'legacy-ui', title: 'Старый', text: 'Привет 🙂', updatedAt: 42,
-    history: { current: 'Привет 🙂', undo: [{ value: 'Привет', start: 6, end: 6 }], redo: [] } }]);
-  await page.addInitScript(raw => {
-    if (!sessionStorage.getItem('seeded')) {
-      localStorage.setItem('typebridge.drafts.v1', raw);
-      sessionStorage.setItem('typebridge.activeDraft.v1', 'legacy-ui');
-      sessionStorage.setItem('seeded', 'yes');
-    }
-  }, legacy);
-  await page.goto('/typebridge/');
-  const field = page.locator('#editor');
-  await expect(field).toHaveValue('Привет 🙂');
-  await page.locator('#undo').click();
-  await expect(field).toHaveValue('Привет');
-  await expect(page.locator('#status')).toContainText('Saved locally');
-  await page.reload();
-  await expect(field).toHaveValue('Привет');
-  await expect(page.locator('#redo')).toBeEnabled();
-  expect(await page.evaluate(() => localStorage.getItem('typebridge.drafts.v1'))).toBe(legacy);
-});
-
 test('a stale tab saves a visible conflict copy without overwriting the newer draft', async ({ page, context }) => {
   await page.goto('/typebridge/');
   await page.locator('#editor').fill('Исходный текст');
@@ -111,4 +89,33 @@ test('imports a text file into its own saved document', async ({ page }) => {
   await expect(page.locator('#draft-title')).toHaveValue('post');
   await page.reload();
   await expect(page.locator('#editor')).toHaveValue('Русский текст 🙂\nВторая строка');
+});
+
+test('old localStorage drafts are ignored and left untouched while IndexedDB saves', async ({ page, context }) => {
+  const old = '[{"id":"old","title":"Старый","text":"Старый пост","updatedAt":1},invalid]';
+  await page.addInitScript(raw => {
+    if (!sessionStorage.getItem('seeded')) {
+      localStorage.setItem('typebridge.drafts.v1', raw);
+      sessionStorage.setItem('seeded', 'yes');
+    }
+  }, old);
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await expect(field).toHaveValue('');
+  await field.fill('Новый пост 🙂\nВторая строка');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.reload();
+  await expect(field).toHaveValue('Новый пост 🙂\nВторая строка');
+  expect(await page.evaluate(() => localStorage.getItem('typebridge.drafts.v1'))).toBe(old);
+  const other = await context.newPage();
+  await other.goto('/typebridge/');
+  await expect(other.locator('#editor')).toBeEnabled();
+  const changed = '[{"id":"other","title":"Old tab","text":"Ignored","updatedAt":2}]';
+  await other.evaluate(raw => localStorage.setItem('typebridge.drafts.v1', raw), changed);
+  await expect(page.locator('#drafts option')).toHaveCount(1);
+  await expect(field).toHaveValue('Новый пост 🙂\nВторая строка');
+  await page.reload();
+  await expect(field).toHaveValue('Новый пост 🙂\nВторая строка');
+  expect(await page.evaluate(() => localStorage.getItem('typebridge.drafts.v1'))).toBe(changed);
 });

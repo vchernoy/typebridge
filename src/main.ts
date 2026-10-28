@@ -3,7 +3,7 @@ import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, 
 import './style.css';
 import { Editor } from './editor/editor';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
-import { openDraftDatabase, migrateLegacyDrafts, legacyRecoveryInfo, listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
+import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
 const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
@@ -416,47 +416,6 @@ const recoveryNotice = document.createElement('div');
 recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
-let legacyStopped = false;
-function showLegacyFailure(raw: string | null): void {
-  legacyStopped = true;
-  recoveryNotice.hidden = false;
-  recoveryNotice.replaceChildren(document.createTextNode('Older-tab changes could not be saved (storage or the recovery archive may be full). Stop editing the older tab; export this pending snapshot and its current data before retrying. Later changes are not being imported. '));
-  const button = document.createElement('button');
-  button.textContent = 'Export pending legacy snapshot';
-  button.addEventListener('click', () => downloadText('typebridge-legacy-pending.json', raw ?? '', 'application/json'));
-  const current = document.createElement('button');
-  current.textContent = 'Export current legacy data';
-  current.addEventListener('click', () => { try { downloadText('typebridge-legacy-current.json', localStorage.getItem('typebridge.drafts.v1') ?? '', 'application/json'); } catch { status.textContent = 'Cannot read legacy storage'; } });
-  recoveryNotice.append(button, current);
-}
-async function showLegacyWarning(): Promise<void> {
-  if (!db || legacyStopped) return;
-  const info = await legacyRecoveryInfo(db);
-  recoveryNotice.replaceChildren();
-  if (!info.rejected && !info.olderChanges && !info.backups.length && !info.versions.length) { recoveryNotice.hidden = true; return; }
-  recoveryNotice.hidden = false;
-  recoveryNotice.append(document.createTextNode(
-    (info.rejected ? `${info.rejected} legacy record(s) could not be imported; a backup was kept. ` : info.backups.length ? 'Earlier legacy backups remain available. ' : '') +
-    (info.olderChanges ? 'Changes from an older TypeBridge tab were preserved in Drafts. Earlier versions can be exported. ' : '')
-  ));
-  if (info.backups.length || info.versions.length) {
-    const button = document.createElement('button');
-    button.textContent = 'Export legacy backup';
-    button.addEventListener('click', () => downloadText('typebridge-legacy-recovery.json', JSON.stringify(info.backups.length ? [...info.backups, ...info.versions.map(draft => ({ kind: 'legacy-version', draft }))] : info.versions.map(draft => ({ kind: 'legacy-version', draft })), null, 2), 'application/json'));
-    recoveryNotice.append(button);
-  }
-}
-let legacySync: Promise<void> = Promise.resolve();
-window.addEventListener('storage', event => {
-  if (event.key !== 'typebridge.drafts.v1' || !db) return;
-  const observed = event.newValue;
-  legacySync = legacySync.then(async () => {
-    if (!db || legacyStopped) return;
-    await migrateLegacyDrafts(db, observed);
-    await refreshDrafts();
-    await showLegacyWarning();
-  }).catch(() => { if (!legacyStopped) showLegacyFailure(observed); });
-});
 async function initializeDrafts(): Promise<void> {
   try {
     db = await openDraftDatabase(() => {
@@ -464,12 +423,6 @@ async function initializeDrafts(): Promise<void> {
       recoveryNotice.hidden = false;
       recoveryNotice.textContent = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
     });
-    try { await migrateLegacyDrafts(db); }
-    catch (error) {
-      if (!(error instanceof Error) || error.message !== 'Legacy recovery archive is full') throw error;
-      showLegacyFailure(localStorage.getItem('typebridge.drafts.v1'));
-    }
-    await showLegacyWarning();
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
     try { selected = sessionStorage.getItem('typebridge.activeDraft.v1'); } catch { /* Optional hint. */ }
@@ -478,7 +431,7 @@ async function initializeDrafts(): Promise<void> {
     showDraft();
   } catch (error) {
     db?.close(); db = undefined;
-    status.textContent = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : 'Storage unavailable or migration failed. Your legacy drafts are unchanged; copy or export unsaved text.';
+    status.textContent = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : 'Storage unavailable. Copy or export unsaved text before closing.';
     renderDrafts();
   } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; }
 }
