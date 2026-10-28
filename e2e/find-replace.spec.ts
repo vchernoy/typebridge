@@ -113,6 +113,8 @@ test('Find and Replace share the global transliteration mode and bypass regex', 
   await expect(find).toHaveValue('привет');
   await expect(replacement).toHaveValue('мир');
   await page.locator('#enabled').uncheck();
+  await find.focus();
+  await find.press('End');
   await find.pressSequentially(' xyz');
   await expect(find).toHaveValue('привет xyz');
   await page.locator('#enabled').check();
