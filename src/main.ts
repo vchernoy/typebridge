@@ -52,7 +52,15 @@ field.addEventListener('keydown', event => {
   event.preventDefault();
   editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
 });
-field.addEventListener('input', () => { count.textContent = `${Array.from(field.value).length} characters`; });
+function updateStats(): void {
+  const value = field.value;
+  const characters = Array.from(value).length;
+  const words = (value.match(/[\p{L}\p{N}]+(?:['’\u2010-\u2015-][\p{L}\p{N}]+)*/gu) ?? []).length;
+  const minutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 180));
+  count.textContent = `${characters} characters · ${words} words · ${minutes} min read`;
+}
+field.addEventListener('input', updateStats);
+field.addEventListener('historychange', updateStats);
 // Plain-text writing is a first-class mode. Remember the choice per browser.
 const TRANSLITERATION_KEY = 'typebridge.transliteration.enabled.v1';
 try { enabled.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; }
@@ -285,6 +293,7 @@ function switchDraft(draft: typeof active): void {
   active = draft;
   setActiveDraftId(active.id);
   showDraft();
+updateStats();
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => switchDraft(newDraft()));
 draftSelect.addEventListener('change', () => {
@@ -303,6 +312,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
 });
 window.addEventListener('pagehide', () => { clearTimeout(saveTimer); persist(); });
 showDraft();
+updateStats();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
