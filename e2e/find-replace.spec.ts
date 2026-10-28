@@ -36,6 +36,22 @@ test('replace and replace all support undo, redo, case matching and literal punc
   await expect(field).toHaveValue('fund etf fund (test)');
 });
 
+test('regex find and replace supports captures, named groups, undo and invalid patterns', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.fill('2026-10-27 and 2026-11-03');
+  await page.getByRole('checkbox', { name: 'Regex (.*)' }).check();
+  await page.getByLabel('Find', { exact: true }).fill('(?<year>\\d{4})-(\\d{2})-(\\d{2})');
+  await page.getByLabel('Replace', { exact: true }).fill('$3/$2/$<year>');
+  await page.getByRole('button', { name: 'Replace all' }).click();
+  await expect(field).toHaveValue('27/10/2026 and 03/11/2026');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(field).toHaveValue('2026-10-27 and 2026-11-03');
+  await page.getByLabel('Find', { exact: true }).fill('(');
+  await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.locator('#find-status')).toContainText('Invalid regex');
+});
+
 test('focus mode preserves text, selection and editor undo history', async ({ page }) => {
   await page.goto('/typebridge/');
   const field = page.getByRole('textbox', { name: 'Your text' });
