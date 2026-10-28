@@ -41,8 +41,10 @@ function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'prog
   status.textContent = text; statusKind = kind;
 }
 function notify(text: string): void {
-  // Text is still unsaved after a failed save: keep saying so.
-  if (saveFailed) { setSaveStatus(text.replace(/[.…]$/, '') + '. ' + SAVE_FAILED, 'failure'); return; }
+  // Text is still unsaved after a failed save: keep saying so. With autosave
+  // off, "Autosave off — changes are unsaved" already says it, and editing
+  // would not retry.
+  if (saveFailed && autosave.checked) { setSaveStatus(text.replace(/[.…]$/, '') + '. ' + SAVE_FAILED, 'failure'); return; }
   status.textContent = text; statusKind = 'action';
 }
 const count = document.querySelector<HTMLElement>('#count')!;
@@ -373,7 +375,7 @@ function sameContent(a: StoredDraft, b: StoredDraft): boolean {
 function savePending(): void {
   if (!dirty || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
-  catch { notify('Unsaved text could not be backed up for reload. Copy or export it.'); }
+  catch { setSaveStatus('Unsaved text could not be backed up for reload. Copy or export it.'); }
 }
 function clearPending(saved: StoredDraft): void {
   try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
@@ -467,10 +469,13 @@ draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {
-  try { setAutosaveEnabled(autosave.checked); } catch { notify('Could not save preference'); }
+  let preferenceSaved = true;
+  try { setAutosaveEnabled(autosave.checked); } catch { notify('Could not save preference'); preferenceSaved = false; }
+  // Keep a preference error or a storage-unavailable message visible.
+  const announce = preferenceSaved && !!db;
   if (autosave.checked) {
-    if (dirty) { setSaveStatus('Saving…'); journalEdit(); void persist(); }
-    else setSaveStatus('Autosave on');
+    if (dirty) { if (announce) setSaveStatus('Saving…'); journalEdit(); void persist(); }
+    else if (announce) setSaveStatus('Autosave on');
   }
   else {
     clearTimeout(saveTimer);
@@ -483,7 +488,7 @@ autosave.addEventListener('change', async () => {
         await refreshDrafts();
       } catch { notify('Could not delete saved draft; current text is kept'); return; }
     }
-    setSaveStatus(dirty ? 'Autosave off — changes are unsaved' : 'Autosave off');
+    if (announce) setSaveStatus(dirty ? 'Autosave off — changes are unsaved' : 'Autosave off');
   }
   } finally { autosave.disabled = false; }
 });

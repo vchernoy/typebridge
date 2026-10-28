@@ -36,8 +36,10 @@ function breakSaves(page: Page): Promise<void> {
 const restoreSaves = (page: Page) => page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
 
 test('a background autosave does not replace newer conversion guidance', async ({ page }) => {
-  await page.clock.install();
+  // install() alone lets fake time flow; pause it so only runFor() fires timers.
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.getByRole('textbox', { name: 'Your text' });
   await expect(field).toBeEnabled();
   await field.fill('zhuk');
@@ -182,8 +184,10 @@ test('a background save on hiding the page clears an earlier failure', async ({ 
 });
 
 test('action feedback during a successful retry does not leave a stale failure', async ({ page }) => {
-  await page.clock.install();
+  // install() alone lets fake time flow; pause it so only runFor() fires timers.
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Первый');
@@ -202,4 +206,62 @@ test('action feedback during a successful retry does not leave a stale failure',
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Первый23');
   await expect(status(page)).toHaveText('Saved locally');
+});
+
+test('a failed reload backup gives way to the save that follows it', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Первый');
+  await expect(status(page)).toHaveText('Saved locally');
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+      if (key === 'typebridge.pendingDraft.v1') throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return setItem.call(this, key, value);
+    };
+  });
+  await field.press('End');
+  await field.pressSequentially(' два');
+  // Unload starts: the backup fails, then the flush in the same handler saves the text.
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expect.poll(() => storedTexts(page)).toContain('Первый два');
+  await expect(status(page)).toHaveText('Saved locally');
+});
+
+test('a failed autosave preference write stays visible when toggling', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Первый');
+  await expect(status(page)).toHaveText('Saved locally');
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+      if (key === 'typebridge.autosave.v1') throw new DOMException('Blocked', 'SecurityError');
+      return setItem.call(this, key, value);
+    };
+  });
+  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Could not save preference');
+  await page.locator('#autosave').check();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Could not save preference');
+});
+
+test('with autosave off after a failure, action feedback does not advise retrying by editing', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Сохранено');
+  await expect(status(page)).toHaveText('Saved locally');
+  await breakSaves(page);
+  await field.press('End');
+  await field.pressSequentially(' несохранено');
+  await expect(status(page)).toContainText('Save failed');
+  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  await page.locator('#export-txt').click();
+  await expect(status(page)).toHaveText('Text exported');
 });
