@@ -33,6 +33,7 @@ test('recovery keeps a newer version from another tab and does not clear a newer
   await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Несохранённая версия');
   await expect(page.locator('#status')).toContainText('Save failed');
+  await page.close();
   const third = await context.newPage(); await third.goto('/typebridge/');
   await third.getByRole('button', { name: /Recover Untitled draft/ }).click();
   await expect(third.locator('#status')).toContainText('Recovered a copy');
@@ -69,6 +70,7 @@ test('retry after committed recovery with failed journal cleanup does not duplic
   await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Сохранить эту запись');
   await expect(page.locator('#status')).toContainText('Save failed');
+  await page.close();
   const other = await context.newPage(); await other.goto('/typebridge/');
   await other.evaluate(() => {
     const original = Storage.prototype.removeItem;
@@ -98,4 +100,53 @@ test('immediate reload recovers text after a failed IndexedDB save', async ({ pa
   await page.reload();
   await expect(editor).toHaveValue('Быстрая строка 🙂');
   await expect(page.locator('#status')).toContainText('Save failed');
+});
+
+test('already committed emergency snapshot is removed without a duplicate', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await page.locator('#editor').fill('Сохранённая запись 🙂');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const id = sessionStorage.getItem('typebridge.activeDraft.v1')!;
+    localStorage.setItem(`typebridge.recovery.v1.closed.${id}`, JSON.stringify({ token: 'saved-token', tab: 'closed', documentId: id, revision: 0, timestamp: Date.now(), title: 'Untitled draft', text: 'Сохранённая запись 🙂' }));
+  });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('typebridge.recovery.v1.closed.')).length)).toBe(0);
+  await expect(page.getByRole('button', { name: /Recover Untitled draft/ })).toHaveCount(0);
+  await expect(page.locator('#drafts option')).toHaveCount(1);
+});
+
+test('confirmed discard removes only the selected unsaved snapshot', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await page.evaluate(() => {
+    for (const token of ['a', 'b']) localStorage.setItem(`typebridge.recovery.v1.closed.${token}`, JSON.stringify({ token, tab: 'closed', documentId: token, revision: 0, timestamp: Date.now(), title: token, text: 'Несохранённый текст ' + token }));
+  });
+  await page.reload();
+  const check = page.getByRole('button', { name: 'Check emergency backups' });
+  if (await check.isVisible()) await check.click();
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.getByRole('button', { name: 'Discard backup for a' }).click();
+  await expect(page.getByRole('button', { name: 'Discard backup for a' })).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Discard backup for a' }).click();
+  await expect(page.getByRole('button', { name: 'Discard backup for a' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Discard backup for b' })).toBeVisible();
+  await expect(page.locator('#drafts option')).toHaveCount(1);
+});
+
+test('active tab snapshots are not presented as lost; closing exposes them', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  const other = await context.newPage(); await other.goto('/typebridge/');
+  await page.evaluate(() => {
+    IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); };
+    IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); };
+  });
+  await page.locator('#editor').fill('Важный черновик');
+  await expect(page.locator('#status')).toContainText('Save failed');
+  await expect(other.getByRole('button', { name: /Recover Untitled draft/ })).toHaveCount(0);
+  await page.close();
+  const check = other.getByRole('button', { name: 'Check emergency backups' });
+  await expect.poll(async () => await check.isVisible() || await other.getByRole('button', { name: /Recover Untitled draft/ }).isVisible(), { timeout: 10000 }).toBe(true);
+  if (await check.isVisible()) await check.click();
+  await expect(other.getByRole('button', { name: /Recover Untitled draft/ })).toBeVisible();
 });

@@ -4,7 +4,7 @@ import './style.css';
 import { Editor } from './editor/editor';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
-import { clearRecovery, listRecovery, writeRecovery, type RecoverySnapshot } from './editor/recovery';
+import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
 const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
@@ -305,6 +305,15 @@ let transitioning = false;
 let deleting = false;
 let loadingDraft = false;
 const journalTab = crypto.randomUUID();
+const OWNER_LOCK = 'typebridge-recovery-owner:';
+let ownershipAvailable = false;
+const ownerReady = new Promise<void>(resolve => {
+  if (!navigator.locks) { resolve(); return; }
+  void navigator.locks.request(OWNER_LOCK + journalTab, async () => {
+    ownershipAvailable = true; resolve();
+    await new Promise<void>(() => { /* The browser releases this lock with the page. */ });
+  }).catch(() => { resolve(); });
+});
 let currentJournal: RecoverySnapshot | undefined;
 const journalWarning = document.createElement('p');
 journalWarning.setAttribute('role', 'alert');
@@ -530,39 +539,93 @@ const recoveryNotice = document.createElement('div');
 recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
+let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+let recoveryRenderVersion = 0;
+let panelSignature = '';
+let inspectUnknownOwners = false;
+async function ownerIsActive(tab: string): Promise<boolean | undefined> {
+  if (!ownershipAvailable) return undefined;
+  try { return (await navigator.locks.query()).held?.some(lock => lock.name === OWNER_LOCK + tab) ?? false; }
+  catch { return undefined; }
+}
+function queueRecovery(): void {
+  if (recoveryTimer) return;
+  recoveryTimer = setTimeout(() => { recoveryTimer = undefined; void renderRecovery(); }, 1200);
+}
 async function renderRecovery(): Promise<void> {
-  recoveryPanel.replaceChildren();
+  const version = ++recoveryRenderVersion;
   let entries: RecoverySnapshot[];
   try { entries = listRecovery(localStorage).filter(item => item.tab !== journalTab); }
   catch { journalWarning.textContent = 'Emergency backups cannot be read. Copy or export unsaved text.'; journalWarning.hidden = false; return; }
-  if (!entries.length) return;
-  const heading = document.createElement('p');
-  heading.textContent = 'Unsaved emergency backups found. Recover a copy without changing your current draft:';
-  recoveryPanel.append(heading);
+  const candidates: { item: RecoverySnapshot; unknown: boolean }[] = [];
   for (const item of entries) {
+    const activeOwner = await ownerIsActive(item.tab);
+    if (activeOwner === true) continue;
+    // A committed exact document or idempotent recovery copy makes only this
+    // precise journal version redundant; newer revisions are never overwritten.
+    try {
+      if (db) {
+        const original = await getStoredDraft(db, item.documentId);
+        const recovered = await getStoredDraft(db, 'recovery-' + item.token);
+        if ((original?.title === item.title && original.text === item.text) ||
+            (recovered?.title === item.title + ' (recovered)' && recovered.text === item.text)) {
+          clearRecovery(localStorage, item);
+          continue;
+        }
+      }
+    } catch { /* A failed check must never discard a potentially unsaved snapshot. */ }
+    candidates.push({ item, unknown: activeOwner === undefined });
+  }
+  if (version !== recoveryRenderVersion) return;
+  const signature = JSON.stringify({ candidates, inspectUnknownOwners });
+  if (signature === panelSignature) return;
+  panelSignature = signature;
+  recoveryPanel.replaceChildren();
+  if (!ownershipAvailable && !inspectUnknownOwners) {
+    const inspect = document.createElement('button');
+    inspect.type = 'button'; inspect.textContent = 'Check emergency backups';
+    inspect.addEventListener('click', () => { inspectUnknownOwners = true; panelSignature = ''; void renderRecovery(); });
+    recoveryPanel.append(inspect); return;
+  }
+  if (!candidates.length) return;
+  const heading = document.createElement('p');
+  heading.textContent = ownershipAvailable ? 'Emergency backups found. Recover a copy without changing your current draft:' : 'Ownership cannot be verified; these backups may belong to open tabs. Recover a copy without changing your current draft:';
+  recoveryPanel.append(heading);
+  for (const { item, unknown } of candidates) {
+    const group = document.createElement('div');
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = `Recover ${item.title} (${new Date(item.timestamp).toLocaleString()})`;
+    if (unknown) button.title = 'Tab ownership could not be verified; the original tab may still be open.';
     button.addEventListener('click', async () => {
       button.disabled = true;
       try {
+        if (await ownerIsActive(item.tab) === true) throw new Error('The original tab is still open');
         if (!db) throw new Error('Storage unavailable');
-        // The snapshot token is a stable ID: retrying after interruption cannot
-        // create another copy. A recovery never replaces an existing draft.
         const copy = { id: 'recovery-' + item.token, title: item.title + ' (recovered)', text: item.text, updatedAt: item.timestamp };
         const result = await commitDraft(db, copy, 0);
         if (!result.ok && (!result.current || result.current.title !== copy.title || result.current.text !== copy.text)) throw new Error('Recovery copy already changed');
         clearRecovery(localStorage, item);
         await refreshDrafts();
         status.textContent = 'Recovered a copy in Drafts. Your current draft was kept.';
-        await renderRecovery();
+        panelSignature = ''; await renderRecovery();
       } catch { status.textContent = 'Recovery failed. The emergency backup was kept; retry or copy your text.'; button.disabled = false; }
     });
-    recoveryPanel.append(button);
+    const discard = document.createElement('button');
+    discard.type = 'button'; discard.textContent = `Discard backup for ${item.title}`;
+    discard.addEventListener('click', async () => {
+      if (await ownerIsActive(item.tab) === true) { status.textContent = 'The original tab is still open; backup kept.'; queueRecovery(); return; }
+      if (!window.confirm('Discard this emergency backup? Unsaved text in this backup will be lost.')) return;
+      try { clearRecovery(localStorage, item); panelSignature = ''; await renderRecovery(); }
+      catch { status.textContent = 'Could not discard backup; it was kept.'; }
+    });
+    group.append(button, discard); recoveryPanel.append(group);
   }
 }
-window.addEventListener('storage', () => { void renderRecovery(); });
+window.addEventListener('storage', event => { if (event.key?.startsWith(RECOVERY_PREFIX)) queueRecovery(); });
+setInterval(queueRecovery, 5000);
 async function initializeDrafts(): Promise<void> {
+  await ownerReady;
   try {
     db = await openDraftDatabase(() => {
       db = undefined;
