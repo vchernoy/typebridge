@@ -18,3 +18,14 @@ button:disabled { opacity:.45; cursor:not-allowed }
 .rules-panel textarea { width:100%; max-width:700px; height:240px; min-height:140px; resize:vertical; font:1rem/1.5 ui-monospace,monospace; margin-bottom:12px }
 .rules-panel .actions { margin:8px 0 }
 #rules-status { display:block; margin-top:8px }
+/* Focus mode keeps the same textarea and editor instance, preserving selection and history. */
+.focus-header { display:none; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px }
+body.focus-mode { background:#f4f7fc }
+body.focus-mode .workspace { max-width:none; padding:16px clamp(12px,4vw,48px) }
+body.focus-mode header, body.focus-mode .toolbar, body.focus-mode .find-bar,
+body.focus-mode .draft-bar, body.focus-mode .hint, body.focus-mode label[for="editor"] { display:none }
+body.focus-mode section { box-shadow:none; border:0; padding:clamp(12px,2vw,28px); min-height:calc(100dvh - 32px) }
+body.focus-mode .focus-header { display:flex; max-width:900px; margin-inline:auto }
+body.focus-mode textarea { width:100%; max-width:900px; min-width:0; height:calc(100dvh - 160px); min-height:12rem; resize:vertical; margin:0 auto; }
+body.focus-mode .bottom { max-width:900px; margin-inline:auto }
+@media(prefers-color-scheme:dark) { body.focus-mode { background:#151b29 } }
