@@ -1,8 +1,8 @@
 import { createTransliterator } from '../core/transliterate';
-import { russianPack } from '../core/russian';
+import { effectivePack, loadOverrides, type Overrides } from '../core/custom-rules';
 import { cyrillicToLatin } from '../core/reverse-russian';
 
-const convert = createTransliterator(russianPack);
+
 type Selection = [start: number, end: number, direction: 'forward' | 'backward' | 'none'];
 export type Snapshot = { value: string; start: number; end: number };
 type Delta = [position: number, deleted: string, inserted: string, before: Selection, after: Selection];
@@ -73,6 +73,8 @@ export class Editor {
   private nativeHistory = false;
   private known: { value: string; selection: Selection };
   private lastEditAt = 0;
+  private convert = createTransliterator(effectivePack(loadOverrides()));
+  setRules(overrides: Overrides): void { this.convert = createTransliterator(effectivePack(overrides)); this.pending = null; }
   enabled = true;
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
@@ -254,7 +256,7 @@ export class Editor {
       const active = start === end && this.pending && this.pending.end === start ? this.pending : null;
       const raw = (active?.raw ?? '') + event.data;
       const begin = active?.start ?? start;
-      const translated = convert(raw);
+      const translated = this.convert(raw);
       this.field.setRangeText(translated, begin, end, 'end');
       this.pending = { start: begin, end: begin + translated.length, raw };
       this.field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -265,7 +267,7 @@ export class Editor {
     const end = this.field.selectionEnd;
     if (start === end) return false;
     const original = this.field.value.slice(start, end);
-    const converted = direction === 'to-cyrillic' ? convert(original) : cyrillicToLatin(original);
+    const converted = direction === 'to-cyrillic' ? this.convert(original) : cyrillicToLatin(original);
     if (original === converted) return false;
     this.replaceRange(start, end, converted);
     this.field.focus({ preventScroll: true });
