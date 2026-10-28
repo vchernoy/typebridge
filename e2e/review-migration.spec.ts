@@ -122,3 +122,61 @@ test('failed deletion keeps the text and allows retry', async ({ page }) => {
   await expect(page.locator('#status')).toHaveText('Draft deleted');
   await expect(editor).toHaveValue('');
 });
+
+test('stale deletion retries saving pending edits as a conflict copy', async ({ page, context }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Исходный длинный пост');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  const other = await context.newPage();
+  await other.goto('/typebridge/');
+  await expect(other.locator('#editor')).toHaveValue('Исходный длинный пост');
+  await other.locator('#editor').fill('Версия другой вкладки');
+  await expect(other.locator('#status')).toContainText('Saved locally');
+  await editor.fill('Важная правка первой вкладки 🙂');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('conflict copy');
+  await page.reload();
+  await expect(editor).toHaveValue('Важная правка первой вкладки 🙂');
+  await expect(page.locator('#drafts option')).toHaveCount(2);
+});
+
+test('selecting current draft preserves pending text and undo history', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await page.locator('#enabled').uncheck();
+  await editor.fill('Первая версия');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await editor.fill('Первая версия плюс новое');
+  await page.locator('#drafts').dispatchEvent('change');
+  await expect(editor).toHaveValue('Первая версия плюс новое');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.locator('#undo').click();
+  await expect(editor).toHaveValue('Первая версия');
+});
+
+test('post-delete list failure does not pretend deleted text is still saved', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Русский пост и история');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.getAll;
+    (window as unknown as { restoreGetAll: () => void }).restoreGetAll = () => { IDBObjectStore.prototype.getAll = original; };
+    IDBObjectStore.prototype.getAll = function (...args: Parameters<IDBObjectStore['getAll']>) {
+      if (this.name === 'documents') throw new Error('list unavailable');
+      return original.apply(this, args);
+    };
+  });
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(page.locator('#status')).toContainText('Draft deleted, but');
+  await expect(editor).toHaveValue('');
+  await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
+  await page.reload();
+  await expect(editor).toHaveValue('');
+});

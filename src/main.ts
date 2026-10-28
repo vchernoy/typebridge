@@ -353,17 +353,22 @@ autosave.addEventListener('change', async () => {
 });
 async function switchDraft(id?: string): Promise<boolean> {
   if (transitioning) return false;
+  if (id === active.id) { renderDrafts(); return true; }
   transitioning = true;
   try {
-    const next = id && db ? await getStoredDraft(db, id) : undefined;
-    if (id && !next) throw new Error('Draft no longer exists');
     clearTimeout(saveTimer);
-    while (dirty && autosave.checked) {
-      const saved = await persist();
-      if (!saved && status.textContent?.startsWith('Save failed')) return false;
+    let next: StoredDraft | undefined;
+    while (true) {
+      while (dirty && autosave.checked) {
+        const saved = await persist();
+        if (!saved && status.textContent?.startsWith('Save failed')) return false;
+      }
+      if (dirty && !autosave.checked && !window.confirm('Discard unsaved changes? Copy or export them first to keep them.')) return false;
+      const version = generation;
+      next = id && db ? await getStoredDraft(db, id) : undefined;
+      if (id && !next) throw new Error('Draft no longer exists');
+      if (generation === version) break;
     }
-    if (dirty && !autosave.checked && !window.confirm('Discard unsaved changes? Copy or export them first to keep them.')) return false;
-    // No asynchronous work between the final dirty check and replacing the buffer.
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
     showDraft();
@@ -385,19 +390,26 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   deleting = true;
   field.readOnly = true;
   draftTitle.readOnly = true;
+  let committed = false;
   try {
     if (saving && !await saving) throw new Error('Save failed');
     if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed in another tab');
+    committed = true;
     clearTimeout(saveTimer);
     active = { ...newDraft(), revision: 0 };
     rememberActive();
-    await refreshDrafts();
+    // The deletion is durable; clear the editor before a fallible list refresh.
     showDraft();
-    status.textContent = 'Draft deleted';
-  } catch { status.textContent = 'Could not delete draft — it may have changed in another tab. Your text is kept.'; }
-  finally {
+    try { await refreshDrafts(); status.textContent = 'Draft deleted'; }
+    catch { status.textContent = 'Draft deleted, but the draft list could not be refreshed'; }
+  } catch {
+    status.textContent = dirty ? 'Could not delete draft — your changes are unsaved; saving again…' : 'Could not delete draft — your text is kept.';
+  } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
-    if (dirty && autosave.checked && !status.textContent?.startsWith('Could not delete')) saveTimer = setTimeout(() => { void persist(); }, 300);
+    if (!committed && dirty && autosave.checked) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { void persist(); }, 300);
+    }
   }
 });
 const recoveryNotice = document.createElement('div');
