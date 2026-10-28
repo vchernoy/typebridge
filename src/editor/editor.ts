@@ -108,20 +108,22 @@ export class Editor {
   private notifyHistory(): void { this.field.dispatchEvent(new Event('historychange')); }
   undo(): void { this.history('undo'); }
   redo(): void { this.history('redo'); }
-  constructor(readonly field: HTMLTextAreaElement) {
+  readonly field: HTMLTextAreaElement;
+  constructor(field: HTMLTextAreaElement | HTMLInputElement) {
+    this.field = field as HTMLTextAreaElement;
     this.known = this.capture();
-    field.addEventListener('compositionstart', () => {
+    this.field.addEventListener('compositionstart', () => {
       this.composing = true; this.pending = null; this.compositionStart = this.capture();
     });
-    field.addEventListener('compositionend', () => {
+    this.field.addEventListener('compositionend', () => {
       this.composing = false; this.pending = null;
       if (this.compositionStart && this.compositionStart.value !== this.field.value)
         this.record(this.compositionStart, this.capture(), false);
       this.compositionStart = null; this.before = null; this.known = this.capture();
     });
-    field.addEventListener('beforeinput', event => this.beforeInput(event));
-    field.addEventListener('input', event => this.onInput(event));
-    field.addEventListener('keydown', event => {
+    this.field.addEventListener('beforeinput', event => this.beforeInput(event));
+    this.field.addEventListener('input', event => this.onInput(event));
+    this.field.addEventListener('keydown', event => {
       if (this.composing || event.isComposing) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z') {
         event.preventDefault(); this.history(event.shiftKey ? 'redo' : 'undo');
@@ -129,11 +131,11 @@ export class Editor {
         event.preventDefault(); this.history('redo');
       }
     });
-    field.addEventListener('paste', () => { this.pending = null; });
-    field.addEventListener('cut', () => { this.pending = null; });
+    this.field.addEventListener('paste', () => { this.pending = null; });
+    this.field.addEventListener('cut', () => { this.pending = null; });
   }
   private capture(): { value: string; selection: Selection } {
-    return { value: this.field.value, selection: [this.field.selectionStart, this.field.selectionEnd, this.field.selectionDirection] };
+    return { value: this.field.value, selection: [this.field.selectionStart ?? 0, this.field.selectionEnd ?? 0, this.field.selectionDirection ?? 'none'] };
   }
   private record(b: { value: string; selection: Selection }, a: { value: string; selection: Selection }, group: boolean): void {
     if (b.value === a.value) return;
