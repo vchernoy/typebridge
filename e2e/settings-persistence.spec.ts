@@ -61,11 +61,16 @@ test('real resize drag persists across reload and focus mode', async ({ page }) 
   await field.scrollIntoViewIfNeeded();
   const before = await field.boundingBox();
   if (!before) throw new Error('Editor has no bounding box');
-  const x = before.x + before.width - 4;
-  const y = before.y + before.height - 4;
+  const x = before.x + before.width - 10;
+  const y = before.y + before.height - 10;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(Math.min(x + 800, 1895), y + 80, { steps: 12 });
+  const endX = Math.min(x + 800, 1895);
+  const endY = y + 80;
+  await page.mouse.move(endX, endY, { steps: 12 });
+  const duringDrag = await field.boundingBox();
+  if (!duringDrag) throw new Error('Editor has no bounding box during drag');
+  expect(endX > duringDrag.x + duringDrag.width || endY > duringDrag.y + duringDrag.height).toBe(true);
   await page.mouse.up();
   const dimensions = await field.evaluate(el => ({ width: el.style.width, height: el.style.height }));
   expect(dimensions.height).toMatch(/^\d+(?:\.\d+)?px$/);
@@ -82,9 +87,9 @@ test('real resize drag persists across reload and focus mode', async ({ page }) 
 test('settings warning clears only after the failed setting is saved', async ({ page }) => {
   await page.addInitScript(() => {
     const original = Storage.prototype.setItem;
-    let failFind = true;
+    (window as unknown as { failFind: boolean }).failFind = true;
     Storage.prototype.setItem = function (key, value) {
-      if (key === 'typebridge.find.query.v1' && failFind) { failFind = false; throw new DOMException('blocked', 'SecurityError'); }
+      if (key === 'typebridge.find.query.v1' && (window as unknown as { failFind: boolean }).failFind) throw new DOMException('blocked', 'SecurityError');
       return original.call(this, key, value);
     };
   });
@@ -95,6 +100,7 @@ test('settings warning clears only after the failed setting is saved', async ({ 
   await expect(warning).toBeVisible();
   await page.locator('#replace-text').fill('other');
   await expect(warning).toBeVisible();
+  await page.evaluate(() => { (window as unknown as { failFind: boolean }).failFind = false; });
   await page.locator('#find-text').fill('ab');
   await expect(warning).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('ab');
