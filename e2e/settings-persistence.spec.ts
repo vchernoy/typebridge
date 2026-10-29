@@ -111,7 +111,9 @@ test('settings warning clears only after the failed setting is saved', async ({ 
 test('browser profile restart keeps preferences but a new session has no find text', async ({ playwright, browserName, baseURL }, testInfo) => {
   if (!baseURL) throw new Error('A Playwright baseURL is required');
   const appURL = new URL('/typebridge/', baseURL).href;
-  const launchOptions = { ...testInfo.project.use.launchOptions, headless: testInfo.project.use.headless ?? true };
+  const launchOptions = { ...testInfo.project.use.launchOptions };
+  if (testInfo.project.use.headless !== undefined) launchOptions.headless = testInfo.project.use.headless;
+  if (testInfo.project.use.channel !== undefined) launchOptions.channel = testInfo.project.use.channel;
   const dir = await mkdtemp(join(tmpdir(), 'typebridge-settings-'));
   let ctx = await playwright[browserName].launchPersistentContext(dir, launchOptions);
   try {
