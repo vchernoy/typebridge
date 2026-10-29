@@ -5,10 +5,65 @@ import { Editor } from './editor/editor';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
+import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from './editor/search-settings';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
+const editorSizeWarning = document.createElement('span');
+editorSizeWarning.setAttribute('aria-live', 'polite');
+field.after(editorSizeWarning);
+try {
+  const size: unknown = JSON.parse(localStorage.getItem(EDITOR_SIZE_KEY) ?? 'null');
+  if (size && typeof size === 'object') {
+    const value = size as { width?: unknown; height?: unknown };
+    if (typeof value.width === 'string' && /^\d+(?:\.\d+)?px$/.test(value.width)) field.style.width = value.width;
+    if (typeof value.height === 'string' && /^\d+(?:\.\d+)?px$/.test(value.height)) field.style.height = value.height;
+  }
+} catch { /* Storage or malformed settings must not prevent editing. */ }
+let savedEditorSize = JSON.stringify({ width: field.style.width, height: field.style.height });
+function persistEditorSize(): void {
+  if (document.body.classList.contains('focus-mode') || (!field.style.width && !field.style.height)) return;
+  const next = JSON.stringify({ width: field.style.width, height: field.style.height });
+  if (next === savedEditorSize) return;
+  try { localStorage.setItem(EDITOR_SIZE_KEY, next); savedEditorSize = next; editorSizeWarning.textContent = ''; }
+  catch { editorSizeWarning.textContent = 'Editor size could not be saved in this browser.'; }
+}
+window.addEventListener('pointerup', persistEditorSize);
+const resizeEditor = document.querySelector<HTMLButtonElement>('#resize-editor')!;
+let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number } | undefined;
+resizeEditor.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  const rect = field.getBoundingClientRect();
+  resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
+  resizeEditor.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+resizeEditor.addEventListener('pointermove', event => {
+  if (!resizeDrag || resizeDrag.pointer !== event.pointerId) return;
+  field.style.width = Math.max(280, resizeDrag.width + event.clientX - resizeDrag.x) + 'px';
+  field.style.height = Math.max(160, resizeDrag.height + event.clientY - resizeDrag.y) + 'px';
+});
+resizeEditor.addEventListener('pointerup', event => {
+  if (resizeDrag?.pointer === event.pointerId) resizeDrag = undefined;
+});
+resizeEditor.addEventListener('pointercancel', () => { resizeDrag = undefined; });
+resizeEditor.addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+  const rect = field.getBoundingClientRect();
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') field.style.width = Math.max(280, rect.width + (event.key === 'ArrowRight' ? 20 : -20)) + 'px';
+  else field.style.height = Math.max(160, rect.height + (event.key === 'ArrowDown' ? 20 : -20)) + 'px';
+  event.preventDefault();
+  persistEditorSize();
+});
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
 const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
+let normalEditorSize = { width: '', height: '' };
 function setFocusMode(enabled: boolean): void {
+  if (enabled && !document.body.classList.contains('focus-mode')) {
+    normalEditorSize = { width: field.style.width, height: field.style.height };
+    field.style.width = ''; field.style.height = '';
+  } else if (!enabled && document.body.classList.contains('focus-mode')) {
+    field.style.width = normalEditorSize.width; field.style.height = normalEditorSize.height;
+  }
   document.body.classList.toggle('focus-mode', enabled);
   focusButton.setAttribute('aria-pressed', String(enabled));
   exitFocusButton.hidden = !enabled;
@@ -177,6 +232,31 @@ const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
 const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
 const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
 const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
+const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+const searchStorageWarning = document.createElement('span');
+searchStorageWarning.setAttribute('aria-live', 'polite');
+findStatus.before(searchStorageWarning);
+const failedSearchKeys = new Set<string>();
+function searchStorageResult(key: string, success: boolean): void {
+  if (success) failedSearchKeys.delete(key); else failedSearchKeys.add(key);
+  searchStorageWarning.textContent = failedSearchKeys.size ? 'Find settings could not be saved or restored in this browser.' : '';
+}
+for (const [input, key] of [[findInput, FIND_KEY], [replaceInput, REPLACE_KEY]] as const) {
+  try { input.value = readSearchText(sessionStorage, key); } catch { searchStorageResult(key, false); }
+  const save = (): void => {
+    try { sessionStorage.setItem(key, input.value); searchStorageResult(key, true); }
+    catch { searchStorageResult(key, false); }
+  };
+  input.addEventListener('input', save);
+  input.addEventListener('compositionend', save);
+}
+for (const [input, key] of [[matchCase, CASE_KEY], [regexMode, REGEX_KEY]] as const) {
+  try { input.checked = readSearchOption(localStorage, key); } catch { searchStorageResult(key, false); }
+  input.addEventListener('change', () => {
+    try { localStorage.setItem(key, String(input.checked)); searchStorageResult(key, true); }
+    catch { searchStorageResult(key, false); }
+  });
+}
 const findEditor = new Editor(findInput);
 const replaceEditor = new Editor(replaceInput);
 function syncSearchEditors(): void {
@@ -186,7 +266,6 @@ function syncSearchEditors(): void {
 }
 regexMode.addEventListener('change', syncSearchEditors);
 syncSearchEditors();
-const findStatus = document.querySelector<HTMLElement>('#find-status')!;
 function searchPattern(): RegExp | null {
   const query = findInput.value;
   if (!query) { findStatus.textContent = ''; return null; }
