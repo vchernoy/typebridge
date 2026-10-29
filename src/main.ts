@@ -20,12 +20,39 @@ try {
   }
 } catch { /* Storage or malformed settings must not prevent editing. */ }
 let savedEditorSize = JSON.stringify({ width: field.style.width, height: field.style.height });
-window.addEventListener('pointerup', () => {
+function persistEditorSize(): void {
   if (document.body.classList.contains('focus-mode') || (!field.style.width && !field.style.height)) return;
   const next = JSON.stringify({ width: field.style.width, height: field.style.height });
   if (next === savedEditorSize) return;
   try { localStorage.setItem(EDITOR_SIZE_KEY, next); savedEditorSize = next; editorSizeWarning.textContent = ''; }
   catch { editorSizeWarning.textContent = 'Editor size could not be saved in this browser.'; }
+}
+window.addEventListener('pointerup', persistEditorSize);
+const resizeEditor = document.querySelector<HTMLButtonElement>('#resize-editor')!;
+let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number } | undefined;
+resizeEditor.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  const rect = field.getBoundingClientRect();
+  resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
+  resizeEditor.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+resizeEditor.addEventListener('pointermove', event => {
+  if (!resizeDrag || resizeDrag.pointer !== event.pointerId) return;
+  field.style.width = Math.max(280, resizeDrag.width + event.clientX - resizeDrag.x) + 'px';
+  field.style.height = Math.max(160, resizeDrag.height + event.clientY - resizeDrag.y) + 'px';
+});
+resizeEditor.addEventListener('pointerup', event => {
+  if (resizeDrag?.pointer === event.pointerId) resizeDrag = undefined;
+});
+resizeEditor.addEventListener('pointercancel', () => { resizeDrag = undefined; });
+resizeEditor.addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+  const rect = field.getBoundingClientRect();
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') field.style.width = Math.max(280, rect.width + (event.key === 'ArrowRight' ? 20 : -20)) + 'px';
+  else field.style.height = Math.max(160, rect.height + (event.key === 'ArrowDown' ? 20 : -20)) + 'px';
+  event.preventDefault();
+  persistEditorSize();
 });
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
 const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;

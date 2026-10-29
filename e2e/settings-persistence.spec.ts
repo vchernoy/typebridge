@@ -61,8 +61,10 @@ test('real resize drag persists across reload and focus mode', async ({ page }) 
   await field.scrollIntoViewIfNeeded();
   const before = await field.boundingBox();
   if (!before) throw new Error('Editor has no bounding box');
-  const x = before.x + before.width - 10;
-  const y = before.y + before.height - 10;
+  const handle = await page.locator('#resize-editor').boundingBox();
+  if (!handle) throw new Error('Resize control has no bounding box');
+  const x = handle.x + handle.width / 2;
+  const y = handle.y + handle.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   const endX = Math.min(x + 800, 1895);
@@ -124,4 +126,23 @@ test('browser profile restart keeps preferences but a new session has no find te
     await expect(page.locator('#regex-mode')).toBeChecked();
     await expect(page.locator('#find-text')).toHaveValue('');
   } finally { await ctx.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+
+test('resize control supports keyboard and keeps editor content and history', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await page.locator('#enabled').uncheck();
+  await editor.fill('Текст для редактора');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  const before = await editor.boundingBox();
+  if (!before) throw new Error('Editor has no bounding box');
+  await page.locator('#resize-editor').focus();
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => (await editor.boundingBox())?.height).toBeGreaterThan(before.height);
+  await expect(editor).toHaveValue('Текст для редактора');
+  await page.locator('#undo').click();
+  await expect(editor).toHaveValue('');
+  await page.locator('#redo').click();
+  await expect(editor).toHaveValue('Текст для редактора');
 });

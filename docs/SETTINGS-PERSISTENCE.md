@@ -14,7 +14,7 @@ TypeBridge stores everything locally in the browser profile. Browser privacy set
 | Drafts and undo/redo history | IndexedDB | Committed documents and history survive reload and browser restart subject to browser storage. Revision checks prevent stale writes; conflicts create copies. |
 | Emergency recovery | temporary localStorage journal and sessionStorage reload snapshot | Only with autosave enabled; see architecture for recovery, limitations and conflict handling. |
 | Focus mode and open settings panels | in memory | Reset on reload; editing layout is not a saved preference. |
-| Editor resize | localStorage | Explicit mouse/touch resizing in normal mode is restored on reload, restart and new tabs, subject to responsive min/max constraints. Focus mode uses its own temporary dimensions. |
+| Editor resize | localStorage | Resize using the drag control or its arrow keys; normal-mode resizing is restored on reload, restart and new tabs, subject to responsive min/max constraints. Focus mode uses its own temporary dimensions; native textarea resizing remains available where supported. |
 | Appearance | system color scheme | Follows the operating system; no selectable theme is currently implemented. |
 | Selection, caret, scroll, Find match selection, imported file picker | in memory | Transient and not promised across reload. Undo/redo history is part of the committed draft. |
 

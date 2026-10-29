@@ -30,3 +30,5 @@ body.focus-mode .focus-header { display:flex; max-width:900px; margin-inline:aut
 body.focus-mode textarea { width:100%; max-width:900px; min-width:0; height:calc(100dvh - 160px); min-height:12rem; resize:vertical; margin:0 auto; }
 body.focus-mode .bottom { max-width:900px; margin-inline:auto }
 @media(prefers-color-scheme:dark) { body.focus-mode { background:#151b29 } }
+
+#resize-editor { display:block; margin:4px 0 0 auto; min-height:32px; padding:2px 10px; font-size:.8rem; cursor:nwse-resize; touch-action:none }
