@@ -405,12 +405,17 @@ test('a failed IndexedDB initialization stays visible after Copy, Export and Con
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
   });
+  // Paused fake clock: the autosave debounce runs only when the test says so.
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await expect(status(page)).toHaveText(STORAGE_UNAVAILABLE);
   await expectActionsKeep(page, STORAGE_UNAVAILABLE);
   await field.fill('Нельзя потерять');
+  await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
+  await page.clock.runFor(400); // The debounced save fails before the actions below.
   await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
   await expectActionsKeep(page, SAVE_FAILED_NO_STORAGE);
   // Autosave off does not hide that storage is unavailable.
@@ -580,9 +585,12 @@ test('continuous typing keeps a failed save visible until a commit succeeds', as
   await expect(field).toBeEnabled();
   await page.locator('#enabled').uncheck();
   await field.focus();
+  const renders = await watchDraftListRenders(page);
   await field.pressSequentially('saved');
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('saved');
+  // The save finishes with a draft-list refresh; wait so no save is still in flight.
+  await expect.poll(renders).toBeGreaterThan(0);
   await expect(status(page)).toHaveText('Saved locally');
   await breakSaves(page);
   await field.pressSequentially(' x');
@@ -603,4 +611,101 @@ test('continuous typing keeps a failed save visible until a commit succeeds', as
   await expect(status(page)).toHaveText('Saved locally');
   await field.pressSequentially('!');
   await expect(status(page)).toHaveText('Saving…');
+});
+
+for (const failure of ['blocked IndexedDB', 'quota failure'] as const) {
+  test(`a failed debounced save keeps newer action feedback with its warning (${failure})`, async ({ page }) => {
+    if (failure === 'blocked IndexedDB') {
+      await page.addInitScript(() => {
+        Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+      });
+    }
+    await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+    await page.goto('/typebridge/');
+    await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+    const field = page.locator('#editor');
+    await expect(field).toBeEnabled();
+    let warning = SAVE_FAILED_NO_STORAGE;
+    if (failure === 'quota failure') {
+      await field.fill('Сохранено');
+      await page.clock.runFor(400);
+      await expect(status(page)).toHaveText('Saved locally');
+      await breakSaves(page);
+      await field.press('End');
+      await field.pressSequentially(' a');
+      await page.clock.runFor(400);
+      await expect(status(page)).toHaveText(SAVE_FAILED);
+      warning = SAVE_FAILED;
+    }
+    // Edit, then act before the debounced save runs and fails.
+    await field.press('End');
+    await field.pressSequentially(' b');
+    await page.locator('#export-txt').click();
+    await expect(status(page)).toHaveText('Text exported. ' + warning);
+    await page.clock.runFor(400);
+    await expect(status(page)).toHaveText('Text exported. ' + warning);
+    // The next edit still shows progress without hiding the failure.
+    await field.pressSequentially('c');
+    await expect(status(page)).toHaveText(failure === 'quota failure' ? RETRYING : SAVE_FAILED_NO_STORAGE);
+  });
+}
+
+test('a failed delete without storage and with autosave off keeps the storage warning', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+  });
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await field.fill('Нельзя потерять');
+  await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#delete-draft').click();
+  await expect(status(page)).toHaveText('Could not delete draft — your text is kept. ' + SAVE_FAILED_NO_STORAGE);
+  await expect(field).toHaveValue('Нельзя потерять');
+});
+
+test('a database upgrade while a conflict copy is written keeps the storage warning', async ({ page, context }) => {
+  // Paused fake clock: the whole edit below is one save, however slowly it is typed.
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.goto('/typebridge/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  const renders = await watchDraftListRenders(page);
+  await field.fill('Исходный');
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('Исходный');
+  await expect.poll(renders).toBeGreaterThan(0); // No save still in flight.
+  await expect(status(page)).toHaveText('Saved locally');
+  // Another tab saves a newer revision, so this tab's next save becomes a conflict copy.
+  const other = await context.newPage();
+  await other.goto('/typebridge/');
+  await expect(other.locator('#editor')).toHaveValue('Исходный');
+  await other.locator('#editor').fill('Версия другой вкладки');
+  await page.clock.runFor(400); // The fake clock is shared by both tabs.
+  await expect(other.locator('#status')).toHaveText('Saved locally');
+  await other.close();
+  await page.evaluate(() => {
+    // Another tab upgrades the database while the conflict copy is being added.
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+      IDBObjectStore.prototype.add = add;
+      const db = this.transaction.db;
+      const result = add.apply(this, args);
+      db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 1, newVersion: 2 }));
+      return result;
+    };
+  });
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await page.clock.runFor(400);
+  const upgraded = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+  await expect(status(page)).toHaveText('Another tab changed this draft. Your edits were saved as a conflict copy. ' + upgraded);
+  await page.locator('#export-txt').click();
+  await expect(status(page)).toHaveText('Text exported. ' + upgraded);
 });
