@@ -19,9 +19,12 @@ try {
     if (typeof value.height === 'string' && /^\d+(?:\.\d+)?px$/.test(value.height)) field.style.height = value.height;
   }
 } catch { /* Storage or malformed settings must not prevent editing. */ }
-field.addEventListener('pointerup', () => {
+let savedEditorSize = JSON.stringify({ width: field.style.width, height: field.style.height });
+window.addEventListener('pointerup', () => {
   if (document.body.classList.contains('focus-mode') || (!field.style.width && !field.style.height)) return;
-  try { localStorage.setItem(EDITOR_SIZE_KEY, JSON.stringify({ width: field.style.width, height: field.style.height })); }
+  const next = JSON.stringify({ width: field.style.width, height: field.style.height });
+  if (next === savedEditorSize) return;
+  try { localStorage.setItem(EDITOR_SIZE_KEY, next); savedEditorSize = next; editorSizeWarning.textContent = ''; }
   catch { editorSizeWarning.textContent = 'Editor size could not be saved in this browser.'; }
 });
 const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
@@ -206,19 +209,26 @@ const findStatus = document.querySelector<HTMLElement>('#find-status')!;
 const searchStorageWarning = document.createElement('span');
 searchStorageWarning.setAttribute('aria-live', 'polite');
 findStatus.before(searchStorageWarning);
-function searchStorageError(): void {
-  searchStorageWarning.textContent = 'Find settings could not be saved or restored in this browser.';
+const failedSearchKeys = new Set<string>();
+function searchStorageResult(key: string, success: boolean): void {
+  if (success) failedSearchKeys.delete(key); else failedSearchKeys.add(key);
+  searchStorageWarning.textContent = failedSearchKeys.size ? 'Find settings could not be saved or restored in this browser.' : '';
 }
-try { findInput.value = readSearchText(sessionStorage, FIND_KEY); replaceInput.value = readSearchText(sessionStorage, REPLACE_KEY); }
-catch { searchStorageError(); }
-try { matchCase.checked = readSearchOption(localStorage, CASE_KEY); regexMode.checked = readSearchOption(localStorage, REGEX_KEY); }
-catch { searchStorageError(); }
 for (const [input, key] of [[findInput, FIND_KEY], [replaceInput, REPLACE_KEY]] as const) {
-  input.addEventListener('input', () => { try { sessionStorage.setItem(key, input.value); } catch { searchStorageError(); } });
-  input.addEventListener('compositionend', () => { try { sessionStorage.setItem(key, input.value); } catch { searchStorageError(); } });
+  try { input.value = readSearchText(sessionStorage, key); } catch { searchStorageResult(key, false); }
+  const save = (): void => {
+    try { sessionStorage.setItem(key, input.value); searchStorageResult(key, true); }
+    catch { searchStorageResult(key, false); }
+  };
+  input.addEventListener('input', save);
+  input.addEventListener('compositionend', save);
 }
 for (const [input, key] of [[matchCase, CASE_KEY], [regexMode, REGEX_KEY]] as const) {
-  input.addEventListener('change', () => { try { localStorage.setItem(key, String(input.checked)); } catch { searchStorageError(); } });
+  try { input.checked = readSearchOption(localStorage, key); } catch { searchStorageResult(key, false); }
+  input.addEventListener('change', () => {
+    try { localStorage.setItem(key, String(input.checked)); searchStorageResult(key, true); }
+    catch { searchStorageResult(key, false); }
+  });
 }
 const findEditor = new Editor(findInput);
 const replaceEditor = new Editor(replaceInput);
@@ -498,13 +508,15 @@ async function persist(): Promise<boolean> {
         active = result.draft;
         if (generation !== version && autosave.checked) journalEdit();
         rememberActive();
+        saveFailed = false;
+        dirty = generation !== version;
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
-          setSaveStatus('Another tab changed this draft. Your edits were saved as a conflict copy.', 'conflict');
+          const conflictNotice = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
+          // Storage may have become unusable while the copy was written.
+          setSaveStatus(storageProblem ? conflictNotice + ' ' + riskText() : conflictNotice, 'conflict');
         }
-        saveFailed = false;
-        dirty = generation !== version;
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
         if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure')) {
@@ -518,7 +530,13 @@ async function persist(): Promise<boolean> {
       catch { if (!dirty && (statusKind === 'progress' || statusKind === 'conflict')) status.textContent += ' — draft list could not be refreshed'; }
       return !dirty;
     } catch {
-      saveFailed = true; setSaveStatus(riskText() || SAVE_FAILED, 'failure');
+      saveFailed = true;
+      // Keep newer action feedback that already carries this exact warning;
+      // otherwise show the warning derived from persistence state.
+      const risk = riskText() || SAVE_FAILED;
+      const shown = status.textContent ?? '';
+      if (!(shown.endsWith('. ' + risk) && statusKind !== 'conflict')) setSaveStatus(risk, 'failure');
+      else statusKind = 'failure';
       return false;
     }
   })();
@@ -638,8 +656,9 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     try { await refreshDrafts(); notify('Draft deleted'); }
     catch { notify('Draft deleted, but the draft list could not be refreshed'); }
   } catch {
-    if (dirty && !saveFailed && autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
-    else if (dirty && !autosave.checked) setSaveStatus('Could not delete draft — your changes are unsaved; autosave is off');
+    // Without storage, notify() adds the storage warning; no save will follow.
+    if (dirty && !saveFailed && autosave.checked && !storageProblem) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
+    else if (dirty && !autosave.checked && !storageProblem) setSaveStatus('Could not delete draft — your changes are unsaved; autosave is off');
     else notify(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;

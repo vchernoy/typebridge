@@ -53,31 +53,67 @@ test('blocked settings storage keeps search usable and reports the problem', asy
   await expect(page.locator('#editor')).toHaveValue('Русский текст');
 });
 
-test('editor resize preference survives reload and focus mode', async ({ page }) => {
+test('real resize drag persists across reload and focus mode', async ({ page }) => {
+  await page.setViewportSize({ width: 1900, height: 1600 });
   await page.goto('/typebridge/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
-  await field.evaluate(el => { el.style.width = '700px'; el.style.height = '350px'; el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); });
+  await field.scrollIntoViewIfNeeded();
+  const before = await field.boundingBox();
+  if (!before) throw new Error('Editor has no bounding box');
+  const x = before.x + before.width - 4;
+  const y = before.y + before.height - 4;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(Math.min(x + 800, 1895), y + 80, { steps: 12 });
+  await page.mouse.up();
+  const dimensions = await field.evaluate(el => ({ width: el.style.width, height: el.style.height }));
+  expect(dimensions.height).toMatch(/^\d+(?:\.\d+)?px$/);
+  expect(parseFloat(dimensions.height)).toBeGreaterThan(before.height);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('typebridge.editor.size.v1'))).toBe(JSON.stringify(dimensions));
   await page.reload();
-  await expect(field).toHaveCSS('height', '350px');
+  await expect(field).toHaveCSS('height', dimensions.height);
   await page.locator('#focus-mode').click();
   await expect(page.locator('#exit-focus')).toBeVisible();
   await page.locator('#exit-focus').click();
-  await expect(field).toHaveCSS('height', '350px');
+  await expect(field).toHaveCSS('height', dimensions.height);
 });
 
+test('settings warning clears only after the failed setting is saved', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    let failFind = true;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'typebridge.find.query.v1' && failFind) { failFind = false; throw new DOMException('blocked', 'SecurityError'); }
+      return original.call(this, key, value);
+    };
+  });
+  await page.goto('/typebridge/');
+  await page.locator('#enabled').uncheck();
+  await page.locator('#find-text').fill('a');
+  const warning = page.getByText('Find settings could not be saved or restored in this browser.');
+  await expect(warning).toBeVisible();
+  await page.locator('#replace-text').fill('other');
+  await expect(warning).toBeVisible();
+  await page.locator('#find-text').fill('ab');
+  await expect(warning).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('ab');
+});
 
-test('browser profile restart keeps preferences but a new session has no find text', async ({ playwright, browserName }) => {
+test('browser profile restart keeps preferences but a new session has no find text', async ({ playwright, browserName, baseURL }, testInfo) => {
+  if (!baseURL) throw new Error('A Playwright baseURL is required');
+  const appURL = new URL('/typebridge/', baseURL).href;
+  const launchOptions = { ...testInfo.project.use.launchOptions, headless: testInfo.project.use.headless ?? true };
   const dir = await mkdtemp(join(tmpdir(), 'typebridge-settings-'));
-  let ctx = await playwright[browserName].launchPersistentContext(dir, { headless: true });
+  let ctx = await playwright[browserName].launchPersistentContext(dir, launchOptions);
   try {
-    let page = await ctx.newPage(); await page.goto('http://127.0.0.1:4173/typebridge/');
+    let page = await ctx.newPage(); await page.goto(appURL);
     await page.locator('#match-case').check();
     await page.locator('#regex-mode').check();
     await page.locator('#find-text').fill('private');
     await ctx.close();
-    ctx = await playwright[browserName].launchPersistentContext(dir, { headless: true });
-    page = await ctx.newPage(); await page.goto('http://127.0.0.1:4173/typebridge/');
+    ctx = await playwright[browserName].launchPersistentContext(dir, launchOptions);
+    page = await ctx.newPage(); await page.goto(appURL);
     await expect(page.locator('#match-case')).toBeChecked();
     await expect(page.locator('#regex-mode')).toBeChecked();
     await expect(page.locator('#find-text')).toHaveValue('');
