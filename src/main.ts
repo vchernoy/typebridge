@@ -7,6 +7,7 @@ import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from 
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from './editor/search-settings';
+import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
 const editorSizeWarning = document.createElement('span');
@@ -154,6 +155,7 @@ function notify(text: string): void {
   status.textContent = text; statusKind = 'action';
 }
 const count = document.querySelector<HTMLElement>('#count')!;
+const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
 const syncHistory = () => { undo.disabled = !editor.canUndo; redo.disabled = !editor.canRedo; };
@@ -178,15 +180,23 @@ field.addEventListener('keydown', event => {
   event.preventDefault();
   editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
 });
+function updateCaretPosition(): void {
+  const { line, column } = lineColumnAtOffset(field.value, field.selectionStart);
+  caretPosition.textContent = `Ln ${line}, Col ${column}`;
+}
 function updateStats(): void {
   const value = field.value;
   const characters = Array.from(value).length;
   const words = (value.match(/[\p{L}\p{N}]+(?:['’\u2010-\u2015-][\p{L}\p{N}]+)*/gu) ?? []).length;
   const minutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 180));
   count.textContent = `${characters} characters · ${words} words · ${minutes} min read`;
+  updateCaretPosition();
 }
 field.addEventListener('input', updateStats);
 field.addEventListener('historychange', updateStats);
+field.addEventListener('keyup', updateCaretPosition);
+field.addEventListener('click', updateCaretPosition);
+field.addEventListener('select', updateCaretPosition);
 // Plain-text writing is a first-class mode. Remember the choice per browser.
 const TRANSLITERATION_KEY = 'typebridge.transliteration.enabled.v1';
 try { enabled.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; }
@@ -228,7 +238,7 @@ document.addEventListener('keydown', event => {
   if (isMac ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
   if (event.code !== (shortcut === 'default' ? 'Space' : shortcut.toUpperCase())) return;
   if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
-  if (!['editor', 'find-text', 'replace-text'].includes(event.target.id)) return;
+  if (!['editor', 'find-text', 'replace-text', 'draft-title'].includes(event.target.id)) return;
   event.preventDefault();
   enabled.checked = !enabled.checked;
   enabled.dispatchEvent(new Event('change', { bubbles: true }));
@@ -360,9 +370,44 @@ document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('cli
 findInput.addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
 });
+const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
+const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
+function openGoto(): void {
+  if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  gotoInput.focus();
+  gotoInput.select();
+}
+function goToLine(): void {
+  const parsed = parseGotoInput(gotoInput.value);
+  if (!parsed) {
+    gotoStatus.textContent = gotoInput.value.trim() ? 'Use line or line:column' : 'Enter a line number';
+    return;
+  }
+  const target = offsetForLineColumn(field.value, parsed.line, parsed.column ?? 1);
+  field.focus({ preventScroll: true });
+  field.setSelectionRange(target.offset, target.offset);
+  editor.revealSelection();
+  updateCaretPosition();
+  gotoStatus.textContent = target.line === parsed.line && (parsed.column === undefined || target.column === parsed.column)
+    ? `Line ${target.line}, column ${target.column}`
+    : `Clamped to line ${target.line}, column ${target.column}`;
+}
+document.querySelector<HTMLButtonElement>('#goto-go')!.addEventListener('click', goToLine);
+gotoInput.addEventListener('keydown', event => {
+  // Skip IME confirmation Enter; composition must not navigate (#88 review).
+  if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.repeat || event.isComposing || event.defaultPrevented) return;
+  event.preventDefault();
+  goToLine();
+});
 document.addEventListener('keydown', event => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat || event.isComposing) return;
+  const key = event.key.toLowerCase();
+  if (key === 'f' && !event.shiftKey) {
     event.preventDefault(); findInput.focus(); findInput.select();
+  } else if (key === 'g' && !event.shiftKey) {
+    // Cmd/Ctrl+G: go to line. May also be reserved by the browser's Find UI.
+    event.preventDefault();
+    openGoto();
   }
 });
 
@@ -398,13 +443,13 @@ document.querySelector<HTMLButtonElement>('#rules-save')!.addEventListener('clic
     const next = parseRules(rulesText.value);
     saveOverrides(next);
     overrides = next;
-    editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides);
+    editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides);
     renderRules();
     rulesStatus.textContent = 'Rules saved locally';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', () => {
-  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
+  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
   catch { rulesStatus.textContent = 'Unable to save rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-export')!.addEventListener('click', () => {
@@ -421,7 +466,7 @@ document.querySelector<HTMLInputElement>('#rules-import')!.addEventListener('cha
   try {
     if (file.size > 65536) throw new Error('Rules file is too large');
     const next = importRules(await file.text());
-    saveOverrides(next); overrides = next; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules();
+    saveOverrides(next); overrides = next; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides); renderRules();
     rulesStatus.textContent = 'Rules imported';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Import failed'; }
   finally { input.value = ''; }
@@ -430,6 +475,10 @@ renderRules();
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
+// The draft title follows the global transliteration mode and rules (#89).
+const titleEditor = new Editor(draftTitle);
+titleEditor.setEnabled(enabled.checked);
+enabled.addEventListener('change', () => titleEditor.setEnabled(enabled.checked));
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
