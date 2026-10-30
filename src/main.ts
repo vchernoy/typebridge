@@ -184,8 +184,10 @@ tabIndent.addEventListener('change', () => {
 field.addEventListener('keydown', event => {
   if (event.key !== 'Tab' || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
   const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
-  if (!change) return;
+  // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
+  if (!change && event.shiftKey) return;
   event.preventDefault();
+  if (!change) return;
   editor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
 });
 function updateStats(): void {

@@ -53,3 +53,12 @@ test('keyboard users can always leave the editor', async ({ page }) => {
   await page.reload();
   await expect(page.locator('#tab-indent')).not.toBeChecked();
 });
+
+test('Tab over blank lines keeps focus in the editor', async ({ page }) => {
+  const editor = page.locator('#editor');
+  await editor.fill('a\n\n\nb');
+  await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(2, 4));
+  await editor.press('Tab');
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('a\n\n\nb');
+});
