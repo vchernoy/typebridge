@@ -2,7 +2,7 @@ import { russianPack } from './core/russian';
 import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from './core/custom-rules';
 import './style.css';
 import { Editor } from './editor/editor';
-import { renderStatusMessage, type StatusMessage } from './editor/status';
+import { CONFLICT_COPY, renderStatusMessage, type StatusMessage } from './editor/status';
 import { replaceMatchAt } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
@@ -95,10 +95,9 @@ const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, th
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
 const AUTOSAVE_OFF_UNSAVED = 'Autosave off — changes are unsaved';
-const CONFLICT_COPY = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
 let statusKind: StatusKind = 'progress';
-let conflictNoticePending = false;
-let statusMessage: StatusMessage = { primary: '', risk: '', draftListRefreshFailed: false };
+let conflictNoticeVersion = 0;
+let statusMessage: StatusMessage = { conflict: false, primary: '', risk: '', draftListRefreshFailed: false };
 function renderStatus(): void { status.textContent = renderStatusMessage(statusMessage); }
 let saveFailed = false;
 // Non-empty while browser storage cannot be used (failed or blocked
@@ -106,7 +105,7 @@ let saveFailed = false;
 // restores it; only a reload can.
 let storageProblem = '';
 function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'progress'): void {
-  statusMessage = { primary: text, risk: '', draftListRefreshFailed: false };
+  statusMessage = { ...statusMessage, primary: text, risk: '' };
   statusKind = kind; renderStatus();
 }
 /** The warning that must stay visible while text or storage is at risk. */
@@ -120,20 +119,12 @@ function riskText(): string {
   return '';
 }
 function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): void {
-  statusMessage = { primary, risk, draftListRefreshFailed: false };
+  statusMessage = { ...statusMessage, primary, risk };
   statusKind = kind; renderStatus();
-}
-/** Pending feedback belongs to the current document, independently of save state. */
-function showConflict(kind: 'conflict' | 'failure' = 'conflict'): void {
-  const refreshFailed = statusMessage.primary === CONFLICT_COPY && statusMessage.draftListRefreshFailed;
-  setRiskStatus(CONFLICT_COPY, kind);
-  statusMessage.draftListRefreshFailed = refreshFailed;
-  renderStatus();
 }
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 /** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
 function showSaving(prefix = ''): void {
-  if (conflictNoticePending && !prefix) { showConflict(storageProblem || saveFailed ? 'failure' : 'conflict'); return; }
   if (storageProblem) setSaveStatus(prefix + riskText(), 'failure'); // No save can succeed.
   else if (saveFailed) setSaveStatus(prefix + RETRYING, 'failure');  // Cleared only by a commit.
   else setSaveStatus(prefix + 'Saving…');
@@ -146,7 +137,7 @@ function showSaveState(): void {
 }
 function notify(text: string): void {
   // An explicit action replaces conflict feedback, but never the current risk.
-  conflictNoticePending = false;
+  statusMessage.conflict = false;
   const risk = riskText();
   if (risk) setRiskStatus(text.replace(/[.…]$/, ''), risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure', risk);
   else { setSaveStatus(text); statusKind = 'action'; }
@@ -512,10 +503,15 @@ function renderDrafts(): void {
 async function refreshDrafts(): Promise<void> {
   if (db) drafts = await listStoredDrafts(db);
   renderDrafts();
+  if (statusMessage.draftListRefreshFailed) {
+    statusMessage.draftListRefreshFailed = false;
+    renderStatus();
+  }
 }
 function showDraft(): void {
-  const hadConflict = conflictNoticePending;
-  conflictNoticePending = false;
+  const hadConflict = statusMessage.conflict;
+  statusMessage.conflict = false;
+  statusMessage.draftListRefreshFailed = false;
   loadingDraft = true;
   try {
     editor.load(active.text);
@@ -551,23 +547,23 @@ async function persist(): Promise<boolean> {
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
           // Storage may have become unusable while the copy was written.
-          conflictNoticePending = true;
-          showConflict();
+          statusMessage.conflict = true;
+          conflictNoticeVersion++;
+          setRiskStatus(dirty && !storageProblem ? 'Saving…' : '', 'conflict');
         }
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
-        if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure')) {
+        if (!dirty && !result.conflict && (statusMessage.conflict || statusKind === 'progress' || statusKind === 'failure')) {
           // Storage can become unusable while this save was in flight (an
           // upgrade in another tab); never replace that warning.
           const risk = riskText();
-          if (conflictNoticePending) showConflict();
-          else if (risk) setRiskStatus('', 'failure', risk);
-          else setSaveStatus('Saved locally');
+          if (risk) setRiskStatus('', 'failure', risk);
+          else setSaveStatus(statusMessage.conflict ? '' : 'Saved locally');
         }
       }
       try { await refreshDrafts(); }
       catch {
-        if (!dirty && (conflictNoticePending || statusKind === 'progress' || statusKind === 'conflict')) {
+        if (!dirty && (statusMessage.conflict || statusKind === 'progress' || statusKind === 'conflict')) {
           statusMessage.draftListRefreshFailed = true;
           statusMessage.risk = riskText();
           renderStatus();
@@ -579,8 +575,7 @@ async function persist(): Promise<boolean> {
       // Keep newer action feedback that already carries this exact warning;
       // keep a conflict notice in front of the warning; otherwise show risk alone.
       const risk = riskText() || SAVE_FAILED;
-      if (conflictNoticePending) showConflict('failure');
-      else if (statusMessage.primary && statusMessage.risk === risk) { statusKind = 'failure'; renderStatus(); }
+      if (statusMessage.primary && statusMessage.risk === risk) { statusKind = 'failure'; renderStatus(); }
       else setRiskStatus('', 'failure', risk);
       return false;
     }
@@ -607,7 +602,7 @@ field.addEventListener('input', scheduleSave);
 field.addEventListener('historychange', scheduleSave);
 draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', async () => {
-  conflictNoticePending = false;
+  statusMessage.conflict = false;
   autosave.disabled = true;
   try {
   let prefix = '';
@@ -642,6 +637,7 @@ async function switchDraft(id?: string): Promise<boolean> {
   if (transitioning) return false;
   if (id === active.id) { renderDrafts(); return true; }
   transitioning = true;
+  const conflictVersionBeforeSwitch = conflictNoticeVersion;
   try {
     clearTimeout(saveTimer);
     let next: StoredDraft | undefined;
@@ -661,6 +657,8 @@ async function switchDraft(id?: string): Promise<boolean> {
     showDraft();
     // The new draft has no unsaved changes; don't keep the previous draft's state.
     if (statusKind === 'progress' || statusKind === 'failure') showSaveState();
+    // A conflict created by this switch's flush has not yet been announced to the user.
+    if (conflictNoticeVersion !== conflictVersionBeforeSwitch) setRiskStatus(CONFLICT_COPY, 'action');
     void refreshDrafts().catch(() => { notify('Could not refresh drafts'); });
     return true;
   } catch { notify('Could not open draft — current text was kept'); return false; }
@@ -812,8 +810,7 @@ async function initializeDrafts(): Promise<void> {
       recoveryNotice.hidden = false;
       recoveryNotice.textContent = storageProblem;
       // A later upgrade must not erase an earlier conflict-copy notice (#66).
-      if (conflictNoticePending) showConflict('failure');
-      else setRiskStatus('', 'failure');
+      setRiskStatus('', 'failure');
     });
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
