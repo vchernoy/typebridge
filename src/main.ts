@@ -2,7 +2,7 @@ import { russianPack } from './core/russian';
 import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from './core/custom-rules';
 import './style.css';
 import { Editor } from './editor/editor';
-import { expandReplacement } from './editor/search';
+import { replaceMatchAt } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
@@ -270,7 +270,8 @@ syncSearchEditors();
 function searchPattern(): RegExp | null {
   const query = findInput.value;
   if (!query) { findStatus.textContent = ''; return null; }
-  const flags = matchCase.checked ? 'g' : 'gi';
+  // `u` keeps matches, including zero-width ones, on code point boundaries.
+  const flags = matchCase.checked ? 'gu' : 'giu';
   const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
   try {
     const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
@@ -286,14 +287,10 @@ function matches(): Array<[number, number]> {
   if (!pattern) return [];
   return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
 }
-function replacementFor(match: RegExpExecArray, original: string): string {
-  return regexMode.checked ? expandReplacement(replaceInput.value, match, original) : replaceInput.value;
-}
 let lastZeroWidthMatch: { position: number; text: string; query: string; matchCase: boolean; regex: boolean } | undefined;
 function resetSearchPosition(): void { lastZeroWidthMatch = undefined; }
+// Caret moves and edits are caught by the position and text checks in findNext.
 field.addEventListener('input', resetSearchPosition);
-field.addEventListener('pointerdown', resetSearchPosition);
-field.addEventListener('keydown', resetSearchPosition);
 function findNext(backwards = false): void {
   const found = matches();
   if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
@@ -319,11 +316,11 @@ document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('cli
   if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = 'No matches'; return; }
   const match = found.find(([start, end]) => start === field.selectionStart && end === field.selectionEnd)
     ?? found.find(([start]) => start >= field.selectionEnd) ?? found[0];
-  const pattern = searchPattern()!;
-  pattern.lastIndex = match[0];
-  const capture = pattern.exec(field.value);
-  if (!capture || capture.index !== match[0]) return;
-  editor.replaceRange(match[0], match[1], replacementFor(capture, field.value));
+  const result = regexMode.checked
+    ? replaceMatchAt(searchPattern()!, field.value, match[0], replaceInput.value)
+    : { end: match[1], text: replaceInput.value };
+  if (!result || result.end !== match[1]) return;
+  editor.replaceRange(match[0], match[1], result.text);
   findStatus.textContent = 'Replaced 1 match';
   field.focus({ preventScroll: true });
 });
@@ -331,18 +328,12 @@ document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('cli
   const pattern = searchPattern();
   if (!pattern) return;
   const original = field.value;
-  const found = Array.from(original.matchAll(pattern));
-  if (!found.length) { findStatus.textContent = 'No matches'; return; }
-  const result = original.replace(pattern, (...args) => {
-    const text = args[0] as string;
-    const offset = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null ? args[args.length - 3] as number : args[args.length - 2] as number;
-    const groups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null ? args[args.length - 1] as Record<string, string> : undefined;
-    const captures = args.slice(1, groups ? -3 : -2) as string[];
-    const match = Object.assign([text, ...captures], { index: offset, input: original, groups }) as RegExpExecArray;
-    return replacementFor(match, original);
-  });
+  const count = Array.from(original.matchAll(pattern)).length;
+  if (!count) { findStatus.textContent = 'No matches'; return; }
+  // Native substitution in regex mode; literal mode inserts the replacement text as is.
+  const result = regexMode.checked ? original.replace(pattern, replaceInput.value) : original.replace(pattern, () => replaceInput.value);
   editor.replaceRange(0, original.length, result);
-  findStatus.textContent = `Replaced ${found.length} matches`;
+  findStatus.textContent = `Replaced ${count} matches`;
   field.focus({ preventScroll: true });
 });
 findInput.addEventListener('keydown', event => {

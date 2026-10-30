@@ -200,7 +200,9 @@ export class Editor {
     mirror.style.pointerEvents = 'none';
     mirror.style.top = '0';
     mirror.style.left = '-100000px';
-    mirror.style.width = field.getBoundingClientRect().width + 'px';
+    // Match the textarea's text area exactly: clientWidth excludes the border and any vertical scrollbar.
+    mirror.style.boxSizing = 'content-box';
+    mirror.style.width = field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) + 'px';
     mirror.style.height = 'auto';
     mirror.style.minHeight = '0';
     mirror.style.maxHeight = 'none';
@@ -209,7 +211,7 @@ export class Editor {
     mirror.style.overflowWrap = 'break-word';
 
     const marker = document.createElement('span');
-    marker.textContent = '\\u200b';
+    marker.textContent = '\u200b';
     mirror.append(document.createTextNode(field.value.slice(0, position)), marker);
     document.body.append(mirror);
     const lineTop = marker.offsetTop;

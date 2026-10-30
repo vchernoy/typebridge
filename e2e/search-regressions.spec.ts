@@ -62,3 +62,34 @@ for (const button of ['#replace-one', '#replace-all']) {
     await expect(field).toHaveValue('a2');
   });
 }
+
+test('zero-width Find never places the caret inside an emoji', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('🙂🙂');
+  await field.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 0));
+  await page.locator('#regex-mode').check();
+  await page.locator('#find-text').fill('x*');
+  const positions: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    await page.locator('#find-next').click();
+    positions.push(await field.evaluate((el: HTMLTextAreaElement) => el.selectionStart));
+  }
+  expect(positions).toEqual([0, 2, 4, 0]);
+});
+
+test('returning to Find with Ctrl+F keeps zero-width navigation moving', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Line one\nLine two');
+  await field.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 0));
+  await page.locator('#regex-mode').check();
+  const find = page.locator('#find-text');
+  await find.fill('(?=Line)');
+  await find.press('Enter');
+  expect(await field.evaluate((el: HTMLTextAreaElement) => el.selectionStart)).toBe(0);
+  await field.press('ControlOrMeta+f');
+  await expect(find).toBeFocused();
+  await find.press('Enter');
+  expect(await field.evaluate((el: HTMLTextAreaElement) => el.selectionStart)).toBe(9);
+});
