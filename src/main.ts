@@ -2,7 +2,7 @@ import { russianPack } from './core/russian';
 import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from './core/custom-rules';
 import './style.css';
 import { Editor } from './editor/editor';
-import { CONFLICT_COPY, renderStatusMessage, type StatusMessage } from './editor/status';
+import { renderStatusMessage, type StatusMessage } from './editor/status';
 import { replaceMatchAt } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
@@ -658,7 +658,10 @@ async function switchDraft(id?: string): Promise<boolean> {
     // The new draft has no unsaved changes; don't keep the previous draft's state.
     if (statusKind === 'progress' || statusKind === 'failure') showSaveState();
     // A conflict created by this switch's flush has not yet been announced to the user.
-    if (conflictNoticeVersion !== conflictVersionBeforeSwitch) setRiskStatus(CONFLICT_COPY, 'action');
+    if (conflictNoticeVersion !== conflictVersionBeforeSwitch) {
+      statusMessage.conflict = true;
+      setRiskStatus('', 'conflict');
+    }
     void refreshDrafts().catch(() => { notify('Could not refresh drafts'); });
     return true;
   } catch { notify('Could not open draft — current text was kept'); return false; }
