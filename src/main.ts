@@ -380,7 +380,10 @@ function goToLine(): void {
 }
 document.querySelector<HTMLButtonElement>('#goto-go')!.addEventListener('click', goToLine);
 gotoInput.addEventListener('keydown', event => {
-  if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); goToLine(); }
+  // Skip IME confirmation Enter; composition must not navigate (#88 review).
+  if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.repeat || event.isComposing || event.defaultPrevented) return;
+  event.preventDefault();
+  goToLine();
 });
 document.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat || event.isComposing) return;

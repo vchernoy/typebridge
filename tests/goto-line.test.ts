@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lineColumnAtOffset, lineStarts, offsetForLineColumn, parseGotoInput } from '../src/editor/goto-line';
+import { lineColumnAtOffset, lineStarts, offsetForLineColumn, parseGotoInput, snapToCodePointBoundary } from '../src/editor/goto-line';
 
 describe('parseGotoInput', () => {
   it('accepts line and optional column with colon or comma', () => {
@@ -34,9 +34,15 @@ describe('lineStarts and offsets', () => {
     expect(offsetForLineColumn(text, 2, 2)).toMatchObject({ offset: 4, line: 2, column: 2 });
     expect(offsetForLineColumn(text, 2)).toMatchObject({ offset: 3, line: 2, column: 1 });
     expect(offsetForLineColumn(text, 99, 99)).toMatchObject({ offset: text.length, line: 3, column: 4 });
-    // Columns use textarea UTF-16 offsets, so an emoji occupies two columns.
-    expect(offsetForLineColumn(text, 3, 2)).toMatchObject({ offset: 8, line: 3, column: 2 });
+    // Column 2 lands inside 🙂; snap forward to a safe code-point boundary (before x).
+    expect(offsetForLineColumn(text, 3, 2)).toMatchObject({ offset: text.indexOf('x'), line: 3, column: 3 });
     expect(offsetForLineColumn(text, 3, 3)).toMatchObject({ offset: text.indexOf('x'), line: 3, column: 3 });
+  });
+
+  it('snaps mid-surrogate offsets forward to after the pair', () => {
+    expect(snapToCodePointBoundary('🙂x', 1)).toBe(2);
+    expect(snapToCodePointBoundary('🙂x', 0)).toBe(0);
+    expect(snapToCodePointBoundary('🙂x', 2)).toBe(2);
   });
 
   it('reports line and column for an offset', () => {

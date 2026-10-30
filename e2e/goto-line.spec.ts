@@ -57,3 +57,38 @@ test('Go to line clamps past the end of the document', async ({ page }) => {
   await expect(page.locator('#goto-status')).toHaveText('Clamped to line 2, column 4');
   await expect(page.locator('#caret-position')).toHaveText('Ln 2, Col 4');
 });
+
+test('Go to a column inside an emoji snaps to a safe boundary so typing cannot split it', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.getByLabel('Transliteration on')).toBeChecked();
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.fill('🙂x');
+  await page.locator('#goto-line').fill('1:2');
+  await page.getByRole('button', { name: 'Go', exact: true }).click();
+  await expect(page.locator('#goto-status')).toHaveText('Clamped to line 1, column 3');
+  await expect(page.locator('#caret-position')).toHaveText('Ln 1, Col 3');
+  await field.press('a');
+  await expect(field).toHaveValue('🙂аx');
+});
+
+test('Enter during IME composition in Go to line does not navigate', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await page.getByLabel('Transliteration on').uncheck();
+  const field = page.getByRole('textbox', { name: 'Your text' });
+  await field.fill('one\ntwo\nthree');
+  await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
+  const goto = page.locator('#goto-line');
+  await goto.fill('2');
+  await goto.focus();
+  await goto.evaluate(el => {
+    const input = el as HTMLInputElement;
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    Object.defineProperty(enter, 'isComposing', { get: () => true });
+    input.dispatchEvent(enter);
+  });
+  await expect(goto).toBeFocused();
+  const start = await field.evaluate(el => (el as HTMLTextAreaElement).selectionStart);
+  expect(start).toBe(0);
+  await expect(page.locator('#caret-position')).toHaveText('Ln 1, Col 1');
+});

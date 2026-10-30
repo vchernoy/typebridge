@@ -32,9 +32,35 @@ function lineContentEnd(text: string, starts: number[], lineIndex: number): numb
   return next;
 }
 
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/**
+ * Move a UTF-16 offset off the middle of a surrogate pair so inserts cannot
+ * split an emoji or other non-BMP character. Mid-pair offsets snap forward
+ * to after the pair (still within document bounds).
+ */
+export function snapToCodePointBoundary(text: string, offset: number): number {
+  const clamped = Math.max(0, Math.min(offset, text.length));
+  if (
+    clamped > 0 &&
+    clamped < text.length &&
+    isHighSurrogate(text.charCodeAt(clamped - 1)) &&
+    isLowSurrogate(text.charCodeAt(clamped))
+  ) {
+    return clamped + 1;
+  }
+  return clamped;
+}
+
 /**
  * Map a 1-based line/column to a textarea UTF-16 caret offset.
  * Out-of-range lines clamp to the last line; columns clamp to the end of that line.
+ * The returned offset is never in the middle of a surrogate pair.
  */
 export function offsetForLineColumn(
   text: string,
@@ -48,7 +74,8 @@ export function offsetForLineColumn(
   const end = lineContentEnd(text, starts, targetLine - 1);
   const maxColumn = end - start + 1;
   const targetColumn = Math.min(Math.max(1, column), maxColumn);
-  return { offset: start + (targetColumn - 1), line: targetLine, column: targetColumn, lineCount };
+  const offset = snapToCodePointBoundary(text, start + (targetColumn - 1));
+  return { offset, line: targetLine, column: offset - start + 1, lineCount };
 }
 
 /** 1-based line/column for a UTF-16 offset (clamped to the document). */

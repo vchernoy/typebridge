@@ -6,7 +6,7 @@ Incremental keyboard navigation for long documents ([#60](https://github.com/vch
 
 - **Go to line** accepts `line` or `line:column` / `line,column` (1-based). Invalid input leaves the caret unchanged and shows guidance in the go-to status.
 - Out-of-range lines clamp to the last line; columns clamp to the end of that line (after the last character).
-- Line breaks are `\n`, `\r\n` or lone `\r`. Columns use the textarea’s UTF-16 offsets (the same units as `selectionStart`), so a single emoji may span two columns.
+- Line breaks are `\n`, `\r\n` or lone `\r`. Columns use the textarea’s UTF-16 offsets (the same units as `selectionStart`), so a single emoji may span two columns. If the requested column would place the caret in the middle of a surrogate pair, the caret snaps forward to the next code-point boundary and the status reports the resulting column.
 - **Go** or Enter in the field moves a collapsed caret, focuses the editor and reveals the target line with the same scroll helper as Find and Undo. The document text and Undo history are not changed.
 - **Cmd/Ctrl+G** focuses the go-to field (and leaves Focus mode if needed so the chrome is visible). The shortcut may also be claimed by the browser’s own Find UI on some platforms.
 
