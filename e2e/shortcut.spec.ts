@@ -80,7 +80,7 @@ test('Focus Mode keeps transliteration feedback visible and hides settings', asy
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.focus();
-  await page.keyboard.press('Control+Shift+E');
+  await page.keyboard.press('ControlOrMeta+Shift+Enter');
   await expect(page.locator('body')).toHaveClass(/focus-mode/);
   await expect(page.locator('.shortcut-panel')).toBeHidden();
   await expect(page.locator('.rules-panel')).toBeHidden();
@@ -154,4 +154,23 @@ test('Escape guards also apply while Focus mode is active (#67)', async ({ page 
   await expect(page.locator('body')).toHaveClass(/focus-mode/);
   await editor.press('Escape');
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+});
+
+test('Cmd/Ctrl+Shift+Enter toggles Focus mode without inserting text or searching', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Привет');
+  await editor.press('ControlOrMeta+Shift+Enter');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await editor.press('ControlOrMeta+Shift+Enter');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await expect(editor).toHaveValue('Привет');
+  await page.locator('#find-text').fill('zzz');
+  await page.locator('#find-text').press('ControlOrMeta+Shift+Enter');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(page.locator('#find-status')).toHaveText('');
+  // The old shortcut no longer switches modes.
+  await editor.press('ControlOrMeta+Shift+E');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
 });

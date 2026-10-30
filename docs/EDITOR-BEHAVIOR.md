@@ -6,7 +6,7 @@ Paste inserts clipboard text as-is, including Latin, Cyrillic, whitespace and Un
 
 ## Focus mode keys
 
-Escape in the editor, or with no control focused (for example after clicking the page background), toggles Focus mode in both directions, and Escape anywhere exits Focus mode. Outside Focus mode, Escape in Find/Replace, the title field, selects and other controls keeps its usual cancel role and does not switch modes. In either mode, Escape is ignored while an IME composition is active, when the key auto-repeats, and when another handler has already handled it (`preventDefault`). Cmd/Ctrl+Shift+E also toggles Focus mode. Focus returns to the editor after each switch.
+Escape in the editor, or with no control focused (for example after clicking the page background), toggles Focus mode in both directions, and Escape anywhere exits Focus mode. Outside Focus mode, Escape in Find/Replace, the title field, selects and other controls keeps its usual cancel role and does not switch modes. In either mode, Escape is ignored while an IME composition is active, when the key auto-repeats, and when another handler has already handled it (`preventDefault`). Cmd/Ctrl+Shift+Enter also toggles Focus mode from anywhere, including Find/Replace (where plain Enter and Shift+Enter still find the next and previous match). Focus returns to the editor after each switch.
 
 ## History and IME
 
