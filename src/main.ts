@@ -225,7 +225,7 @@ document.addEventListener('keydown', event => {
   if (isMac ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
   if (event.code !== (shortcut === 'default' ? 'Space' : shortcut.toUpperCase())) return;
   if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
-  if (!['editor', 'find-text', 'replace-text'].includes(event.target.id)) return;
+  if (!['editor', 'find-text', 'replace-text', 'draft-title'].includes(event.target.id)) return;
   event.preventDefault();
   enabled.checked = !enabled.checked;
   enabled.dispatchEvent(new Event('change', { bubbles: true }));
@@ -429,13 +429,13 @@ document.querySelector<HTMLButtonElement>('#rules-save')!.addEventListener('clic
     const next = parseRules(rulesText.value);
     saveOverrides(next);
     overrides = next;
-    editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides);
+    editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides);
     renderRules();
     rulesStatus.textContent = 'Rules saved locally';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', () => {
-  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
+  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
   catch { rulesStatus.textContent = 'Unable to save rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-export')!.addEventListener('click', () => {
@@ -452,7 +452,7 @@ document.querySelector<HTMLInputElement>('#rules-import')!.addEventListener('cha
   try {
     if (file.size > 65536) throw new Error('Rules file is too large');
     const next = importRules(await file.text());
-    saveOverrides(next); overrides = next; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules();
+    saveOverrides(next); overrides = next; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides); renderRules();
     rulesStatus.textContent = 'Rules imported';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Import failed'; }
   finally { input.value = ''; }
@@ -461,6 +461,10 @@ renderRules();
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
+// The draft title follows the global transliteration mode and rules (#89).
+const titleEditor = new Editor(draftTitle);
+titleEditor.setEnabled(enabled.checked);
+enabled.addEventListener('change', () => titleEditor.setEnabled(enabled.checked));
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
