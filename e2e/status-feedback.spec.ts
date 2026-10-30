@@ -683,8 +683,7 @@ async function createForeignRevision(page: Page, context: BrowserContext, text: 
   await other.close();
 }
 
-test('a database upgrade while a conflict copy is written keeps the storage warning', async ({ page, context }) => {
-  // Paused fake clock: the whole edit below is one save, however slowly it is typed.
+async function prepareConflict(page: Page, context: BrowserContext) {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/typebridge/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
@@ -694,10 +693,21 @@ test('a database upgrade while a conflict copy is written keeps the storage warn
   await field.fill('Исходный');
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный');
-  await expect.poll(renders).toBeGreaterThan(0); // No save still in flight.
+  await expect.poll(renders).toBeGreaterThan(0);
   await expect(status(page)).toHaveText('Saved locally');
-  // Another tab saves a newer revision, so this tab's next save becomes a conflict copy.
   await createForeignRevision(page, context, 'Исходный');
+  return { field, renders };
+}
+
+async function upgradeCapturedConnection(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const db = (window as unknown as { typebridgeDb: IDBDatabase }).typebridgeDb;
+    db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 1, newVersion: 2 }));
+  });
+}
+
+test('a database upgrade while a conflict copy is written keeps the storage warning', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
   await page.evaluate(() => {
     // Another tab upgrades the database while the conflict copy is being added.
     const add = IDBObjectStore.prototype.add;
@@ -719,18 +729,7 @@ test('a database upgrade while a conflict copy is written keeps the storage warn
 });
 
 test('a database upgrade after a conflict copy keeps the conflict notice with the storage warning', async ({ page, context }) => {
-  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
-  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
-  const field = page.locator('#editor');
-  await expect(field).toBeEnabled();
-  const renders = await watchDraftListRenders(page);
-  await field.fill('Исходный');
-  await page.clock.runFor(400);
-  await expect.poll(() => storedTexts(page)).toContain('Исходный');
-  await expect.poll(renders).toBeGreaterThan(0);
-  await expect(status(page)).toHaveText('Saved locally');
-  await createForeignRevision(page, context, 'Исходный');
+  const { field, renders } = await prepareConflict(page, context);
   // Capture the page's live IDB connection during the conflict write.
   await page.evaluate(() => {
     const add = IDBObjectStore.prototype.add;
@@ -756,77 +755,117 @@ test('a database upgrade after a conflict copy keeps the conflict notice with th
   await expect(status(page)).toHaveText('Text exported. ' + UPGRADED);
 });
 
-test('a failed follow-up save after a conflict copy keeps the conflict notice with the save warning', async ({ page, context }) => {
-  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
-  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
-  const field = page.locator('#editor');
-  await expect(field).toBeEnabled();
-  const renders = await watchDraftListRenders(page);
-  await field.fill('Исходный');
-  await page.clock.runFor(400);
-  await expect.poll(() => storedTexts(page)).toContain('Исходный');
-  await expect.poll(renders).toBeGreaterThan(0);
-  await createForeignRevision(page, context, 'Исходный');
-  // Conflict copy succeeds; a later put in the same persist loop fails after an in-flight edit.
-  await page.evaluate(() => {
-    const add = IDBObjectStore.prototype.add;
-    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
-      IDBObjectStore.prototype.add = add;
-      const result = add.apply(this, args);
-      const put = IDBObjectStore.prototype.put;
-      IDBObjectStore.prototype.put = function () {
-        IDBObjectStore.prototype.put = put;
-        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+for (const upgradeAfterFailure of [false, true]) {
+  test(`a failed follow-up save retains conflict feedback; later upgrade=${upgradeAfterFailure}`, async ({ page, context }) => {
+    const { field } = await prepareConflict(page, context);
+    await page.evaluate(() => {
+      const state = window as unknown as { typebridgeDb: IDBDatabase; holdConflict: boolean; conflictHeld: boolean };
+      const add = IDBObjectStore.prototype.add;
+      IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+        IDBObjectStore.prototype.add = add;
+        state.typebridgeDb = this.transaction.db;
+        state.holdConflict = true;
+        const copyId = (args[0] as { id: string }).id;
+        const result = add.apply(this, args);
+        // Keep the real transaction alive until actual keyboard input has changed the buffer.
+        result.addEventListener('success', () => {
+          state.conflictHeld = true;
+          const keepAlive = (): void => {
+            if (state.holdConflict) this.get(copyId).addEventListener('success', keepAlive);
+          };
+          keepAlive();
+        });
+        const put = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...values: Parameters<IDBObjectStore['put']>) {
+          if (this.name === 'documents' && (values[0] as { id: string }).id === copyId) {
+            IDBObjectStore.prototype.put = put;
+            throw new DOMException('Quota exceeded', 'QuotaExceededError');
+          }
+          return put.apply(this, values);
+        };
+        return result;
       };
-      // Keep persist() looping: bump the generation the same way an in-flight edit would.
-      const editor = document.querySelector<HTMLTextAreaElement>('#editor')!;
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, data: '!', inputType: 'insertText' }));
-      return result;
-    };
+    });
+    await field.press('End');
+    await field.pressSequentially(' — правка');
+    await page.clock.runFor(400);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
+    await field.pressSequentially('!');
+    await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
+    await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+    await expect(field).toHaveValue('Исходный — правка!');
+    await expect(status(page)).toHaveText(CONFLICT_COPY + ' ' + SAVE_FAILED);
+    if (upgradeAfterFailure) {
+      await upgradeCapturedConnection(page);
+      await expect(status(page)).toHaveText(CONFLICT_COPY + ' Changes are unsaved. ' + UPGRADED);
+      await expect(field).toHaveValue('Исходный — правка!');
+    } else {
+      // The injected failure is one-shot: retry succeeds but does not erase the conflict notice.
+      await field.pressSequentially('?');
+      await page.clock.runFor(400);
+      await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!?');
+      await expect(status(page)).toHaveText(CONFLICT_COPY);
+    }
   });
-  await field.press('End');
-  await field.pressSequentially(' — правка');
-  await page.clock.runFor(400);
-  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-  await expect(status(page)).toHaveText(CONFLICT_COPY + ' ' + SAVE_FAILED);
-});
+}
 
-test('draft-list refresh failure after a conflict copy stays before the storage warning', async ({ page, context }) => {
-  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
-  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
-  const field = page.locator('#editor');
-  await expect(field).toBeEnabled();
-  const renders = await watchDraftListRenders(page);
-  await field.fill('Исходный');
-  await page.clock.runFor(400);
-  await expect.poll(() => storedTexts(page)).toContain('Исходный');
-  await expect.poll(renders).toBeGreaterThan(0);
-  await createForeignRevision(page, context, 'Исходный');
-  await page.evaluate(() => {
-    const add = IDBObjectStore.prototype.add;
-    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
-      IDBObjectStore.prototype.add = add;
-      const db = this.transaction.db;
-      const result = add.apply(this, args);
-      // Storage warning is composed into the conflict notice; db is cleared so listStoredDrafts is skipped.
-      db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 1, newVersion: 2 }));
-      return result;
-    };
-    // Force the post-save refresh path to fail while re-rendering the draft list.
-    const replaceChildren = Element.prototype.replaceChildren;
-    Element.prototype.replaceChildren = function (this: Element, ...args: Parameters<Element['replaceChildren']>) {
-      if (this.id === 'drafts') {
-        Element.prototype.replaceChildren = replaceChildren;
-        throw new DOMException('InvalidStateError', 'InvalidStateError');
-      }
-      return replaceChildren.apply(this, args);
-    };
+for (const upgradeDuringRefresh of [false, true]) {
+  test(`draft-list refresh failure precedes fresh storage risk; upgrade during refresh=${upgradeDuringRefresh}`, async ({ page, context }) => {
+    const { field } = await prepareConflict(page, context);
+    await page.evaluate(duringRefresh => {
+      const add = IDBObjectStore.prototype.add;
+      IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+        IDBObjectStore.prototype.add = add;
+        const db = this.transaction.db;
+        const result = add.apply(this, args);
+        (window as unknown as { typebridgeDb: IDBDatabase }).typebridgeDb = db;
+        if (!duringRefresh) db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 1, newVersion: 2 }));
+        return result;
+      };
+      // Force the post-save refresh path to fail while re-rendering the draft list.
+      const replaceChildren = Element.prototype.replaceChildren;
+      Element.prototype.replaceChildren = function (this: Element, ...args: Parameters<Element['replaceChildren']>) {
+        if (this.id === 'drafts') {
+          Element.prototype.replaceChildren = replaceChildren;
+          if (duringRefresh) {
+            const db = (window as unknown as { typebridgeDb: IDBDatabase }).typebridgeDb;
+            db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 1, newVersion: 2 }));
+          }
+          throw new DOMException('InvalidStateError', 'InvalidStateError');
+        }
+        return replaceChildren.apply(this, args);
+      };
+    }, upgradeDuringRefresh);
+    await field.press('End');
+    await field.pressSequentially(' — правка');
+    await page.clock.runFor(400);
+    await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+    await expect(status(page)).toHaveText(CONFLICT_COPY + DRAFT_LIST_REFRESH_FAILED + ' ' + UPGRADED);
   });
-  await field.press('End');
-  await field.pressSequentially(' — правка');
-  await page.clock.runFor(400);
-  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-  await expect(status(page)).toHaveText(CONFLICT_COPY + DRAFT_LIST_REFRESH_FAILED + ' ' + UPGRADED);
-});
+}
+
+for (const upgrade of [false, true]) {
+  test(`opening a new draft clears conflict feedback; storage upgraded=${upgrade}`, async ({ page, context }) => {
+    const { field, renders } = await prepareConflict(page, context);
+    // Capture the page's live IDB connection during the conflict write.
+    await page.evaluate(() => {
+      const add = IDBObjectStore.prototype.add;
+      IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+        IDBObjectStore.prototype.add = add;
+        (window as unknown as { typebridgeDb: IDBDatabase }).typebridgeDb = this.transaction.db;
+        return add.apply(this, args);
+      };
+    });
+    await field.press('End');
+    await field.pressSequentially(' — правка');
+    await page.clock.runFor(400);
+    await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+    await expect.poll(renders).toBeGreaterThan(1);
+    await expect(status(page)).toHaveText(CONFLICT_COPY);
+    if (upgrade) await upgradeCapturedConnection(page);
+    await page.locator('#new-draft').click();
+    await expect(field).toHaveValue('');
+    await expect(status(page)).toHaveText(upgrade ? UPGRADED : 'Saved locally');
+    await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+  });
+}
