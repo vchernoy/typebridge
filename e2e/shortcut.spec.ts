@@ -57,7 +57,8 @@ test('macOS Command shortcut works while unrelated fields are ignored', async ({
   await page.goto('/typebridge/');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#shortcut-label')).toContainText('⌘+Shift+Space');
-  const unrelated = page.locator('#draft-title');
+  // The mappings box holds Latin rule text, so the shortcut must not apply there.
+  const unrelated = page.locator('#rules-text');
   const blocked = await unrelated.evaluate(el => {
     const event = new KeyboardEvent('keydown', { code: 'Space', key: ' ', metaKey: true, shiftKey: true, bubbles: true, cancelable: true });
     el.dispatchEvent(event);

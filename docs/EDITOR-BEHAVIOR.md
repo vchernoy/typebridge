@@ -12,6 +12,10 @@ Escape in the editor, or with no control focused (for example after clicking the
 
 Cmd/Ctrl+G focuses **Go to line** (exiting Focus mode when needed). Enter or **Go** moves a collapsed caret to a 1-based `line` or `line:column`, clamps out-of-range values, reveals the line and leaves text/history unchanged. The footer shows `Ln N, Col M` for the caret. Details and limits: [navigation](NAVIGATION.md).
 
+## Transliteration in other fields
+
+The draft title, Find and Replace follow the same transliteration mode and custom rules as the editor, and the transliteration shortcut toggles the mode from any of them. In Regex mode, Find and Replace stay literal so that regex syntax is not transliterated. The mappings box always keeps Latin rule text.
+
 ## History and IME
 
 The editor maintains its own delta history (up to 500 steps) because transformed text uses programmatic edits that do not reliably join native undo history. With transliteration off, consecutive typing at a collapsed caret is grouped into one step while keystrokes arrive less than 800 ms apart and nothing is available to redo; a longer pause, a selection replacement, a composition commit or any transliterated keystroke starts a new step. A step is recorded only when an input actually changes the text. Non-cancelable edits are allowed to complete and recorded from their resulting input; a non-cancelable native undo/redo clears custom history after the browser's change, avoiding replay of a stale custom stack at the cost of losing earlier custom undo steps. Composition is treated as one edit in the tested synthetic sequence; undo shortcuts are not intercepted during composition. These precautions do not establish equivalence with native history in all browsers and event orderings.
