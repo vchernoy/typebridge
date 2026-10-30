@@ -25,7 +25,7 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 
 [Audit #71](https://github.com/vchernoy/typebridge/issues/71) records baseline code, exact verification limits and AI handoff. #62 tracks search correctness/UX; #72 excluded core unit tests; #73 a recovery confirmation-test wait cycle; #74 stale documentation; #75 the Pages release gate. Existing #66–#70 own status feedback, Escape, macOS shortcut conflict, centralized shortcut settings and editor resizing. Design-dependent issues require their specified UX decision before implementation.
 
-This document is a snapshot. A merged implementation and a production-verified release are different stages; consult linked issues/PRs for later changes. Portable sharing, dual panels, Markdown/rich preview, retained version snapshots and advanced navigation/indentation remain future work.
+This document is a snapshot. A merged implementation and a production-verified release are different stages; consult linked issues/PRs for later changes. Portable sharing, dual panels, Markdown/rich preview, retained version snapshots and advanced navigation/indentation remain future work. Go to line and the caret line/column readout are the first shipped slice of [#60](https://github.com/vchernoy/typebridge/issues/60); see [navigation](NAVIGATION.md).
 
 ## P0 — Reliability and unfinished work
 

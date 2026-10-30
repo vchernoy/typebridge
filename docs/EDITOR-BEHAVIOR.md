@@ -8,6 +8,10 @@ Paste inserts clipboard text as-is, including Latin, Cyrillic, whitespace and Un
 
 Escape in the editor, or with no control focused (for example after clicking the page background), toggles Focus mode in both directions, and Escape anywhere exits Focus mode. Outside Focus mode, Escape in Find/Replace, the title field, selects and other controls keeps its usual cancel role and does not switch modes. In either mode, Escape is ignored while an IME composition is active, when the key auto-repeats, and when another handler has already handled it (`preventDefault`). Cmd/Ctrl+Shift+Enter also toggles Focus mode from anywhere, including Find/Replace (where plain Enter and Shift+Enter still find the next and previous match). Focus returns to the editor after each switch.
 
+## Go to line
+
+Cmd/Ctrl+G focuses **Go to line** (exiting Focus mode when needed). Enter or **Go** moves a collapsed caret to a 1-based `line` or `line:column`, clamps out-of-range values, reveals the line and leaves text/history unchanged. The footer shows `Ln N, Col M` for the caret. Details and limits: [navigation](NAVIGATION.md).
+
 ## History and IME
 
 The editor maintains its own delta history (up to 500 steps) because transformed text uses programmatic edits that do not reliably join native undo history. With transliteration off, consecutive typing at a collapsed caret is grouped into one step while keystrokes arrive less than 800 ms apart and nothing is available to redo; a longer pause, a selection replacement, a composition commit or any transliterated keystroke starts a new step. A step is recorded only when an input actually changes the text. Non-cancelable edits are allowed to complete and recorded from their resulting input; a non-cancelable native undo/redo clears custom history after the browser's change, avoiding replay of a stale custom stack at the cost of losing earlier custom undo steps. Composition is treated as one edit in the tested synthetic sequence; undo shortcuts are not intercepted during composition. These precautions do not establish equivalence with native history in all browsers and event orderings.
