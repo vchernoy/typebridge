@@ -1,17 +1,25 @@
 name: CI
 on:
-  push:
-    branches: [main]
+  # Pushes to main run this workflow through the Pages gate (pages.yml), so
+  # each main revision is checked once and deployed only if it passes.
   pull_request:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      upload-pages-artifact:
+        description: Upload the checked production build for Pages deployment.
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -21,6 +29,10 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run build
+      - if: inputs.upload-pages-artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -30,6 +42,8 @@ jobs:
         browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
