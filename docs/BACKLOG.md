@@ -17,5 +17,5 @@ GitHub Issues are the source of truth for scope, status and dependencies. Links 
 
 Implemented portions of the original backlog include the shell/live input, both conversion directions on a selection, custom rules, saved draft/history management and keyboard resizing. Whole-document conversion, dual panels and some original UX acceptance criteria remain incomplete or require review; do not bulk-close issues based on this summary.
 
-Current follow-ups: [#71 audit/handoff](https://github.com/vchernoy/typebridge/issues/71), #62 search audit, #72 test discovery, #73 recovery-test synchronization, #74 documentation, #75 deployment gating, and #66–#70 status/shortcut/Escape/resize decisions. Full priorities are in [ROADMAP.md](ROADMAP.md).
+Current follow-ups and priorities are listed once, in [ROADMAP.md](ROADMAP.md); see also [audit #71](https://github.com/vchernoy/typebridge/issues/71).
 

@@ -1,6 +1,6 @@
 # Product requirements
 
-> Historical design intent, not a current feature inventory. See [README](../README.md), [architecture](ARCHITECTURE.md), [settings lifetimes](SETTINGS-PERSISTENCE.md) and [roadmap](ROADMAP.md) for implemented behavior. Current tabs reopen the latest saved draft (#22), committed drafts/history use IndexedDB (#45), recovery is implemented (#53), and offline support/Pages deployment are enabled. Blank-new-tab wording and future feature descriptions below have not been implemented literally. This documentation update does not change product behavior.
+> Historical design intent, not a current feature inventory. See [README](../README.md), [architecture](ARCHITECTURE.md), [settings lifetimes](SETTINGS-PERSISTENCE.md) and [roadmap](ROADMAP.md) for implemented behavior. Current tabs reopen the latest saved draft (#22), committed drafts/history use IndexedDB (#45), emergency recovery is merged (#53) while recovery hardening and version history remain open (#37), and offline support/Pages deployment are enabled. Blank-new-tab wording and future feature descriptions below have not been implemented literally.
 
 
 ## Goal and audience

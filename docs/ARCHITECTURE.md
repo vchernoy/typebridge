@@ -5,7 +5,7 @@ Static TypeScript application, built with Vite, rendered in semantic vanilla HTM
 
 ## Current layout and intended boundaries
 
-Current code lives in `src/core/` (pure rules), `src/editor/` (DOM editing, IndexedDB, recovery and preference helpers), and `src/main.ts` (UI/event integration). The `src/state/`, `src/storage/` and `src/ui/` sections below describe intended responsibilities; those directories do not exist yet. No refactor is implied by this document.
+Current code lives in `src/core/` (transliteration rules; `custom-rules.ts` also loads and saves custom mappings in localStorage, an exception to the pure-core boundary below), `src/editor/` (DOM editing, IndexedDB, recovery and preference helpers), and `src/main.ts` (UI/event integration). The `src/state/`, `src/storage/` and `src/ui/` sections below describe intended responsibilities; those directories do not exist yet. No refactor is implied by this document.
 
 ## Boundaries
 
@@ -18,7 +18,7 @@ Current code lives in `src/core/` (pure rules), `src/editor/` (DOM editing, Inde
 Input processing for live editing needs bounded context around the caret to recognize digraphs, avoid rewriting unrelated text, and reset at boundaries and mode changes. Paste behavior, ambiguous sequences, capitalization, deletion and undo are first-class test cases. Batch conversion is a separate pure operation; reverse transliteration is potentially ambiguous and lossy.
 
 ## Quality and deployment
-Unit tests cover rules, conflicting mappings, case, Unicode, boundaries, storage validation and transactional concurrency. Browser tests cover typing, selection, IME where automation permits, clipboard fallback, resize, mobile layout, persistence and keyboard navigation. Manual testing remains necessary for real IMEs, screen readers and mobile devices. CI currently runs quality checks and a Chromium/Firefox/WebKit matrix on pull requests and main pushes. Pages is enabled on main pushes and manual dispatch; at this audit baseline it runs independently of CI. Exact-revision deployment gating is tracked in [#75](https://github.com/vchernoy/typebridge/issues/75); consult workflow YAML and [deployment notes](PREVIEW.md) for the current gate. Successful Actions runs and real-device/production verification are separate evidence.
+Unit tests cover rules, conflicting mappings, case, Unicode, boundaries, storage validation and transactional concurrency. Browser tests cover typing, selection, IME where automation permits, clipboard fallback, resize, mobile layout, persistence and keyboard navigation. Manual testing remains necessary for real IMEs, screen readers and mobile devices. CI runs quality checks and a Chromium/Firefox/WebKit matrix on pull requests. Pages deploys from main; for how main revisions are checked before deployment ([#75](https://github.com/vchernoy/typebridge/issues/75)), consult the workflow YAML and [deployment notes](PREVIEW.md). Successful Actions runs and real-device/production verification are separate evidence.
 
 ## IndexedDB persistence and durability
 
