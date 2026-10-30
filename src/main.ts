@@ -83,7 +83,8 @@ document.addEventListener('keydown', event => {
       setFocusMode(!inFocusMode);
     }
   }
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'e') {
+  // Cmd/Ctrl+Shift+Enter toggles Focus mode; Cmd/Ctrl+Shift+E opened Firefox's Network panel.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Enter' && !event.repeat && !event.isComposing) {
     event.preventDefault();
     setFocusMode(!document.body.classList.contains('focus-mode'));
   }
@@ -343,7 +344,7 @@ document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('cli
   field.focus({ preventScroll: true });
 });
 findInput.addEventListener('keydown', event => {
-  if (event.key === 'Enter') { event.preventDefault(); findNext(event.shiftKey); }
+  if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
 });
 document.addEventListener('keydown', event => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
