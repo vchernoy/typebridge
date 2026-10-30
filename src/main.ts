@@ -2,6 +2,7 @@ import { russianPack } from './core/russian';
 import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from './core/custom-rules';
 import './style.css';
 import { Editor } from './editor/editor';
+import { indentEdit } from './editor/indent';
 import { replaceMatchAt } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
@@ -184,6 +185,24 @@ function updateCaretPosition(): void {
   const { line, column } = lineColumnAtOffset(field.value, field.selectionStart);
   caretPosition.textContent = `Ln ${line}, Col ${column}`;
 }
+// Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
+// "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
+// outdent moves focus as usual.
+const TAB_INDENT_KEY = 'typebridge.editor.tabIndent.v1';
+const tabIndent = document.querySelector<HTMLInputElement>('#tab-indent')!;
+try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* Keep the default. */ }
+tabIndent.addEventListener('change', () => {
+  try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); } catch { /* The choice still applies to this page. */ }
+});
+field.addEventListener('keydown', event => {
+  if (event.key !== 'Tab' || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
+  const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
+  // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
+  if (!change && event.shiftKey) return;
+  event.preventDefault();
+  if (!change) return;
+  editor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
+});
 function updateStats(): void {
   const value = field.value;
   const characters = Array.from(value).length;
