@@ -2,6 +2,7 @@ import { russianPack } from './core/russian';
 import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from './core/custom-rules';
 import './style.css';
 import { Editor } from './editor/editor';
+import { expandReplacement } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
@@ -286,32 +287,29 @@ function matches(): Array<[number, number]> {
   return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
 }
 function replacementFor(match: RegExpExecArray, original: string): string {
-  if (!regexMode.checked) return replaceInput.value;
-  const start = match.index;
-  const end = start + match[0].length;
-  return replaceInput.value.replace(/\$\$|\$&|\$\x60|\$'|\$<([^>]+)>|\$(\d{1,2})/g, (token, name: string | undefined, index: string | undefined) => {
-    if (token === '$$') return '$';
-    if (token === '$&') return match[0];
-    if (token === '$\x60') return original.slice(0, start);
-    if (token === "$'") return original.slice(end);
-    if (name !== undefined) return match.groups ? (name in match.groups ? match.groups[name] ?? '' : token) : token;
-    if (index !== undefined) {
-      const n = Number(index);
-      if (n > 0 && n < match.length) return match[n] ?? '';
-    }
-    return token;
-  });
+  return regexMode.checked ? expandReplacement(replaceInput.value, match, original) : replaceInput.value;
 }
+let lastZeroWidthMatch: { position: number; text: string; query: string; matchCase: boolean; regex: boolean } | undefined;
+function resetSearchPosition(): void { lastZeroWidthMatch = undefined; }
+field.addEventListener('input', resetSearchPosition);
+field.addEventListener('pointerdown', resetSearchPosition);
+field.addEventListener('keydown', resetSearchPosition);
 function findNext(backwards = false): void {
   const found = matches();
   if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
   const position = backwards ? field.selectionStart : field.selectionEnd;
+  const skipCurrent = lastZeroWidthMatch?.position === position && field.selectionStart === field.selectionEnd &&
+    lastZeroWidthMatch.text === field.value && lastZeroWidthMatch.query === findInput.value &&
+    lastZeroWidthMatch.matchCase === matchCase.checked && lastZeroWidthMatch.regex === regexMode.checked;
   const match = backwards
     ? [...found].reverse().find(([start]) => start < position) ?? found[found.length - 1]
-    : found.find(([start]) => start >= position) ?? found[0];
+    : found.find(([start]) => skipCurrent ? start > position : start >= position) ?? found[0];
   field.focus({ preventScroll: true });
   field.setSelectionRange(match[0], match[1]);
-  // The browser scrolls textarea contents to the selected match.
+  lastZeroWidthMatch = match[0] === match[1]
+    ? { position: match[0], text: field.value, query: findInput.value, matchCase: matchCase.checked, regex: regexMode.checked }
+    : undefined;
+  editor.revealSelection();
   findStatus.textContent = `${found.length} match${found.length === 1 ? '' : 'es'}`;
 }
 document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());

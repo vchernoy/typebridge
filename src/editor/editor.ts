@@ -108,6 +108,7 @@ export class Editor {
   private notifyHistory(): void { this.field.dispatchEvent(new Event('historychange')); }
   undo(): void { this.history('undo'); }
   redo(): void { this.history('redo'); }
+  revealSelection(): void { this.revealEdit(this.field.selectionStart); }
   readonly field: HTMLTextAreaElement;
   constructor(field: HTMLTextAreaElement | HTMLInputElement) {
     this.field = field as HTMLTextAreaElement;
