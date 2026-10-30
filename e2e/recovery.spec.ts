@@ -118,27 +118,33 @@ test('already committed emergency snapshot is removed without a duplicate', asyn
 
 test('confirmed discard removes only the selected unsaved snapshot', async ({ page }) => {
   await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await editor.fill('Текущий черновик');
+  await expect(page.locator('#status')).toContainText('Saved locally');
   await page.evaluate(() => {
     for (const token of ['a', 'b']) localStorage.setItem(`typebridge.recovery.v1.closed.${token}`, JSON.stringify({ token, tab: 'closed', documentId: token, revision: 0, timestamp: Date.now(), title: token, text: 'Несохранённый текст ' + token }));
   });
+  const backupText = (token: string) => page.evaluate(key => {
+    const raw = localStorage.getItem(key);
+    return raw === null ? null : (JSON.parse(raw) as { text: string }).text;
+  }, `typebridge.recovery.v1.closed.${token}`);
   await page.reload();
+  // The recovery panel renders asynchronously; wait for either its ownership prompt or the backups.
   const check = page.getByRole('button', { name: 'Check emergency backups' });
+  const discardA = page.getByRole('button', { name: 'Discard backup for a' });
+  await expect(check.or(discardA)).toBeVisible();
   if (await check.isVisible()) await check.click();
-  await Promise.all([
-    page.waitForEvent('dialog').then(dialog => dialog.dismiss()),
-    page.getByRole('button', { name: 'Discard backup for a' }).click(),
-  ]);
-  await expect(page.getByRole('button', { name: 'Discard backup for a' })).toBeVisible();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('typebridge.recovery.v1.closed.a')!).text)).toBe('Несохранённый текст a');
-  await Promise.all([
-    page.waitForEvent('dialog').then(dialog => dialog.accept()),
-    page.getByRole('button', { name: 'Discard backup for a' }).click(),
-  ]);
-  await expect(page.getByRole('button', { name: 'Discard backup for a' })).toHaveCount(0);
+  page.once('dialog', dialog => dialog.dismiss());
+  await discardA.click();
+  await expect(discardA).toBeVisible();
+  expect(await backupText('a')).toBe('Несохранённый текст a');
+  page.once('dialog', dialog => dialog.accept());
+  await discardA.click();
+  await expect(discardA).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Discard backup for b' })).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('typebridge.recovery.v1.closed.a'))).toBeNull();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('typebridge.recovery.v1.closed.b')!).text)).toBe('Несохранённый текст b');
-  await expect(page.locator('#editor')).toHaveValue('');
+  expect(await backupText('a')).toBeNull();
+  expect(await backupText('b')).toBe('Несохранённый текст b');
+  await expect(editor).toHaveValue('Текущий черновик');
   await expect(page.locator('#drafts option')).toHaveCount(1);
 });
 
