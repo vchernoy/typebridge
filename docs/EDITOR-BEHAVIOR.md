@@ -4,6 +4,10 @@
 
 Paste inserts clipboard text as-is, including Latin, Cyrillic, whitespace and Unicode, regardless of the transliteration toggle. It replaces the selection using browser behavior and terminates the pending phonetic sequence. Cut also terminates that sequence. Automatic paste conversion is outside this editor; a future explicit conversion action can provide it.
 
+## Focus mode keys
+
+Escape in the editor, or with no control focused (for example after clicking the page background), toggles Focus mode in both directions, and Escape anywhere exits Focus mode. Outside Focus mode, Escape in Find/Replace, the title field, selects and other controls keeps its usual cancel role and does not switch modes. In either mode, Escape is ignored while an IME composition is active, when the key auto-repeats, and when another handler has already handled it (`preventDefault`). Cmd/Ctrl+Shift+E also toggles Focus mode. Focus returns to the editor after each switch.
+
 ## History and IME
 
 The editor maintains its own delta history (up to 500 steps) because transformed text uses programmatic edits that do not reliably join native undo history. With transliteration off, consecutive typing at a collapsed caret is grouped into one step while keystrokes arrive less than 800 ms apart and nothing is available to redo; a longer pause, a selection replacement, a composition commit or any transliterated keystroke starts a new step. A step is recorded only when an input actually changes the text. Non-cancelable edits are allowed to complete and recorded from their resulting input; a non-cancelable native undo/redo clears custom history after the browser's change, avoiding replay of a stale custom stack at the cost of losing earlier custom undo steps. Composition is treated as one edit in the tested synthetic sequence; undo shortcuts are not intercepted during composition. These precautions do not establish equivalence with native history in all browsers and event orderings.

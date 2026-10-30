@@ -73,9 +73,15 @@ function setFocusMode(enabled: boolean): void {
 focusButton.addEventListener('click', () => setFocusMode(!document.body.classList.contains('focus-mode')));
 exitFocusButton.addEventListener('click', () => setFocusMode(false));
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) {
-    event.preventDefault();
-    setFocusMode(false);
+  if (event.key === 'Escape' && !event.repeat && !event.isComposing && !event.defaultPrevented) {
+    // Escape toggles Focus mode from the editor or with nothing focused (body),
+    // and always exits it; it keeps its cancel role in Find/Replace, selects
+    // and other controls (#67).
+    const inFocusMode = document.body.classList.contains('focus-mode');
+    if (inFocusMode || event.target === field || event.target === document.body) {
+      event.preventDefault();
+      setFocusMode(!inFocusMode);
+    }
   }
   if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'e') {
     event.preventDefault();

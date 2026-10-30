@@ -100,3 +100,58 @@ test('Focus Mode keeps transliteration feedback visible and hides settings', asy
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
   await expect(page.locator('.shortcut-panel')).toBeVisible();
 });
+
+test('Escape in the editor enters and exits Focus mode (#67)', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Привет');
+  await editor.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(page.locator('#exit-focus')).toBeVisible();
+  await expect(editor).toBeFocused();
+  await editor.press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('Привет');
+});
+
+test('Escape keeps its cancel role outside the editor and during composition (#67)', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await page.locator('#find-text').press('Escape');
+  await page.locator('#draft-title').press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await editor.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true })));
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await editor.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', repeat: true, bubbles: true, cancelable: true })));
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+});
+
+test('Escape with no control focused toggles Focus mode (#67)', async ({ page }) => {
+  await page.goto('/typebridge/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(page.locator('#editor')).toBeFocused();
+});
+
+test('Escape guards also apply while Focus mode is active (#67)', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  const escape = (init: { isComposing?: boolean; repeat?: boolean }) => editor.evaluate((el, options) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...options })), init);
+  await escape({ isComposing: true });
+  await escape({ repeat: true });
+  // A descendant handler that already handled Escape keeps Focus mode on.
+  await editor.evaluate(el => el.addEventListener('keydown', event => event.preventDefault(), { once: true }));
+  await escape({});
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await editor.press('Escape');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+});
