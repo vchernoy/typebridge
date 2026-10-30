@@ -1,5 +1,8 @@
 # UI design specification
 
+> Historical design intent, not a current feature inventory. See [README](../README.md), [architecture](ARCHITECTURE.md), [settings lifetimes](SETTINGS-PERSISTENCE.md) and [roadmap](ROADMAP.md) for implemented behavior. Current tabs reopen the latest saved draft (#22), committed drafts/history use IndexedDB (#45), recovery is implemented (#53), and offline support/Pages deployment are enabled. Blank-new-tab wording and future feature descriptions below have not been implemented literally. This documentation update does not change product behavior.
+
+
 ## Visual direction
 Quiet, spacious writing workspace; strong hierarchy, high contrast, understated blue accent. Use system fonts, generous line-height, clear labels and visible focus rings. No imitation of competitors' branding. Theme tokens for surface, text, muted text, border, accent, focus and error; test contrast in light and dark themes and forced-colors mode.
 

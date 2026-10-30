@@ -1,5 +1,8 @@
 # Product requirements
 
+> Historical design intent, not a current feature inventory. See [README](../README.md), [architecture](ARCHITECTURE.md), [settings lifetimes](SETTINGS-PERSISTENCE.md) and [roadmap](ROADMAP.md) for implemented behavior. Current tabs reopen the latest saved draft (#22), committed drafts/history use IndexedDB (#45), recovery is implemented (#53), and offline support/Pages deployment are enabled. Blank-new-tab wording and future feature descriptions below have not been implemented literally. This documentation update does not change product behavior.
+
+
 ## Goal and audience
 Enable someone with a Latin keyboard to write, edit and copy Russian naturally, on desktop or mobile, without setting up an OS keyboard. Also support conversion of existing text. English UI initially; Russian UI is desirable after the MVP. Transliteration is not translation, spellchecking, or a guarantee of official passport spelling.
 
