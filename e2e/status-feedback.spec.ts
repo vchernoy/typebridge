@@ -15,6 +15,8 @@ function storedTexts(page: Page): Promise<string[]> {
   }));
 }
 const status = (page: Page) => page.locator('#status');
+const prefWarning = (page: Page) => page.locator('#preference-warning');
+const AUTOSAVE_PREF_FAILED = 'Could not save the autosave setting; it may reset on reload.';
 const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
@@ -270,15 +272,18 @@ test('a failed autosave preference write stays visible when toggling', async ({ 
   page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await page.locator('#autosave').uncheck();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Could not save preference. Autosave off');
+  await expect(status(page)).toHaveText('Autosave off');
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   await page.locator('#autosave').check();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Could not save preference. Autosave on');
+  await expect(status(page)).toHaveText('Autosave on');
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   // Deleting the saved copy leaves the text only in memory: say so.
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#autosave').uncheck();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Could not save preference. Autosave off — changes are unsaved');
+  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   await expect.poll(() => storedTexts(page)).toEqual([]);
 });
 
@@ -347,7 +352,8 @@ test('without browser storage, toggling autosave keeps the storage warning', asy
   await expect(field).toBeEnabled();
   await page.locator('#autosave').uncheck();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Could not save preference. Storage unavailable. Copy or export unsaved text before closing.');
+  await expect(status(page)).toHaveText(STORAGE_UNAVAILABLE);
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   await field.fill('Нельзя потерять');
   await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
   await page.locator('#autosave').check();
@@ -356,7 +362,8 @@ test('without browser storage, toggling autosave keeps the storage warning', asy
   page.once('dialog', dialog => dialog.dismiss());
   await page.locator('#autosave').uncheck();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Could not save preference. Save failed — browser storage is unavailable. Copy or export your text before closing.');
+  await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
 });
 
 test('switching to a clean draft with autosave off does not report unsaved changes', async ({ page }) => {
@@ -708,4 +715,41 @@ test('a database upgrade while a conflict copy is written keeps the storage warn
   await expect(status(page)).toHaveText('Another tab changed this draft. Your edits were saved as a conflict copy. ' + upgraded);
   await page.locator('#export-txt').click();
   await expect(status(page)).toHaveText('Text exported. ' + upgraded);
+});
+
+test('a failed preference write stays visible after later document saves until it is saved (#57)', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await field.fill('Первый');
+  await expect(status(page)).toHaveText('Saved locally');
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    (window as unknown as { unblockPrefs: () => void }).unblockPrefs = () => { Storage.prototype.setItem = setItem; };
+    Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+      if (key === 'typebridge.autosave.v1' || key === 'typebridge.transliteration.enabled.v1') throw new DOMException('Blocked', 'SecurityError');
+      return setItem.call(this, key, value);
+    };
+  });
+  await page.locator('#enabled').uncheck();
+  await expect(prefWarning(page)).toHaveText('Could not save the transliteration setting; it may reset on reload.');
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#autosave').uncheck();
+  await page.locator('#autosave').check();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(prefWarning(page)).toHaveText('Could not save the transliteration and autosave settings; they may reset on reload.');
+  // A successful document save does not repair the preferences.
+  await field.fill('Второй');
+  await expect.poll(() => storedTexts(page)).toContain('Второй');
+  await expect(status(page)).toHaveText('Saved locally');
+  await expect(prefWarning(page)).toBeVisible();
+  // Each warning clears only when its own preference is saved.
+  await page.evaluate(() => (window as unknown as { unblockPrefs: () => void }).unblockPrefs());
+  await page.locator('#enabled').check();
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#autosave').uncheck();
+  await page.locator('#autosave').check();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(prefWarning(page)).toBeHidden();
+  await expect(status(page)).toHaveText('Autosave on');
 });

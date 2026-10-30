@@ -92,6 +92,19 @@ document.addEventListener('keydown', event => {
 const editor = new Editor(field);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const status = document.querySelector<HTMLElement>('#status')!;
+// Preference write failures are shown apart from the document status line, so a
+// later successful draft save cannot hide them. Each clears only when that
+// preference is saved successfully (#57).
+const preferenceWarning = document.querySelector<HTMLElement>('#preference-warning')!;
+const failedPreferences = new Set<string>();
+function preferenceSaved(name: string, saved: boolean): void {
+  if (saved) failedPreferences.delete(name); else failedPreferences.add(name);
+  const names = [...failedPreferences];
+  preferenceWarning.textContent = names.length === 0 ? ''
+    : names.length === 1 ? `Could not save the ${names[0]} setting; it may reset on reload.`
+    : `Could not save the ${names.join(' and ')} settings; they may reset on reload.`;
+  preferenceWarning.hidden = names.length === 0;
+}
 // One status line carries both save state and action feedback (#52).
 // 'progress' is save state that a later save may replace; 'action' is
 // feedback the user caused; 'conflict' and 'failure' come from saving and
@@ -122,10 +135,10 @@ function riskText(): string {
 }
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 /** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
-function showSaving(prefix = ''): void {
-  if (storageProblem) setSaveStatus(prefix + riskText(), 'failure'); // No save can succeed.
-  else if (saveFailed) setSaveStatus(prefix + RETRYING, 'failure');  // Cleared only by a commit.
-  else setSaveStatus(prefix + 'Saving…');
+function showSaving(): void {
+  if (storageProblem) setSaveStatus(riskText(), 'failure'); // No save can succeed.
+  else if (saveFailed) setSaveStatus(RETRYING, 'failure');  // Cleared only by a commit.
+  else setSaveStatus('Saving…');
 }
 /** Show the save state alone, e.g. after loading a draft. */
 function showSaveState(): void {
@@ -224,8 +237,9 @@ enabled.addEventListener('change', () => {
   editor.setEnabled(enabled.checked);
   syncSearchEditors();
   modeAnnouncement.textContent = enabled.checked ? 'Transliteration on' : 'Transliteration off';
-  try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); }
-  catch { /* Editing must continue even when browser storage is blocked. */ }
+  // Editing continues even when browser storage is blocked.
+  try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); preferenceSaved('transliteration', true); }
+  catch { preferenceSaved('transliteration', false); }
 });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); notify('Copied'); }
@@ -587,17 +601,16 @@ draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {
-  let prefix = '';
-  try { setAutosaveEnabled(autosave.checked); } catch { prefix = 'Could not save preference. '; }
-  // Always show the accurate save state, with any preference error in front.
-  // Without storage, no save can succeed: keep saying so.
+  try { setAutosaveEnabled(autosave.checked); preferenceSaved('autosave', true); }
+  catch { preferenceSaved('autosave', false); }
+  // Always show the accurate save state. Without storage, no save can succeed: keep saying so.
   const announce = (text: string): void => {
     // storageProblem, not !db: db is also unset while initialization runs.
-    if (storageProblem) setSaveStatus(prefix + riskText(), 'failure');
-    else setSaveStatus(prefix + text);
+    if (storageProblem) setSaveStatus(riskText(), 'failure');
+    else setSaveStatus(text);
   };
   if (autosave.checked) {
-    if (dirty) showSaving(prefix); else announce('Autosave on');
+    if (dirty) showSaving(); else announce('Autosave on');
     if (dirty) { journalEdit(); void persist(); }
   }
   else {
