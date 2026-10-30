@@ -10,27 +10,33 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 
 | Issue | Feature | Current stage |
 | --- | --- | --- |
-| [#32](https://github.com/vchernoy/typebridge/issues/32) | Offline refresh | Implemented in PR #30 |
-| [#33](https://github.com/vchernoy/typebridge/issues/33) | Draft backup | Implemented in PR #27 |
-| [#34](https://github.com/vchernoy/typebridge/issues/34) | Custom mappings | Implemented in PR #25 |
-| [#35](https://github.com/vchernoy/typebridge/issues/35) | Regex replace | Implemented in PR #26 |
-| [#36](https://github.com/vchernoy/typebridge/issues/36) | Word statistics | Implemented in PR #28 |
-| [#37](https://github.com/vchernoy/typebridge/issues/37) | Draft recovery / version history | Research |
+| [#32](https://github.com/vchernoy/typebridge/issues/32) | Offline refresh | Merged in PR #30; production checks recorded separately |
+| [#33](https://github.com/vchernoy/typebridge/issues/33) | Draft backup | Merged in PR #27; production checks recorded separately |
+| [#34](https://github.com/vchernoy/typebridge/issues/34) | Custom mappings | Merged in PR #25; production checks recorded separately |
+| [#35](https://github.com/vchernoy/typebridge/issues/35) | Regex replace | Merged in PR #26; production checks recorded separately |
+| [#36](https://github.com/vchernoy/typebridge/issues/36) | Word statistics | Merged in PR #28; production checks recorded separately |
+| [#37](https://github.com/vchernoy/typebridge/issues/37) | Draft recovery / version history | Emergency recovery merged (#53); retained version snapshots remain research |
 | [#38](https://github.com/vchernoy/typebridge/issues/38) | Customizable UI/UX | Research |
 | [#39](https://github.com/vchernoy/typebridge/issues/39) | Portable share links | Ready for implementation |
-| [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Ready for implementation |
+| [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Plain-text preference merged (#42); Reading View remains open |
 | [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
+
+## Audit and current reliability follow-ups
+
+[Audit #71](https://github.com/vchernoy/typebridge/issues/71) records baseline code, exact verification limits and AI handoff. #62 tracks search correctness/UX; #72 excluded core unit tests; #73 a recovery confirmation-test wait cycle; #74 stale documentation; #75 the Pages release gate. Existing #66–#70 own status feedback, Escape, macOS shortcut conflict, centralized shortcut settings and editor resizing. Design-dependent issues require their specified UX decision before implementation.
+
+This document is a snapshot. A merged implementation and a production-verified release are different stages; consult linked issues/PRs for later changes. Portable sharing, dual panels, Markdown/rich preview, retained version snapshots and advanced navigation/indentation remain future work.
 
 ## P0 — Reliability and unfinished work
 
 | Feature | Why / acceptance criteria | Tracking |
 | --- | --- | --- |
-| Offline refresh and reopening | After one successful online installation, refresh/reopen while offline; preserve and continue editing saved Russian drafts; test Chromium, Firefox and WebKit. | [PR #30](https://github.com/vchernoy/typebridge/pull/30) — in progress |
-| Draft export/import (TXT, JSON) | Explicit local backup and restore; Unicode and WebKit filenames; never silently overwrite existing drafts. | [PR #27](https://github.com/vchernoy/typebridge/pull/27) — open |
-| Custom transliteration mappings | Local persistence, validation, import/export; do not mutate existing text when mappings change. | [PR #25](https://github.com/vchernoy/typebridge/pull/25) — open |
-| Regex Find & Replace | Optional regex, capture groups, invalid-pattern feedback, undo support and browser tests. | [PR #26](https://github.com/vchernoy/typebridge/pull/26) — open |
-| Live word count / reading time | Correct Unicode word boundaries and updates during editing. | [PR #28](https://github.com/vchernoy/typebridge/pull/28) — open |
-| Draft recovery hardening | Confirm autosave behavior on reload/crash, storage failures, accidental clear, and offline refresh. Add explicit recovery UX if needed. | Planned |
+| Offline refresh and reopening | After one successful online installation, refresh/reopen while offline; preserve and continue editing saved Russian drafts; test Chromium, Firefox and WebKit. | [PR #30](https://github.com/vchernoy/typebridge/pull/30) — merged; verify production separately |
+| Draft export/import (TXT, JSON) | Explicit local backup and restore; Unicode and WebKit filenames; never silently overwrite existing drafts. | [PR #27](https://github.com/vchernoy/typebridge/pull/27) — merged; verify production separately |
+| Custom transliteration mappings | Local persistence, validation, import/export; do not mutate existing text when mappings change. | [PR #25](https://github.com/vchernoy/typebridge/pull/25) — merged; verify production separately |
+| Regex Find & Replace | Optional regex, capture groups, invalid-pattern feedback, undo support and browser tests. | [PR #26](https://github.com/vchernoy/typebridge/pull/26) — merged; verify production separately |
+| Live word count / reading time | Correct Unicode word boundaries and updates during editing. | [PR #28](https://github.com/vchernoy/typebridge/pull/28) — merged; verify production separately |
+| Draft recovery hardening | Continue real-device/crash verification and design retained snapshots separately from emergency recovery. | IndexedDB #45 and emergency journal #53 merged; #37 remains open |
 
 ## P1 — Product UX and sharing
 
@@ -54,7 +60,7 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 - A true short URL requires persistent server-side mapping or a third-party shortener; **defer backend/shortener** until measurements justify it.
 
 ### Universal writing editor
-- Make plain-text editing a first-class mode; optional transliteration toggle with persisted preference.
+- Plain-text editing and the remembered transliteration toggle are implemented (#42). Keep them first-class while adding optional modes.
 - Distinguish **Document** (content), **Workspace** (tool layout) and **View Mode** (reading/editing presentation).
 - Provide an uncluttered Reading View for own drafts as well as shared links.
 

@@ -1,5 +1,8 @@
 # UI design specification
 
+> Historical design intent, not a current feature inventory. See the [note at the top of the PRD](PRD.md) and the [README](../README.md) for implemented behavior.
+
+
 ## Visual direction
 Quiet, spacious writing workspace; strong hierarchy, high contrast, understated blue accent. Use system fonts, generous line-height, clear labels and visible focus rings. No imitation of competitors' branding. Theme tokens for surface, text, muted text, border, accent, focus and error; test contrast in light and dark themes and forced-colors mode.
 
