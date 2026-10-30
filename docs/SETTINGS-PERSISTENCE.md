@@ -7,6 +7,7 @@ TypeBridge stores everything locally in the browser profile. Browser privacy set
 | Transliteration on/off | localStorage | Restored on reload, restart and new tabs; each tab writes only this preference. Already-open tabs retain their own current choice. |
 | Transliteration shortcut | localStorage | Restored on reload, restart and new tabs. |
 | Saved mapping overrides | localStorage | Restored on reload, restart and new tabs. Unsaved edits in the mapping form are transient. |
+| Tab indents | localStorage | Restored on reload, restart and new tabs. |
 | Autosave | localStorage | Restored on reload, restart and new tabs. Existing tabs keep their current control state. |
 | Match case and Regex | Separate localStorage keys | Restored on reload, restart and new tabs; an already-open tab retains its current values. Each preference is written independently. |
 | Find and Replace text | Separate sessionStorage keys | Restored on reload in the same tab. Independent new tabs start empty; duplicated tabs can inherit an initial copy. Closing a tab normally ends its session, but browser session-restore features may retain it across close or restart. Avoid searching for sensitive text on a shared browser; clear the fields when finished. |

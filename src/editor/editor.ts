@@ -286,6 +286,15 @@ export class Editor {
     this.field.setRangeText(replacement, start, end, 'select');
     this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
+  /** Replace a range and place the selection, as one undoable edit. */
+  replaceAndSelect(start: number, end: number, replacement: string, selectionStart: number, selectionEnd: number): void {
+    if (start < 0 || end < start || end > this.field.value.length) return;
+    this.pending = null;
+    this.before = this.capture();
+    this.field.setRangeText(replacement, start, end, 'preserve');
+    this.field.setSelectionRange(selectionStart, selectionEnd, this.field.selectionDirection ?? 'none');
+    this.field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
   load(value: string): void {
     this.field.value = value; this.field.setSelectionRange(0, 0);
     this.undoStack = []; this.redoStack = []; this.pending = null; this.before = null;
