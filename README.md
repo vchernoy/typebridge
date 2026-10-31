@@ -16,7 +16,7 @@ GitHub Pages deployment is enabled for main. Successful Actions deployment is no
 
 Use Node.js 22.13+ in the Node 22 line, or Node 24+, and npm. Run `npm ci`, then `npm run dev` and open `/typebridge/` at the URL Vite prints.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the issue, review and merge workflow. Before a PR, run `npm run lint`, `npm run typecheck`, `npm run test:unit`, and `npm run build`. Install browsers with `npx playwright install chromium firefox webkit` (Linux may need `--with-deps`), then run `npm run test:e2e`. Playwright tests the production build under `/typebridge/` in Chromium, Firefox and WebKit. See [editor behavior and manual test limits](docs/EDITOR-BEHAVIOR.md); Linux WebKit is not real Safari/iOS testing.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the issue, review and merge workflow. Before a PR, run `npm run lint`, `npm run format:check` (run `npm run format` to fix HTML/CSS formatting), `npm run typecheck`, `npm run test:unit`, and `npm run build`. Install browsers with `npx playwright install chromium firefox webkit` (Linux may need `--with-deps`), then run `npm run test:e2e`. Playwright tests the production build under `/typebridge/` in Chromium, Firefox and WebKit. See [editor behavior and manual test limits](docs/EDITOR-BEHAVIOR.md); Linux WebKit is not real Safari/iOS testing.
 
 ## Requirements and remaining work
 

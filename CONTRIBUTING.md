@@ -9,7 +9,7 @@ These rules apply to every contributor: people, AI coding agents and review bots
 
 ## Before opening a pull request
 
-Run `npm run lint`, `npm run typecheck`, `npm run test:unit` and `npm run build`, and run the Playwright tests that cover what you changed (`npm run test:e2e`). Add or update tests for behavior you change. In the PR description, say what changed, how you validated it, and what you could not check (for example real devices or other browsers).
+Run `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:unit` and `npm run build`, and run the Playwright tests that cover what you changed (`npm run test:e2e`). Add or update tests for behavior you change. In the PR description, say what changed, how you validated it, and what you could not check (for example real devices or other browsers).
 
 ## Review
 
