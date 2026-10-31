@@ -187,3 +187,135 @@ test('resize control follows the editor right edge when the width changes (#70)'
   await page.locator('#exit-focus').click();
   await expect.poll(gap).toBeLessThan(2);
 });
+
+test('corner grip sits on the editor corner and resizes it, down to the new minimum (#70)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await page.goto('/');
+  const field = page.locator('#editor');
+  const grip = page.locator('#resize-grip');
+  await expect(field).toBeEnabled();
+  await expect(grip).toHaveAttribute('aria-hidden', 'true');
+  await grip.scrollIntoViewIfNeeded();
+  const onCorner = async (): Promise<boolean> => {
+    const [f, g] = await Promise.all([field.boundingBox(), grip.boundingBox()]);
+    if (!f || !g) return false;
+    const right = f.x + f.width, bottom = f.y + f.height;
+    return g.x < right && right < g.x + g.width && g.y < bottom && bottom < g.y + g.height;
+  };
+  await expect.poll(onCorner).toBe(true);
+  const before = await field.boundingBox();
+  const start = await grip.boundingBox();
+  if (!before || !start) throw new Error('Missing bounding box');
+  const x = start.x + start.width / 2;
+  const y = start.y + start.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 120, y + 60, { steps: 8 });
+  await expect.poll(onCorner).toBe(true);
+  await page.mouse.up();
+  const after = await field.boundingBox();
+  expect(Math.round(after!.width)).toBe(Math.round(before.width - 120));
+  expect(Math.round(after!.height)).toBe(Math.round(before.height + 60));
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('typebridge.editor.size.v1'))).toContain(`${Math.round(before.width - 120)}px`);
+  // Drag far past the top-left: the editor stops at the new 160 × 96 minimum.
+  const now = await grip.boundingBox();
+  await page.mouse.move(now!.x + now!.width / 2, now!.y + now!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(20, 20, { steps: 10 });
+  await page.mouse.up();
+  const smallest = await field.boundingBox();
+  expect(Math.round(smallest!.width)).toBe(160);
+  expect(Math.round(smallest!.height)).toBe(96);
+  await expect.poll(onCorner).toBe(true);
+  // Focus mode keeps the grip on the corner and usable.
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('#exit-focus')).toBeVisible();
+  await expect.poll(onCorner).toBe(true);
+  await expect(page.locator('#resize-editor')).toHaveText('Resize');
+});
+
+async function expectGripClearOfText(page: import('@playwright/test').Page, expectedSize: number): Promise<void> {
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill(Array.from({ length: 60 }, (_, i) => `line ${i + 1} with enough words to reach the right edge of the editor`).join('\n'));
+  await field.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await page.locator('#resize-grip').scrollIntoViewIfNeeded();
+  const geometry = await page.evaluate(() => {
+    const textarea = document.querySelector<HTMLTextAreaElement>('#editor')!;
+    const grip = document.querySelector<HTMLElement>('#resize-grip')!.getBoundingClientRect();
+    const box = textarea.getBoundingClientRect();
+    const style = getComputedStyle(textarea);
+    const contentBottom = box.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom);
+    const contentRight = box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+    const hit = document.elementFromPoint(contentRight - 1, contentBottom - 1);
+    return { gripTop: grip.top, gripWidth: grip.width, contentBottom, contentRight, hitIsEditor: hit === textarea };
+  });
+  expect(geometry.gripWidth).toBe(expectedSize);
+  // The grip may cover the bottom padding strip, never the text area itself.
+  expect(geometry.gripTop).toBeGreaterThanOrEqual(geometry.contentBottom);
+  expect(geometry.hitIsEditor).toBe(true);
+  const sizeBefore = await field.evaluate(el => el.style.width + 'x' + el.style.height);
+  await page.mouse.click(geometry.contentRight - 4, geometry.contentBottom - 6);
+  await expect(field).toBeFocused();
+  const caret = await field.evaluate(el => (el as HTMLTextAreaElement).selectionStart);
+  expect(caret).toBeGreaterThan(0);
+  expect(await field.evaluate(el => el.style.width + 'x' + el.style.height)).toBe(sizeBefore);
+}
+
+test('corner grip does not cover editable text with a mouse (#70)', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto('/');
+  await expectGripClearOfText(page, 32);
+});
+
+test('corner grip touch target does not cover editable text on a touch screen (#70)', async ({ browser, browserName, baseURL }) => {
+  test.skip(browserName === 'firefox', 'Firefox does not support mobile emulation');
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
+  const page = await context.newPage();
+  await page.goto('/');
+  await expectGripClearOfText(page, 44);
+  await context.close();
+});
+
+for (const mode of ['Normal', 'Focus'] as const) {
+  test(`${mode} mode: dragging the grip or button moves the corner with the pointer, past 900 px and down to 160 × 96 (#70)`, async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto('/');
+    const field = page.locator('#editor');
+    await expect(field).toBeEnabled();
+    if (mode === 'Focus') {
+      await page.locator('#focus-mode').click();
+      await expect(page.locator('#exit-focus')).toBeVisible();
+    }
+    const drag = async (selector: string, dx: number, dy: number): Promise<{ right: number; bottom: number; width: number; height: number }> => {
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const before = await field.boundingBox();
+      const handle = await page.locator(selector).boundingBox();
+      if (!before || !handle) throw new Error('Missing bounding box');
+      const x = handle.x + handle.width / 2;
+      const y = handle.y + handle.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + dx, y + dy, { steps: 8 });
+      await page.mouse.up();
+      const after = await field.boundingBox();
+      if (!after) throw new Error('Missing bounding box');
+      // Height change, not bottom position: shrinking the page near its end can scroll it.
+      return { right: after.x + after.width - (before.x + before.width), bottom: after.height - before.height, width: after.width, height: after.height };
+    };
+    for (const selector of ['#resize-grip', '#resize-editor']) {
+      const narrower = await drag(selector, -150, -60);
+      expect(Math.abs(narrower.right + 150)).toBeLessThan(2);
+      expect(Math.abs(narrower.bottom + 60)).toBeLessThan(2);
+      const wider = await drag(selector, 150, 60);
+      expect(Math.abs(wider.right - 150)).toBeLessThan(2);
+      expect(Math.abs(wider.bottom - 60)).toBeLessThan(2);
+    }
+    const wide = await drag('#resize-grip', 200, 0);
+    expect(wide.width).toBeGreaterThan(1000);
+    await drag('#resize-grip', -2000, -2000);
+    const smallest = await field.boundingBox();
+    expect(Math.round(smallest!.width)).toBe(160);
+    expect(Math.round(smallest!.height)).toBe(96);
+  });
+}

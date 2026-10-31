@@ -327,7 +327,8 @@ test('editor can shrink to five lines and resize horizontally', async ({ page })
   expect(sizes.initialHeight).toBeGreaterThan(sizes.height);
   expect(sizes.height).toBeLessThan(200);
   expect(sizes.width).toBeGreaterThan(1000);
-  expect(sizes.resize).toBe('both');
+  // The drawn corner grip replaces native resizing on the main editor (#70).
+  expect(sizes.resize).toBe('none');
 });
 
 test('fresh page opens latest saved draft, reload keeps current tab selection', async ({ page, context }) => {
