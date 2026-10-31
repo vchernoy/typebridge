@@ -324,7 +324,9 @@ try {
 } catch { /* Keep the default if preferences are unavailable. */ }
 shortcutSelect.value = shortcut;
 function renderShortcut(): void {
-  const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  // The default uses Control on every platform: Command+Shift+Space can invoke Siri.
+  // Keep the established Command modifier for explicitly saved macOS F-key choices.
+  const modifier = shortcut !== 'default' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
   const label = shortcut === 'off' ? 'Shortcut disabled' : `${modifier}+Shift+${shortcut === 'default' ? 'Space' : shortcut.toUpperCase()}`;
   shortcutLabel.textContent = `(${label})`;
   enabled.title = label;
@@ -342,8 +344,8 @@ shortcutSelect.addEventListener('change', () => {
 document.querySelector<HTMLButtonElement>('#shortcut-reset')!.addEventListener('click', () => saveShortcut('default'));
 document.addEventListener('keydown', event => {
   if (event.isComposing || event.keyCode === 229 || event.repeat || event.altKey || !event.shiftKey || shortcut === 'off') return;
-  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-  if (isMac ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
+  const usesCommand = shortcut !== 'default' && /Mac|iPhone|iPad/.test(navigator.platform);
+  if (usesCommand ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
   if (event.code !== (shortcut === 'default' ? 'Space' : shortcut.toUpperCase())) return;
   if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
   if (!['editor', 'find-text', 'replace-text', 'draft-title'].includes(event.target.id)) return;

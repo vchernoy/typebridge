@@ -5,7 +5,7 @@ TypeBridge stores everything locally in the browser profile. Browser privacy set
 | Control or state | Storage | Lifetime and tab behavior |
 | --- | --- | --- |
 | Transliteration on/off | localStorage | Restored on reload, restart and new tabs; each tab writes only this preference. Already-open tabs retain their own current choice. |
-| Transliteration shortcut | localStorage | Restored on reload, restart and new tabs. |
+| Transliteration shortcut | localStorage | Restored on reload, restart and new tabs. Default is Ctrl+Shift+Space on every platform; existing `default` choices automatically use this binding, including Reset. Saved F7/F8/F9 choices retain Cmd+Shift on macOS and Ctrl+Shift elsewhere; Disabled remains disabled. |
 | Saved mapping overrides | localStorage | Restored on reload, restart and new tabs. Unsaved edits in the mapping form are transient. |
 | Tab indents | localStorage | Restored on reload, restart and new tabs. |
 | Autosave | localStorage | Restored on reload, restart and new tabs. Existing tabs keep their current control state. |

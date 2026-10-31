@@ -52,22 +52,22 @@ test('mode announcement and active shortcut remain visible with settings closed'
   await expect(page.locator('#shortcut-label')).toContainText('Shortcut disabled');
 });
 
-test('macOS Command shortcut works while unrelated fields are ignored', async ({ page }) => {
+test('macOS Control shortcut works while unrelated fields are ignored', async ({ page }) => {
   await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' }));
   await page.goto('/typebridge/');
   await expect(page.locator('#editor')).toBeEnabled();
-  await expect(page.locator('#shortcut-label')).toContainText('⌘+Shift+Space');
+  await expect(page.locator('#shortcut-label')).toContainText('Ctrl+Shift+Space');
   // The mappings box holds Latin rule text, so the shortcut must not apply there.
   const unrelated = page.locator('#rules-text');
   const blocked = await unrelated.evaluate(el => {
-    const event = new KeyboardEvent('keydown', { code: 'Space', key: ' ', metaKey: true, shiftKey: true, bubbles: true, cancelable: true });
+    const event = new KeyboardEvent('keydown', { code: 'Space', key: ' ', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
     el.dispatchEvent(event);
     return event.defaultPrevented;
   });
   expect(blocked).toBe(false);
   await expect(page.locator('#enabled')).toBeChecked();
   const handled = await page.locator('#find-text').evaluate(el => {
-    const event = new KeyboardEvent('keydown', { code: 'Space', key: ' ', metaKey: true, shiftKey: true, bubbles: true, cancelable: true });
+    const event = new KeyboardEvent('keydown', { code: 'Space', key: ' ', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
     el.dispatchEvent(event);
     return event.defaultPrevented;
   });
