@@ -85,7 +85,7 @@ test('stale deletion retries saving pending edits as a conflict copy', async ({ 
   await editor.fill('Важная правка первой вкладки 🙂');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(page.locator('#status')).toContainText('conflict copy');
+  await expect(page.locator('#status-line')).toContainText('conflict copy');
   await page.reload();
   await expect(editor).toHaveValue('Важная правка первой вкладки 🙂');
   await expect(page.locator('#drafts option')).toHaveCount(2);
