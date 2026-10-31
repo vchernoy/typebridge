@@ -11,8 +11,9 @@ import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type Recov
 import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from './editor/search-settings';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
+import { setupWritingPosition } from './editor/writing-position';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
-const { setFocusMode } = setupLayout(field);
+const { setFocusMode, restoreFocusMode } = setupLayout(field);
 const editor = new Editor(field);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
@@ -521,6 +522,7 @@ let saving: Promise<PersistResult> | undefined;
 let transitioning = false;
 let deleting = false;
 let loadingDraft = false;
+const writingPosition = setupWritingPosition(field, () => loadingDraft || field.disabled ? undefined : active.id);
 const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
 let ownershipAvailable = false;
@@ -612,6 +614,7 @@ function showDraft(): void {
     dirty = false;
     saveFailed = false; // The editor no longer holds the unsaved text.
   } finally { loadingDraft = false; }
+  writingPosition.restore(active.id);
   renderDrafts();
   updateStats();
 }
@@ -631,6 +634,7 @@ async function persist(): Promise<PersistResult> {
         clearPending(saved);
         if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         active = result.draft;
+        writingPosition.save();
         if (generation !== version && autosave.checked) journalEdit();
         rememberActive();
         saveFailed = false;
@@ -765,6 +769,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
       if (id && !next) throw new Error('Draft no longer exists');
       if (generation === version) break;
     }
+    writingPosition.save();
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
     showDraft();
@@ -812,6 +817,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed in another tab');
     committed = true;
     clearTimeout(saveTimer);
+    writingPosition.save();
     active = { ...newDraft(), revision: 0 };
     rememberActive();
     // The deletion is durable; clear the editor before a fallible list refresh.
@@ -957,7 +963,13 @@ async function initializeDrafts(): Promise<void> {
     storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
     setSaveStatus(storageProblem, 'failure');
     renderDrafts();
-  } finally { field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false; void renderRecovery(); }
+  } finally {
+    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
+    restoreFocusMode();
+    writingPosition.restore(active.id);
+    updateStats();
+    void renderRecovery();
+  }
 }
 void initializeDrafts();
 
