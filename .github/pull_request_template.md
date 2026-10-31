@@ -6,7 +6,7 @@ Closes #
 
 ## Not verified
 
-## Merge checklist ([CONTRIBUTING.md](../blob/main/CONTRIBUTING.md))
+## Merge checklist ([CONTRIBUTING.md](https://github.com/vchernoy/typebridge/blob/main/CONTRIBUTING.md))
 - [ ] Linked issue above
 - [ ] CI green on the final head
 - [ ] Independent review on the current changes, no open P0/P1 findings
