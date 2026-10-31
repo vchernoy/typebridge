@@ -14,7 +14,7 @@ Cmd/Ctrl+G focuses **Go to line** (exiting Focus mode when needed). Enter or **G
 
 ## Transliteration in other fields
 
-The draft title, Find and Replace follow the same transliteration mode and custom rules as the editor, and the transliteration shortcut toggles the mode from any of them. In Regex mode, Find and Replace stay literal so that regex syntax is not transliterated. The mappings box always keeps Latin rule text.
+The draft title, Find and Replace follow the same transliteration mode and custom rules as the editor, and the transliteration shortcut toggles the mode from any of them. This includes Regex mode: to mix Russian letters with Latin regex syntax such as `\s`, `[a-z]` or `$<name>`, toggle transliteration with the shortcut while typing the pattern (#102). The mappings box always keeps Latin rule text.
 
 ## Indentation
 

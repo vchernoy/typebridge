@@ -103,7 +103,7 @@ test('focus mode preserves text, selection and editor undo history', async ({ pa
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
 });
 
-test('Find and Replace share the global transliteration mode and bypass regex', async ({ page }) => {
+test('Find and Replace share the global transliteration mode, in Regex mode too', async ({ page }) => {
   await page.goto('/typebridge/');
   await expect(page.locator('#editor')).toBeEnabled();
   const find = page.locator('#find-text');
@@ -122,8 +122,31 @@ test('Find and Replace share the global transliteration mode and bypass regex', 
   await find.fill('');
   await find.pressSequentially('sh');
   await replacement.fill('$1');
-  await expect(find).toHaveValue('sh');
+  await expect(find).toHaveValue('ш');
   await expect(replacement).toHaveValue('$1');
+});
+
+test('a Regex pattern can mix Russian letters and Latin syntax by toggling the shortcut (#102)', async ({ page }) => {
+  await page.goto('/typebridge/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.locator('#enabled').uncheck();
+  await field.fill('привет   мир, привет мир');
+  await page.locator('#enabled').check();
+  await page.locator('#regex-mode').check();
+  const find = page.locator('#find-text');
+  await find.click();
+  await find.pressSequentially('privet');
+  await find.press('Control+Shift+Space');
+  await expect(page.locator('#enabled')).not.toBeChecked();
+  await find.pressSequentially('\\s+');
+  await find.press('Control+Shift+Space');
+  await expect(page.locator('#enabled')).toBeChecked();
+  await find.pressSequentially('mir');
+  await expect(find).toHaveValue('привет\\s+мир');
+  await page.locator('#replace-all').click();
+  await expect(page.locator('#find-status')).toHaveText('Replaced 2 matches');
+  await expect(field).toHaveValue(', ');
 });
 
 test('Find supports selection replacement and leaves IME composition untouched', async ({ page }) => {

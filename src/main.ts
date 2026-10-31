@@ -322,12 +322,12 @@ for (const [input, key] of [[matchCase, CASE_KEY], [regexMode, REGEX_KEY]] as co
 }
 const findEditor = new Editor(findInput);
 const replaceEditor = new Editor(replaceInput);
+// Find and Replace follow the transliteration toggle in literal and Regex mode alike, so a
+// pattern can mix Russian letters with Latin syntax by toggling while typing (#102).
 function syncSearchEditors(): void {
-  const active = enabled.checked && !regexMode.checked;
-  findEditor.setEnabled(active);
-  replaceEditor.setEnabled(active);
+  findEditor.setEnabled(enabled.checked);
+  replaceEditor.setEnabled(enabled.checked);
 }
-regexMode.addEventListener('change', syncSearchEditors);
 syncSearchEditors();
 function searchPattern(): RegExp | null {
   const query = findInput.value;
