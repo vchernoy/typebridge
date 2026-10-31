@@ -2,12 +2,14 @@ import { russianPack } from './core/russian';
 import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from './core/custom-rules';
 import './style.css';
 import { Editor } from './editor/editor';
-import { renderStatusMessage, type StatusMessage } from './editor/status';
+import { indentEdit } from './editor/indent';
+import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusMessage, type StatusMessage } from './editor/status';
 import { replaceMatchAt } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from './editor/search-settings';
+import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
 const editorSizeWarning = document.createElement('span');
@@ -74,11 +76,18 @@ function setFocusMode(enabled: boolean): void {
 focusButton.addEventListener('click', () => setFocusMode(!document.body.classList.contains('focus-mode')));
 exitFocusButton.addEventListener('click', () => setFocusMode(false));
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && document.body.classList.contains('focus-mode')) {
-    event.preventDefault();
-    setFocusMode(false);
+  if (event.key === 'Escape' && !event.repeat && !event.isComposing && !event.defaultPrevented) {
+    // Escape toggles Focus mode from the editor or with nothing focused (body),
+    // and always exits it; it keeps its cancel role in Find/Replace, selects
+    // and other controls (#67).
+    const inFocusMode = document.body.classList.contains('focus-mode');
+    if (inFocusMode || event.target === field || event.target === document.body) {
+      event.preventDefault();
+      setFocusMode(!inFocusMode);
+    }
   }
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'e') {
+  // Cmd/Ctrl+Shift+Enter toggles Focus mode; Cmd/Ctrl+Shift+E opened Firefox's Network panel.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Enter' && !event.repeat && !event.isComposing) {
     event.preventDefault();
     setFocusMode(!document.body.classList.contains('focus-mode'));
   }
@@ -86,6 +95,19 @@ document.addEventListener('keydown', event => {
 const editor = new Editor(field);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const status = document.querySelector<HTMLElement>('#status')!;
+// Preference write failures are shown apart from the document status line, so a
+// later successful draft save cannot hide them. Each clears only when that
+// preference is saved successfully (#57).
+const preferenceWarning = document.querySelector<HTMLElement>('#preference-warning')!;
+const failedPreferences = new Set<string>();
+function preferenceSaved(name: string, saved: boolean): void {
+  if (saved) failedPreferences.delete(name); else failedPreferences.add(name);
+  const names = [...failedPreferences];
+  preferenceWarning.textContent = names.length === 0 ? ''
+    : names.length === 1 ? `Could not save the ${names[0]} setting; it may reset on reload.`
+    : `Could not save the ${names.join(' and ')} settings; they may reset on reload.`;
+  preferenceWarning.hidden = names.length === 0;
+}
 // One status line carries both save state and action feedback (#52).
 // 'progress' is save state that a later save may replace; 'action' is
 // feedback the user caused; 'conflict' and 'failure' come from saving and
@@ -97,16 +119,21 @@ const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text be
 const AUTOSAVE_OFF_UNSAVED = 'Autosave off — changes are unsaved';
 let statusKind: StatusKind = 'progress';
 let conflictNoticeVersion = 0;
-let statusMessage: StatusMessage = { conflict: false, primary: '', risk: '', draftListRefreshFailed: false };
+let statusMessage: StatusMessage = { conflict: '', primary: '', risk: '', draftListRefreshFailed: false };
 function renderStatus(): void { status.textContent = renderStatusMessage(statusMessage); }
 let saveFailed = false;
 // Non-empty while browser storage cannot be used (failed or blocked
 // initialization, or an upgrade in another tab). Nothing in this page
 // restores it; only a reload can.
 let storageProblem = '';
+/** Single writer for status fields so clears/resets cannot skip a part. */
+function updateStatus(patch: Partial<StatusMessage>, kind?: StatusKind): void {
+  statusMessage = { ...statusMessage, ...patch };
+  if (kind !== undefined) statusKind = kind;
+  renderStatus();
+}
 function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'progress'): void {
-  statusMessage = { ...statusMessage, primary: text, risk: '' };
-  statusKind = kind; renderStatus();
+  updateStatus({ primary: text, risk: '' }, kind);
 }
 /** The warning that must stay visible while text or storage is at risk. */
 function riskText(): string {
@@ -119,30 +146,45 @@ function riskText(): string {
   return '';
 }
 function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): void {
-  statusMessage = { ...statusMessage, primary, risk };
-  statusKind = kind; renderStatus();
+  updateStatus({ primary, risk }, kind);
+}
+function statusKindForRisk(risk: string): Exclude<StatusKind, 'action' | 'conflict'> {
+  return risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure';
+}
+/** Explicit action/failure feedback: clears conflict and stale list-refresh suffix. */
+function announceAction(text: string, kind: StatusKind = 'action'): void {
+  const risk = riskText();
+  if (risk) updateStatus({ conflict: '', draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
+  else updateStatus({ conflict: '', draftListRefreshFailed: false, primary: text, risk: '' }, kind);
 }
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 /** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
-function showSaving(prefix = ''): void {
-  if (storageProblem) setSaveStatus(prefix + riskText(), 'failure'); // No save can succeed.
-  else if (saveFailed) setSaveStatus(prefix + RETRYING, 'failure');  // Cleared only by a commit.
-  else setSaveStatus(prefix + 'Saving…');
+function showSaving(): void {
+  if (storageProblem) setSaveStatus(riskText(), 'failure'); // No save can succeed.
+  else if (saveFailed) setSaveStatus(RETRYING, 'failure');  // Cleared only by a commit.
+  else setSaveStatus('Saving…');
 }
 /** Show the save state alone, e.g. after loading a draft. */
 function showSaveState(): void {
   const risk = riskText();
-  if (risk) setSaveStatus(risk, risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure');
+  if (risk) setSaveStatus(risk, statusKindForRisk(risk));
   else setSaveStatus(autosave.checked ? 'Saved locally' : 'Autosave off');
 }
 function notify(text: string): void {
   // An explicit action replaces conflict feedback, but never the current risk.
-  statusMessage.conflict = false;
+  announceAction(text);
+}
+function markDraftListRefreshFailed(): void {
+  updateStatus({ draftListRefreshFailed: true, risk: riskText() });
+}
+/** Announce a conflict created while leaving a draft for another document. */
+function announceLeftDraftConflict(): void {
   const risk = riskText();
-  if (risk) setRiskStatus(text.replace(/[.…]$/, ''), risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure', risk);
-  else { setSaveStatus(text); statusKind = 'action'; }
+  if (risk) updateStatus({ conflict: CONFLICT_COPY_LEFT, primary: '', risk }, statusKindForRisk(risk));
+  else updateStatus({ conflict: CONFLICT_COPY_LEFT, primary: '', risk: '' }, 'action');
 }
 const count = document.querySelector<HTMLElement>('#count')!;
+const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
 const syncHistory = () => { undo.disabled = !editor.canUndo; redo.disabled = !editor.canRedo; };
@@ -167,15 +209,41 @@ field.addEventListener('keydown', event => {
   event.preventDefault();
   editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
 });
+function updateCaretPosition(): void {
+  const { line, column } = lineColumnAtOffset(field.value, field.selectionStart);
+  caretPosition.textContent = `Ln ${line}, Col ${column}`;
+}
+// Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
+// "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
+// outdent moves focus as usual.
+const TAB_INDENT_KEY = 'typebridge.editor.tabIndent.v1';
+const tabIndent = document.querySelector<HTMLInputElement>('#tab-indent')!;
+try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* Keep the default. */ }
+tabIndent.addEventListener('change', () => {
+  try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); } catch { /* The choice still applies to this page. */ }
+});
+field.addEventListener('keydown', event => {
+  if (event.key !== 'Tab' || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
+  const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
+  // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
+  if (!change && event.shiftKey) return;
+  event.preventDefault();
+  if (!change) return;
+  editor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
+});
 function updateStats(): void {
   const value = field.value;
   const characters = Array.from(value).length;
   const words = (value.match(/[\p{L}\p{N}]+(?:['’\u2010-\u2015-][\p{L}\p{N}]+)*/gu) ?? []).length;
   const minutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 180));
   count.textContent = `${characters} characters · ${words} words · ${minutes} min read`;
+  updateCaretPosition();
 }
 field.addEventListener('input', updateStats);
 field.addEventListener('historychange', updateStats);
+field.addEventListener('keyup', updateCaretPosition);
+field.addEventListener('click', updateCaretPosition);
+field.addEventListener('select', updateCaretPosition);
 // Plain-text writing is a first-class mode. Remember the choice per browser.
 const TRANSLITERATION_KEY = 'typebridge.transliteration.enabled.v1';
 try { enabled.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; }
@@ -217,7 +285,7 @@ document.addEventListener('keydown', event => {
   if (isMac ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
   if (event.code !== (shortcut === 'default' ? 'Space' : shortcut.toUpperCase())) return;
   if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
-  if (!['editor', 'find-text', 'replace-text'].includes(event.target.id)) return;
+  if (!['editor', 'find-text', 'replace-text', 'draft-title'].includes(event.target.id)) return;
   event.preventDefault();
   enabled.checked = !enabled.checked;
   enabled.dispatchEvent(new Event('change', { bubbles: true }));
@@ -226,8 +294,9 @@ enabled.addEventListener('change', () => {
   editor.setEnabled(enabled.checked);
   syncSearchEditors();
   modeAnnouncement.textContent = enabled.checked ? 'Transliteration on' : 'Transliteration off';
-  try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); }
-  catch { /* Editing must continue even when browser storage is blocked. */ }
+  // Editing continues even when browser storage is blocked.
+  try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); preferenceSaved('transliteration', true); }
+  catch { preferenceSaved('transliteration', false); }
 });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); notify('Copied'); }
@@ -346,11 +415,46 @@ document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('cli
   field.focus({ preventScroll: true });
 });
 findInput.addEventListener('keydown', event => {
-  if (event.key === 'Enter') { event.preventDefault(); findNext(event.shiftKey); }
+  if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
+});
+const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
+const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
+function openGoto(): void {
+  if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  gotoInput.focus();
+  gotoInput.select();
+}
+function goToLine(): void {
+  const parsed = parseGotoInput(gotoInput.value);
+  if (!parsed) {
+    gotoStatus.textContent = gotoInput.value.trim() ? 'Use line or line:column' : 'Enter a line number';
+    return;
+  }
+  const target = offsetForLineColumn(field.value, parsed.line, parsed.column ?? 1);
+  field.focus({ preventScroll: true });
+  field.setSelectionRange(target.offset, target.offset);
+  editor.revealSelection();
+  updateCaretPosition();
+  gotoStatus.textContent = target.line === parsed.line && (parsed.column === undefined || target.column === parsed.column)
+    ? `Line ${target.line}, column ${target.column}`
+    : `Clamped to line ${target.line}, column ${target.column}`;
+}
+document.querySelector<HTMLButtonElement>('#goto-go')!.addEventListener('click', goToLine);
+gotoInput.addEventListener('keydown', event => {
+  // Skip IME confirmation Enter; composition must not navigate (#88 review).
+  if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.repeat || event.isComposing || event.defaultPrevented) return;
+  event.preventDefault();
+  goToLine();
 });
 document.addEventListener('keydown', event => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat || event.isComposing) return;
+  const key = event.key.toLowerCase();
+  if (key === 'f' && !event.shiftKey) {
     event.preventDefault(); findInput.focus(); findInput.select();
+  } else if (key === 'g' && !event.shiftKey) {
+    // Cmd/Ctrl+G: go to line. May also be reserved by the browser's Find UI.
+    event.preventDefault();
+    openGoto();
   }
 });
 
@@ -386,13 +490,13 @@ document.querySelector<HTMLButtonElement>('#rules-save')!.addEventListener('clic
     const next = parseRules(rulesText.value);
     saveOverrides(next);
     overrides = next;
-    editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides);
+    editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides);
     renderRules();
     rulesStatus.textContent = 'Rules saved locally';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', () => {
-  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
+  try { saveOverrides({}); overrides = {}; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
   catch { rulesStatus.textContent = 'Unable to save rules'; }
 });
 document.querySelector<HTMLButtonElement>('#rules-export')!.addEventListener('click', () => {
@@ -409,7 +513,7 @@ document.querySelector<HTMLInputElement>('#rules-import')!.addEventListener('cha
   try {
     if (file.size > 65536) throw new Error('Rules file is too large');
     const next = importRules(await file.text());
-    saveOverrides(next); overrides = next; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); renderRules();
+    saveOverrides(next); overrides = next; editor.setRules(overrides); findEditor.setRules(overrides); replaceEditor.setRules(overrides); titleEditor.setRules(overrides); renderRules();
     rulesStatus.textContent = 'Rules imported';
   } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Import failed'; }
   finally { input.value = ''; }
@@ -418,6 +522,10 @@ renderRules();
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
+// The draft title follows the global transliteration mode and rules (#89).
+const titleEditor = new Editor(draftTitle);
+titleEditor.setEnabled(enabled.checked);
+enabled.addEventListener('change', () => titleEditor.setEnabled(enabled.checked));
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
@@ -482,7 +590,7 @@ function sameContent(a: StoredDraft, b: StoredDraft): boolean {
 function savePending(): void {
   if (!dirty || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
-  catch { setSaveStatus('Unsaved text could not be backed up for reload. Copy or export it.'); }
+  catch { announceAction('Unsaved text could not be backed up for reload. Copy or export it.', 'failure'); }
 }
 function clearPending(saved: StoredDraft): void {
   try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
@@ -503,15 +611,11 @@ function renderDrafts(): void {
 async function refreshDrafts(): Promise<void> {
   if (db) drafts = await listStoredDrafts(db);
   renderDrafts();
-  if (statusMessage.draftListRefreshFailed) {
-    statusMessage.draftListRefreshFailed = false;
-    renderStatus();
-  }
+  if (statusMessage.draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
 }
 function showDraft(): void {
-  const hadConflict = statusMessage.conflict;
-  statusMessage.conflict = false;
-  statusMessage.draftListRefreshFailed = false;
+  // Callers decide post-load status; clearing here avoids a double render in switchDraft.
+  statusMessage = { ...statusMessage, conflict: '', draftListRefreshFailed: false };
   loadingDraft = true;
   try {
     editor.load(active.text);
@@ -522,7 +626,6 @@ function showDraft(): void {
   } finally { loadingDraft = false; }
   renderDrafts();
   updateStats();
-  if (hadConflict) showSaveState();
 }
 async function persist(): Promise<boolean> {
   clearTimeout(saveTimer);
@@ -547,9 +650,12 @@ async function persist(): Promise<boolean> {
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
           // Storage may have become unusable while the copy was written.
-          statusMessage.conflict = true;
           conflictNoticeVersion++;
-          setRiskStatus(dirty && !storageProblem ? 'Saving…' : '', 'conflict');
+          updateStatus({
+            conflict: CONFLICT_COPY,
+            primary: dirty && !storageProblem ? 'Saving…' : '',
+            risk: riskText(),
+          }, 'conflict');
         }
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
@@ -564,9 +670,7 @@ async function persist(): Promise<boolean> {
       try { await refreshDrafts(); }
       catch {
         if (!dirty && (statusMessage.conflict || statusKind === 'progress' || statusKind === 'conflict')) {
-          statusMessage.draftListRefreshFailed = true;
-          statusMessage.risk = riskText();
-          renderStatus();
+          markDraftListRefreshFailed();
         }
       }
       return !dirty;
@@ -575,7 +679,7 @@ async function persist(): Promise<boolean> {
       // Keep newer action feedback that already carries this exact warning;
       // keep a conflict notice in front of the warning; otherwise show risk alone.
       const risk = riskText() || SAVE_FAILED;
-      if (statusMessage.primary && statusMessage.risk === risk) { statusKind = 'failure'; renderStatus(); }
+      if (statusMessage.primary && statusMessage.risk === risk) updateStatus({}, 'failure');
       else setRiskStatus('', 'failure', risk);
       return false;
     }
@@ -602,20 +706,19 @@ field.addEventListener('input', scheduleSave);
 field.addEventListener('historychange', scheduleSave);
 draftTitle.addEventListener('input', scheduleSave);
 autosave.addEventListener('change', async () => {
-  statusMessage.conflict = false;
+  updateStatus({ conflict: '', draftListRefreshFailed: false });
   autosave.disabled = true;
   try {
-  let prefix = '';
-  try { setAutosaveEnabled(autosave.checked); } catch { prefix = 'Could not save preference. '; }
-  // Always show the accurate save state, with any preference error in front.
-  // Without storage, no save can succeed: keep saying so.
+  try { setAutosaveEnabled(autosave.checked); preferenceSaved('autosave', true); }
+  catch { preferenceSaved('autosave', false); }
+  // Always show the accurate save state. Without storage, no save can succeed: keep saying so.
   const announce = (text: string): void => {
     // storageProblem, not !db: db is also unset while initialization runs.
-    if (storageProblem) setSaveStatus(prefix + riskText(), 'failure');
-    else setSaveStatus(prefix + text);
+    if (storageProblem) setSaveStatus(riskText(), 'failure');
+    else setSaveStatus(text);
   };
   if (autosave.checked) {
-    if (dirty) showSaving(prefix); else announce('Autosave on');
+    if (dirty) showSaving(); else announce('Autosave on');
     if (dirty) { journalEdit(); void persist(); }
   }
   else {
@@ -655,16 +758,22 @@ async function switchDraft(id?: string): Promise<boolean> {
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
     showDraft();
-    // The new draft has no unsaved changes; don't keep the previous draft's state.
-    if (statusKind === 'progress' || statusKind === 'failure') showSaveState();
     // A conflict created by this switch's flush has not yet been announced to the user.
-    if (conflictNoticeVersion !== conflictVersionBeforeSwitch) {
-      statusMessage.conflict = true;
-      setRiskStatus('', 'conflict');
-    }
-    void refreshDrafts().catch(() => { notify('Could not refresh drafts'); });
+    // Wording names the draft that was left; kind follows notify()'s risk rule.
+    if (conflictNoticeVersion !== conflictVersionBeforeSwitch) announceLeftDraftConflict();
+    else showSaveState();
+    void refreshDrafts().catch(() => { markDraftListRefreshFailed(); });
     return true;
-  } catch { notify('Could not open draft — current text was kept'); return false; }
+  } catch {
+    // Persist may have already moved edits onto a conflict copy; keep that notice.
+    if (conflictNoticeVersion !== conflictVersionBeforeSwitch) {
+      const risk = riskText();
+      const primary = 'Could not open draft — current text was kept';
+      if (risk) updateStatus({ conflict: CONFLICT_COPY, draftListRefreshFailed: false, primary: primary.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
+      else updateStatus({ conflict: CONFLICT_COPY, draftListRefreshFailed: false, primary, risk: '' }, 'action');
+    } else notify('Could not open draft — current text was kept');
+    return false;
+  }
   finally { transitioning = false; renderDrafts(); }
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
@@ -704,9 +813,13 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     catch { notify('Draft deleted, but the draft list could not be refreshed'); }
   } catch {
     // Without storage, notify() adds the storage warning; no save will follow.
-    if (dirty && !saveFailed && autosave.checked && !storageProblem) setSaveStatus('Could not delete draft — your changes are unsaved; saving again…');
-    else if (dirty && !autosave.checked && !storageProblem) setSaveStatus('Could not delete draft — your changes are unsaved; autosave is off');
-    else notify(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
+    // Explicit delete failures clear conflict feedback; these two messages already
+    // state the save situation, so they do not also append riskText().
+    if (dirty && !saveFailed && autosave.checked && !storageProblem) {
+      updateStatus({ conflict: '', draftListRefreshFailed: false, primary: 'Could not delete draft — your changes are unsaved; saving again…', risk: '' }, 'progress');
+    } else if (dirty && !autosave.checked && !storageProblem) {
+      updateStatus({ conflict: '', draftListRefreshFailed: false, primary: 'Could not delete draft — your changes are unsaved; autosave is off', risk: '' }, 'progress');
+    } else notify(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
     if (!committed && dirty && autosave.checked) {
