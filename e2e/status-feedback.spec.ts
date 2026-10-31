@@ -895,6 +895,21 @@ test('switch-time conflict is announced after the selected draft loads', async (
   await expect(status(page)).toHaveText('Saved locally');
 });
 
+test('import after a conflict flush keeps the left-draft conflict notice', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#import-file').setInputFiles({
+    name: 'import.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('Импортированный текст'),
+  });
+  await expect(field).toHaveValue('Импортированный текст');
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Imported as a new draft');
+});
+
 test('a failed switch after a conflict flush keeps the open-failure through a later save', async ({ page, context }) => {
   const { field, targetId } = await prepareConflict(page, context, true);
   // Hold the conflict-copy transaction, delete the target, and leave dirty true so persist's

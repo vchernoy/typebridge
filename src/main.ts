@@ -151,11 +151,13 @@ function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): vo
 function statusKindForRisk(risk: string): Exclude<StatusKind, 'action' | 'conflict'> {
   return risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure';
 }
-/** Explicit action/failure feedback: clears conflict and stale list-refresh suffix. */
-function announceAction(text: string, kind: StatusKind = 'action'): void {
+/** Explicit action/failure feedback: clears conflict and stale list-refresh suffix unless kept. */
+function announceAction(text: string, options: { kind?: StatusKind; keepConflict?: boolean } = {}): void {
+  const kind = options.kind ?? 'action';
+  const conflict = options.keepConflict ? statusMessage.conflict : '';
   const risk = riskText();
-  if (risk) updateStatus({ conflict: '', draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
-  else updateStatus({ conflict: '', draftListRefreshFailed: false, primary: text, risk: '' }, kind);
+  if (risk) updateStatus({ conflict, draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
+  else updateStatus({ conflict, draftListRefreshFailed: false, primary: text, risk: '' }, kind);
 }
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 /** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
@@ -170,9 +172,10 @@ function showSaveState(): void {
   if (risk) setSaveStatus(risk, statusKindForRisk(risk));
   else setSaveStatus(autosave.checked ? 'Saved locally' : 'Autosave off');
 }
-function notify(text: string): void {
+function notify(text: string, options: { keepConflict?: boolean } = {}): void {
   // An explicit action replaces conflict feedback, but never the current risk.
-  announceAction(text);
+  // Callers may keep a conflict that switchDraft just announced (e.g. import).
+  announceAction(text, options);
 }
 function markDraftListRefreshFailed(): void {
   updateStatus(withDraftListRefreshFailure(statusMessage, riskText()));
@@ -1001,8 +1004,14 @@ importFile.addEventListener('change', async () => {
     // Save even when autosave is off: importing is an explicit save action.
     if (!db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
-    if (await switchDraft(result.draft.id)) notify('Imported as a new draft');
-    else notify('Import saved in Drafts; current text was kept');
+    const conflictVersionBeforeImport = conflictNoticeVersion;
+    if (await switchDraft(result.draft.id)) {
+      // Keep a conflict notice that this switch's flush just announced.
+      notify('Imported as a new draft', { keepConflict: conflictNoticeVersion !== conflictVersionBeforeImport });
+    } else if (conflictNoticeVersion === conflictVersionBeforeImport) {
+      notify('Import saved in Drafts; current text was kept');
+    }
+    // else: switchDraft already reported the conflict copy and open failure.
   } catch (error) {
     notify('Import failed: ' + (error instanceof Error ? error.message : String(error)));
   }
