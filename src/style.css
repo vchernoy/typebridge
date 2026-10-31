@@ -33,4 +33,3 @@ body.focus-mode .bottom { max-width:900px; margin-inline:auto }
 @media(prefers-color-scheme:dark) { body.focus-mode { background:#151b29 } }
 
 #resize-editor { display:block; margin:4px 0 0 auto; min-height:32px; padding:2px 10px; font-size:.8rem; cursor:nwse-resize; touch-action:none }
-

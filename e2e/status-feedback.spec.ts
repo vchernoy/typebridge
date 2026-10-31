@@ -934,13 +934,28 @@ test('turning autosave off during an in-flight conflict keeps the notice', async
   await page.clock.runFor(400);
   await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
   page.once('dialog', dialog => dialog.dismiss()); // Keep the conflict copy in Drafts.
-  // Release the held conflict write before the autosave handler awaits it.
+  // Start the toggle while the write is still held so the handler reaches `await saving`.
+  const unchecking = page.locator('#autosave').uncheck();
+  await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
   await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
-  await page.locator('#autosave').uncheck();
+  await unchecking;
   await expect(page.locator('#autosave')).not.toBeChecked();
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
   await expect(status(page)).toContainText(CONFLICT_COPY);
   await expect(status(page)).toContainText('Autosave off');
+});
+
+test('turning autosave off clears an earlier conflict notice', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(CONFLICT_COPY);
+  // Save finished; this notice must clear on toggle (Cancel keeps the draft).
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#conflict-notice')).toHaveText('');
+  await expect(status(page)).toHaveText('Autosave off');
 });
 
 test('a failed switch after a conflict flush keeps the open-failure through a later save', async ({ page, context }) => {
