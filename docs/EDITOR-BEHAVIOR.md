@@ -12,6 +12,10 @@ Escape in the editor, or with no control focused (for example after clicking the
 
 Cmd/Ctrl+G focuses **Go to line** (exiting Focus mode when needed). Enter or **Go** moves a collapsed caret to a 1-based `line` or `line:column`, clamps out-of-range values, reveals the line and leaves text/history unchanged. The footer shows `Ln N, Col M` for the caret. Details and limits: [navigation](NAVIGATION.md).
 
+## Writing view across reloads
+
+Focus mode is a saved browser preference: it reopens on reload, in a new tab and after browser restart where localStorage survives. The editor receives focus after its draft has loaded. Exiting Focus mode persists too, and Normal-mode dimensions remain independent. Caret, selection direction and editor scroll are saved per draft in this tab's session and restored after loading; stale positions clamp safely. This does not change text or Undo/Redo history. Settings panels stay collapsed on reload; page scroll remains browser managed. See [settings lifetimes](SETTINGS-PERSISTENCE.md).
+
 ## Transliteration in other fields
 
 The draft title, Find and Replace follow the same transliteration mode and custom rules as the editor, and the transliteration shortcut toggles the mode from any of them. This includes Regex mode: to mix Russian letters with Latin regex syntax such as `\s`, `[a-z]` or `$<name>`, toggle transliteration with the shortcut while typing the pattern (#102). The mappings box always keeps Latin rule text.

@@ -2,7 +2,8 @@
  * Editor layout: resize control with saved Normal-mode size, and Focus mode
  * with its Escape and Cmd/Ctrl+Shift+Enter keys (#67, #83).
  */
-export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enabled: boolean) => void } {
+export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void } {
+  const FOCUS_KEY = 'typebridge.focusMode.v1';
   const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
   const editorSizeWarning = document.createElement('span');
   editorSizeWarning.setAttribute('aria-live', 'polite');
@@ -53,7 +54,7 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
   const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
   let normalEditorSize = { width: '', height: '' };
-  function setFocusMode(enabled: boolean): void {
+  function applyFocusMode(enabled: boolean): void {
     if (enabled && !document.body.classList.contains('focus-mode')) {
       normalEditorSize = { width: field.style.width, height: field.style.height };
       field.style.width = ''; field.style.height = '';
@@ -64,6 +65,17 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     focusButton.setAttribute('aria-pressed', String(enabled));
     exitFocusButton.hidden = !enabled;
     field.focus({ preventScroll: true });
+  }
+  function setFocusMode(enabled: boolean): void {
+    applyFocusMode(enabled);
+    try { localStorage.setItem(FOCUS_KEY, enabled ? 'on' : 'off'); }
+    catch { /* Optional layout preference; editing remains available. */ }
+  }
+  function restoreFocusMode(): void {
+    // Called after the draft is loaded and the textarea is enabled. Do not write
+    // the preference or Normal-mode size while restoring it.
+    try { if (localStorage.getItem(FOCUS_KEY) === 'on') applyFocusMode(true); }
+    catch { /* Start in Normal mode when storage is unavailable. */ }
   }
   focusButton.addEventListener('click', () => setFocusMode(!document.body.classList.contains('focus-mode')));
   exitFocusButton.addEventListener('click', () => setFocusMode(false));
@@ -84,5 +96,5 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
       setFocusMode(!document.body.classList.contains('focus-mode'));
     }
   });
-  return { setFocusMode };
+  return { setFocusMode, restoreFocusMode };
 }
