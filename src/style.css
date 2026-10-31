@@ -290,9 +290,13 @@ body:not(.focus-mode) #editor {
 #editor {
   resize: none;
 }
-/* Drawn corner grip (#70): iOS Safari never shows the native textarea grip. */
+/* Drawn corner grip (#70): iOS Safari never shows the native textarea grip.
+   The touch target reaches outside the editor so that, inside it, it covers
+   only the bottom padding strip (16 px padding + 1 px border), never text at
+   rest: inside height = height - outset-y <= 14 px. */
 .resize-grip {
-  --grip-outset: 10px;
+  --grip-outset-x: 6px;
+  --grip-outset-y: 18px;
   position: absolute;
   z-index: 1;
   width: 32px;
@@ -311,11 +315,12 @@ body:not(.focus-mode) #editor {
       #7d8ca6 80% 88%,
       transparent 88%
     )
-    no-repeat right calc(var(--grip-outset) + 3px) bottom calc(var(--grip-outset) + 3px) / 14px 14px;
+    no-repeat right calc(var(--grip-outset-x) + 3px) bottom calc(var(--grip-outset-y) + 3px) / 14px 14px;
 }
 @media (any-pointer: coarse) {
   .resize-grip {
-    --grip-outset: 14px;
+    --grip-outset-x: 8px;
+    --grip-outset-y: 30px;
     width: 44px;
     height: 44px;
   }

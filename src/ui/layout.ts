@@ -44,10 +44,13 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     const gap = Math.max(0, contentRight - fieldBox.right);
     resizeEditor.style.marginRight = gap ? gap + 'px' : '';
     if (resizeGrip && resizeGrip.offsetParent === parent) {
-      // The grip's box reaches slightly past the corner so most of it lies outside the text.
-      const outset = parseFloat(getComputedStyle(resizeGrip).getPropertyValue('--grip-outset')) || 0;
-      resizeGrip.style.left = fieldBox.right - parentBox.left - parent.clientLeft + outset - resizeGrip.offsetWidth + 'px';
-      resizeGrip.style.top = fieldBox.bottom - parentBox.top - parent.clientTop + outset - resizeGrip.offsetHeight + 'px';
+      // The grip's box reaches past the corner (mostly downward) so inside the editor
+      // it covers only the bottom padding, not text.
+      const gripStyle = getComputedStyle(resizeGrip);
+      const outsetX = parseFloat(gripStyle.getPropertyValue('--grip-outset-x')) || 0;
+      const outsetY = parseFloat(gripStyle.getPropertyValue('--grip-outset-y')) || 0;
+      resizeGrip.style.left = fieldBox.right - parentBox.left - parent.clientLeft + outsetX - resizeGrip.offsetWidth + 'px';
+      resizeGrip.style.top = fieldBox.bottom - parentBox.top - parent.clientTop + outsetY - resizeGrip.offsetHeight + 'px';
     }
   }
   if (typeof ResizeObserver === 'function') {

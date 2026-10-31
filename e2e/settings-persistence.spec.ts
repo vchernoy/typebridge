@@ -233,3 +233,46 @@ test('corner grip sits on the editor corner and resizes it, down to the new mini
   await expect.poll(onCorner).toBe(true);
   await expect(page.locator('#resize-editor')).toHaveText('Resize');
 });
+
+async function expectGripClearOfText(page: import('@playwright/test').Page, expectedSize: number): Promise<void> {
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill(Array.from({ length: 60 }, (_, i) => `line ${i + 1} with enough words to reach the right edge of the editor`).join('\n'));
+  await field.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await page.locator('#resize-grip').scrollIntoViewIfNeeded();
+  const geometry = await page.evaluate(() => {
+    const textarea = document.querySelector<HTMLTextAreaElement>('#editor')!;
+    const grip = document.querySelector<HTMLElement>('#resize-grip')!.getBoundingClientRect();
+    const box = textarea.getBoundingClientRect();
+    const style = getComputedStyle(textarea);
+    const contentBottom = box.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom);
+    const contentRight = box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+    const hit = document.elementFromPoint(contentRight - 1, contentBottom - 1);
+    return { gripTop: grip.top, gripWidth: grip.width, contentBottom, contentRight, hitIsEditor: hit === textarea };
+  });
+  expect(geometry.gripWidth).toBe(expectedSize);
+  // The grip may cover the bottom padding strip, never the text area itself.
+  expect(geometry.gripTop).toBeGreaterThanOrEqual(geometry.contentBottom);
+  expect(geometry.hitIsEditor).toBe(true);
+  const sizeBefore = await field.evaluate(el => el.style.width + 'x' + el.style.height);
+  await page.mouse.click(geometry.contentRight - 4, geometry.contentBottom - 6);
+  await expect(field).toBeFocused();
+  const caret = await field.evaluate(el => (el as HTMLTextAreaElement).selectionStart);
+  expect(caret).toBeGreaterThan(0);
+  expect(await field.evaluate(el => el.style.width + 'x' + el.style.height)).toBe(sizeBefore);
+}
+
+test('corner grip does not cover editable text with a mouse (#70)', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.goto('/');
+  await expectGripClearOfText(page, 32);
+});
+
+test('corner grip touch target does not cover editable text on a touch screen (#70)', async ({ browser, browserName, baseURL }) => {
+  test.skip(browserName === 'firefox', 'Firefox does not support mobile emulation');
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
+  const page = await context.newPage();
+  await page.goto('/');
+  await expectGripClearOfText(page, 44);
+  await context.close();
+});
