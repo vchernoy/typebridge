@@ -280,8 +280,8 @@ body.focus-mode .bottom {
   touch-action: none;
 }
 
-/* Smaller Normal-mode minimums for the main editor (#70); Focus mode keeps its own. */
-body:not(.focus-mode) #editor {
+/* The same minimums for the main editor in Normal and Focus mode (#70). */
+#editor {
   min-width: min(100%, 160px);
   min-height: 96px;
 }

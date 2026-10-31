@@ -60,18 +60,27 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   }
   window.addEventListener('resize', alignResizeControls);
   alignResizeControls();
-  let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number } | undefined;
+  // Focus mode caps its default width at 900 px; a resize there may use the full
+  // width like Normal mode. The cap returns when Focus mode is entered or left.
+  function liftFocusWidthCap(): void {
+    if (document.body.classList.contains('focus-mode')) field.style.maxWidth = '100%';
+  }
+  let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number; widthFactor: number } | undefined;
   function enableDragResize(handle: HTMLElement): void {
     handle.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
       const rect = field.getBoundingClientRect();
-      resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
+      // Focus mode centers the editor, so its right edge moves half as far as its width
+      // changes; doubling the width change keeps the corner under the pointer (#70).
+      const widthFactor = document.body.classList.contains('focus-mode') ? 2 : 1;
+      resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, widthFactor };
       handle.setPointerCapture(event.pointerId);
       event.preventDefault();
     });
     handle.addEventListener('pointermove', event => {
       if (!resizeDrag || resizeDrag.pointer !== event.pointerId) return;
-      field.style.width = Math.max(MIN_WIDTH, resizeDrag.width + event.clientX - resizeDrag.x) + 'px';
+      liftFocusWidthCap();
+      field.style.width = Math.max(MIN_WIDTH, resizeDrag.width + (event.clientX - resizeDrag.x) * resizeDrag.widthFactor) + 'px';
       field.style.height = Math.max(MIN_HEIGHT, resizeDrag.height + event.clientY - resizeDrag.y) + 'px';
     });
     handle.addEventListener('pointerup', event => {
@@ -84,6 +93,7 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   resizeEditor.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     const rect = field.getBoundingClientRect();
+    liftFocusWidthCap();
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') field.style.width = Math.max(MIN_WIDTH, rect.width + (event.key === 'ArrowRight' ? 20 : -20)) + 'px';
     else field.style.height = Math.max(MIN_HEIGHT, rect.height + (event.key === 'ArrowDown' ? 20 : -20)) + 'px';
     event.preventDefault();
@@ -95,9 +105,9 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   function applyFocusMode(enabled: boolean): void {
     if (enabled && !document.body.classList.contains('focus-mode')) {
       normalEditorSize = { width: field.style.width, height: field.style.height };
-      field.style.width = ''; field.style.height = '';
+      field.style.width = ''; field.style.height = ''; field.style.maxWidth = '';
     } else if (!enabled && document.body.classList.contains('focus-mode')) {
-      field.style.width = normalEditorSize.width; field.style.height = normalEditorSize.height;
+      field.style.width = normalEditorSize.width; field.style.height = normalEditorSize.height; field.style.maxWidth = '';
     }
     document.body.classList.toggle('focus-mode', enabled);
     focusButton.setAttribute('aria-pressed', String(enabled));

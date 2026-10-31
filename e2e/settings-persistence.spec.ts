@@ -276,3 +276,46 @@ test('corner grip touch target does not cover editable text on a touch screen (#
   await expectGripClearOfText(page, 44);
   await context.close();
 });
+
+for (const mode of ['Normal', 'Focus'] as const) {
+  test(`${mode} mode: dragging the grip or button moves the corner with the pointer, past 900 px and down to 160 × 96 (#70)`, async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto('/');
+    const field = page.locator('#editor');
+    await expect(field).toBeEnabled();
+    if (mode === 'Focus') {
+      await page.locator('#focus-mode').click();
+      await expect(page.locator('#exit-focus')).toBeVisible();
+    }
+    const drag = async (selector: string, dx: number, dy: number): Promise<{ right: number; bottom: number; width: number; height: number }> => {
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const before = await field.boundingBox();
+      const handle = await page.locator(selector).boundingBox();
+      if (!before || !handle) throw new Error('Missing bounding box');
+      const x = handle.x + handle.width / 2;
+      const y = handle.y + handle.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + dx, y + dy, { steps: 8 });
+      await page.mouse.up();
+      const after = await field.boundingBox();
+      if (!after) throw new Error('Missing bounding box');
+      // Height change, not bottom position: shrinking the page near its end can scroll it.
+      return { right: after.x + after.width - (before.x + before.width), bottom: after.height - before.height, width: after.width, height: after.height };
+    };
+    for (const selector of ['#resize-grip', '#resize-editor']) {
+      const narrower = await drag(selector, -150, -60);
+      expect(Math.abs(narrower.right + 150)).toBeLessThan(2);
+      expect(Math.abs(narrower.bottom + 60)).toBeLessThan(2);
+      const wider = await drag(selector, 150, 60);
+      expect(Math.abs(wider.right - 150)).toBeLessThan(2);
+      expect(Math.abs(wider.bottom - 60)).toBeLessThan(2);
+    }
+    const wide = await drag('#resize-grip', 200, 0);
+    expect(wide.width).toBeGreaterThan(1000);
+    await drag('#resize-grip', -2000, -2000);
+    const smallest = await field.boundingBox();
+    expect(Math.round(smallest!.width)).toBe(160);
+    expect(Math.round(smallest!.height)).toBe(96);
+  });
+}
