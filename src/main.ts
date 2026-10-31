@@ -125,12 +125,11 @@ type PersistResult = { saved: boolean; conflict: boolean };
 type SwitchResult = { opened: boolean; conflict: boolean };
 /** Cancels a pending deferred conflict write so a newer setConflict/clear wins. */
 let conflictAnnounceToken = 0;
+/** True between clearing the live region and the rAF rewrite for an identical conflict. */
+let conflictReannouncePending = false;
 /** Body/separator only — conflict live region is owned by setConflict. */
 function renderStatus(): void {
-  const { body } = statusLineParts(statusMessage);
-  // Separator follows the live region so a deferred model-only conflict does not
-  // insert a leading space before the body.
-  const sep = conflictNotice.textContent && body ? ' ' : '';
+  const { sep, body } = statusLineParts(statusMessage, conflictNotice.textContent ?? '');
   if (statusSep.textContent !== sep) statusSep.textContent = sep;
   if (status.textContent !== body) status.textContent = body;
 }
@@ -147,33 +146,43 @@ function updateStatus(patch: Partial<StatusMessage>, kind?: StatusKind): void {
 }
 /**
  * Write the conflict live region. Identical wording re-announces on a later frame
- * so assistive tech sees a clear change; callers that only need the model updated
- * (switch flush while transitioning) set statusMessage.conflict without calling this.
+ * so assistive tech sees a clear change. Switch flushes that defer announcement
+ * leave the model empty until switchDraft calls this.
  */
 function setConflict(text: string, reannounce = false): void {
   statusMessage = { ...statusMessage, conflict: text };
   if (text) statusKind = 'conflict';
   if (!text) {
     conflictAnnounceToken++;
+    conflictReannouncePending = false;
     if (conflictNotice.textContent) conflictNotice.textContent = '';
     renderStatus();
     return;
   }
   if (reannounce && conflictNotice.textContent === text) {
     const token = ++conflictAnnounceToken;
+    conflictReannouncePending = true;
     conflictNotice.textContent = '';
-    requestAnimationFrame(() => {
+    renderStatus();
+    // Microtask: a later turn than this clear (so live regions observe a change), and
+    // not a timer — Playwright's paused fake clock would otherwise leave the notice blank.
+    queueMicrotask(() => {
       if (token !== conflictAnnounceToken) return;
-      if (statusMessage.conflict === text) conflictNotice.textContent = text;
+      conflictReannouncePending = false;
+      if (statusMessage.conflict !== text) return;
+      conflictNotice.textContent = text;
+      renderStatus();
     });
-  } else if (conflictNotice.textContent !== text) {
-    conflictAnnounceToken++;
-    conflictNotice.textContent = text;
+    return;
   }
+  conflictAnnounceToken++;
+  conflictReannouncePending = false;
+  if (conflictNotice.textContent !== text) conflictNotice.textContent = text;
   renderStatus();
 }
 function clearNotices(): void {
   conflictAnnounceToken++;
+  conflictReannouncePending = false;
   if (conflictNotice.textContent) conflictNotice.textContent = '';
   updateStatus({ conflict: '', draftListRefreshFailed: false });
 }
@@ -202,18 +211,14 @@ function announceAction(text: string, options: {
   kind?: StatusKind;
   /** Keep the current conflict string. */
   keepConflict?: boolean;
-  /** Set an explicit conflict notice (wins over keepConflict). */
-  conflict?: string;
   /** Messages that already describe save state must not also append riskText(). */
   omitRisk?: boolean;
 } = {}): void {
   const kind = options.kind ?? 'action';
-  if (options.conflict !== undefined) setConflict(options.conflict);
-  else if (!options.keepConflict) setConflict('');
-  else if (statusMessage.conflict && conflictNotice.textContent !== statusMessage.conflict) {
-    // Model was set without a live-region write (switch flush); announce once now.
-    conflictAnnounceToken++;
-    conflictNotice.textContent = statusMessage.conflict;
+  if (!options.keepConflict) setConflict('');
+  else if (statusMessage.conflict && !conflictReannouncePending && conflictNotice.textContent !== statusMessage.conflict) {
+    // Sync a deferred model-only write without cancelling a pending re-announce.
+    setConflict(statusMessage.conflict);
   }
   const risk = options.omitRisk ? '' : riskText();
   if (risk) updateStatus({ draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
@@ -712,18 +717,13 @@ async function persist(): Promise<PersistResult> {
           if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
           // Storage may have become unusable while the copy was written.
           createdConflict = true;
-          if (transitioning) {
-            // switchDraft announces once after load (or on failed open). Avoid a
-            // CONFLICT_COPY live-region write that would double-announce.
-            statusMessage = { ...statusMessage, conflict: CONFLICT_COPY };
-            statusKind = 'conflict';
-          } else {
-            setConflict(CONFLICT_COPY, true);
-          }
+          // While switching, leave announcement to switchDraft so early returns and
+          // the success path each announce once (avoids CONFLICT_COPY then LEFT).
+          if (!transitioning) setConflict(CONFLICT_COPY, true);
           updateStatus({
             primary: dirty && !storageProblem ? 'Saving…' : '',
             risk: riskText(),
-          }, 'conflict');
+          }, transitioning ? statusKind : 'conflict');
         }
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
@@ -817,6 +817,10 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
   let flushConflict = false;
+  /** Announce a flush conflict when the switch does not open another draft. */
+  const announceAbortedFlushConflict = (): void => {
+    if (flushConflict) setConflict(CONFLICT_COPY);
+  };
   try {
     clearTimeout(saveTimer);
     let next: StoredDraft | undefined;
@@ -824,9 +828,13 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
       while (dirty && autosave.checked) {
         const result = await persist();
         if (result.conflict) flushConflict = true;
-        if (!result.saved && saveFailed) return { opened: false, conflict: flushConflict };
+        if (!result.saved && saveFailed) {
+          announceAbortedFlushConflict();
+          return { opened: false, conflict: flushConflict };
+        }
       }
       if (dirty && !autosave.checked && !window.confirm('Discard unsaved changes? Copy or export them first to keep them.')) {
+        announceAbortedFlushConflict();
         return { opened: false, conflict: flushConflict };
       }
       const version = generation;
@@ -837,17 +845,16 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
     showDraft();
-    // Restore save state for progress/failure, and for a prior conflict notice showDraft
-    // just cleared. Keep action feedback the user triggered while the switch awaited I/O.
-    if (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict') showSaveState();
-    // Flush announced nothing to the live region while transitioning; name the draft left once.
+    // Always show the opened draft's save state — pre-switch action feedback must not stick.
+    showSaveState();
+    // Flush announced nothing while transitioning; name the draft that was left once.
     if (flushConflict) setConflict(CONFLICT_COPY_LEFT);
     void refreshDrafts().catch(() => {
       if (shouldAttachDraftListRefreshFailure()) markDraftListRefreshFailed();
     });
     return { opened: true, conflict: flushConflict };
   } catch {
-    // Persist recorded the conflict in the model without a live-region write; keep it once.
+    announceAbortedFlushConflict();
     announceAction('Could not open draft — current text was kept', { keepConflict: flushConflict });
     return { opened: false, conflict: flushConflict };
   }

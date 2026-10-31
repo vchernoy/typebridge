@@ -26,10 +26,17 @@ export function renderStatusBody(message: StatusMessage): string {
   return text;
 }
 
-/** Parts written into `#conflict-notice`, `#status-sep`, and `#status`. */
-export function statusLineParts(message: StatusMessage): { conflict: string; sep: string; body: string } {
+/**
+ * Parts written into `#conflict-notice`, `#status-sep`, and `#status`.
+ * Pass `displayedConflict` when the live region may briefly differ from the model
+ * (for example during a deferred re-announce).
+ */
+export function statusLineParts(
+  message: StatusMessage,
+  displayedConflict: string = message.conflict,
+): { conflict: string; sep: string; body: string } {
   const body = renderStatusBody(message);
-  return { conflict: message.conflict, sep: message.conflict && body ? ' ' : '', body };
+  return { conflict: message.conflict, sep: displayedConflict && body ? ' ' : '', body };
 }
 
 /** Full status line for tests and documentation expectations (matches `#status-line` textContent). */

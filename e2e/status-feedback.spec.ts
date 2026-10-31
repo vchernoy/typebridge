@@ -958,6 +958,66 @@ test('turning autosave off clears an earlier conflict notice', async ({ page, co
   await expect(status(page)).toHaveText('Autosave off');
 });
 
+test('a failed retry during a switch flush still announces the conflict', async ({ page, context }) => {
+  const { field, targetId } = await prepareConflict(page, context, true);
+  await page.evaluate(() => {
+    const state = window as unknown as { holdConflict: boolean; conflictHeld: boolean; copyId: string };
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+      IDBObjectStore.prototype.add = add;
+      state.holdConflict = true;
+      state.copyId = (args[0] as { id: string }).id;
+      const result = add.apply(this, args);
+      result.addEventListener('success', () => {
+        state.conflictHeld = true;
+        const keepAlive = (): void => {
+          if (state.holdConflict) this.get(state.copyId).addEventListener('success', keepAlive);
+        };
+        keepAlive();
+      });
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...values: Parameters<IDBObjectStore['put']>) {
+        if (this.name === 'documents' && (values[0] as { id: string }).id === state.copyId) {
+          IDBObjectStore.prototype.put = put;
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        }
+        return put.apply(this, values);
+      };
+      return result;
+    };
+  });
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  const switching = page.locator('#drafts').selectOption(targetId);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
+  // Keep dirty so persist retries after the conflict commit, then fails.
+  await field.pressSequentially('!');
+  await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
+  await switching;
+  await expect(field).toHaveValue('Исходный — правка!');
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+  // Early return must still write the notice; callers ignore switchDraft's result.
+  await expect(status(page)).toContainText(CONFLICT_COPY);
+  await expect(status(page)).toContainText(SAVE_FAILED);
+});
+
+test('a second identical conflict copy re-announces and keeps a space before save state', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(CONFLICT_COPY);
+  await createForeignRevision(page, context, 'Исходный — правка');
+  await field.pressSequentially('!');
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
+  await expect(page.locator('#conflict-notice')).toHaveText(CONFLICT_COPY);
+  // A later non-conflict save must keep the separator after the deferred re-announce.
+  await field.pressSequentially('?');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Saved locally');
+});
+
 test('a failed switch after a conflict flush keeps the open-failure through a later save', async ({ page, context }) => {
   const { field, targetId } = await prepareConflict(page, context, true);
   // Hold the conflict-copy transaction, delete the target, and leave dirty true so persist's

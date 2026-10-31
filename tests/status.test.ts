@@ -100,4 +100,11 @@ test('status line parts match the conflict / separator / body DOM split', () => 
     risk: '',
     draftListRefreshFailed: false,
   })).toEqual({ conflict: CONFLICT_COPY, sep: '', body: '' });
+  // During a deferred re-announce the live region is briefly empty.
+  expect(statusLineParts({
+    conflict: CONFLICT_COPY,
+    primary: 'Saving…',
+    risk: '',
+    draftListRefreshFailed: false,
+  }, '')).toEqual({ conflict: CONFLICT_COPY, sep: '', body: 'Saving…' });
 });
