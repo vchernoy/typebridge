@@ -813,7 +813,7 @@ updateStats();
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/typebridge/sw.js', { scope: '/typebridge/' })
+    void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .catch(() => { /* Editor remains usable without service worker support. */ });
   });
 }

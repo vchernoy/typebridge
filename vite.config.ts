@@ -3,6 +3,8 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 
+const BASE = '/';
+
 function offlineServiceWorker(): Plugin {
   return {
     name: 'typebridge-offline',
@@ -15,7 +17,7 @@ function offlineServiceWorker(): Plugin {
           const full = join(dir, item.name);
           if (item.isDirectory()) await visit(full);
           else if (item.isFile() && !item.name.endsWith('.map') && item.name !== 'sw.js') {
-            assets.push('/typebridge/' + relative(root, full).replaceAll('\\', '/'));
+            assets.push(BASE + relative(root, full).replaceAll('\\', '/'));
           }
         }
       }
@@ -24,12 +26,12 @@ function offlineServiceWorker(): Plugin {
       const hash = createHash('sha256');
       for (const path of assets) {
         hash.update(path);
-        hash.update(await readFile(join(root, path.slice('/typebridge/'.length))));
+        hash.update(await readFile(join(root, path.slice(BASE.length))));
       }
       const version = hash.digest('hex').slice(0, 16);
       const worker = `const CACHE = 'typebridge-${version}';
 const ASSETS = ${JSON.stringify(assets)};
-const HOME = '/typebridge/';
+const HOME = ${JSON.stringify(BASE)};
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
@@ -59,6 +61,6 @@ self.addEventListener('fetch', event => {
 }
 
 export default defineConfig({
-  base: '/typebridge/',
+  base: BASE,
   plugins: [offlineServiceWorker()],
 });

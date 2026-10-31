@@ -4,7 +4,7 @@ const U = '    ';
 const selection = (el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd];
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#enabled').uncheck();
   await expect(page.locator('#editor')).toBeEnabled();
 });

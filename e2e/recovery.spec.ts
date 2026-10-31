@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('interrupted write and immediate tab close leave a recoverable Unicode copy', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await editor.fill('Начало');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -12,7 +12,7 @@ test('interrupted write and immediate tab close leave a recoverable Unicode copy
   page.once('dialog', dialog => dialog.accept());
   await page.close({ runBeforeUnload: true });
   const next = await context.newPage();
-  await next.goto('/typebridge/');
+  await next.goto('/');
   const recover = next.getByRole('button', { name: /Recover Untitled draft/ });
   await expect(recover).toBeVisible();
   await recover.click();
@@ -24,17 +24,17 @@ test('interrupted write and immediate tab close leave a recoverable Unicode copy
 });
 
 test('recovery keeps a newer version from another tab and does not clear a newer journal', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#editor').fill('Оригинал');
   await expect(page.locator('#status')).toContainText('Saved locally');
-  const other = await context.newPage(); await other.goto('/typebridge/');
+  const other = await context.newPage(); await other.goto('/');
   await other.locator('#editor').fill('Новая версия');
   await expect(other.locator('#status')).toContainText('Saved locally');
   await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Несохранённая версия');
   await expect(page.locator('#status')).toContainText('Save failed');
   await page.close();
-  const third = await context.newPage(); await third.goto('/typebridge/');
+  const third = await context.newPage(); await third.goto('/');
   await third.getByRole('button', { name: /Recover Untitled draft/ }).click();
   await expect(third.locator('#status')).toContainText('Recovered a copy');
   await third.locator('#drafts').selectOption({ label: 'Untitled draft (recovered)' });
@@ -43,7 +43,7 @@ test('recovery keeps a newer version from another tab and does not clear a newer
 });
 
 test('autosave off does not create an emergency journal for new edits', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   page.once('dialog', dialog => dialog.dismiss());
   await page.locator('#autosave').uncheck();
   await page.locator('#editor').fill('Только в памяти');
@@ -51,7 +51,7 @@ test('autosave off does not create an emergency journal for new edits', async ({
 });
 
 test('journal quota failures are visible while editing remains available', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key, value) {
@@ -66,12 +66,12 @@ test('journal quota failures are visible while editing remains available', async
 });
 
 test('retry after committed recovery with failed journal cleanup does not duplicate copies', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Сохранить эту запись');
   await expect(page.locator('#status')).toContainText('Save failed');
   await page.close();
-  const other = await context.newPage(); await other.goto('/typebridge/');
+  const other = await context.newPage(); await other.goto('/');
   await other.evaluate(() => {
     const original = Storage.prototype.removeItem;
     (window as unknown as { restoreRemove: () => void }).restoreRemove = () => { Storage.prototype.removeItem = original; };
@@ -93,7 +93,7 @@ test('immediate reload recovers text after a failed IndexedDB save', async ({ pa
   await page.addInitScript(() => {
     IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); };
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await editor.fill('Быстрая строка 🙂');
   page.once('dialog', dialog => dialog.accept());
@@ -103,7 +103,7 @@ test('immediate reload recovers text after a failed IndexedDB save', async ({ pa
 });
 
 test('already committed emergency snapshot is removed without a duplicate', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#editor').fill('Сохранённая запись 🙂');
   await expect(page.locator('#status')).toContainText('Saved locally');
   await page.evaluate(() => {
@@ -117,7 +117,7 @@ test('already committed emergency snapshot is removed without a duplicate', asyn
 });
 
 test('confirmed discard removes only the selected unsaved snapshot', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await editor.fill('Текущий черновик');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -153,8 +153,8 @@ test('confirmed discard removes only the selected unsaved snapshot', async ({ pa
 });
 
 test('active tab snapshots are not presented as lost; closing exposes them', async ({ page, context }) => {
-  await page.goto('/typebridge/');
-  const other = await context.newPage(); await other.goto('/typebridge/');
+  await page.goto('/');
+  const other = await context.newPage(); await other.goto('/');
   await expect(other.locator('#editor')).toBeEnabled();
   await other.evaluate(() => {
     const observed = document.querySelector('[aria-label="Recover unsaved drafts"]')!;

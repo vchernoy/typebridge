@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 for (const saved of [false, true]) for (const delay of [0, 800]) {
   test(`delete pending edits: saved=${saved}, confirmation delay=${delay}`, async ({ page }) => {
-    await page.goto('/typebridge/');
+    await page.goto('/');
     const editor = page.locator('#editor');
     await expect(editor).toBeEnabled();
     if (saved) { await editor.fill('Saved'); await expect(page.locator('#status')).toContainText('Saved locally'); }
@@ -20,10 +20,10 @@ for (const saved of [false, true]) for (const delay of [0, 800]) {
 }
 
 test('database version change closes the old connection and warns the editor', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const second = await context.newPage();
-  await second.goto('/typebridge/');
+  await second.goto('/');
   await expect(second.locator('#editor')).toBeEnabled();
   const upgraded = await second.evaluate(() => new Promise<boolean>((resolve, reject) => {
     const request = indexedDB.open('typebridge', 2);
@@ -35,7 +35,7 @@ test('database version change closes the old connection and warns the editor', a
 });
 
 test('canceling deletion retains pending edits and autosave', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Оставить текст');
   page.once('dialog', dialog => dialog.dismiss());
@@ -47,7 +47,7 @@ test('canceling deletion retains pending edits and autosave', async ({ page }) =
 });
 
 test('failed deletion keeps the text and allows retry', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Не потерять');
@@ -72,13 +72,13 @@ test('failed deletion keeps the text and allows retry', async ({ page }) => {
 });
 
 test('stale deletion retries saving pending edits as a conflict copy', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Исходный длинный пост');
   await expect(page.locator('#status')).toContainText('Saved locally');
   const other = await context.newPage();
-  await other.goto('/typebridge/');
+  await other.goto('/');
   await expect(other.locator('#editor')).toHaveValue('Исходный длинный пост');
   await other.locator('#editor').fill('Версия другой вкладки');
   await expect(other.locator('#status')).toContainText('Saved locally');
@@ -92,7 +92,7 @@ test('stale deletion retries saving pending edits as a conflict copy', async ({ 
 });
 
 test('selecting current draft preserves pending text and undo history', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await page.locator('#enabled').uncheck();
@@ -107,7 +107,7 @@ test('selecting current draft preserves pending text and undo history', async ({
 });
 
 test('post-delete list failure does not pretend deleted text is still saved', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Русский пост и история');
@@ -130,7 +130,7 @@ test('post-delete list failure does not pretend deleted text is still saved', as
 });
 
 test('a failed IndexedDB deletion retries pending autosave without further typing', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Сохранённый текст');

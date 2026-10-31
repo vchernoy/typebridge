@@ -1,6 +1,6 @@
 # Preview builds and production deployment
 
-Pull requests run quality checks and Playwright in Chromium, Firefox and WebKit. They do not publish a preview or change production. To preview a branch locally, run `npm ci`, `npm run build`, and `npm run preview`, then open `/typebridge/`.
+Pull requests run quality checks and Playwright in Chromium, Firefox and WebKit. They do not publish a preview or change production. To preview a branch locally, run `npm ci`, `npm run build`, and `npm run preview`, then open the URL it prints.
 
 The historical PR #16 artifact-only workflow has been retired. A general hosted PR preview remains future work; do not use the production Pages environment for a PR-only artifact that could replace the live site. Any separate preview host needs a concrete design, permissions and cleanup policy first.
 

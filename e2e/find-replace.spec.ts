@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('find navigates forwards and backwards with wrap-around', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Alpha beta alpha');
   await page.getByLabel('Find', { exact: true }).fill('alpha');
@@ -16,7 +16,7 @@ test('find navigates forwards and backwards with wrap-around', async ({ page }) 
 });
 
 test('replace and replace all support undo, redo, case matching and literal punctuation', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('ETF etf ETF (test)');
   await page.getByLabel('Find', { exact: true }).fill('ETF');
@@ -37,7 +37,7 @@ test('replace and replace all support undo, redo, case matching and literal punc
 });
 
 test('exports a Unicode draft and imports a JSON draft as a new document', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет, мир!\\nВторая строка.');
   await page.getByRole('textbox', { name: 'Draft title' }).fill('Русский пост');
@@ -64,7 +64,7 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
 });
 
 test('word statistics count Cyrillic, Latin, punctuation and update on undo', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет, мир! Hello 2026.');
   await expect(page.locator('#count')).toHaveText('24 characters · 4 words · 1 min read');
@@ -73,7 +73,7 @@ test('word statistics count Cyrillic, Latin, punctuation and update on undo', as
 });
 
 test('regex find and replace supports captures, named groups, undo and invalid patterns', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('2026-10-27 and 2026-11-03');
   await page.getByRole('checkbox', { name: 'Regex (.*)' }).check();
@@ -89,7 +89,7 @@ test('regex find and replace supports captures, named groups, undo and invalid p
 });
 
 test('focus mode preserves text, selection and editor undo history', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет, мир');
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(2, 5));
@@ -104,7 +104,7 @@ test('focus mode preserves text, selection and editor undo history', async ({ pa
 });
 
 test('Find and Replace share the global transliteration mode, in Regex mode too', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const find = page.locator('#find-text');
   const replacement = page.locator('#replace-text');
@@ -127,7 +127,7 @@ test('Find and Replace share the global transliteration mode, in Regex mode too'
 });
 
 test('a Regex pattern can mix Russian letters and Latin syntax by toggling the shortcut (#102)', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#enabled').uncheck();
@@ -150,7 +150,7 @@ test('a Regex pattern can mix Russian letters and Latin syntax by toggling the s
 });
 
 test('Find supports selection replacement and leaves IME composition untouched', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const find = page.locator('#find-text');
   await find.pressSequentially('mir');

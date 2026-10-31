@@ -4,7 +4,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('requestfailed', request => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
     if (!registration.active) throw new Error('Offline worker did not activate');

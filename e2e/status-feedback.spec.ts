@@ -57,7 +57,7 @@ const restoreSaves = (page: Page) => page.evaluate(() => (window as unknown as {
 test('a background autosave does not replace newer conversion guidance', async ({ page }) => {
   // install() alone lets fake time flow; pause it so only runFor() fires timers.
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.getByRole('textbox', { name: 'Your text' });
   await expect(field).toBeEnabled();
@@ -86,7 +86,7 @@ test('a background autosave does not replace newer conversion guidance', async (
 
 test('a failed save stays visible after later action feedback until a save succeeds', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
@@ -114,7 +114,7 @@ test('a failed save stays visible after later action feedback until a save succe
 });
 
 test('save progress messages are replaced when the save they announce succeeds', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
@@ -144,14 +144,14 @@ test('recovered text reports a completed save', async ({ page }) => {
       id: 'pending-status', title: 'Черновик', text: 'Восстановленный текст', updatedAt: 1, revision: 0,
     }));
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toHaveValue('Восстановленный текст');
   await expect.poll(() => storedTexts(page)).toContain('Восстановленный текст');
   await expect(status(page)).toHaveText('Saved locally');
 });
 
 test('discarding text after a failed save stops reporting unsaved text', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
@@ -176,7 +176,7 @@ test('discarding text after a failed save stops reporting unsaved text', async (
 });
 
 test('a save that resolves an earlier failure reports success without a new edit', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
@@ -193,7 +193,7 @@ test('a save that resolves an earlier failure reports success without a new edit
 });
 
 test('a background save on hiding the page clears an earlier failure', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
@@ -215,7 +215,7 @@ test('a background save on hiding the page clears an earlier failure', async ({ 
 test('action feedback during a successful retry does not leave a stale failure', async ({ page }) => {
   // install() alone lets fake time flow; pause it so only runFor() fires timers.
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
@@ -238,7 +238,7 @@ test('action feedback during a successful retry does not leave a stale failure',
 });
 
 test('a failed reload backup gives way to the save that follows it', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
@@ -258,7 +258,7 @@ test('a failed reload backup gives way to the save that follows it', async ({ pa
 });
 
 test('a failed autosave preference write stays visible when toggling', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
@@ -288,7 +288,7 @@ test('a failed autosave preference write stays visible when toggling', async ({ 
 });
 
 test('with autosave off after a failure, action feedback keeps the unsaved warning without advising a retry', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
@@ -308,7 +308,7 @@ test('without browser storage, failures do not advise retrying by editing', asyn
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await expect(status(page)).toContainText('Storage unavailable');
@@ -320,7 +320,7 @@ test('without browser storage, failures do not advise retrying by editing', asyn
 });
 
 test('a failed delete with autosave off does not promise another save', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
@@ -347,7 +347,7 @@ test('without browser storage, toggling autosave keeps the storage warning', asy
       return setItem.call(this, key, value);
     };
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#autosave').uncheck();
@@ -367,7 +367,7 @@ test('without browser storage, toggling autosave keeps the storage warning', asy
 });
 
 test('switching to a clean draft with autosave off does not report unsaved changes', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
@@ -384,7 +384,7 @@ test('switching to a clean draft with autosave off does not report unsaved chang
 });
 
 test('with autosave off, Copy, Export and Convert keep the unsaved-changes warning until the edit is saved', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
@@ -414,7 +414,7 @@ test('a failed IndexedDB initialization stays visible after Copy, Export and Con
   });
   // Paused fake clock: the autosave debounce runs only when the test says so.
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
@@ -442,7 +442,7 @@ test('a blocked database upgrade stays visible after action feedback', async ({ 
       return request;
     } } });
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const blocked = 'Database upgrade blocked. Close other TypeBridge tabs, then reload.';
   await expect(status(page)).toHaveText(blocked);
@@ -454,12 +454,12 @@ test('a blocked database upgrade stays visible after action feedback', async ({ 
 });
 
 test('a database upgrade in another tab stays visible after action feedback and edits', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
   const other = await context.newPage();
-  await other.goto('/typebridge/404');
+  await other.goto('/404');
   await other.evaluate(() => new Promise<void>((resolve, reject) => {
     const open = indexedDB.open('typebridge', 2);
     open.onsuccess = () => { open.result.close(); resolve(); };
@@ -486,7 +486,7 @@ test('recovered text with autosave off keeps the unsaved warning after actions',
       id: 'pending-off', title: 'Черновик', text: 'Восстановленный текст', updatedAt: 1, revision: 0,
     }));
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toHaveValue('Восстановленный текст');
   await expect(status(page)).toHaveText('Recovered unsaved text; autosave is off');
   await page.locator('#export-txt').click();
@@ -507,7 +507,7 @@ test('toggling autosave before initialization finishes does not report unavailab
       return gate.then(() => (request as (...a: unknown[]) => Promise<unknown>).apply(this, args));
     } as LockManager['request'];
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeDisabled();
   page.once('dialog', dialog => dialog.dismiss());
   await page.locator('#autosave').uncheck();
@@ -519,7 +519,7 @@ test('toggling autosave before initialization finishes does not report unavailab
 });
 
 test('a database upgrade during an in-flight save keeps the storage warning', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
@@ -547,7 +547,7 @@ test('importing without browser storage reports the storage warning once', async
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#import-file').setInputFiles({ name: 'post.txt', mimeType: 'text/plain', buffer: Buffer.from('Текст') });
@@ -569,7 +569,7 @@ test('continuous typing keeps an IndexedDB initialization failure visible', asyn
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
   });
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
@@ -586,7 +586,7 @@ test('continuous typing keeps an IndexedDB initialization failure visible', asyn
 
 test('continuous typing keeps a failed save visible until a commit succeeds', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
@@ -628,7 +628,7 @@ for (const failure of ['blocked IndexedDB', 'quota failure'] as const) {
       });
     }
     await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-    await page.goto('/typebridge/');
+    await page.goto('/');
     await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
     const field = page.locator('#editor');
     await expect(field).toBeEnabled();
@@ -661,7 +661,7 @@ test('a failed delete without storage and with autosave off keeps the storage wa
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   page.once('dialog', dialog => dialog.dismiss());
@@ -682,7 +682,7 @@ const UPGRADED = 'Storage was upgraded in another tab. Copy or export unsaved te
 /** Force the next save into a conflict copy by committing a newer revision from another tab. */
 async function createForeignRevision(page: Page, context: BrowserContext, text: string): Promise<void> {
   const other = await context.newPage();
-  await other.goto('/typebridge/');
+  await other.goto('/');
   await expect(other.locator('#editor')).toHaveValue(text);
   await other.locator('#editor').fill('Версия другой вкладки');
   await page.clock.runFor(400); // The fake clock is shared by both tabs.
@@ -692,7 +692,7 @@ async function createForeignRevision(page: Page, context: BrowserContext, text: 
 
 async function prepareConflict(page: Page, context: BrowserContext, withTargetDraft = false) {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
@@ -1100,7 +1100,7 @@ test('save and retry progress after a conflict remain visible with its notice', 
 });
 
 test('a failed preference write stays visible after later document saves until it is saved (#57)', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
