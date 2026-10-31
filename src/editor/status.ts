@@ -13,15 +13,20 @@ export function withDraftListRefreshFailure(message: StatusMessage, risk: string
   return { ...message, draftListRefreshFailed: true, risk };
 }
 
-/** Render message parts without inferring state from previously displayed text. */
-export function renderStatusMessage(message: StatusMessage): string {
-  const { conflict, primary, risk, draftListRefreshFailed } = message;
-  let text = [conflict, primary].filter(Boolean).join(' ');
+/** Progress/action/risk text without the conflict notice (conflict is a separate live region). */
+export function renderStatusBody(message: StatusMessage): string {
+  const { primary, risk, draftListRefreshFailed } = message;
+  let text = primary;
   if (draftListRefreshFailed) {
-    // Avoid "copy. — draft list…" / "Saving… — …": strip trailing sentence end first.
-    text = text.replace(/[.…]$/, '');
+    // Strip a trailing period only — keep ellipsis on "Saving…" intact.
+    text = text.replace(/\.$/, '');
     text += text ? ' — draft list could not be refreshed' : 'Draft list could not be refreshed.';
   }
   if (risk) text += text ? (/[.…]$/.test(text) ? ' ' : '. ') + risk : risk;
   return text;
+}
+
+/** Full status line for tests and documentation expectations. */
+export function renderStatusMessage(message: StatusMessage): string {
+  return [message.conflict, renderStatusBody(message)].filter(Boolean).join(' ');
 }
