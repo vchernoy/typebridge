@@ -26,6 +26,24 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   }
   window.addEventListener('pointerup', persistEditorSize);
   const resizeEditor = document.querySelector<HTMLButtonElement>('#resize-editor')!;
+  // Keep the button under the editor's right edge, so it follows the corner when
+  // the width changes, not only the height (#70). The button stays right-aligned
+  // in its container; the right margin covers the gap to the editor's edge.
+  function alignResizeButton(): void {
+    const parent = resizeEditor.parentElement;
+    if (!parent) return;
+    const style = getComputedStyle(parent);
+    const contentRight = parent.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
+    const gap = Math.max(0, contentRight - field.getBoundingClientRect().right);
+    resizeEditor.style.marginRight = gap ? gap + 'px' : '';
+  }
+  if (typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(alignResizeButton);
+    observer.observe(field);
+    if (resizeEditor.parentElement) observer.observe(resizeEditor.parentElement);
+  }
+  window.addEventListener('resize', alignResizeButton);
+  alignResizeButton();
   let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number } | undefined;
   resizeEditor.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
