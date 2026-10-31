@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusBody, renderStatusMessage, withDraftListRefreshFailure } from '../src/editor/status';
+import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusBody, renderStatusMessage, statusLineParts, withDraftListRefreshFailure } from '../src/editor/status';
 
 test('conflict feedback precedes a newer risk and list failure', () => {
   expect(renderStatusMessage({
@@ -79,4 +79,25 @@ test('conflict text is omitted from the body live region', () => {
     risk: '',
     draftListRefreshFailed: false,
   })).toBe('Saved locally');
+});
+
+test('status line parts match the conflict / separator / body DOM split', () => {
+  expect(statusLineParts({
+    conflict: CONFLICT_COPY,
+    primary: 'Saved locally',
+    risk: '',
+    draftListRefreshFailed: false,
+  })).toEqual({ conflict: CONFLICT_COPY, sep: ' ', body: 'Saved locally' });
+  expect(statusLineParts({
+    conflict: '',
+    primary: 'Saved locally',
+    risk: '',
+    draftListRefreshFailed: false,
+  })).toEqual({ conflict: '', sep: '', body: 'Saved locally' });
+  expect(statusLineParts({
+    conflict: CONFLICT_COPY,
+    primary: '',
+    risk: '',
+    draftListRefreshFailed: false,
+  })).toEqual({ conflict: CONFLICT_COPY, sep: '', body: '' });
 });

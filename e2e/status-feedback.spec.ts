@@ -887,7 +887,7 @@ test('switch-time conflict is announced after the selected draft loads', async (
   await page.locator('#drafts').selectOption(targetId);
   await expect(field).toHaveValue('Целевой черновик');
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT);
+  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Saved locally');
   // Once announced, the notice must not follow the user to another document.
   await page.locator('#new-draft').click();
   await expect(field).toHaveValue('');

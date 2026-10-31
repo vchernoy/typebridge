@@ -3,7 +3,7 @@ import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, 
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusBody, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
+import { CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
 import { replaceMatchAt } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
@@ -123,12 +123,14 @@ let statusKind: StatusKind = 'progress';
 let statusMessage: StatusMessage = { conflict: '', primary: '', risk: '', draftListRefreshFailed: false };
 type PersistResult = { saved: boolean; conflict: boolean };
 type SwitchResult = { opened: boolean; conflict: boolean };
+/** Cancels a pending deferred conflict write so a newer setConflict/clear wins. */
+let conflictAnnounceToken = 0;
+/** Body/separator only — conflict live region is owned by setConflict. */
 function renderStatus(): void {
-  // Conflict lives in its own polite region so save progress does not re-announce it.
-  // Clear-then-set forces a second identical conflict (another copy) to re-announce.
-  if (conflictNotice.textContent !== statusMessage.conflict) conflictNotice.textContent = statusMessage.conflict;
-  const body = renderStatusBody(statusMessage);
-  const sep = statusMessage.conflict && body ? ' ' : '';
+  const { body } = statusLineParts(statusMessage);
+  // Separator follows the live region so a deferred model-only conflict does not
+  // insert a leading space before the body.
+  const sep = conflictNotice.textContent && body ? ' ' : '';
   if (statusSep.textContent !== sep) statusSep.textContent = sep;
   if (status.textContent !== body) status.textContent = body;
 }
@@ -143,7 +145,36 @@ function updateStatus(patch: Partial<StatusMessage>, kind?: StatusKind): void {
   if (kind !== undefined) statusKind = kind;
   renderStatus();
 }
+/**
+ * Write the conflict live region. Identical wording re-announces on a later frame
+ * so assistive tech sees a clear change; callers that only need the model updated
+ * (switch flush while transitioning) set statusMessage.conflict without calling this.
+ */
+function setConflict(text: string, reannounce = false): void {
+  statusMessage = { ...statusMessage, conflict: text };
+  if (text) statusKind = 'conflict';
+  if (!text) {
+    conflictAnnounceToken++;
+    if (conflictNotice.textContent) conflictNotice.textContent = '';
+    renderStatus();
+    return;
+  }
+  if (reannounce && conflictNotice.textContent === text) {
+    const token = ++conflictAnnounceToken;
+    conflictNotice.textContent = '';
+    requestAnimationFrame(() => {
+      if (token !== conflictAnnounceToken) return;
+      if (statusMessage.conflict === text) conflictNotice.textContent = text;
+    });
+  } else if (conflictNotice.textContent !== text) {
+    conflictAnnounceToken++;
+    conflictNotice.textContent = text;
+  }
+  renderStatus();
+}
 function clearNotices(): void {
+  conflictAnnounceToken++;
+  if (conflictNotice.textContent) conflictNotice.textContent = '';
   updateStatus({ conflict: '', draftListRefreshFailed: false });
 }
 function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'progress'): void {
@@ -177,14 +208,16 @@ function announceAction(text: string, options: {
   omitRisk?: boolean;
 } = {}): void {
   const kind = options.kind ?? 'action';
-  const conflict = options.conflict ?? (options.keepConflict ? statusMessage.conflict : '');
-  // Explicit conflict sets re-announce even when the wording is unchanged.
-  if (options.conflict !== undefined && options.conflict && conflictNotice.textContent === options.conflict) {
-    conflictNotice.textContent = '';
+  if (options.conflict !== undefined) setConflict(options.conflict);
+  else if (!options.keepConflict) setConflict('');
+  else if (statusMessage.conflict && conflictNotice.textContent !== statusMessage.conflict) {
+    // Model was set without a live-region write (switch flush); announce once now.
+    conflictAnnounceToken++;
+    conflictNotice.textContent = statusMessage.conflict;
   }
   const risk = options.omitRisk ? '' : riskText();
-  if (risk) updateStatus({ conflict, draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
-  else updateStatus({ conflict, draftListRefreshFailed: false, primary: text, risk: '' }, kind);
+  if (risk) updateStatus({ draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
+  else updateStatus({ draftListRefreshFailed: false, primary: text, risk: '' }, kind);
 }
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 /** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
@@ -205,10 +238,6 @@ function markDraftListRefreshFailed(): void {
 /** Same gate for persist and switch refresh failures — never attach to newer action feedback. */
 function shouldAttachDraftListRefreshFailure(): boolean {
   return !dirty && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict');
-}
-/** Announce a conflict created while leaving a draft for another document. */
-function announceLeftDraftConflict(): void {
-  announceAction('', { conflict: CONFLICT_COPY_LEFT });
 }
 const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
@@ -683,10 +712,15 @@ async function persist(): Promise<PersistResult> {
           if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
           // Storage may have become unusable while the copy was written.
           createdConflict = true;
-          // Re-announce even when the wording matches a prior conflict copy.
-          if (conflictNotice.textContent === CONFLICT_COPY) conflictNotice.textContent = '';
+          if (transitioning) {
+            // switchDraft announces once after load (or on failed open). Avoid a
+            // CONFLICT_COPY live-region write that would double-announce.
+            statusMessage = { ...statusMessage, conflict: CONFLICT_COPY };
+            statusKind = 'conflict';
+          } else {
+            setConflict(CONFLICT_COPY, true);
+          }
           updateStatus({
-            conflict: CONFLICT_COPY,
             primary: dirty && !storageProblem ? 'Saving…' : '',
             risk: riskText(),
           }, 'conflict');
@@ -769,7 +803,10 @@ autosave.addEventListener('change', async () => {
         dirty = true;
         clearNotices();
         await refreshDrafts();
-      } catch { announceAction('Could not delete saved draft; current text is kept'); return; }
+      } catch {
+        announceAction('Could not delete saved draft; current text is kept', { keepConflict: true });
+        return;
+      }
     }
     announce(dirty ? 'Autosave off — changes are unsaved' : 'Autosave off');
   }
@@ -800,19 +837,18 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
     active = next ?? { ...newDraft(), revision: 0 };
     rememberActive();
     showDraft();
-    // A conflict created by this switch's flush has not yet been announced to the user.
-    // Wording names the draft that was left; kind follows announceAction's risk rule.
-    if (flushConflict) announceLeftDraftConflict();
-    else showSaveState();
+    // Restore save state for progress/failure, and for a prior conflict notice showDraft
+    // just cleared. Keep action feedback the user triggered while the switch awaited I/O.
+    if (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict') showSaveState();
+    // Flush announced nothing to the live region while transitioning; name the draft left once.
+    if (flushConflict) setConflict(CONFLICT_COPY_LEFT);
     void refreshDrafts().catch(() => {
       if (shouldAttachDraftListRefreshFailure()) markDraftListRefreshFailed();
     });
     return { opened: true, conflict: flushConflict };
   } catch {
-    // Persist may have already moved edits onto a conflict copy; keep that notice.
-    announceAction('Could not open draft — current text was kept', {
-      conflict: flushConflict ? CONFLICT_COPY : undefined,
-    });
+    // Persist recorded the conflict in the model without a live-region write; keep it once.
+    announceAction('Could not open draft — current text was kept', { keepConflict: flushConflict });
     return { opened: false, conflict: flushConflict };
   }
   finally { transitioning = false; renderDrafts(); }

@@ -26,7 +26,14 @@ export function renderStatusBody(message: StatusMessage): string {
   return text;
 }
 
-/** Full status line for tests and documentation expectations. */
+/** Parts written into `#conflict-notice`, `#status-sep`, and `#status`. */
+export function statusLineParts(message: StatusMessage): { conflict: string; sep: string; body: string } {
+  const body = renderStatusBody(message);
+  return { conflict: message.conflict, sep: message.conflict && body ? ' ' : '', body };
+}
+
+/** Full status line for tests and documentation expectations (matches `#status-line` textContent). */
 export function renderStatusMessage(message: StatusMessage): string {
-  return [message.conflict, renderStatusBody(message)].filter(Boolean).join(' ');
+  const { conflict, sep, body } = statusLineParts(message);
+  return conflict + sep + body;
 }
