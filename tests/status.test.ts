@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusMessage } from '../src/editor/status';
+import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusMessage, withDraftListRefreshFailure } from '../src/editor/status';
 
 test('conflict feedback precedes a newer risk and list failure', () => {
   expect(renderStatusMessage({
@@ -47,4 +47,12 @@ test('a left-draft conflict notice uses distinct wording', () => {
     risk: 'Storage upgraded.',
     draftListRefreshFailed: false,
   })).toBe(CONFLICT_COPY_LEFT + ' Storage upgraded.');
+});
+
+test('list refresh failure does not duplicate a warning already shown as primary', () => {
+  const risk = 'Autosave off — changes are unsaved';
+  expect(renderStatusMessage(withDraftListRefreshFailure(
+    { conflict: '', primary: risk, risk: '', draftListRefreshFailed: false },
+    risk,
+  ))).toBe('Draft list could not be refreshed. ' + risk);
 });

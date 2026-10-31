@@ -4,6 +4,15 @@ export const CONFLICT_COPY_LEFT = 'Another tab changed the draft you left. Your 
 
 export type StatusMessage = { conflict: string; primary: string; risk: string; draftListRefreshFailed: boolean };
 
+/**
+ * Apply a draft-list refresh failure without duplicating a warning that is already
+ * in `primary` (showSaveState/showSaving often put riskText there with risk '').
+ */
+export function withDraftListRefreshFailure(message: StatusMessage, risk: string): StatusMessage {
+  if (risk && message.primary === risk) return { ...message, draftListRefreshFailed: true, primary: '', risk };
+  return { ...message, draftListRefreshFailed: true, risk };
+}
+
 /** Render message parts without inferring state from previously displayed text. */
 export function renderStatusMessage(message: StatusMessage): string {
   const { conflict, primary, risk, draftListRefreshFailed } = message;

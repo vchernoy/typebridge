@@ -895,6 +895,44 @@ test('switch-time conflict is announced after the selected draft loads', async (
   await expect(status(page)).toHaveText('Saved locally');
 });
 
+test('a failed switch after a conflict flush keeps the open-failure through a later save', async ({ page, context }) => {
+  const { field, targetId } = await prepareConflict(page, context, true);
+  // Hold the conflict-copy transaction, delete the target, and leave dirty true so persist's
+  // finally schedules another save after switchDraft's catch has set the open-failure action.
+  await page.evaluate(id => {
+    const state = window as unknown as { holdConflict: boolean; conflictHeld: boolean };
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+      IDBObjectStore.prototype.add = add;
+      state.holdConflict = true;
+      const copyId = (args[0] as { id: string }).id;
+      const result = add.apply(this, args);
+      this.transaction.db.transaction('documents', 'readwrite').objectStore('documents').delete(id);
+      result.addEventListener('success', () => {
+        state.conflictHeld = true;
+        const keepAlive = (): void => {
+          if (state.holdConflict) this.get(copyId).addEventListener('success', keepAlive);
+        };
+        keepAlive();
+      });
+      return result;
+    };
+  }, targetId);
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  const switching = page.locator('#drafts').selectOption(targetId);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
+  await field.pressSequentially('!');
+  await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
+  await switching;
+  await expect(field).toHaveValue('Исходный — правка!');
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Could not open draft — current text was kept');
+  // The post-commit timer from the flush must not wipe the action while conflict remains.
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Could not open draft — current text was kept');
+});
+
 test('refresh failure clears after a later successful conflict-draft refresh', async ({ page, context }) => {
   const { field, renders } = await prepareConflict(page, context);
   await page.evaluate(() => {

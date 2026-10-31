@@ -3,7 +3,7 @@ import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, 
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusMessage, type StatusMessage } from './editor/status';
+import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusMessage, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
 import { replaceMatchAt } from './editor/search';
 import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
@@ -175,7 +175,7 @@ function notify(text: string): void {
   announceAction(text);
 }
 function markDraftListRefreshFailed(): void {
-  updateStatus({ draftListRefreshFailed: true, risk: riskText() });
+  updateStatus(withDraftListRefreshFailure(statusMessage, riskText()));
 }
 /** Announce a conflict created while leaving a draft for another document. */
 function announceLeftDraftConflict(): void {
@@ -590,7 +590,8 @@ function sameContent(a: StoredDraft, b: StoredDraft): boolean {
 function savePending(): void {
   if (!dirty || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
-  catch { announceAction('Unsaved text could not be backed up for reload. Copy or export it.', 'failure'); }
+  // Background pagehide/beforeunload feedback must not clear a conflict notice.
+  catch { setSaveStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure'); }
 }
 function clearPending(saved: StoredDraft): void {
   try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
@@ -659,7 +660,9 @@ async function persist(): Promise<boolean> {
         }
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
-        if (!dirty && !result.conflict && (statusMessage.conflict || statusKind === 'progress' || statusKind === 'failure')) {
+        // Use statusKind (not merely a pending conflict string) so an action that
+        // kept a conflict notice — e.g. a failed draft switch — is not wiped.
+        if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict')) {
           // Storage can become unusable while this save was in flight (an
           // upgrade in another tab); never replace that warning.
           const risk = riskText();
