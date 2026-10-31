@@ -34,6 +34,7 @@ header p {
   letter-spacing: 0.12em;
 }
 section {
+  position: relative;
   background: #fff;
   padding: clamp(16px, 3vw, 28px);
   border: 1px solid #d9e2ef;
@@ -277,4 +278,45 @@ body.focus-mode .bottom {
   font-size: 0.8rem;
   cursor: nwse-resize;
   touch-action: none;
+}
+
+/* Smaller Normal-mode minimums for the main editor (#70); Focus mode keeps its own. */
+body:not(.focus-mode) #editor {
+  min-width: min(100%, 160px);
+  min-height: 96px;
+}
+/* The drawn grip replaces the native one on the main editor in every mode, so
+   there is exactly one, and it works on iOS Safari too. */
+#editor {
+  resize: none;
+}
+/* Drawn corner grip (#70): iOS Safari never shows the native textarea grip. */
+.resize-grip {
+  --grip-outset: 10px;
+  position: absolute;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background: linear-gradient(
+      135deg,
+      transparent 0 40%,
+      #7d8ca6 40% 48%,
+      transparent 48% 60%,
+      #7d8ca6 60% 68%,
+      transparent 68% 80%,
+      #7d8ca6 80% 88%,
+      transparent 88%
+    )
+    no-repeat right calc(var(--grip-outset) + 3px) bottom calc(var(--grip-outset) + 3px) / 14px 14px;
+}
+@media (any-pointer: coarse) {
+  .resize-grip {
+    --grip-outset: 14px;
+    width: 44px;
+    height: 44px;
+  }
 }

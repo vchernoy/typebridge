@@ -187,3 +187,49 @@ test('resize control follows the editor right edge when the width changes (#70)'
   await page.locator('#exit-focus').click();
   await expect.poll(gap).toBeLessThan(2);
 });
+
+test('corner grip sits on the editor corner and resizes it, down to the new minimum (#70)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await page.goto('/');
+  const field = page.locator('#editor');
+  const grip = page.locator('#resize-grip');
+  await expect(field).toBeEnabled();
+  await expect(grip).toHaveAttribute('aria-hidden', 'true');
+  await grip.scrollIntoViewIfNeeded();
+  const onCorner = async (): Promise<boolean> => {
+    const [f, g] = await Promise.all([field.boundingBox(), grip.boundingBox()]);
+    if (!f || !g) return false;
+    const right = f.x + f.width, bottom = f.y + f.height;
+    return g.x < right && right < g.x + g.width && g.y < bottom && bottom < g.y + g.height;
+  };
+  await expect.poll(onCorner).toBe(true);
+  const before = await field.boundingBox();
+  const start = await grip.boundingBox();
+  if (!before || !start) throw new Error('Missing bounding box');
+  const x = start.x + start.width / 2;
+  const y = start.y + start.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 120, y + 60, { steps: 8 });
+  await expect.poll(onCorner).toBe(true);
+  await page.mouse.up();
+  const after = await field.boundingBox();
+  expect(Math.round(after!.width)).toBe(Math.round(before.width - 120));
+  expect(Math.round(after!.height)).toBe(Math.round(before.height + 60));
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('typebridge.editor.size.v1'))).toContain(`${Math.round(before.width - 120)}px`);
+  // Drag far past the top-left: the editor stops at the new 160 × 96 minimum.
+  const now = await grip.boundingBox();
+  await page.mouse.move(now!.x + now!.width / 2, now!.y + now!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(20, 20, { steps: 10 });
+  await page.mouse.up();
+  const smallest = await field.boundingBox();
+  expect(Math.round(smallest!.width)).toBe(160);
+  expect(Math.round(smallest!.height)).toBe(96);
+  await expect.poll(onCorner).toBe(true);
+  // Focus mode keeps the grip on the corner and usable.
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('#exit-focus')).toBeVisible();
+  await expect.poll(onCorner).toBe(true);
+  await expect(page.locator('#resize-editor')).toHaveText('Resize');
+});

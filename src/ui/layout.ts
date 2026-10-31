@@ -26,46 +26,63 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   }
   window.addEventListener('pointerup', persistEditorSize);
   const resizeEditor = document.querySelector<HTMLButtonElement>('#resize-editor')!;
+  // A drawn corner grip: iOS Safari ignores CSS resize, so the native grip never
+  // appears there (#70). It is a pointer shortcut only; keyboard users use the button.
+  const resizeGrip = document.querySelector<HTMLElement>('#resize-grip');
+  const MIN_WIDTH = 160;
+  const MIN_HEIGHT = 96;
   // Keep the button under the editor's right edge, so it follows the corner when
   // the width changes, not only the height (#70). The button stays right-aligned
   // in its container; the right margin covers the gap to the editor's edge.
-  function alignResizeButton(): void {
+  function alignResizeControls(): void {
     const parent = resizeEditor.parentElement;
     if (!parent) return;
     const style = getComputedStyle(parent);
-    const contentRight = parent.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
-    const gap = Math.max(0, contentRight - field.getBoundingClientRect().right);
+    const fieldBox = field.getBoundingClientRect();
+    const parentBox = parent.getBoundingClientRect();
+    const contentRight = parentBox.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
+    const gap = Math.max(0, contentRight - fieldBox.right);
     resizeEditor.style.marginRight = gap ? gap + 'px' : '';
+    if (resizeGrip && resizeGrip.offsetParent === parent) {
+      // The grip's box reaches slightly past the corner so most of it lies outside the text.
+      const outset = parseFloat(getComputedStyle(resizeGrip).getPropertyValue('--grip-outset')) || 0;
+      resizeGrip.style.left = fieldBox.right - parentBox.left - parent.clientLeft + outset - resizeGrip.offsetWidth + 'px';
+      resizeGrip.style.top = fieldBox.bottom - parentBox.top - parent.clientTop + outset - resizeGrip.offsetHeight + 'px';
+    }
   }
   if (typeof ResizeObserver === 'function') {
-    const observer = new ResizeObserver(alignResizeButton);
+    const observer = new ResizeObserver(alignResizeControls);
     observer.observe(field);
     if (resizeEditor.parentElement) observer.observe(resizeEditor.parentElement);
   }
-  window.addEventListener('resize', alignResizeButton);
-  alignResizeButton();
+  window.addEventListener('resize', alignResizeControls);
+  alignResizeControls();
   let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number } | undefined;
-  resizeEditor.addEventListener('pointerdown', event => {
-    if (event.button !== 0) return;
-    const rect = field.getBoundingClientRect();
-    resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
-    resizeEditor.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  });
-  resizeEditor.addEventListener('pointermove', event => {
-    if (!resizeDrag || resizeDrag.pointer !== event.pointerId) return;
-    field.style.width = Math.max(280, resizeDrag.width + event.clientX - resizeDrag.x) + 'px';
-    field.style.height = Math.max(160, resizeDrag.height + event.clientY - resizeDrag.y) + 'px';
-  });
-  resizeEditor.addEventListener('pointerup', event => {
-    if (resizeDrag?.pointer === event.pointerId) resizeDrag = undefined;
-  });
-  resizeEditor.addEventListener('pointercancel', () => { resizeDrag = undefined; });
+  function enableDragResize(handle: HTMLElement): void {
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      const rect = field.getBoundingClientRect();
+      resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
+      handle.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+    handle.addEventListener('pointermove', event => {
+      if (!resizeDrag || resizeDrag.pointer !== event.pointerId) return;
+      field.style.width = Math.max(MIN_WIDTH, resizeDrag.width + event.clientX - resizeDrag.x) + 'px';
+      field.style.height = Math.max(MIN_HEIGHT, resizeDrag.height + event.clientY - resizeDrag.y) + 'px';
+    });
+    handle.addEventListener('pointerup', event => {
+      if (resizeDrag?.pointer === event.pointerId) resizeDrag = undefined;
+    });
+    handle.addEventListener('pointercancel', () => { resizeDrag = undefined; });
+  }
+  enableDragResize(resizeEditor);
+  if (resizeGrip) enableDragResize(resizeGrip);
   resizeEditor.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     const rect = field.getBoundingClientRect();
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') field.style.width = Math.max(280, rect.width + (event.key === 'ArrowRight' ? 20 : -20)) + 'px';
-    else field.style.height = Math.max(160, rect.height + (event.key === 'ArrowDown' ? 20 : -20)) + 'px';
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') field.style.width = Math.max(MIN_WIDTH, rect.width + (event.key === 'ArrowRight' ? 20 : -20)) + 'px';
+    else field.style.height = Math.max(MIN_HEIGHT, rect.height + (event.key === 'ArrowDown' ? 20 : -20)) + 'px';
     event.preventDefault();
     persistEditorSize();
   });
