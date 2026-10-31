@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('converts only selection in both directions with undo and redo', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Hello privet мир');
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(6, 12));
@@ -18,7 +18,7 @@ test('converts only selection in both directions with undo and redo', async ({ p
 });
 
 test('shortcut converts selection and empty selection does not change document', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('zhuk');
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 4));

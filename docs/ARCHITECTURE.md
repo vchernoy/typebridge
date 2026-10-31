@@ -1,7 +1,7 @@
 # Architecture
 
 ## Platform
-Static TypeScript application, built with Vite, rendered in semantic vanilla HTML and CSS, hosted under GitHub Pages project path `/typebridge/`. No backend. Set Vite `base` appropriately for deployment and test direct asset loading. Development scripts use `npm ci`, typecheck, Vitest, Playwright and `vite build`; pin dependencies via a committed lockfile when scaffolding.
+Static TypeScript application, built with Vite, rendered in semantic vanilla HTML and CSS, hosted on GitHub Pages at the custom domain `https://typebridge.vchernoy.xyz/` (site root `/`; `vchernoy.github.io/typebridge/` redirects there, [#112](https://github.com/vchernoy/typebridge/issues/112)). No backend. Set Vite `base` appropriately for deployment and test direct asset loading. Development scripts use `npm ci`, typecheck, Vitest, Playwright and `vite build`; pin dependencies via a committed lockfile when scaffolding.
 
 ## Current layout and intended boundaries
 

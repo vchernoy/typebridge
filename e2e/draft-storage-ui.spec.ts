@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 
 test('a stale tab saves a visible conflict copy without overwriting the newer draft', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#editor').fill('Исходный текст');
   await expect(page.locator('#status')).toContainText('Saved locally');
   const other = await context.newPage();
-  await other.goto('/typebridge/');
+  await other.goto('/');
   await expect(other.locator('#editor')).toHaveValue('Исходный текст');
   await page.locator('#editor').fill('Новое содержание');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -22,7 +22,7 @@ test('failed database initialization keeps text editable and reports unsaved sta
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await expect(page.locator('#status')).toContainText('Storage unavailable');
@@ -34,7 +34,7 @@ test('failed database initialization keeps text editable and reports unsaved sta
 });
 
 test('switching immediately after typing saves the previous document', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#editor').fill('Быстрый набор 🙂');
   await page.locator('#new-draft').click();
   await expect(page.locator('#editor')).toHaveValue('');
@@ -43,7 +43,7 @@ test('switching immediately after typing saves the previous document', async ({ 
 });
 
 test('failed writes keep current text and can be retried without switching away', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.evaluate(() => {
     const original = IDBObjectStore.prototype.put;
@@ -65,7 +65,7 @@ test('failed writes keep current text and can be retried without switching away'
 });
 
 test('repeated edits during autosave persist the latest text', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   for (const text of ['Раз', 'Раз два', 'Раз два три 🙂']) {
@@ -78,7 +78,7 @@ test('repeated edits during autosave persist the latest text', async ({ page }) 
 });
 
 test('imports a text file into its own saved document', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#import-file').setInputFiles({
@@ -99,7 +99,7 @@ test('old localStorage drafts are ignored and left untouched while IndexedDB sav
       sessionStorage.setItem('seeded', 'yes');
     }
   }, old);
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await expect(field).toHaveValue('');
@@ -109,7 +109,7 @@ test('old localStorage drafts are ignored and left untouched while IndexedDB sav
   await expect(field).toHaveValue('Новый пост 🙂\nВторая строка');
   expect(await page.evaluate(() => localStorage.getItem('typebridge.drafts.v1'))).toBe(old);
   const other = await context.newPage();
-  await other.goto('/typebridge/');
+  await other.goto('/');
   await expect(other.locator('#editor')).toBeEnabled();
   const changed = '[{"id":"other","title":"Old tab","text":"Ignored","updatedAt":2}]';
   await other.evaluate(raw => localStorage.setItem('typebridge.drafts.v1', raw), changed);
@@ -122,7 +122,7 @@ test('old localStorage drafts are ignored and left untouched while IndexedDB sav
 
 for (const operation of ['reload', 'navigation'] as const) {
   test(`immediate ${operation} starts saving the pending edit`, async ({ page }) => {
-    await page.goto('/typebridge/');
+    await page.goto('/');
     const field = page.locator('#editor');
     await expect(field).toBeEnabled();
     await field.fill('Начало поста');
@@ -130,13 +130,13 @@ for (const operation of ['reload', 'navigation'] as const) {
     await field.fill('Начало поста — последняя фраза 🙂');
     page.once('dialog', dialog => dialog.accept());
     if (operation === 'reload') await page.reload();
-    else await page.goto('/typebridge/?navigation=1');
+    else await page.goto('/?navigation=1');
     await expect(field).toHaveValue('Начало поста — последняя фраза 🙂');
   });
 }
 
 test('a committed save stays successful if refreshing the draft list fails', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Текст');
@@ -159,7 +159,7 @@ test('a committed save stays successful if refreshing the draft list fails', asy
 });
 
 test('JSON export and import round trip preserves Cyrillic, newlines and emoji', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   const content = 'Русский пост 🙂\nВторая строка\nТретья строка 🌍';
   await field.fill(content);
@@ -177,7 +177,7 @@ test('JSON export and import round trip preserves Cyrillic, newlines and emoji',
 });
 
 test('long editing history survives draft switching and reload', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#enabled').uncheck();
@@ -202,7 +202,7 @@ test('long editing history survives draft switching and reload', async ({ page }
 });
 
 test('closing a tab immediately after editing saves or offers recovery', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Начало');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -212,7 +212,7 @@ test('closing a tab immediately after editing saves or offers recovery', async (
   await page.close({ runBeforeUnload: true });
   await closed;
   const next = await context.newPage();
-  await next.goto('/typebridge/');
+  await next.goto('/');
   await expect(next.locator('#editor')).toBeEnabled();
   if (await next.locator('#editor').inputValue() !== 'Начало — последняя фраза') {
     await next.getByRole('button', { name: /Recover Untitled draft/ }).click();
@@ -222,7 +222,7 @@ test('closing a tab immediately after editing saves or offers recovery', async (
 });
 
 test('reload recovery preserves another tab’s newer revision', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Исходный документ');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -232,7 +232,7 @@ test('reload recovery preserves another tab’s newer revision', async ({ page, 
     open.onsuccess = () => { const db = open.result; const tx = db.transaction('documents'); const get = tx.objectStore('documents').getAll(); get.onsuccess = () => { db.close(); resolve({ ...get.result[0], text: 'Несохранённый вариант 🙂', history: undefined }); }; get.onerror = () => reject(get.error); };
   }));
   const other = await context.newPage();
-  await other.goto('/typebridge/');
+  await other.goto('/');
   await expect(other.locator('#editor')).toHaveValue('Исходный документ');
   await other.locator('#editor').fill('Новая версия другой вкладки');
   await expect(other.locator('#status')).toContainText('Saved locally');

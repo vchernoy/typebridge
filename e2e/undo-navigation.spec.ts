@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('Undo reveals a distant edit inside a long textarea and preserves selection', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.getByLabel('Transliteration on').uncheck();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const lines = Array.from({ length: 250 }, (_, i) => 'Paragraph ' + i + ': ' + 'wrapped text '.repeat(8));
@@ -29,7 +29,7 @@ test('Undo reveals a distant edit inside a long textarea and preserves selection
 });
 
 test('Undo does not scroll when the edited line is already visible', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.getByLabel('Transliteration on').uncheck();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const original = 'First line\\nSecond line\\nThird line';

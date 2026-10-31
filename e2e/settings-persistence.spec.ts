@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 test('find text survives reload within a tab; search options persist in a new tab', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#enabled').uncheck();
   await page.locator('#find-text').fill('Русский 🙂');
@@ -16,7 +16,7 @@ test('find text survives reload within a tab; search options persist in a new ta
   await expect(page.locator('#replace-text')).toHaveValue('Заменить');
   await expect(page.locator('#match-case')).toBeChecked();
   await expect(page.locator('#regex-mode')).toBeChecked();
-  const other = await context.newPage(); await other.goto('/typebridge/');
+  const other = await context.newPage(); await other.goto('/');
   await expect(other.locator('#find-text')).toHaveValue('');
   await expect(other.locator('#replace-text')).toHaveValue('');
   await expect(other.locator('#match-case')).toBeChecked();
@@ -26,11 +26,11 @@ test('find text survives reload within a tab; search options persist in a new ta
 });
 
 test('options restore when a page is reopened without retaining search text', async ({ page, context }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#regex-mode').check();
   await page.locator('#find-text').fill('private text');
   await page.close();
-  const reopened = await context.newPage(); await reopened.goto('/typebridge/');
+  const reopened = await context.newPage(); await reopened.goto('/');
   await expect(reopened.locator('#regex-mode')).toBeChecked();
   await expect(reopened.locator('#find-text')).toHaveValue('');
 });
@@ -43,7 +43,7 @@ test('blocked settings storage keeps search usable and reports the problem', asy
       return set.call(this, key, value);
     };
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#enabled').uncheck();
   await page.locator('#editor').fill('Русский текст');
   await page.locator('#find-text').fill('текст');
@@ -55,7 +55,7 @@ test('blocked settings storage keeps search usable and reports the problem', asy
 
 test('real resize drag persists across reload and focus mode', async ({ page }) => {
   await page.setViewportSize({ width: 1900, height: 1600 });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.scrollIntoViewIfNeeded();
@@ -95,7 +95,7 @@ test('settings warning clears only after the failed setting is saved', async ({ 
       return original.call(this, key, value);
     };
   });
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await page.locator('#enabled').uncheck();
   await page.locator('#find-text').fill('a');
   const warning = page.getByText('Find settings could not be saved or restored in this browser.');
@@ -110,7 +110,7 @@ test('settings warning clears only after the failed setting is saved', async ({ 
 
 test('browser profile restart keeps preferences but a new session has no find text', async ({ playwright, browserName, baseURL }, testInfo) => {
   if (!baseURL) throw new Error('A Playwright baseURL is required');
-  const appURL = new URL('/typebridge/', baseURL).href;
+  const appURL = new URL('/', baseURL).href;
   const launchOptions = { ...testInfo.project.use.launchOptions };
   if (testInfo.project.use.headless !== undefined) launchOptions.headless = testInfo.project.use.headless;
   if (testInfo.project.use.channel !== undefined) launchOptions.channel = testInfo.project.use.channel;
@@ -132,7 +132,7 @@ test('browser profile restart keeps preferences but a new session has no find te
 
 
 test('resize control supports keyboard and keeps editor content and history', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   await page.locator('#enabled').uncheck();
   await editor.fill('Текст для редактора');

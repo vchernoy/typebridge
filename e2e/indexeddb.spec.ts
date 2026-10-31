@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 
 test('stale edits are committed as a separate complete conflict draft', async ({ page }) => {
   const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.addScriptTag({ content: `{ const exports = {}; ${compiled} window.TypeBridgeDb = exports; }` });
   const result = await page.evaluate(async () => {
@@ -27,10 +27,10 @@ test('stale edits are committed as a separate complete conflict draft', async ({
 
 test('a blocked upgrade reports the blocker and closes a late connection', async ({ page, context }) => {
   const compiled = ts.transpileModule(readFileSync('src/editor/indexeddb.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const blocker = await context.newPage();
-  await blocker.goto('/typebridge/');
+  await blocker.goto('/');
   await expect(blocker.locator('#editor')).toBeEnabled();
   await blocker.evaluate(() => new Promise<void>((resolve, reject) => {
     const open = indexedDB.open('typebridge', 1);

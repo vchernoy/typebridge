@@ -11,7 +11,7 @@ for (const saved of [null, 'default', 'invalid']) {
     await page.addInitScript(({ key, value }) => {
       if (value !== null) localStorage.setItem(key, value);
     }, { key: KEY, value: saved });
-    await page.goto('/typebridge/');
+    await page.goto('/');
     const field = page.locator('#editor');
     await expect(field).toBeEnabled();
     await field.fill('Привет 🙂');
@@ -46,7 +46,7 @@ for (const saved of ['f7', 'f8', 'f9', 'off']) {
         sessionStorage.setItem('shortcut-seeded', 'yes');
       }
     }, { key: KEY, saved });
-    await page.goto('/typebridge/');
+    await page.goto('/');
     await expect(page.locator('#editor')).toBeEnabled();
     await expect(page.locator('#translit-shortcut')).toHaveValue(saved);
     await page.locator('#editor').press('Control+Shift+Space');
@@ -74,7 +74,7 @@ for (const saved of ['f7', 'f8', 'f9', 'off']) {
 }
 
 test('macOS default leaves composition, repeats, extra modifiers and unrelated fields alone', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   for (const options of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }, { altKey: true }, { metaKey: true }, { shiftKey: false }]) {
     const blocked = await page.locator('#editor').evaluate((el, init) => {
@@ -100,7 +100,7 @@ test('macOS new default works when shortcut preferences cannot be read or writte
     Storage.prototype.getItem = function (name) { if (name === key) throw new DOMException('Blocked', 'SecurityError'); return get.call(this, name); };
     Storage.prototype.setItem = function (name, value) { if (name === key) throw new DOMException('Blocked', 'SecurityError'); return set.call(this, name, value); };
   }, KEY);
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').press('Control+Shift+Space');
   await expect(page.locator('#enabled')).not.toBeChecked();

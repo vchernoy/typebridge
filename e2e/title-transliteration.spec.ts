@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('the draft title transliterates, saves and keeps its own undo (#89)', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   const editor = page.locator('#editor');
   const title = page.locator('#draft-title');
   await expect(editor).toBeEnabled();
@@ -17,7 +17,7 @@ test('the draft title transliterates, saves and keeps its own undo (#89)', async
 });
 
 test('the transliteration shortcut works from every text box (#89)', async ({ page }) => {
-  await page.goto('/typebridge/');
+  await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const enabled = page.locator('#enabled');
   for (const id of ['#editor', '#find-text', '#replace-text', '#draft-title']) {
