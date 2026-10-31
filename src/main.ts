@@ -151,11 +151,19 @@ function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): vo
 function statusKindForRisk(risk: string): Exclude<StatusKind, 'action' | 'conflict'> {
   return risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure';
 }
-/** Explicit action/failure feedback: clears conflict and stale list-refresh suffix unless kept. */
-function announceAction(text: string, options: { kind?: StatusKind; keepConflict?: boolean } = {}): void {
+/** Explicit action/failure feedback: one place for conflict reset, risk join and kind. */
+function announceAction(text: string, options: {
+  kind?: StatusKind;
+  /** Keep the current conflict string. */
+  keepConflict?: boolean;
+  /** Set an explicit conflict notice (wins over keepConflict). */
+  conflict?: string;
+  /** Messages that already describe save state must not also append riskText(). */
+  omitRisk?: boolean;
+} = {}): void {
   const kind = options.kind ?? 'action';
-  const conflict = options.keepConflict ? statusMessage.conflict : '';
-  const risk = riskText();
+  const conflict = options.conflict ?? (options.keepConflict ? statusMessage.conflict : '');
+  const risk = options.omitRisk ? '' : riskText();
   if (risk) updateStatus({ conflict, draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
   else updateStatus({ conflict, draftListRefreshFailed: false, primary: text, risk: '' }, kind);
 }
@@ -182,9 +190,7 @@ function markDraftListRefreshFailed(): void {
 }
 /** Announce a conflict created while leaving a draft for another document. */
 function announceLeftDraftConflict(): void {
-  const risk = riskText();
-  if (risk) updateStatus({ conflict: CONFLICT_COPY_LEFT, primary: '', risk }, statusKindForRisk(risk));
-  else updateStatus({ conflict: CONFLICT_COPY_LEFT, primary: '', risk: '' }, 'action');
+  announceAction('', { conflict: CONFLICT_COPY_LEFT });
 }
 const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
@@ -618,8 +624,8 @@ async function refreshDrafts(): Promise<void> {
   if (statusMessage.draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
 }
 function showDraft(): void {
-  // Callers decide post-load status; clearing here avoids a double render in switchDraft.
-  statusMessage = { ...statusMessage, conflict: '', draftListRefreshFailed: false };
+  // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
+  updateStatus({ conflict: '', draftListRefreshFailed: false });
   loadingDraft = true;
   try {
     editor.load(active.text);
@@ -670,7 +676,7 @@ async function persist(): Promise<boolean> {
           // upgrade in another tab); never replace that warning.
           const risk = riskText();
           if (risk) setRiskStatus('', 'failure', risk);
-          else setSaveStatus(statusMessage.conflict ? '' : 'Saved locally');
+          else setSaveStatus('Saved locally');
         }
       }
       try { await refreshDrafts(); }
@@ -730,11 +736,15 @@ autosave.addEventListener('change', async () => {
   else {
     clearTimeout(saveTimer);
     if (saving) await saving;
+    // An in-flight save may have re-set conflict after the clear above.
+    updateStatus({ conflict: '', draftListRefreshFailed: false });
     if (window.confirm('Delete the saved copy of this draft? Cancel keeps it in your Drafts list.')) {
       try {
         if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed');
         active = { ...active, revision: 0 };
         dirty = true;
+        // The deleted row may have been a conflict copy; do not keep its notice.
+        updateStatus({ conflict: '', draftListRefreshFailed: false });
         await refreshDrafts();
       } catch { notify('Could not delete saved draft; current text is kept'); return; }
     }
@@ -768,16 +778,16 @@ async function switchDraft(id?: string): Promise<boolean> {
     // Wording names the draft that was left; kind follows notify()'s risk rule.
     if (conflictNoticeVersion !== conflictVersionBeforeSwitch) announceLeftDraftConflict();
     else showSaveState();
-    void refreshDrafts().catch(() => { markDraftListRefreshFailed(); });
+    // Do not attach a late refresh failure to newer action feedback (e.g. Copy).
+    void refreshDrafts().catch(() => {
+      if (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict') markDraftListRefreshFailed();
+    });
     return true;
   } catch {
     // Persist may have already moved edits onto a conflict copy; keep that notice.
-    if (conflictNoticeVersion !== conflictVersionBeforeSwitch) {
-      const risk = riskText();
-      const primary = 'Could not open draft — current text was kept';
-      if (risk) updateStatus({ conflict: CONFLICT_COPY, draftListRefreshFailed: false, primary: primary.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
-      else updateStatus({ conflict: CONFLICT_COPY, draftListRefreshFailed: false, primary, risk: '' }, 'action');
-    } else notify('Could not open draft — current text was kept');
+    announceAction('Could not open draft — current text was kept', {
+      conflict: conflictNoticeVersion !== conflictVersionBeforeSwitch ? CONFLICT_COPY : undefined,
+    });
     return false;
   }
   finally { transitioning = false; renderDrafts(); }
@@ -822,9 +832,9 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     // Explicit delete failures clear conflict feedback; these two messages already
     // state the save situation, so they do not also append riskText().
     if (dirty && !saveFailed && autosave.checked && !storageProblem) {
-      updateStatus({ conflict: '', draftListRefreshFailed: false, primary: 'Could not delete draft — your changes are unsaved; saving again…', risk: '' }, 'progress');
+      announceAction('Could not delete draft — your changes are unsaved; saving again…', { kind: 'progress', omitRisk: true });
     } else if (dirty && !autosave.checked && !storageProblem) {
-      updateStatus({ conflict: '', draftListRefreshFailed: false, primary: 'Could not delete draft — your changes are unsaved; autosave is off', risk: '' }, 'progress');
+      announceAction('Could not delete draft — your changes are unsaved; autosave is off', { kind: 'progress', omitRisk: true });
     } else notify(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
@@ -1005,13 +1015,12 @@ importFile.addEventListener('change', async () => {
     if (!db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
     const conflictVersionBeforeImport = conflictNoticeVersion;
-    if (await switchDraft(result.draft.id)) {
-      // Keep a conflict notice that this switch's flush just announced.
-      notify('Imported as a new draft', { keepConflict: conflictNoticeVersion !== conflictVersionBeforeImport });
-    } else if (conflictNoticeVersion === conflictVersionBeforeImport) {
-      notify('Import saved in Drafts; current text was kept');
-    }
-    // else: switchDraft already reported the conflict copy and open failure.
+    const opened = await switchDraft(result.draft.id);
+    // Always confirm the import; keep a conflict notice that the switch flush created.
+    notify(
+      opened ? 'Imported as a new draft' : 'Import saved in Drafts; current text was kept',
+      { keepConflict: conflictNoticeVersion !== conflictVersionBeforeImport },
+    );
   } catch (error) {
     notify('Import failed: ' + (error instanceof Error ? error.message : String(error)));
   }

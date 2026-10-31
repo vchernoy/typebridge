@@ -17,7 +17,11 @@ export function withDraftListRefreshFailure(message: StatusMessage, risk: string
 export function renderStatusMessage(message: StatusMessage): string {
   const { conflict, primary, risk, draftListRefreshFailed } = message;
   let text = [conflict, primary].filter(Boolean).join(' ');
-  if (draftListRefreshFailed) text += text ? ' — draft list could not be refreshed' : 'Draft list could not be refreshed.';
+  if (draftListRefreshFailed) {
+    // Avoid "copy. — draft list…" / "Saving… — …": strip trailing sentence end first.
+    text = text.replace(/[.…]$/, '');
+    text += text ? ' — draft list could not be refreshed' : 'Draft list could not be refreshed.';
+  }
   if (risk) text += text ? (/[.…]$/.test(text) ? ' ' : '. ') + risk : risk;
   return text;
 }

@@ -677,6 +677,7 @@ test('a failed delete without storage and with autosave off keeps the storage wa
 
 const CONFLICT_COPY = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
 const CONFLICT_COPY_LEFT = 'Another tab changed the draft you left. Your edits were saved as a conflict copy.';
+const CONFLICT_COPY_STEM = CONFLICT_COPY.replace(/\.$/, '');
 const UPGRADED = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
 const DRAFT_LIST_REFRESH_FAILED = ' — draft list could not be refreshed';
 
@@ -821,7 +822,7 @@ for (const upgradeAfterFailure of [false, true]) {
       await field.pressSequentially('?');
       await page.clock.runFor(400);
       await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!?');
-      await expect(status(page)).toHaveText(CONFLICT_COPY);
+      await expect(status(page)).toHaveText(CONFLICT_COPY + ' Saved locally');
     }
   });
 }
@@ -857,7 +858,7 @@ for (const upgradeDuringRefresh of [false, true]) {
     await field.pressSequentially(' — правка');
     await page.clock.runFor(400);
     await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-    await expect(status(page)).toHaveText(CONFLICT_COPY + DRAFT_LIST_REFRESH_FAILED + '. ' + UPGRADED);
+    await expect(status(page)).toHaveText(CONFLICT_COPY_STEM + DRAFT_LIST_REFRESH_FAILED + '. ' + UPGRADED);
   });
 }
 
@@ -968,7 +969,7 @@ test('refresh failure clears after a later successful conflict-draft refresh', a
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
   await expect.poll(renders).toBeGreaterThan(1);
-  await expect(status(page)).toHaveText(CONFLICT_COPY);
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Saved locally');
 });
 
 test('save and retry progress after a conflict remain visible with its notice', async ({ page, context }) => {
@@ -988,7 +989,7 @@ test('save and retry progress after a conflict remain visible with its notice', 
   await restoreSaves(page);
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка?!');
-  await expect(status(page)).toHaveText(CONFLICT_COPY);
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Saved locally');
 });
 
 test('a failed preference write stays visible after later document saves until it is saved (#57)', async ({ page }) => {

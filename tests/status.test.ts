@@ -1,13 +1,15 @@
 import { expect, test } from 'vitest';
 import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusMessage, withDraftListRefreshFailure } from '../src/editor/status';
 
+const CONFLICT_COPY_STEM = CONFLICT_COPY.replace(/\.$/, '');
+
 test('conflict feedback precedes a newer risk and list failure', () => {
   expect(renderStatusMessage({
     conflict: CONFLICT_COPY,
     primary: '',
     risk: 'Storage upgraded.',
     draftListRefreshFailed: true,
-  })).toBe(CONFLICT_COPY + ' — draft list could not be refreshed. Storage upgraded.');
+  })).toBe(CONFLICT_COPY_STEM + ' — draft list could not be refreshed. Storage upgraded.');
 });
 
 test('a risk-only status has no leading separator when list refresh fails', () => {
@@ -28,7 +30,7 @@ test('replacing risk state does not retain or parse an old warning', () => {
     primary: '',
     risk: 'Storage upgraded.',
     draftListRefreshFailed: true,
-  })).toBe(CONFLICT_COPY + ' — draft list could not be refreshed. Storage upgraded.');
+  })).toBe(CONFLICT_COPY_STEM + ' — draft list could not be refreshed. Storage upgraded.');
 });
 
 test('clearing primary and risk clears old feedback', () => {
@@ -55,4 +57,13 @@ test('list refresh failure does not duplicate a warning already shown as primary
     { conflict: '', primary: risk, risk: '', draftListRefreshFailed: false },
     risk,
   ))).toBe('Draft list could not be refreshed. ' + risk);
+});
+
+test('list refresh failure does not leave a period before the em dash', () => {
+  expect(renderStatusMessage({
+    conflict: CONFLICT_COPY,
+    primary: '',
+    risk: '',
+    draftListRefreshFailed: true,
+  })).toBe(CONFLICT_COPY_STEM + ' — draft list could not be refreshed');
 });
