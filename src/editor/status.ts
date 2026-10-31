@@ -1,0 +1,27 @@
+export const CONFLICT_COPY = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
+/** Shown after a draft switch whose flush created a conflict copy of the draft that was left. */
+export const CONFLICT_COPY_LEFT = 'Another tab changed the draft you left. Your edits were saved as a conflict copy.';
+
+export type StatusMessage = { conflict: string; primary: string; risk: string; draftListRefreshFailed: boolean };
+
+/**
+ * Apply a draft-list refresh failure without duplicating a warning that is already
+ * in `primary` (showSaveState/showSaving often put riskText there with risk '').
+ */
+export function withDraftListRefreshFailure(message: StatusMessage, risk: string): StatusMessage {
+  if (risk && message.primary === risk) return { ...message, draftListRefreshFailed: true, primary: '', risk };
+  return { ...message, draftListRefreshFailed: true, risk };
+}
+
+/** Render message parts without inferring state from previously displayed text. */
+export function renderStatusMessage(message: StatusMessage): string {
+  const { conflict, primary, risk, draftListRefreshFailed } = message;
+  let text = [conflict, primary].filter(Boolean).join(' ');
+  if (draftListRefreshFailed) {
+    // Avoid "copy. — draft list…" / "Saving… — …": strip trailing sentence end first.
+    text = text.replace(/[.…]$/, '');
+    text += text ? ' — draft list could not be refreshed' : 'Draft list could not be refreshed.';
+  }
+  if (risk) text += text ? (/[.…]$/.test(text) ? ' ' : '. ') + risk : risk;
+  return text;
+}
