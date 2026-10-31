@@ -1,7 +1,5 @@
 import { expect, test } from 'vitest';
-import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusMessage, withDraftListRefreshFailure } from '../src/editor/status';
-
-const CONFLICT_COPY_STEM = CONFLICT_COPY.replace(/\.$/, '');
+import { CONFLICT_COPY, CONFLICT_COPY_LEFT, renderStatusBody, renderStatusMessage, statusLineParts, withDraftListRefreshFailure } from '../src/editor/status';
 
 test('conflict feedback precedes a newer risk and list failure', () => {
   expect(renderStatusMessage({
@@ -9,7 +7,7 @@ test('conflict feedback precedes a newer risk and list failure', () => {
     primary: '',
     risk: 'Storage upgraded.',
     draftListRefreshFailed: true,
-  })).toBe(CONFLICT_COPY_STEM + ' — draft list could not be refreshed. Storage upgraded.');
+  })).toBe(CONFLICT_COPY + ' Draft list could not be refreshed. Storage upgraded.');
 });
 
 test('a risk-only status has no leading separator when list refresh fails', () => {
@@ -30,7 +28,7 @@ test('replacing risk state does not retain or parse an old warning', () => {
     primary: '',
     risk: 'Storage upgraded.',
     draftListRefreshFailed: true,
-  })).toBe(CONFLICT_COPY_STEM + ' — draft list could not be refreshed. Storage upgraded.');
+  })).toBe(CONFLICT_COPY + ' Draft list could not be refreshed. Storage upgraded.');
 });
 
 test('clearing primary and risk clears old feedback', () => {
@@ -59,11 +57,54 @@ test('list refresh failure does not duplicate a warning already shown as primary
   ))).toBe('Draft list could not be refreshed. ' + risk);
 });
 
-test('list refresh failure does not leave a period before the em dash', () => {
-  expect(renderStatusMessage({
+test('list refresh failure strips a trailing period but keeps an ellipsis', () => {
+  expect(renderStatusBody({
+    conflict: '',
+    primary: 'Saved locally.',
+    risk: '',
+    draftListRefreshFailed: true,
+  })).toBe('Saved locally — draft list could not be refreshed');
+  expect(renderStatusBody({
+    conflict: '',
+    primary: 'Saving…',
+    risk: '',
+    draftListRefreshFailed: true,
+  })).toBe('Saving… — draft list could not be refreshed');
+});
+
+test('conflict text is omitted from the body live region', () => {
+  expect(renderStatusBody({
+    conflict: CONFLICT_COPY,
+    primary: 'Saved locally',
+    risk: '',
+    draftListRefreshFailed: false,
+  })).toBe('Saved locally');
+});
+
+test('status line parts match the conflict / separator / body DOM split', () => {
+  expect(statusLineParts({
+    conflict: CONFLICT_COPY,
+    primary: 'Saved locally',
+    risk: '',
+    draftListRefreshFailed: false,
+  })).toEqual({ conflict: CONFLICT_COPY, sep: ' ', body: 'Saved locally' });
+  expect(statusLineParts({
+    conflict: '',
+    primary: 'Saved locally',
+    risk: '',
+    draftListRefreshFailed: false,
+  })).toEqual({ conflict: '', sep: '', body: 'Saved locally' });
+  expect(statusLineParts({
     conflict: CONFLICT_COPY,
     primary: '',
     risk: '',
-    draftListRefreshFailed: true,
-  })).toBe(CONFLICT_COPY_STEM + ' — draft list could not be refreshed');
+    draftListRefreshFailed: false,
+  })).toEqual({ conflict: CONFLICT_COPY, sep: '', body: '' });
+  // During a deferred re-announce the live region is briefly empty.
+  expect(statusLineParts({
+    conflict: CONFLICT_COPY,
+    primary: 'Saving…',
+    risk: '',
+    draftListRefreshFailed: false,
+  }, '')).toEqual({ conflict: CONFLICT_COPY, sep: '', body: 'Saving…' });
 });

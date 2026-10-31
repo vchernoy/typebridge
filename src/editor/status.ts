@@ -13,15 +13,34 @@ export function withDraftListRefreshFailure(message: StatusMessage, risk: string
   return { ...message, draftListRefreshFailed: true, risk };
 }
 
-/** Render message parts without inferring state from previously displayed text. */
-export function renderStatusMessage(message: StatusMessage): string {
-  const { conflict, primary, risk, draftListRefreshFailed } = message;
-  let text = [conflict, primary].filter(Boolean).join(' ');
+/** Progress/action/risk text without the conflict notice (conflict is a separate live region). */
+export function renderStatusBody(message: StatusMessage): string {
+  const { primary, risk, draftListRefreshFailed } = message;
+  let text = primary;
   if (draftListRefreshFailed) {
-    // Avoid "copy. — draft list…" / "Saving… — …": strip trailing sentence end first.
-    text = text.replace(/[.…]$/, '');
+    // Strip a trailing period only — keep ellipsis on "Saving…" intact.
+    text = text.replace(/\.$/, '');
     text += text ? ' — draft list could not be refreshed' : 'Draft list could not be refreshed.';
   }
   if (risk) text += text ? (/[.…]$/.test(text) ? ' ' : '. ') + risk : risk;
   return text;
+}
+
+/**
+ * Parts written into `#conflict-notice`, `#status-sep`, and `#status`.
+ * Pass `displayedConflict` when the live region may briefly differ from the model
+ * (for example during a deferred re-announce).
+ */
+export function statusLineParts(
+  message: StatusMessage,
+  displayedConflict: string = message.conflict,
+): { conflict: string; sep: string; body: string } {
+  const body = renderStatusBody(message);
+  return { conflict: message.conflict, sep: displayedConflict && body ? ' ' : '', body };
+}
+
+/** Full status line for tests and documentation expectations (matches `#status-line` textContent). */
+export function renderStatusMessage(message: StatusMessage): string {
+  const { conflict, sep, body } = statusLineParts(message);
+  return conflict + sep + body;
 }

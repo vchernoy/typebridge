@@ -10,7 +10,7 @@ test('a stale tab saves a visible conflict copy without overwriting the newer dr
   await page.locator('#editor').fill('Новое содержание');
   await expect(page.locator('#status')).toContainText('Saved locally');
   await other.locator('#editor').fill('Другой вариант 🙂');
-  await expect(other.locator('#status')).toContainText('conflict copy');
+  await expect(other.locator('#status-line')).toContainText('conflict copy');
   await expect(other.locator('#drafts option')).toHaveCount(2);
   await other.reload();
   await expect(other.locator('#editor')).toHaveValue('Другой вариант 🙂');
@@ -239,7 +239,7 @@ test('reload recovery preserves another tab’s newer revision', async ({ page, 
   await page.evaluate(draft => sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify(draft)), pending);
   await page.reload();
   await expect(field).toHaveValue('Несохранённый вариант 🙂');
-  await expect(page.locator('#status')).toContainText('conflict copy');
+  await expect(page.locator('#status-line')).toContainText('conflict copy');
   await expect(page.locator('#drafts option')).toHaveCount(2);
   await other.reload();
   await expect(other.locator('#editor')).toHaveValue('Новая версия другой вкладки');

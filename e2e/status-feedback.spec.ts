@@ -14,7 +14,7 @@ function storedTexts(page: Page): Promise<string[]> {
     };
   }));
 }
-const status = (page: Page) => page.locator('#status');
+const status = (page: Page) => page.locator('#status-line');
 const prefWarning = (page: Page) => page.locator('#preference-warning');
 const AUTOSAVE_PREF_FAILED = 'Could not save the autosave setting; it may reset on reload.';
 const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
@@ -677,9 +677,7 @@ test('a failed delete without storage and with autosave off keeps the storage wa
 
 const CONFLICT_COPY = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
 const CONFLICT_COPY_LEFT = 'Another tab changed the draft you left. Your edits were saved as a conflict copy.';
-const CONFLICT_COPY_STEM = CONFLICT_COPY.replace(/\.$/, '');
 const UPGRADED = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
-const DRAFT_LIST_REFRESH_FAILED = ' — draft list could not be refreshed';
 
 /** Force the next save into a conflict copy by committing a newer revision from another tab. */
 async function createForeignRevision(page: Page, context: BrowserContext, text: string): Promise<void> {
@@ -688,7 +686,7 @@ async function createForeignRevision(page: Page, context: BrowserContext, text: 
   await expect(other.locator('#editor')).toHaveValue(text);
   await other.locator('#editor').fill('Версия другой вкладки');
   await page.clock.runFor(400); // The fake clock is shared by both tabs.
-  await expect(other.locator('#status')).toHaveText('Saved locally');
+  await expect(other.locator('#status-line')).toHaveText('Saved locally');
   await other.close();
 }
 
@@ -858,7 +856,7 @@ for (const upgradeDuringRefresh of [false, true]) {
     await field.pressSequentially(' — правка');
     await page.clock.runFor(400);
     await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-    await expect(status(page)).toHaveText(CONFLICT_COPY_STEM + DRAFT_LIST_REFRESH_FAILED + '. ' + UPGRADED);
+    await expect(status(page)).toHaveText(CONFLICT_COPY + ' Draft list could not be refreshed. ' + UPGRADED);
   });
 }
 
@@ -889,7 +887,7 @@ test('switch-time conflict is announced after the selected draft loads', async (
   await page.locator('#drafts').selectOption(targetId);
   await expect(field).toHaveValue('Целевой черновик');
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT);
+  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Saved locally');
   // Once announced, the notice must not follow the user to another document.
   await page.locator('#new-draft').click();
   await expect(field).toHaveValue('');
@@ -909,6 +907,115 @@ test('import after a conflict flush keeps the left-draft conflict notice', async
   await expect(field).toHaveValue('Импортированный текст');
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
   await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Imported as a new draft');
+});
+
+test('turning autosave off during an in-flight conflict keeps the notice', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
+  await page.evaluate(() => {
+    const state = window as unknown as { holdConflict: boolean; conflictHeld: boolean };
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+      IDBObjectStore.prototype.add = add;
+      state.holdConflict = true;
+      const copyId = (args[0] as { id: string }).id;
+      const result = add.apply(this, args);
+      result.addEventListener('success', () => {
+        state.conflictHeld = true;
+        const keepAlive = (): void => {
+          if (state.holdConflict) this.get(copyId).addEventListener('success', keepAlive);
+        };
+        keepAlive();
+      });
+      return result;
+    };
+  });
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await page.clock.runFor(400);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
+  page.once('dialog', dialog => dialog.dismiss()); // Keep the conflict copy in Drafts.
+  // Start the toggle while the write is still held so the handler reaches `await saving`.
+  const unchecking = page.locator('#autosave').uncheck();
+  await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
+  await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
+  await unchecking;
+  await expect(page.locator('#autosave')).not.toBeChecked();
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+  await expect(status(page)).toContainText(CONFLICT_COPY);
+  await expect(status(page)).toContainText('Autosave off');
+});
+
+test('turning autosave off clears an earlier conflict notice', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(CONFLICT_COPY);
+  // Save finished; this notice must clear on toggle (Cancel keeps the draft).
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#conflict-notice')).toHaveText('');
+  await expect(status(page)).toHaveText('Autosave off');
+});
+
+test('a failed retry during a switch flush still announces the conflict', async ({ page, context }) => {
+  const { field, targetId } = await prepareConflict(page, context, true);
+  await page.evaluate(() => {
+    const state = window as unknown as { holdConflict: boolean; conflictHeld: boolean; copyId: string };
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+      IDBObjectStore.prototype.add = add;
+      state.holdConflict = true;
+      state.copyId = (args[0] as { id: string }).id;
+      const result = add.apply(this, args);
+      result.addEventListener('success', () => {
+        state.conflictHeld = true;
+        const keepAlive = (): void => {
+          if (state.holdConflict) this.get(state.copyId).addEventListener('success', keepAlive);
+        };
+        keepAlive();
+      });
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...values: Parameters<IDBObjectStore['put']>) {
+        if (this.name === 'documents' && (values[0] as { id: string }).id === state.copyId) {
+          IDBObjectStore.prototype.put = put;
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        }
+        return put.apply(this, values);
+      };
+      return result;
+    };
+  });
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  const switching = page.locator('#drafts').selectOption(targetId);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
+  // Keep dirty so persist retries after the conflict commit, then fails.
+  await field.pressSequentially('!');
+  await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
+  await switching;
+  await expect(field).toHaveValue('Исходный — правка!');
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+  // Early return must still write the notice; callers ignore switchDraft's result.
+  await expect(status(page)).toContainText(CONFLICT_COPY);
+  await expect(status(page)).toContainText(SAVE_FAILED);
+});
+
+test('a second identical conflict copy re-announces and keeps a space before save state', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(CONFLICT_COPY);
+  await createForeignRevision(page, context, 'Исходный — правка');
+  await field.pressSequentially('!');
+  await page.clock.runFor(400);
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
+  await expect(page.locator('#conflict-notice')).toHaveText(CONFLICT_COPY);
+  // A later non-conflict save must keep the separator after the deferred re-announce.
+  await field.pressSequentially('?');
+  await page.clock.runFor(400);
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Saved locally');
 });
 
 test('a failed switch after a conflict flush keeps the open-failure through a later save', async ({ page, context }) => {
@@ -964,7 +1071,7 @@ test('refresh failure clears after a later successful conflict-draft refresh', a
   await field.press('End');
   await field.pressSequentially(' — правка');
   await page.clock.runFor(400);
-  await expect(status(page)).toContainText(DRAFT_LIST_REFRESH_FAILED);
+  await expect(status(page)).toHaveText(new RegExp('draft list could not be refreshed', 'i'));
   await field.pressSequentially('!');
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
