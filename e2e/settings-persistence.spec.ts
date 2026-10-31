@@ -148,3 +148,42 @@ test('resize control supports keyboard and keeps editor content and history', as
   await page.locator('#redo').click();
   await expect(editor).toHaveValue('Текст для редактора');
 });
+
+test('resize control follows the editor right edge when the width changes (#70)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await page.goto('/');
+  const field = page.locator('#editor');
+  const button = page.locator('#resize-editor');
+  await expect(field).toBeEnabled();
+  const gap = async (): Promise<number> => {
+    const [f, b] = await Promise.all([field.boundingBox(), button.boundingBox()]);
+    if (!f || !b) throw new Error('Missing bounding box');
+    return Math.abs(f.x + f.width - (b.x + b.width));
+  };
+  await expect.poll(gap).toBeLessThan(2);
+  await button.scrollIntoViewIfNeeded();
+  const start = await button.boundingBox();
+  if (!start) throw new Error('Resize control has no bounding box');
+  const x = start.x + start.width / 2;
+  const y = start.y + start.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 250, y + 40, { steps: 8 });
+  await expect.poll(gap).toBeLessThan(2);
+  const narrowed = await button.boundingBox();
+  expect(narrowed!.x).toBeLessThan(start.x - 200);
+  await page.mouse.move(x - 100, y + 40, { steps: 8 });
+  await expect.poll(gap).toBeLessThan(2);
+  await page.mouse.up();
+  await button.focus();
+  await button.press('ArrowLeft');
+  await expect.poll(gap).toBeLessThan(2);
+  await page.reload();
+  await expect(field).toBeEnabled();
+  await expect.poll(gap).toBeLessThan(2);
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('#exit-focus')).toBeVisible();
+  await expect.poll(gap).toBeLessThan(2);
+  await page.locator('#exit-focus').click();
+  await expect.poll(gap).toBeLessThan(2);
+});
