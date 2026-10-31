@@ -22,4 +22,4 @@ The footer shows `Ln N, Col M` for the current caret (selection start). It updat
 | Go to line | Cmd/Ctrl+G |
 | Focus mode | Esc (see editor behavior) or Cmd/Ctrl+Shift+Enter |
 
-Avoid colliding with transliteration (Cmd/Ctrl+Shift+Space or the configured F-key) and conversion (Cmd/Ctrl+Shift+L / K).
+Avoid colliding with transliteration (Ctrl+Shift+Space on all platforms, or the configured Cmd/Ctrl+Shift+F-key) and conversion (Cmd/Ctrl+Shift+L / K). The macOS default uses Control rather than Command to avoid the reported Siri conflict (#68). OS/browser and user-configured shortcuts can still take precedence; choose an F-key alternative or use the on-screen toggle if needed. Real Mac/browser verification is required; automated platform emulation does not verify OS shortcut availability.
