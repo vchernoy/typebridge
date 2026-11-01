@@ -361,3 +361,62 @@ test('resize grip keeps a visible mark in forced-colors mode (#70)', async ({ pa
   await page.emulateMedia({ forcedColors: 'none' });
   expect(await page.locator('#resize-editor').evaluate(el => getComputedStyle(el, '::after').content)).toBe('none');
 });
+
+test('Focus mode keeps its own saved size across reload and new tabs, separate from Normal (#120)', async ({ page, context }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto('/');
+  const field = page.locator('#editor');
+  const grip = page.locator('#resize-editor');
+  await expect(field).toBeEnabled();
+  // Normal size first.
+  await grip.press('ArrowLeft');
+  await grip.press('ArrowLeft');
+  const normal = await field.evaluate(el => ({ width: el.style.width, height: el.style.height }));
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('#exit-focus')).toBeVisible();
+  const focusDefault = await field.boundingBox();
+  // Resize in Focus mode with a real drag, wider than Focus mode's 900 px default.
+  await grip.scrollIntoViewIfNeeded();
+  const handle = await grip.boundingBox();
+  if (!handle || !focusDefault) throw new Error('Missing bounding box');
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 100, handle.y + handle.height / 2 - 120, { steps: 8 });
+  await page.mouse.up();
+  const focused = await field.evaluate(el => ({ width: el.style.width, height: el.style.height }));
+  expect(parseFloat(focused.width)).toBeGreaterThan(1000);
+  expect(parseFloat(focused.height)).toBeLessThan(focusDefault.height);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('typebridge.editor.focusSize.v1'))).toBe(JSON.stringify(focused));
+  // The Normal size is untouched in storage.
+  expect(await page.evaluate(() => localStorage.getItem('typebridge.editor.size.v1'))).toBe(JSON.stringify(normal));
+  await page.reload();
+  await expect(field).toBeEnabled();
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  expect(await field.evaluate(el => ({ width: el.style.width, height: el.style.height }))).toEqual(focused);
+  const box = await field.boundingBox();
+  expect(Math.round(box!.width)).toBe(Math.round(parseFloat(focused.width)));
+  const other = await context.newPage();
+  await other.setViewportSize({ width: 1600, height: 1000 });
+  await other.goto('/');
+  await expect(other.locator('#editor')).toBeEnabled();
+  await expect(other.locator('body')).toHaveClass(/focus-mode/);
+  expect(await other.locator('#editor').evaluate(el => ({ width: el.style.width, height: el.style.height }))).toEqual(focused);
+  await other.close();
+  // Leaving Focus shows the Normal size; coming back shows the Focus size again.
+  await page.locator('#exit-focus').click();
+  expect(await field.evaluate(el => ({ width: el.style.width, height: el.style.height }))).toEqual(normal);
+  await page.locator('#focus-mode').click();
+  expect(await field.evaluate(el => ({ width: el.style.width, height: el.style.height }))).toEqual(focused);
+});
+
+test('without a saved Focus size, Focus mode keeps its default layout (#120)', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.addInitScript(() => { try { localStorage.setItem('typebridge.editor.focusSize.v1', '{"width":"bad","height":7}'); } catch { /* ignore */ } });
+  await page.goto('/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('#exit-focus')).toBeVisible();
+  expect(await field.evaluate(el => ({ width: el.style.width, height: el.style.height, maxWidth: el.style.maxWidth }))).toEqual({ width: '', height: '', maxWidth: '' });
+  expect(Math.round((await field.boundingBox())!.width)).toBe(900);
+});
