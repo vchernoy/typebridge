@@ -344,3 +344,20 @@ test('Focus mode: ArrowUp/ArrowDown on the resize grip change only the height (#
   await page.locator('#resize-editor').press('ArrowRight');
   expect(Math.round((await field.boundingBox())!.width)).toBe(Math.round(before!.width + 20));
 });
+
+test('resize grip keeps a visible mark in forced-colors mode (#70)', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Forced-colors emulation is Chromium-only');
+  await page.emulateMedia({ forcedColors: 'active' });
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const mark = await page.locator('#resize-editor').evaluate(el => {
+    const style = getComputedStyle(el, '::after');
+    return { content: style.content, right: style.borderRightWidth, bottom: style.borderBottomWidth, rightStyle: style.borderRightStyle };
+  });
+  expect(mark.content).toBe('""');
+  expect(mark.right).toBe('2px');
+  expect(mark.bottom).toBe('2px');
+  expect(mark.rightStyle).toBe('solid');
+  await page.emulateMedia({ forcedColors: 'none' });
+  expect(await page.locator('#resize-editor').evaluate(el => getComputedStyle(el, '::after').content)).toBe('none');
+});

@@ -327,3 +327,17 @@ body.focus-mode .bottom {
     height: 44px;
   }
 }
+/* Forced-colors modes (e.g. Windows High Contrast) drop background gradients, so the
+   grip above would vanish. Draw a corner mark with a system-color border instead. */
+@media (forced-colors: active) {
+  .resize-grip::after {
+    content: "";
+    position: absolute;
+    right: calc(var(--grip-outset-x) + 3px);
+    bottom: calc(var(--grip-outset-y) + 3px);
+    width: 10px;
+    height: 10px;
+    border-right: 2px solid ButtonText;
+    border-bottom: 2px solid ButtonText;
+  }
+}
