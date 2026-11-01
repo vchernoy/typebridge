@@ -2,11 +2,13 @@ import { expect, test } from '@playwright/test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { openFind } from './settings-helpers';
 
 test('find text survives reload within a tab; search options persist in a new tab', async ({ page, context }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#enabled').uncheck();
+  await openFind(page);
   await page.locator('#find-text').fill('Русский 🙂');
   await page.locator('#replace-text').fill('Заменить');
   await page.locator('#match-case').check();
@@ -21,12 +23,14 @@ test('find text survives reload within a tab; search options persist in a new ta
   await expect(other.locator('#replace-text')).toHaveValue('');
   await expect(other.locator('#match-case')).toBeChecked();
   await expect(other.locator('#regex-mode')).toBeChecked();
+  await openFind(other);
   await other.locator('#find-text').fill('other');
   await page.reload(); await expect(page.locator('#find-text')).toHaveValue('Русский 🙂');
 });
 
 test('options restore when a page is reopened without retaining search text', async ({ page, context }) => {
   await page.goto('/');
+  await openFind(page);
   await page.locator('#regex-mode').check();
   await page.locator('#find-text').fill('private text');
   await page.close();
@@ -46,6 +50,7 @@ test('blocked settings storage keeps search usable and reports the problem', asy
   await page.goto('/');
   await page.locator('#enabled').uncheck();
   await page.locator('#editor').fill('Русский текст');
+  await openFind(page);
   await page.locator('#find-text').fill('текст');
   await expect(page.getByText('Find settings could not be saved or restored in this browser.')).toBeVisible();
   await page.getByRole('button', { name: 'Next', exact: true }).click();
@@ -97,6 +102,7 @@ test('settings warning clears only after the failed setting is saved', async ({ 
   });
   await page.goto('/');
   await page.locator('#enabled').uncheck();
+  await openFind(page);
   await page.locator('#find-text').fill('a');
   const warning = page.getByText('Find settings could not be saved or restored in this browser.');
   await expect(warning).toBeVisible();
@@ -118,6 +124,7 @@ test('browser profile restart keeps preferences but a new session has no find te
   let ctx = await playwright[browserName].launchPersistentContext(dir, launchOptions);
   try {
     let page = await ctx.newPage(); await page.goto(appURL);
+    await openFind(page);
     await page.locator('#match-case').check();
     await page.locator('#regex-mode').check();
     await page.locator('#find-text').fill('private');

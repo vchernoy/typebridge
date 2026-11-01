@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { openFind } from './settings-helpers';
 
 test('find navigates forwards and backwards with wrap-around', async ({ page }) => {
   await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Alpha beta alpha');
+  await openFind(page);
   await page.getByLabel('Find', { exact: true }).fill('alpha');
   await page.getByRole('button', { name: 'Next' }).click();
   expect(await field.evaluate(el => [(el as HTMLTextAreaElement).selectionStart, (el as HTMLTextAreaElement).selectionEnd])).toEqual([0, 5]);
@@ -19,6 +21,7 @@ test('replace and replace all support undo, redo, case matching and literal punc
   await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('ETF etf ETF (test)');
+  await openFind(page);
   await page.getByLabel('Find', { exact: true }).fill('ETF');
   await page.getByLabel('Replace', { exact: true }).fill('fund');
   await page.getByRole('checkbox', { name: 'Match case' }).check();
@@ -76,6 +79,7 @@ test('regex find and replace supports captures, named groups, undo and invalid p
   await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('2026-10-27 and 2026-11-03');
+  await openFind(page);
   await page.getByRole('checkbox', { name: 'Regex (.*)' }).check();
   await page.getByLabel('Find', { exact: true }).fill('(?<year>\\d{4})-(\\d{2})-(\\d{2})');
   await page.getByLabel('Replace', { exact: true }).fill('$3/$2/$<year>');
@@ -106,6 +110,7 @@ test('focus mode preserves text, selection and editor undo history', async ({ pa
 test('Find and Replace share the global transliteration mode, in Regex mode too', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
+  await openFind(page);
   const find = page.locator('#find-text');
   const replacement = page.locator('#replace-text');
   await find.pressSequentially('privet');
@@ -133,6 +138,7 @@ test('a Regex pattern can mix Russian letters and Latin syntax by toggling the s
   await page.locator('#enabled').uncheck();
   await field.fill('привет   мир, привет мир');
   await page.locator('#enabled').check();
+  await openFind(page);
   await page.locator('#regex-mode').check();
   const find = page.locator('#find-text');
   await find.click();
@@ -152,6 +158,7 @@ test('a Regex pattern can mix Russian letters and Latin syntax by toggling the s
 test('Find supports selection replacement and leaves IME composition untouched', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
+  await openFind(page);
   const find = page.locator('#find-text');
   await find.pressSequentially('mir');
   await find.evaluate((el: HTMLInputElement) => el.setSelectionRange(0, 2));
