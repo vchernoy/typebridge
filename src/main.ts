@@ -1,8 +1,10 @@
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
+import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
+import { draftOptionLabel } from './editor/draft-list';
 import { UNTITLED_TITLE, autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
+import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
@@ -45,7 +47,6 @@ type StatusKind = 'progress' | 'action' | 'conflict' | 'failure';
 const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
-const AUTOSAVE_OFF_UNSAVED = 'Autosave off — changes are unsaved';
 let statusKind: StatusKind = 'progress';
 let statusMessage: StatusMessage = { conflict: '', primary: '', risk: '', draftListRefreshFailed: false };
 type PersistResult = { saved: boolean; conflict: boolean };
@@ -124,14 +125,14 @@ function riskText(): string {
     return storageProblem === STORAGE_UNAVAILABLE ? SAVE_FAILED_NO_STORAGE : 'Changes are unsaved. ' + storageProblem;
   }
   if (saveFailed && autosave.checked) return SAVE_FAILED;
-  if (dirty && !autosave.checked) return AUTOSAVE_OFF_UNSAVED;
+  if (dirty && !autosave.checked) return AUTOSAVE_OFF;
   return '';
 }
 function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): void {
   updateStatus({ primary, risk }, kind);
 }
 function statusKindForRisk(risk: string): Exclude<StatusKind, 'action' | 'conflict'> {
-  return risk === AUTOSAVE_OFF_UNSAVED ? 'progress' : 'failure';
+  return risk === AUTOSAVE_OFF ? 'progress' : 'failure';
 }
 /** Explicit action/failure feedback: one place for conflict reset, risk join and kind. */
 function announceAction(text: string, options: {
@@ -162,7 +163,7 @@ function showSaving(): void {
 function showSaveState(): void {
   const risk = riskText();
   if (risk) setSaveStatus(risk, statusKindForRisk(risk));
-  else setSaveStatus(autosave.checked ? 'Saved locally' : 'Autosave off');
+  else setSaveStatus(autosave.checked ? 'Saved locally' : AUTOSAVE_OFF);
 }
 function markDraftListRefreshFailed(): void {
   updateStatus(withDraftListRefreshFailure(statusMessage, riskText()));
@@ -408,10 +409,17 @@ function rememberActive(): void { try { setActiveDraftId(active.id); } catch { /
 function renderDrafts(): void {
   draftSelect.replaceChildren();
   const visible = drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
+  const displayTitle = draftTitle.value.trim() || UNTITLED_TITLE;
   for (const draft of visible) {
     const option = document.createElement('option');
     option.value = draft.id;
-    option.textContent = draft.title + (draft.id === active.id ? ' (current)' : '');
+    const isCurrent = draft.id === active.id;
+    option.textContent = draftOptionLabel({
+      savedTitle: draft.title,
+      displayTitle,
+      isCurrent,
+      unsaved: isCurrent && dirty,
+    });
     draftSelect.append(option);
   }
   draftSelect.value = active.id;
@@ -508,18 +516,22 @@ async function persist(): Promise<PersistResult> {
     }
   }
 }
-function scheduleSave(): void {
+function scheduleSave(fromTitle = false): void {
   if (loadingDraft) return;
+  const becameDirty = !dirty;
   dirty = true;
   generation++;
   journalEdit();
+  // With autosave off nothing is committed, so refresh the Documents label from the
+  // on-screen title (and mark unsaved) without waiting for a save (#114).
+  if (!autosave.checked && (becameDirty || fromTitle)) renderDrafts();
   clearTimeout(saveTimer);
   if (autosave.checked) { showSaving(); saveTimer = setTimeout(() => { void persist(); }, 300); }
   else showSaveState();
 }
-field.addEventListener('input', scheduleSave);
-field.addEventListener('historychange', scheduleSave);
-draftTitle.addEventListener('input', scheduleSave);
+field.addEventListener('input', () => scheduleSave());
+field.addEventListener('historychange', () => scheduleSave());
+draftTitle.addEventListener('input', () => scheduleSave(true));
 autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {
@@ -543,7 +555,16 @@ autosave.addEventListener('change', async () => {
     // Older conflict notices still clear when the toggle did not itself create one.
     const inFlight = saving ? await saving : undefined;
     if (!inFlight?.conflict) clearNotices();
-    if (window.confirm('Delete the saved copy of this document? Cancel keeps it in your Documents list.')) {
+    // returnFocus is the checkbox itself: it is disabled for this handler, so
+    // capture it here and let askConfirmChoice restore after finally re-enables.
+    const deleteSaved = await askConfirmChoice({
+      title: 'Delete the saved copy?',
+      message: 'Delete the saved copy of this document? Keep saved copy leaves it in your Documents list.',
+      confirmLabel: 'Delete saved copy',
+      cancelLabel: 'Keep saved copy',
+      returnFocus: autosave,
+    });
+    if (deleteSaved) {
       try {
         if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed');
         active = { ...active, revision: 0 };
@@ -555,9 +576,14 @@ autosave.addEventListener('change', async () => {
         return;
       }
     }
-    announce(dirty ? 'Autosave off — changes are unsaved' : 'Autosave off');
+    announce(AUTOSAVE_OFF);
   }
-  } finally { autosave.disabled = false; }
+  } finally {
+    autosave.disabled = false;
+    // Re-focus after re-enabling: the dialog cannot restore while this control
+    // is disabled, and a delete may await before this finally runs (#114 review).
+    autosave.focus({ preventScroll: true });
+  }
 });
 async function switchDraft(id?: string): Promise<SwitchResult> {
   if (transitioning) return { opened: false, conflict: false };

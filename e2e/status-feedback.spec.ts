@@ -21,7 +21,7 @@ const AUTOSAVE_PREF_FAILED = 'Could not save the autosave setting; it may reset 
 const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
-const AUTOSAVE_OFF_UNSAVED = 'Autosave off — changes are unsaved';
+const AUTOSAVE_OFF = 'Autosave off — text and title are not saved and will be lost on reload';
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 // Copy may be refused by the headless clipboard; either message must keep the warning.
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -119,17 +119,15 @@ test('save progress messages are replaced when the save they announce succeeds',
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Autosave off');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   await field.press('End');
   await field.pressSequentially(' правка');
-  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   await setAutosave(page, true);
   await expect.poll(() => storedTexts(page)).toContain('Сохранено правка');
   await expect(status(page)).toHaveText('Saved locally');
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await setAutosave(page, true);
@@ -160,7 +158,6 @@ test('discarding text after a failed save stops reporting unsaved text', async (
   await field.press('End');
   await field.pressSequentially(' несохранено');
   await expect(status(page)).toContainText('Save failed');
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   page.once('dialog', dialog => dialog.accept()); // Discard unsaved changes.
@@ -270,20 +267,18 @@ test('a failed autosave preference write stays visible when toggling', async ({ 
       return setItem.call(this, key, value);
     };
   });
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Autosave off');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   await setAutosave(page, true);
   await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toHaveText('Autosave on');
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   // Deleting the saved copy leaves the text only in memory: say so.
-  page.once('dialog', dialog => dialog.accept());
-  await setAutosave(page, false);
+  await setAutosave(page, false, 'delete');
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   await expect.poll(() => storedTexts(page)).toEqual([]);
 });
@@ -297,12 +292,11 @@ test('with autosave off after a failure, action feedback keeps the unsaved warni
   await field.press('End');
   await field.pressSequentially(' несохранено');
   await expect(status(page)).toContainText('Save failed');
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   await documentAction(page, '#export-txt');
-  await expect(status(page)).toHaveText('Text exported. Autosave off — changes are unsaved');
+  await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF);
 });
 
 test('without browser storage, failures do not advise retrying by editing', async ({ page }) => {
@@ -325,7 +319,6 @@ test('a failed delete with autosave off does not promise another save', async ({
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await field.press('End');
@@ -360,7 +353,6 @@ test('without browser storage, toggling autosave keeps the storage warning', asy
   await setAutosave(page, true);
   await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toContainText('browser storage is unavailable');
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
@@ -372,16 +364,15 @@ test('switching to a clean draft with autosave off does not report unsaved chang
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await field.press('End');
   await field.pressSequentially(' черновик');
-  await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   page.once('dialog', dialog => dialog.accept()); // Discard unsaved changes.
   await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('');
-  await expect(status(page)).toHaveText('Autosave off');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
 });
 
 test('with autosave off, Copy, Export and Convert keep the unsaved-changes warning until the edit is saved', async ({ page }) => {
@@ -389,7 +380,6 @@ test('with autosave off, Copy, Export and Convert keep the unsaved-changes warni
   const field = page.locator('#editor');
   await field.fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the saved copy.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   // Clean draft: no warning yet.
@@ -397,10 +387,10 @@ test('with autosave off, Copy, Export and Convert keep the unsaved-changes warni
   await expect(status(page)).toHaveText('Text exported');
   await field.press('End');
   await field.pressSequentially(' правка');
-  await expect(status(page)).toHaveText(AUTOSAVE_OFF_UNSAVED);
-  await expectActionsKeep(page, AUTOSAVE_OFF_UNSAVED);
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
+  await expectActionsKeep(page, AUTOSAVE_OFF);
   await documentAction(page, '#export-txt');
-  await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF_UNSAVED);
+  await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF);
   // Saving resolves the risk.
   await setAutosave(page, true);
   await expect.poll(() => storedTexts(page)).toContain('Сохранено правка');
@@ -427,7 +417,6 @@ test('a failed IndexedDB initialization stays visible after Copy, Export and Con
   await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
   await expectActionsKeep(page, SAVE_FAILED_NO_STORAGE);
   // Autosave off does not hide that storage is unavailable.
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await documentAction(page, '#export-txt');
@@ -491,7 +480,7 @@ test('recovered text with autosave off keeps the unsaved warning after actions',
   await expect(page.locator('#editor')).toHaveValue('Восстановленный текст');
   await expect(status(page)).toHaveText('Recovered unsaved text; autosave is off');
   await documentAction(page, '#export-txt');
-  await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF_UNSAVED);
+  await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF);
   await setAutosave(page, true);
   await expect.poll(() => storedTexts(page)).toContain('Восстановленный текст');
   await expect(status(page)).toHaveText('Saved locally');
@@ -510,13 +499,12 @@ test('toggling autosave before initialization finishes does not report unavailab
   });
   await page.goto('/');
   await expect(page.locator('#editor')).toBeDisabled();
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Autosave off');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   await page.evaluate(() => (window as unknown as { releaseInit: () => void }).releaseInit());
   await expect(page.locator('#editor')).toBeEnabled();
-  await expect(status(page)).toHaveText('Autosave off');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
 });
 
 test('a database upgrade during an in-flight save keeps the storage warning', async ({ page }) => {
@@ -665,7 +653,6 @@ test('a failed delete without storage and with autosave off keeps the storage wa
   await page.goto('/');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await field.fill('Нельзя потерять');
@@ -934,7 +921,6 @@ test('turning autosave off during an in-flight conflict keeps the notice', async
   await field.pressSequentially(' — правка');
   await page.clock.runFor(400);
   await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
-  page.once('dialog', dialog => dialog.dismiss()); // Keep the conflict copy in Drafts.
   // Start the toggle while the write is still held so the handler reaches `await saving`.
   const unchecking = setAutosave(page, false);
   await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
@@ -943,7 +929,7 @@ test('turning autosave off during an in-flight conflict keeps the notice', async
   await expect(page.locator('#autosave')).not.toBeChecked();
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
   await expect(status(page)).toContainText(CONFLICT_COPY);
-  await expect(status(page)).toContainText('Autosave off');
+  await expect(status(page)).toContainText(AUTOSAVE_OFF);
 });
 
 test('turning autosave off clears an earlier conflict notice', async ({ page, context }) => {
@@ -953,10 +939,9 @@ test('turning autosave off clears an earlier conflict notice', async ({ page, co
   await page.clock.runFor(400);
   await expect(status(page)).toHaveText(CONFLICT_COPY);
   // Save finished; this notice must clear on toggle (Cancel keeps the draft).
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await expect(page.locator('#conflict-notice')).toHaveText('');
-  await expect(status(page)).toHaveText('Autosave off');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
 });
 
 test('a failed retry during a switch flush still announces the conflict', async ({ page, context }) => {
@@ -1115,7 +1100,6 @@ test('a failed preference write stays visible after later document saves until i
   });
   await page.locator('#enabled').uncheck();
   await expect(prefWarning(page)).toHaveText('Could not save the transliteration setting; it may reset on reload.');
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await setAutosave(page, true);
   await expect(page.locator('#autosave')).toBeEnabled();
@@ -1129,7 +1113,6 @@ test('a failed preference write stays visible after later document saves until i
   await page.evaluate(() => (window as unknown as { unblockPrefs: () => void }).unblockPrefs());
   await page.locator('#enabled').check();
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await setAutosave(page, true);
   await expect(page.locator('#autosave')).toBeEnabled();

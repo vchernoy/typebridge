@@ -202,8 +202,13 @@
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-saving-title">
             <h3 id="settings-saving-title">Saving</h3>
-            <label class="toggle"><input id="autosave" type="checkbox" checked /> Autosave</label>
-            <p class="setting-note">Saves your text in this browser as you type.</p>
+            <label class="toggle"
+              ><input id="autosave" type="checkbox" checked aria-describedby="autosave-hint" /> Autosave</label
+            >
+            <p id="autosave-hint" class="setting-note">
+              On: saves text in this browser as you type. Off: privacy mode — text and title are not saved and will be
+              lost on reload (including when a phone browser discards a background tab).
+            </p>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-editor-title">
             <h3 id="settings-editor-title">Editor</h3>
