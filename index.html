@@ -52,6 +52,15 @@
             </div>
           </div>
           <div class="top-actions">
+            <div class="mode-switch">
+              <span class="mode-side" aria-hidden="true">Latin</span
+              ><input id="enabled" type="checkbox" role="switch" checked aria-describedby="shortcut-label" /><label
+                for="enabled"
+                class="mode-side"
+                lang="ru"
+                >Кириллица</label
+              ><span id="shortcut-label" class="shortcut-hint"></span>
+            </div>
             <button
               id="focus-mode"
               type="button"
@@ -73,8 +82,6 @@
           </div>
         </header>
         <div class="toolbar">
-          <label class="toggle"><input id="enabled" type="checkbox" checked /> Transliteration on</label
-          ><span id="shortcut-label"></span>
           <div class="actions" role="toolbar" aria-label="Editing">
             <button id="undo" class="icon-button" type="button" disabled aria-label="Undo" title="Undo (Cmd/Ctrl+Z)">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
