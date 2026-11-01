@@ -319,3 +319,24 @@ for (const mode of ['Normal', 'Focus'] as const) {
     expect(Math.round(smallest!.height)).toBe(96);
   });
 }
+
+test('Focus mode: ArrowUp/ArrowDown on the Resize button change only the height (#70)', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto('/');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('#exit-focus')).toBeVisible();
+  const before = await field.boundingBox();
+  await page.locator('#resize-editor').focus();
+  await page.locator('#resize-editor').press('ArrowDown');
+  const down = await field.boundingBox();
+  expect(Math.round(down!.width)).toBe(Math.round(before!.width));
+  expect(Math.round(down!.height)).toBe(Math.round(before!.height + 20));
+  await page.locator('#resize-editor').press('ArrowUp');
+  const up = await field.boundingBox();
+  expect(Math.round(up!.width)).toBe(Math.round(before!.width));
+  expect(Math.round(up!.height)).toBe(Math.round(before!.height));
+  await page.locator('#resize-editor').press('ArrowRight');
+  expect(Math.round((await field.boundingBox())!.width)).toBe(Math.round(before!.width + 20));
+});

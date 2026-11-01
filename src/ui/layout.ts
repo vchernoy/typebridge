@@ -63,7 +63,11 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   // Focus mode caps its default width at 900 px; a resize there may use the full
   // width like Normal mode. The cap returns when Focus mode is entered or left.
   function liftFocusWidthCap(): void {
-    if (document.body.classList.contains('focus-mode')) field.style.maxWidth = '100%';
+    if (!document.body.classList.contains('focus-mode')) return;
+    // Pin the current width first, so a height-only change (ArrowUp/ArrowDown) does
+    // not let the editor jump to the full container width.
+    if (!field.style.width) field.style.width = field.getBoundingClientRect().width + 'px';
+    field.style.maxWidth = '100%';
   }
   let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number; widthFactor: number } | undefined;
   function enableDragResize(handle: HTMLElement): void {
