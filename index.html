@@ -40,37 +40,74 @@
               Focus mode
             </button>
             <button id="copy" type="button">Copy</button> <button id="clear" type="button">Clear</button>
+            <button
+              id="settings-open"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="settings-panel"
+            >
+              Settings
+            </button>
           </div>
         </div>
-        <details class="rules-panel">
-          <summary>Transliteration rules</summary>
-          <p>
-            One rule per line: Latin = Cyrillic. Edit defaults or add rules. Changes affect future typing, not existing
-            text.
-          </p>
-          <label for="rules-text">Mappings</label
-          ><textarea id="rules-text" spellcheck="false" aria-label="Transliteration mappings"></textarea>
-          <div class="actions">
-            <button id="rules-save" type="button">Save rules</button
-            ><button id="rules-reset" type="button">Reset to defaults</button
-            ><button id="rules-export" type="button">Export JSON</button><label for="rules-import">Import JSON</label
-            ><input id="rules-import" type="file" accept=".json,application/json" />
+        <aside
+          id="settings-panel"
+          class="settings-panel"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="settings-title"
+          hidden
+        >
+          <div class="settings-head">
+            <h2 id="settings-title">Settings</h2>
+            <button id="settings-close" type="button" aria-label="Close settings">×</button>
           </div>
-          <span id="rules-status" aria-live="polite"></span>
-        </details>
-        <details class="shortcut-panel">
-          <summary>Transliteration shortcut</summary>
-          <p>Choose a shortcut, or disable it. Shortcuts may be reserved by your operating system.</p>
-          <label for="translit-shortcut">Shortcut</label
-          ><select id="translit-shortcut">
-            <option value="default">Default (Ctrl + Shift + Space)</option>
-            <option value="f7">Ctrl/⌘ + Shift + F7</option>
-            <option value="f8">Ctrl/⌘ + Shift + F8</option>
-            <option value="f9">Ctrl/⌘ + Shift + F9</option>
-            <option value="off">Disabled</option></select
-          ><button id="shortcut-reset" type="button">Reset shortcut</button
-          ><span id="shortcut-status" aria-live="polite"></span>
-        </details>
+          <div class="settings-group shortcut-panel" role="group" aria-labelledby="settings-shortcut-title">
+            <h3 id="settings-shortcut-title">Transliteration shortcut</h3>
+            <p>Choose a shortcut, or disable it. Shortcuts may be reserved by your operating system.</p>
+            <label for="translit-shortcut">Shortcut</label
+            ><select id="translit-shortcut">
+              <option value="default">Default (Ctrl + Shift + Space)</option>
+              <option value="f7">Ctrl/⌘ + Shift + F7</option>
+              <option value="f8">Ctrl/⌘ + Shift + F8</option>
+              <option value="f9">Ctrl/⌘ + Shift + F9</option>
+              <option value="off">Disabled</option></select
+            ><button id="shortcut-reset" type="button">Reset shortcut</button
+            ><span id="shortcut-status" aria-live="polite"></span>
+          </div>
+          <div class="settings-group rules-panel" role="group" aria-labelledby="settings-rules-title">
+            <h3 id="settings-rules-title">Transliteration rules</h3>
+            <p>
+              One rule per line: Latin = Cyrillic. Edit defaults or add rules. Changes affect future typing, not
+              existing text.
+            </p>
+            <label for="rules-text">Mappings</label
+            ><textarea id="rules-text" spellcheck="false" aria-label="Transliteration mappings"></textarea>
+            <div class="actions">
+              <button id="rules-save" type="button">Save rules</button
+              ><button id="rules-reset" type="button">Reset to defaults</button
+              ><button id="rules-export" type="button">Export JSON</button><label for="rules-import">Import JSON</label
+              ><input id="rules-import" type="file" accept=".json,application/json" />
+            </div>
+            <span id="rules-status" aria-live="polite"></span>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-saving-title">
+            <h3 id="settings-saving-title">Saving</h3>
+            <label class="toggle"><input id="autosave" type="checkbox" checked /> Autosave</label>
+            <p class="setting-note">Saves your text in this browser as you type.</p>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-editor-title">
+            <h3 id="settings-editor-title">Editor</h3>
+            <label class="toggle"
+              ><input id="tab-indent" type="checkbox" checked aria-describedby="tab-indent-note" /> Tab indents</label
+            >
+            <p id="tab-indent-note" class="setting-note">
+              When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this
+              off, moves focus as usual.
+            </p>
+          </div>
+        </aside>
         <div class="find-bar" role="search" aria-label="Find and replace">
           <label for="find-text">Find</label><input id="find-text" type="text" autocomplete="off" /><label
             for="replace-text"
@@ -108,13 +145,7 @@
           ><button id="import-draft" type="button">Import draft</button
           ><input id="import-file" type="file" accept=".txt,.json,.typebridge.json" hidden /><label for="draft-title"
             >Title</label
-          ><input id="draft-title" type="text" aria-label="Draft title" /><label class="toggle"
-            ><input id="autosave" type="checkbox" checked /> Autosave</label
-          ><label
-            class="toggle"
-            title="When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this off, moves focus as usual."
-            ><input id="tab-indent" type="checkbox" checked /> Tab indents</label
-          >
+          ><input id="draft-title" type="text" aria-label="Draft title" />
         </div>
         <div class="focus-header">
           <span>TypeBridge · Focus mode</span><button id="exit-focus" type="button" hidden>Exit focus (Esc)</button>

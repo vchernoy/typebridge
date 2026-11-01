@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openSettings } from './settings-helpers';
 
 const KEY = 'typebridge.transliteration.shortcut.v1';
 
@@ -62,7 +63,7 @@ for (const saved of ['f7', 'f8', 'f9', 'off']) {
     await page.reload();
     await expect(page.locator('#editor')).toBeEnabled();
     await expect(page.locator('#translit-shortcut')).toHaveValue(saved);
-    await page.locator('.shortcut-panel summary').click();
+    await openSettings(page);
     await page.locator('#shortcut-reset').click();
     await expect(page.locator('#shortcut-label')).toHaveText('(Ctrl+Shift+Space)');
     expect(await page.evaluate(key => localStorage.getItem(key), KEY)).toBe('default');
@@ -104,7 +105,7 @@ test('macOS new default works when shortcut preferences cannot be read or writte
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').press('Control+Shift+Space');
   await expect(page.locator('#enabled')).not.toBeChecked();
-  await page.locator('.shortcut-panel summary').click();
+  await openSettings(page);
   await page.locator('#translit-shortcut').selectOption('f8');
   await page.locator('#shortcut-reset').click();
   await expect(page.locator('#shortcut-status')).toHaveText('Shortcut could not be saved');

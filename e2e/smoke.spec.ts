@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setAutosave } from './settings-helpers';
 
 test('editor types transliteration, edits selections and supports history', async ({ page }) => {
   await page.goto('/');
@@ -269,7 +270,7 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   await page.getByRole('combobox', { name: 'Drafts' }).selectOption({ label: 'First post' });
   await expect(field).toHaveValue('привет');
   page.once('dialog', d => d.dismiss());
-  await page.getByRole('checkbox', { name: 'Autosave' }).uncheck();
+  await setAutosave(page, false);
   await field.pressSequentially('a');
   page.once('dialog', d => d.accept());
   await page.reload();

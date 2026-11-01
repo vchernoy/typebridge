@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setSetting } from './settings-helpers';
 
 const U = '    ';
 const selection = (el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd];
@@ -45,7 +46,7 @@ test('keyboard users can always leave the editor', async ({ page }) => {
   await expect(editor).not.toBeFocused();
   await expect(editor).toHaveValue('plain line');
   // Turning the setting off restores normal Tab navigation, and it survives reload.
-  await page.locator('#tab-indent').uncheck();
+  await setSetting(page, '#tab-indent', false);
   await editor.focus();
   await editor.press('Tab');
   await expect(editor).not.toBeFocused();
