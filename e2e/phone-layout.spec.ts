@@ -26,3 +26,22 @@ for (const width of [320, 390]) {
     expect((await page.locator('#editor').boundingBox())!.y).toBeLessThan(width < 360 ? 340 : 300);
   });
 }
+
+test('phone layout wraps instead of overflowing when text is enlarged (#123)', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  // A larger browser default font, as set in accessibility or browser settings.
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style');
+      style.textContent = 'html { font-size: 24px; } body { font-size: 1rem; } button, input, label, span, select { font-size: inherit; }';
+      document.head.append(style);
+    });
+  });
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  for (const id of ['#enabled', '#focus-mode', '#settings-open', '#more-open']) {
+    const box = await page.locator(id).boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  }
+});

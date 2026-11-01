@@ -686,9 +686,9 @@ body.focus-mode .bottom {
     margin-bottom: 10px;
     padding-bottom: 10px;
   }
+  /* Wraps when text is enlarged; at the default size everything fits on one row. */
   .top-actions {
     width: 100%;
-    flex-wrap: nowrap;
     margin-left: 0;
     gap: 6px;
   }
@@ -725,5 +725,20 @@ body.focus-mode .bottom {
   }
   .tool-sep {
     display: none;
+  }
+}
+@media (max-width: 360px) {
+  /* Narrowest phones: a slightly smaller switch keeps it on one row with Focus and Settings. */
+  .mode-switch {
+    gap: 4px;
+  }
+  .mode-side {
+    font-size: 0.9rem;
+  }
+  #enabled {
+    width: 40px;
+  }
+  #enabled:checked::before {
+    transform: translateX(14px);
   }
 }
