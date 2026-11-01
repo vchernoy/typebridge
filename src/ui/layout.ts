@@ -25,33 +25,25 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     catch { editorSizeWarning.textContent = 'Editor size could not be saved in this browser.'; }
   }
   window.addEventListener('pointerup', persistEditorSize);
+  // The resize control is a grip drawn on the editor's bottom-right corner: iOS Safari
+  // ignores CSS resize, so a native grip never appears there (#70). It is a real button,
+  // so keyboard users can Tab to it and resize with the arrow keys.
   const resizeEditor = document.querySelector<HTMLButtonElement>('#resize-editor')!;
-  // A drawn corner grip: iOS Safari ignores CSS resize, so the native grip never
-  // appears there (#70). It is a pointer shortcut only; keyboard users use the button.
-  const resizeGrip = document.querySelector<HTMLElement>('#resize-grip');
   const MIN_WIDTH = 160;
   const MIN_HEIGHT = 96;
-  // Keep the button under the editor's right edge, so it follows the corner when
-  // the width changes, not only the height (#70). The button stays right-aligned
-  // in its container; the right margin covers the gap to the editor's edge.
+  // Keep the grip on the editor's corner as the editor changes size or moves.
   function alignResizeControls(): void {
     const parent = resizeEditor.parentElement;
-    if (!parent) return;
-    const style = getComputedStyle(parent);
+    if (!parent || resizeEditor.offsetParent !== parent) return;
     const fieldBox = field.getBoundingClientRect();
     const parentBox = parent.getBoundingClientRect();
-    const contentRight = parentBox.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
-    const gap = Math.max(0, contentRight - fieldBox.right);
-    resizeEditor.style.marginRight = gap ? gap + 'px' : '';
-    if (resizeGrip && resizeGrip.offsetParent === parent) {
-      // The grip's box reaches past the corner (mostly downward) so inside the editor
-      // it covers only the bottom padding, not text.
-      const gripStyle = getComputedStyle(resizeGrip);
-      const outsetX = parseFloat(gripStyle.getPropertyValue('--grip-outset-x')) || 0;
-      const outsetY = parseFloat(gripStyle.getPropertyValue('--grip-outset-y')) || 0;
-      resizeGrip.style.left = fieldBox.right - parentBox.left - parent.clientLeft + outsetX - resizeGrip.offsetWidth + 'px';
-      resizeGrip.style.top = fieldBox.bottom - parentBox.top - parent.clientTop + outsetY - resizeGrip.offsetHeight + 'px';
-    }
+    // The grip's box reaches past the corner (mostly downward) so inside the editor
+    // it covers only the bottom padding, not text.
+    const gripStyle = getComputedStyle(resizeEditor);
+    const outsetX = parseFloat(gripStyle.getPropertyValue('--grip-outset-x')) || 0;
+    const outsetY = parseFloat(gripStyle.getPropertyValue('--grip-outset-y')) || 0;
+    resizeEditor.style.left = fieldBox.right - parentBox.left - parent.clientLeft + outsetX - resizeEditor.offsetWidth + 'px';
+    resizeEditor.style.top = fieldBox.bottom - parentBox.top - parent.clientTop + outsetY - resizeEditor.offsetHeight + 'px';
   }
   if (typeof ResizeObserver === 'function') {
     const observer = new ResizeObserver(alignResizeControls);
@@ -93,7 +85,6 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     handle.addEventListener('pointercancel', () => { resizeDrag = undefined; });
   }
   enableDragResize(resizeEditor);
-  if (resizeGrip) enableDragResize(resizeGrip);
   resizeEditor.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     const rect = field.getBoundingClientRect();

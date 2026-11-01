@@ -149,16 +149,18 @@ test('resize control supports keyboard and keeps editor content and history', as
   await expect(editor).toHaveValue('Текст для редактора');
 });
 
-test('resize control follows the editor right edge when the width changes (#70)', async ({ page }) => {
+test('resize grip follows the editor corner when the width changes (#70)', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
   await page.goto('/');
   const field = page.locator('#editor');
   const button = page.locator('#resize-editor');
   await expect(field).toBeEnabled();
+  // 0 when the editor's bottom-right corner lies inside the grip control, else 99.
   const gap = async (): Promise<number> => {
     const [f, b] = await Promise.all([field.boundingBox(), button.boundingBox()]);
     if (!f || !b) throw new Error('Missing bounding box');
-    return Math.abs(f.x + f.width - (b.x + b.width));
+    const right = f.x + f.width, bottom = f.y + f.height;
+    return b.x < right && right < b.x + b.width && b.y < bottom && bottom < b.y + b.height ? 0 : 99;
   };
   await expect.poll(gap).toBeLessThan(2);
   await button.scrollIntoViewIfNeeded();
@@ -192,9 +194,12 @@ test('corner grip sits on the editor corner and resizes it, down to the new mini
   await page.setViewportSize({ width: 1400, height: 1000 });
   await page.goto('/');
   const field = page.locator('#editor');
-  const grip = page.locator('#resize-grip');
+  const grip = page.locator('#resize-editor');
   await expect(field).toBeEnabled();
-  await expect(grip).toHaveAttribute('aria-hidden', 'true');
+  // The grip is the only resize control: a real, named button for keyboard users.
+  await expect(page.getByRole('button', { name: 'Resize editor' })).toHaveCount(1);
+  await grip.focus();
+  await expect(grip).toBeFocused();
   await grip.scrollIntoViewIfNeeded();
   const onCorner = async (): Promise<boolean> => {
     const [f, g] = await Promise.all([field.boundingBox(), grip.boundingBox()]);
@@ -231,7 +236,6 @@ test('corner grip sits on the editor corner and resizes it, down to the new mini
   await page.locator('#focus-mode').click();
   await expect(page.locator('#exit-focus')).toBeVisible();
   await expect.poll(onCorner).toBe(true);
-  await expect(page.locator('#resize-editor')).toHaveText('Resize');
 });
 
 async function expectGripClearOfText(page: import('@playwright/test').Page, expectedSize: number): Promise<void> {
@@ -239,10 +243,10 @@ async function expectGripClearOfText(page: import('@playwright/test').Page, expe
   await expect(field).toBeEnabled();
   await field.fill(Array.from({ length: 60 }, (_, i) => `line ${i + 1} with enough words to reach the right edge of the editor`).join('\n'));
   await field.evaluate(el => { el.scrollTop = el.scrollHeight; });
-  await page.locator('#resize-grip').scrollIntoViewIfNeeded();
+  await page.locator('#resize-editor').scrollIntoViewIfNeeded();
   const geometry = await page.evaluate(() => {
     const textarea = document.querySelector<HTMLTextAreaElement>('#editor')!;
-    const grip = document.querySelector<HTMLElement>('#resize-grip')!.getBoundingClientRect();
+    const grip = document.querySelector<HTMLElement>('#resize-editor')!.getBoundingClientRect();
     const box = textarea.getBoundingClientRect();
     const style = getComputedStyle(textarea);
     const contentBottom = box.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom);
@@ -278,7 +282,7 @@ test('corner grip touch target does not cover editable text on a touch screen (#
 });
 
 for (const mode of ['Normal', 'Focus'] as const) {
-  test(`${mode} mode: dragging the grip or button moves the corner with the pointer, past 900 px and down to 160 × 96 (#70)`, async ({ page }) => {
+  test(`${mode} mode: dragging the grip moves the corner with the pointer, past 900 px and down to 160 × 96 (#70)`, async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto('/');
     const field = page.locator('#editor');
@@ -303,7 +307,7 @@ for (const mode of ['Normal', 'Focus'] as const) {
       // Height change, not bottom position: shrinking the page near its end can scroll it.
       return { right: after.x + after.width - (before.x + before.width), bottom: after.height - before.height, width: after.width, height: after.height };
     };
-    for (const selector of ['#resize-grip', '#resize-editor']) {
+    for (const selector of ['#resize-editor']) {
       const narrower = await drag(selector, -150, -60);
       expect(Math.abs(narrower.right + 150)).toBeLessThan(2);
       expect(Math.abs(narrower.bottom + 60)).toBeLessThan(2);
@@ -311,16 +315,16 @@ for (const mode of ['Normal', 'Focus'] as const) {
       expect(Math.abs(wider.right - 150)).toBeLessThan(2);
       expect(Math.abs(wider.bottom - 60)).toBeLessThan(2);
     }
-    const wide = await drag('#resize-grip', 200, 0);
+    const wide = await drag('#resize-editor', 200, 0);
     expect(wide.width).toBeGreaterThan(1000);
-    await drag('#resize-grip', -2000, -2000);
+    await drag('#resize-editor', -2000, -2000);
     const smallest = await field.boundingBox();
     expect(Math.round(smallest!.width)).toBe(160);
     expect(Math.round(smallest!.height)).toBe(96);
   });
 }
 
-test('Focus mode: ArrowUp/ArrowDown on the Resize button change only the height (#70)', async ({ page }) => {
+test('Focus mode: ArrowUp/ArrowDown on the resize grip change only the height (#70)', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto('/');
   const field = page.locator('#editor');
