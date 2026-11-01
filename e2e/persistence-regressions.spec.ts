@@ -9,7 +9,7 @@ for (const saved of [false, true]) for (const delay of [0, 800]) {
     await editor.fill('Pending');
     page.once('dialog', async dialog => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); await dialog.accept(); });
     await page.locator('#delete-draft').click();
-    await expect(page.locator('#status')).toHaveText('Draft deleted');
+    await expect(page.locator('#status')).toHaveText('Document deleted');
     await page.waitForTimeout(600);
     await expect(editor).toHaveValue('');
     await expect(page.locator('#drafts option')).toHaveCount(1);
@@ -62,12 +62,12 @@ test('failed deletion keeps the text and allows retry', async ({ page }) => {
   });
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(page.locator('#status')).toContainText('Could not delete draft');
+  await expect(page.locator('#status')).toContainText('Could not delete document');
   await expect(editor).toHaveValue('Не потерять');
   await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(page.locator('#status')).toHaveText('Draft deleted');
+  await expect(page.locator('#status')).toHaveText('Document deleted');
   await expect(editor).toHaveValue('');
 });
 
@@ -122,7 +122,7 @@ test('post-delete list failure does not pretend deleted text is still saved', as
   });
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(page.locator('#status')).toContainText('Draft deleted, but');
+  await expect(page.locator('#status')).toContainText('Document deleted, but');
   await expect(editor).toHaveValue('');
   await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
   await page.reload();
@@ -146,7 +146,7 @@ test('a failed IndexedDB deletion retries pending autosave without further typin
   await editor.fill('Новая несохранённая правка 🙂');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(page.locator('#status')).toContainText('Could not delete draft');
+  await expect(page.locator('#status')).toContainText('Could not delete document');
   await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
   await page.reload();
   await expect(editor).toHaveValue('Новая несохранённая правка 🙂');

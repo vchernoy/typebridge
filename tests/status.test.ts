@@ -7,12 +7,12 @@ test('conflict feedback precedes a newer risk and list failure', () => {
     primary: '',
     risk: 'Storage upgraded.',
     draftListRefreshFailed: true,
-  })).toBe(CONFLICT_COPY + ' Draft list could not be refreshed. Storage upgraded.');
+  })).toBe(CONFLICT_COPY + ' Document list could not be refreshed. Storage upgraded.');
 });
 
 test('a risk-only status has no leading separator when list refresh fails', () => {
   expect(renderStatusMessage({ conflict: '', primary: '', risk: 'Unsaved changes.', draftListRefreshFailed: true }))
-    .toBe('Draft list could not be refreshed. Unsaved changes.');
+    .toBe('Document list could not be refreshed. Unsaved changes.');
 });
 
 test('an action and an authoritative risk keep their separation', () => {
@@ -28,7 +28,7 @@ test('replacing risk state does not retain or parse an old warning', () => {
     primary: '',
     risk: 'Storage upgraded.',
     draftListRefreshFailed: true,
-  })).toBe(CONFLICT_COPY + ' Draft list could not be refreshed. Storage upgraded.');
+  })).toBe(CONFLICT_COPY + ' Document list could not be refreshed. Storage upgraded.');
 });
 
 test('clearing primary and risk clears old feedback', () => {
@@ -54,7 +54,7 @@ test('list refresh failure does not duplicate a warning already shown as primary
   expect(renderStatusMessage(withDraftListRefreshFailure(
     { conflict: '', primary: risk, risk: '', draftListRefreshFailed: false },
     risk,
-  ))).toBe('Draft list could not be refreshed. ' + risk);
+  ))).toBe('Document list could not be refreshed. ' + risk);
 });
 
 test('list refresh failure strips a trailing period but keeps an ellipsis', () => {
@@ -63,13 +63,13 @@ test('list refresh failure strips a trailing period but keeps an ellipsis', () =
     primary: 'Saved locally.',
     risk: '',
     draftListRefreshFailed: true,
-  })).toBe('Saved locally — draft list could not be refreshed');
+  })).toBe('Saved locally — document list could not be refreshed');
   expect(renderStatusBody({
     conflict: '',
     primary: 'Saving…',
     risk: '',
     draftListRefreshFailed: true,
-  })).toBe('Saving… — draft list could not be refreshed');
+  })).toBe('Saving… — document list could not be refreshed');
 });
 
 test('conflict text is omitted from the body live region', () => {

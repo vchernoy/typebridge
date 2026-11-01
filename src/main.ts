@@ -2,7 +2,7 @@ import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
 import { CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
-import { autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
+import { UNTITLED_TITLE, autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, type StoredDraft } from './editor/indexeddb';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
@@ -352,7 +352,7 @@ journalWarning.setAttribute('role', 'alert');
 journalWarning.hidden = true;
 status.parentElement?.before(journalWarning);
 const recoveryPanel = document.createElement('section');
-recoveryPanel.setAttribute('aria-label', 'Recover unsaved drafts');
+recoveryPanel.setAttribute('aria-label', 'Recover unsaved documents');
 recoveryPanel.className = 'recovery-panel'; // Hidden by CSS while empty (#118).
 status.parentElement?.before(recoveryPanel);
 
@@ -376,11 +376,11 @@ function readPending(): StoredDraft | undefined {
   } catch { return undefined; }
 }
 function snapshot(): StoredDraft {
-  return { ...active, text: field.value, title: draftTitle.value.trim() || 'Untitled draft', history: editor.exportHistory(), updatedAt: Date.now() };
+  return { ...active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
 }
 function journalEdit(): void {
   if (!autosave.checked) return;
-  const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || 'Untitled draft', text: field.value };
+  const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
   try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
   catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
 }
@@ -455,7 +455,7 @@ async function persist(): Promise<PersistResult> {
         dirty = generation !== version;
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
-          if ((draftTitle.value.trim() || 'Untitled draft') === saved.title) draftTitle.value = active.title;
+          if ((draftTitle.value.trim() || UNTITLED_TITLE) === saved.title) draftTitle.value = active.title;
           // Storage may have become unusable while the copy was written.
           createdConflict = true;
           // While switching, leave announcement to switchDraft so early returns and
@@ -537,7 +537,7 @@ autosave.addEventListener('change', async () => {
     // Older conflict notices still clear when the toggle did not itself create one.
     const inFlight = saving ? await saving : undefined;
     if (!inFlight?.conflict) clearNotices();
-    if (window.confirm('Delete the saved copy of this draft? Cancel keeps it in your Drafts list.')) {
+    if (window.confirm('Delete the saved copy of this document? Cancel keeps it in your Documents list.')) {
       try {
         if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed');
         active = { ...active, revision: 0 };
@@ -545,7 +545,7 @@ autosave.addEventListener('change', async () => {
         clearNotices();
         await refreshDrafts();
       } catch {
-        announceAction('Could not delete saved draft; current text is kept', { keepConflict: true });
+        announceAction('Could not delete saved document; current text is kept', { keepConflict: true });
         return;
       }
     }
@@ -597,7 +597,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
     return { opened: true, conflict: flushConflict };
   } catch {
     announceAbortedFlushConflict();
-    announceAction('Could not open draft — current text was kept', { keepConflict: flushConflict });
+    announceAction('Could not open document — current text was kept', { keepConflict: flushConflict });
     return { opened: false, conflict: flushConflict };
   }
   finally { transitioning = false; renderDrafts(); }
@@ -608,7 +608,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   if (transitioning) return;
   clearTimeout(saveTimer);
   const requestedId = active.id;
-  if (!window.confirm('Permanently delete this saved draft?')) {
+  if (!window.confirm('Permanently delete this saved document?')) {
     if (dirty && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
     return;
   }
@@ -636,17 +636,17 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     rememberActive();
     // The deletion is durable; clear the editor before a fallible list refresh.
     showDraft();
-    try { await refreshDrafts(); announceAction('Draft deleted'); }
-    catch { announceAction('Draft deleted, but the draft list could not be refreshed'); }
+    try { await refreshDrafts(); announceAction('Document deleted'); }
+    catch { announceAction('Document deleted, but the document list could not be refreshed'); }
   } catch {
     // Without storage, announceAction() adds the storage warning; no save will follow.
     // Explicit delete failures clear conflict feedback; these two messages already
     // state the save situation, so they do not also append riskText().
     if (dirty && !saveFailed && autosave.checked && !storageProblem) {
-      announceAction('Could not delete draft — your changes are unsaved; saving again…', { kind: 'progress', omitRisk: true });
+      announceAction('Could not delete document — your changes are unsaved; saving again…', { kind: 'progress', omitRisk: true });
     } else if (dirty && !autosave.checked && !storageProblem) {
-      announceAction('Could not delete draft — your changes are unsaved; autosave is off', { kind: 'progress', omitRisk: true });
-    } else announceAction(savedBeforeDelete ? 'Could not delete draft — Saved locally; your text is kept.' : 'Could not delete draft — your text is kept.');
+      announceAction('Could not delete document — your changes are unsaved; autosave is off', { kind: 'progress', omitRisk: true });
+    } else announceAction(savedBeforeDelete ? 'Could not delete document — Saved locally; your text is kept.' : 'Could not delete document — your text is kept.');
   } finally {
     field.readOnly = false; draftTitle.readOnly = false; transitioning = false; deleting = false;
     if (!committed && dirty && autosave.checked) {
@@ -709,7 +709,7 @@ async function renderRecovery(): Promise<void> {
   }
   if (!candidates.length) return;
   const heading = document.createElement('p');
-  heading.textContent = ownershipAvailable ? 'Emergency backups found. Recover a copy without changing your current draft:' : 'Ownership cannot be verified; these backups may belong to open tabs. Recover a copy without changing your current draft:';
+  heading.textContent = ownershipAvailable ? 'Emergency backups found. Recover a copy without changing your current document:' : 'Ownership cannot be verified; these backups may belong to open tabs. Recover a copy without changing your current document:';
   recoveryPanel.append(heading);
   for (const { item, unknown } of candidates) {
     const group = document.createElement('div');
@@ -727,7 +727,7 @@ async function renderRecovery(): Promise<void> {
         if (!result.ok && (!result.current || result.current.title !== copy.title || result.current.text !== copy.text)) throw new Error('Recovery copy already changed');
         clearRecovery(localStorage, item);
         await refreshDrafts();
-        announceAction('Recovered a copy in Drafts. Your current draft was kept.');
+        announceAction('Recovered a copy in Documents. Your current document was kept.');
         panelSignature = ''; await renderRecovery();
       } catch { announceAction('Recovery failed. The emergency backup was kept; retry or copy your text.'); button.disabled = false; }
     });
@@ -798,16 +798,16 @@ function downloadText(filename: string, content: string, mime: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function safeFilename(title: string): string {
-  return (title.trim().split('').map(char => char.charCodeAt(0) < 32 || '/\\\\:*?"<>|'.includes(char) ? '-' : char).join('').slice(0, 80) || 'draft');
+  return (title.trim().split('').map(char => char.charCodeAt(0) < 32 || '/\\\\:*?"<>|'.includes(char) ? '-' : char).join('').slice(0, 80) || 'document');
 }
 document.querySelector<HTMLButtonElement>('#export-txt')!.addEventListener('click', () => {
   downloadText(safeFilename(draftTitle.value) + '.txt', field.value, 'text/plain;charset=utf-8');
   announceAction('Text exported');
 });
 document.querySelector<HTMLButtonElement>('#export-json')!.addEventListener('click', () => {
-  const draft = { title: draftTitle.value.trim() || 'Untitled draft', text: field.value };
+  const draft = { title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
   downloadText(safeFilename(draft.title) + '.typebridge.json', JSON.stringify({ format: 'typebridge-draft', version: 1, draft }, null, 2), 'application/json;charset=utf-8');
-  announceAction('Draft exported');
+  announceAction('Document exported');
 });
 const importFile = document.querySelector<HTMLInputElement>('#import-file')!;
 document.querySelector<HTMLButtonElement>('#import-draft')!.addEventListener('click', () => importFile.click());
@@ -822,19 +822,19 @@ importFile.addEventListener('change', async () => {
     let text = content;
     if (/\.json$/i.test(file.name)) {
       const parsed: unknown = JSON.parse(content);
-      if (!parsed || typeof parsed !== 'object' || !('format' in parsed) || parsed.format !== 'typebridge-draft' || !('version' in parsed) || parsed.version !== 1 || !('draft' in parsed) || !parsed.draft || typeof parsed.draft !== 'object' || !('title' in parsed.draft) || typeof parsed.draft.title !== 'string' || !('text' in parsed.draft) || typeof parsed.draft.text !== 'string') throw new Error('Not a supported TypeBridge draft');
+      if (!parsed || typeof parsed !== 'object' || !('format' in parsed) || parsed.format !== 'typebridge-draft' || !('version' in parsed) || parsed.version !== 1 || !('draft' in parsed) || !parsed.draft || typeof parsed.draft !== 'object' || !('title' in parsed.draft) || typeof parsed.draft.title !== 'string' || !('text' in parsed.draft) || typeof parsed.draft.text !== 'string') throw new Error('Not a supported TypeBridge document');
       title = parsed.draft.title;
       text = parsed.draft.text;
     } else if (!/\.txt$/i.test(file.name)) throw new Error('Choose a .txt or .typebridge.json file');
-    if (!window.confirm('Import as a new draft? Your current draft will be kept.')) return;
-    const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported draft' };
+    if (!window.confirm('Import as a new document? Your current document will be kept.')) return;
+    const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported document' };
     // Save even when autosave is off: importing is an explicit save action.
     if (!db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
     const switched = await switchDraft(result.draft.id);
     // Always confirm the import; keep a conflict notice that the switch flush created.
     announceAction(
-      switched.opened ? 'Imported as a new draft' : 'Import saved in Drafts; current text was kept',
+      switched.opened ? 'Imported as a new document' : 'Import saved in Documents; current text was kept',
       { keepConflict: switched.conflict },
     );
   } catch (error) {
