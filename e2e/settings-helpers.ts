@@ -21,7 +21,30 @@ export async function setSetting(page: Page, selector: string, on: boolean): Pro
   await closeSettings(page);
 }
 
-export const setAutosave = (page: Page, on: boolean): Promise<void> => setSetting(page, '#autosave', on);
+/**
+ * Toggle Autosave in Settings. Turning it off opens the delete-saved-copy dialog
+ * (#114); choose Keep or Delete before the panel is closed.
+ */
+export async function setAutosave(
+  page: Page,
+  on: boolean,
+  offChoice: 'keep' | 'delete' = 'keep',
+): Promise<void> {
+  await openSettings(page);
+  const box = page.locator('#autosave');
+  if (on) await box.check();
+  else {
+    await box.uncheck();
+    const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', {
+      name: offChoice === 'delete' ? 'Delete saved copy' : 'Keep saved copy',
+    }).click();
+    await expect(dialog).toBeHidden();
+    await expect(box).toBeEnabled();
+  }
+  await closeSettings(page);
+}
 
 /** Find and Go to line open on demand (#123, step 2). */
 export async function openFind(page: Page): Promise<void> {

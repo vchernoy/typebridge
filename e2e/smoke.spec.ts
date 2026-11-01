@@ -269,7 +269,6 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   await expect(page.getByRole('status')).toContainText('Saved locally');
   await selectDocument(page, { label: 'First post' });
   await expect(field).toHaveValue('привет');
-  page.once('dialog', d => d.dismiss());
   await setAutosave(page, false);
   await field.pressSequentially('a');
   page.once('dialog', d => d.accept());

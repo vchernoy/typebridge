@@ -1,6 +1,8 @@
 export const CONFLICT_COPY = 'Another tab changed this document. Your edits were saved as a conflict copy.';
 /** Shown after a draft switch whose flush created a conflict copy of the draft that was left. */
 export const CONFLICT_COPY_LEFT = 'Another tab changed the document you left. Your edits were saved as a conflict copy.';
+/** Autosave off is privacy mode: neither text nor title is written to storage (#114). */
+export const AUTOSAVE_OFF = 'Autosave off — text and title are not saved and will be lost on reload';
 
 export type StatusMessage = { conflict: string; primary: string; risk: string; draftListRefreshFailed: boolean };
 

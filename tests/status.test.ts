@@ -50,7 +50,7 @@ test('a left-draft conflict notice uses distinct wording', () => {
 });
 
 test('list refresh failure does not duplicate a warning already shown as primary', () => {
-  const risk = 'Autosave off — changes are unsaved';
+  const risk = 'Autosave off — text and title are not saved and will be lost on reload';
   expect(renderStatusMessage(withDraftListRefreshFailure(
     { conflict: '', primary: risk, risk: '', draftListRefreshFailed: false },
     risk,

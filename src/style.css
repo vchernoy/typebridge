@@ -348,6 +348,10 @@ textarea {
   .topbar {
     border-color: #47536a;
   }
+  .confirm-dialog {
+    background: #202a3b;
+    border-color: #47536a;
+  }
   .doc-menu {
     background: #202a3b;
     border-color: #47536a;
@@ -660,6 +664,40 @@ body.focus-mode .bottom {
     border-right: 2px solid ButtonText;
     border-bottom: 2px solid ButtonText;
   }
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: #151b29a6;
+}
+.confirm-dialog {
+  width: min(100%, 420px);
+  padding: 20px 22px;
+  border: 1px solid #aab8cd;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 40px #18305533;
+  color: inherit;
+}
+.confirm-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 1.15rem;
+}
+.confirm-dialog p {
+  margin: 0 0 18px;
+  line-height: 1.45;
+}
+.confirm-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
 }
 /* The recovery panel is a <section> in the status bar; while it has nothing to
    offer it must not draw the generic section card or expose an empty region (#118). */

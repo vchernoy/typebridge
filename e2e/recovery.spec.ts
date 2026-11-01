@@ -45,7 +45,6 @@ test('recovery keeps a newer version from another tab and does not clear a newer
 
 test('autosave off does not create an emergency journal for new edits', async ({ page }) => {
   await page.goto('/');
-  page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await page.locator('#editor').fill('Только в памяти');
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('typebridge.recovery.v1.')))).toEqual([]);
