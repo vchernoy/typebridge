@@ -4,6 +4,8 @@
  * or an action closes it; Escape and actions return focus to ▾. Picking a document with the pointer closes it; arrow keys in
  * the list keep it open so keyboard users can move through documents.
  */
+import { registerEscapeLayer } from './escape-layers';
+
 export function setupDocumentMenu(): void {
   const panel = document.querySelector<HTMLElement>('#doc-menu')!;
   const button = document.querySelector<HTMLButtonElement>('#doc-menu-open')!;
@@ -20,12 +22,7 @@ export function setupDocumentMenu(): void {
     if (returnFocus) button.focus();
   }
   button.addEventListener('click', () => { if (panel.hidden) open(); else close(true); });
-  panel.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.isComposing || event.repeat || event.defaultPrevented) return;
-    // Marked handled so the page's Escape handler does not also toggle Focus mode.
-    event.preventDefault();
-    close(true);
-  });
+  registerEscapeLayer(panel, 20, () => close(true));
   document.addEventListener('pointerdown', event => {
     const target = event.target as Node | null;
     if (!panel.hidden && target && !panel.contains(target) && !button.contains(target)) close(false);

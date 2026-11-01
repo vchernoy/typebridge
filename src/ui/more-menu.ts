@@ -3,6 +3,8 @@
  * first item; Up/Down/Home/End move between items; Escape closes it and returns focus
  * to ⋯; choosing an item or clicking outside closes it.
  */
+import { registerEscapeLayer } from './escape-layers';
+
 export function setupMoreMenu(): void {
   const button = document.querySelector<HTMLButtonElement>('#more-open')!;
   const menu = document.querySelector<HTMLElement>('#more-menu')!;
@@ -25,6 +27,7 @@ export function setupMoreMenu(): void {
     if (returnFocus) button.focus();
   }
   button.addEventListener('click', () => { if (menu.hidden) open(); else close(true); });
+  registerEscapeLayer(menu, 20, () => close(true));
   menu.addEventListener('keydown', event => {
     if (event.isComposing || event.defaultPrevented) return;
     const list = items();
@@ -34,11 +37,7 @@ export function setupMoreMenu(): void {
     else if (event.key === 'ArrowUp') move(index - 1);
     else if (event.key === 'Home') move(0);
     else if (event.key === 'End') move(list.length - 1);
-    else if (event.key === 'Escape' && !event.repeat) {
-      // Marked handled so the page's Escape handler does not also toggle Focus mode.
-      event.preventDefault();
-      close(true);
-    } else if (event.key === 'Tab') close(false);
+    else if (event.key === 'Tab') close(false);
   });
   // Give focus back to ⋯ when an item hides the menu; Go to line then moves it to its
   // field, and Clear text to the editor once confirmed.
