@@ -1,5 +1,5 @@
 /**
- * Editor layout: resize control with saved Normal-mode size, and Focus mode
+ * Editor layout: resize control with separately saved Normal and Focus sizes, and Focus mode
  * with its Escape and Cmd/Ctrl+Shift+Enter keys (#67, #83).
  */
 export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void } {
@@ -8,20 +8,34 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   const editorSizeWarning = document.createElement('span');
   editorSizeWarning.setAttribute('aria-live', 'polite');
   field.after(editorSizeWarning);
-  try {
-    const size: unknown = JSON.parse(localStorage.getItem(EDITOR_SIZE_KEY) ?? 'null');
-    if (size && typeof size === 'object') {
-      const value = size as { width?: unknown; height?: unknown };
-      if (typeof value.width === 'string' && /^\d+(?:\.\d+)?px$/.test(value.width)) field.style.width = value.width;
-      if (typeof value.height === 'string' && /^\d+(?:\.\d+)?px$/.test(value.height)) field.style.height = value.height;
-    }
-  } catch { /* Storage or malformed settings must not prevent editing. */ }
-  let savedEditorSize = JSON.stringify({ width: field.style.width, height: field.style.height });
+  // Normal and Focus mode each keep their own saved size (#120).
+  const FOCUS_SIZE_KEY = 'typebridge.editor.focusSize.v1';
+  type EditorSize = { width: string; height: string };
+  function readSize(key: string): EditorSize {
+    const result = { width: '', height: '' };
+    try {
+      const size: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+      if (size && typeof size === 'object') {
+        const value = size as { width?: unknown; height?: unknown };
+        if (typeof value.width === 'string' && /^\d+(?:\.\d+)?px$/.test(value.width)) result.width = value.width;
+        if (typeof value.height === 'string' && /^\d+(?:\.\d+)?px$/.test(value.height)) result.height = value.height;
+      }
+    } catch { /* Storage or malformed settings must not prevent editing. */ }
+    return result;
+  }
+  const initialSize = readSize(EDITOR_SIZE_KEY);
+  if (initialSize.width) field.style.width = initialSize.width;
+  if (initialSize.height) field.style.height = initialSize.height;
+  const savedSizes: Record<string, string> = {
+    [EDITOR_SIZE_KEY]: JSON.stringify({ width: field.style.width, height: field.style.height }),
+    [FOCUS_SIZE_KEY]: JSON.stringify(readSize(FOCUS_SIZE_KEY)),
+  };
   function persistEditorSize(): void {
-    if (document.body.classList.contains('focus-mode') || (!field.style.width && !field.style.height)) return;
+    if (!field.style.width && !field.style.height) return;
+    const key = document.body.classList.contains('focus-mode') ? FOCUS_SIZE_KEY : EDITOR_SIZE_KEY;
     const next = JSON.stringify({ width: field.style.width, height: field.style.height });
-    if (next === savedEditorSize) return;
-    try { localStorage.setItem(EDITOR_SIZE_KEY, next); savedEditorSize = next; editorSizeWarning.textContent = ''; }
+    if (next === savedSizes[key]) return;
+    try { localStorage.setItem(key, next); savedSizes[key] = next; editorSizeWarning.textContent = ''; }
     catch { editorSizeWarning.textContent = 'Editor size could not be saved in this browser.'; }
   }
   window.addEventListener('pointerup', persistEditorSize);
@@ -101,6 +115,12 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     if (enabled && !document.body.classList.contains('focus-mode')) {
       normalEditorSize = { width: field.style.width, height: field.style.height };
       field.style.width = ''; field.style.height = ''; field.style.maxWidth = '';
+      // Apply Focus mode's own saved size, if any (#120). Read it fresh: another tab may
+      // have changed it. A saved width may exceed Focus mode's 900 px default.
+      const focusSize = readSize(FOCUS_SIZE_KEY);
+      if (focusSize.width) { field.style.width = focusSize.width; field.style.maxWidth = '100%'; }
+      if (focusSize.height) field.style.height = focusSize.height;
+      savedSizes[FOCUS_SIZE_KEY] = JSON.stringify({ width: field.style.width, height: field.style.height });
     } else if (!enabled && document.body.classList.contains('focus-mode')) {
       field.style.width = normalEditorSize.width; field.style.height = normalEditorSize.height; field.style.maxWidth = '';
     }
