@@ -83,6 +83,10 @@ test('stale deletion retries saving pending edits as a conflict copy', async ({ 
   await expect(other.locator('#editor')).toHaveValue('Исходный длинный пост');
   await other.locator('#editor').fill('Версия другой вкладки');
   await expect(other.locator('#status')).toContainText('Saved locally');
+  // Freeze timers so the 300ms autosave cannot finish before Delete runs; otherwise
+  // a slow document menu on WebKit CI can let the conflict copy become current and
+  // Delete then reports a plain "Document deleted" (#132 CI flake).
+  await page.clock.install();
   await editor.fill('Важная правка первой вкладки 🙂');
   page.once('dialog', dialog => dialog.accept());
   await documentAction(page, '#delete-draft');
