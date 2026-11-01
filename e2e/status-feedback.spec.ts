@@ -32,7 +32,7 @@ async function expectActionsKeep(page: Page, warning: string): Promise<void> {
   await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText(new RegExp('^Text exported' + tail));
   await page.locator('#editor').evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
-  await page.getByRole('button', { name: '→ ABC' }).click();
+  await page.getByRole('button', { name: 'To Latin' }).click();
   await expect(status(page)).toHaveText(new RegExp('^Select text to convert' + tail));
 }
 // The draft list is re-rendered only after a save has updated the status line,
@@ -71,7 +71,7 @@ test('a background autosave does not replace newer conversion guidance', async (
   await expect(status(page)).toHaveText('Saving…');
   // The conversion's autosave is still pending when the guidance appears.
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
-  await page.getByRole('button', { name: '→ ABC' }).click();
+  await page.getByRole('button', { name: 'To Latin' }).click();
   await expect(status(page)).toHaveText('Select text to convert');
   const renders = await watchDraftListRenders(page);
   await page.clock.runFor(400);
@@ -102,7 +102,7 @@ test('a failed save stays visible after later action feedback until a save succe
   await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + SAVE_FAILED);
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
-  await page.getByRole('button', { name: '→ ABC' }).click();
+  await page.getByRole('button', { name: 'To Latin' }).click();
   await expect(status(page)).toHaveText('Select text to convert. ' + SAVE_FAILED);
   await restoreSaves(page);
   await field.press('End');

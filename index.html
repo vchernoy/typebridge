@@ -51,37 +51,16 @@
               <input id="import-file" type="file" accept=".txt,.json,.typebridge.json" hidden />
             </div>
           </div>
-        </header>
-        <div class="toolbar">
-          <label class="toggle"><input id="enabled" type="checkbox" checked /> Transliteration on</label
-          ><span id="shortcut-label"></span>
-          <div class="actions">
-            <button id="undo" type="button" disabled title="Undo (Cmd/Ctrl+Z)">Undo</button>
-            <button id="redo" type="button" disabled title="Redo (Cmd/Ctrl+Shift+Z)">Redo</button>
-            <button id="convert-cyrillic" type="button" title="Latin to Cyrillic (Cmd/Ctrl+Shift+L)">→ АБВ</button>
-            <button id="convert-latin" type="button" title="Cyrillic to Latin (Cmd/Ctrl+Shift+K)">→ ABC</button>
-            <button id="focus-mode" type="button" aria-pressed="false" title="Focus mode (Esc or Cmd/Ctrl+Shift+Enter)">
-              Focus mode
-            </button>
+          <div class="top-actions">
             <button
-              id="find-open"
+              id="focus-mode"
               type="button"
-              aria-expanded="false"
-              aria-controls="find-bar"
-              title="Find and replace (Cmd/Ctrl+F)"
+              aria-pressed="false"
+              aria-label="Focus mode"
+              title="Focus mode (Esc or Cmd/Ctrl+Shift+Enter)"
             >
-              Find
+              Focus
             </button>
-            <button
-              id="goto-open"
-              type="button"
-              aria-expanded="false"
-              aria-controls="goto-bar"
-              title="Go to line (Cmd/Ctrl+G)"
-            >
-              Go to line
-            </button>
-            <button id="copy" type="button">Copy</button> <button id="clear" type="button">Clear</button>
             <button
               id="settings-open"
               type="button"
@@ -91,6 +70,79 @@
             >
               Settings
             </button>
+          </div>
+        </header>
+        <div class="toolbar">
+          <label class="toggle"><input id="enabled" type="checkbox" checked /> Transliteration on</label
+          ><span id="shortcut-label"></span>
+          <div class="actions" role="toolbar" aria-label="Editing">
+            <button id="undo" class="icon-button" type="button" disabled aria-label="Undo" title="Undo (Cmd/Ctrl+Z)">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M9 14L4 9l5-5" />
+                <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+              </svg>
+            </button>
+            <button
+              id="redo"
+              class="icon-button"
+              type="button"
+              disabled
+              aria-label="Redo"
+              title="Redo (Cmd/Ctrl+Shift+Z)"
+            >
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M15 14l5-5-5-5" />
+                <path d="M20 9H10a6 6 0 0 0 0 12h3" />
+              </svg>
+            </button>
+            <span class="tool-sep" aria-hidden="true"></span>
+            <button
+              id="convert-cyrillic"
+              type="button"
+              title="Convert the selected text to Cyrillic (Cmd/Ctrl+Shift+L)"
+            >
+              To Cyrillic
+            </button>
+            <button id="convert-latin" type="button" title="Convert the selected text to Latin (Cmd/Ctrl+Shift+K)">
+              To Latin
+            </button>
+            <span class="tool-sep" aria-hidden="true"></span>
+            <button
+              id="find-open"
+              type="button"
+              aria-expanded="false"
+              aria-controls="find-bar"
+              title="Find and replace (Cmd/Ctrl+F)"
+            >
+              Find
+            </button>
+            <button id="copy" type="button">Copy</button>
+            <div class="more-wrap">
+              <button
+                id="more-open"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-controls="more-menu"
+                aria-label="More actions"
+                title="More actions"
+              >
+                ⋯
+              </button>
+              <div id="more-menu" class="more-menu" role="menu" aria-label="More actions" hidden>
+                <button
+                  id="goto-open"
+                  type="button"
+                  role="menuitem"
+                  aria-expanded="false"
+                  aria-controls="goto-bar"
+                  title="Go to line (Cmd/Ctrl+G)"
+                >
+                  Go to line…
+                </button>
+                <button id="clear" type="button" role="menuitem">Clear text…</button>
+              </div>
+            </div>
           </div>
         </div>
         <aside

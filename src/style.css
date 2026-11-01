@@ -16,6 +16,66 @@ body {
   margin: auto;
   padding: clamp(20px, 5vw, 56px) 20px;
 }
+/* Toolbar (#123, step 4): icon buttons, groups, and the ⋯ menu. */
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+.icon-button {
+  min-width: 44px;
+  padding: 0 10px;
+}
+.tool-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 4px;
+  background: #d9e2ef;
+}
+.more-wrap {
+  position: relative;
+}
+#more-open {
+  min-width: 44px;
+  padding: 0 12px;
+  font-weight: 700;
+}
+.more-menu {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 200px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #aab8cd;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px #1830552e;
+}
+.more-menu [role="menuitem"] {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: 6px;
+}
+.more-menu [role="menuitem"]:hover,
+.more-menu [role="menuitem"]:focus-visible {
+  background: #edf3ff;
+}
+#clear {
+  color: #9a4d06;
+}
+.top-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
 /* Top bar: a small name, the document's title and its menu (#123, step 3). */
 .topbar {
   display: flex;
@@ -137,6 +197,7 @@ section {
   flex-wrap: wrap;
 }
 .toolbar {
+  justify-content: flex-start;
   margin-bottom: 20px;
 }
 button {
@@ -216,8 +277,20 @@ textarea {
   .doc-menu .menu-label {
     color: #c4d0e3;
   }
-  #delete-draft {
+  #delete-draft,
+  #clear {
     color: #f0b36a;
+  }
+  .more-menu {
+    background: #202a3b;
+    border-color: #47536a;
+  }
+  .more-menu [role="menuitem"]:hover,
+  .more-menu [role="menuitem"]:focus-visible {
+    background: #33445f;
+  }
+  .tool-sep {
+    background: #47536a;
   }
 }
 

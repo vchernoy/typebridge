@@ -7,7 +7,7 @@ test('Find and Go to line stay hidden until opened, one at a time (#123)', async
   const findBar = page.getByRole('search', { name: 'Find and replace' });
   const gotoBar = page.getByRole('navigation', { name: 'Go to line' });
   const findButton = page.getByRole('button', { name: 'Find', exact: true });
-  const gotoButton = page.getByRole('button', { name: 'Go to line', exact: true });
+  const gotoButton = page.locator('#goto-open');
   await expect(findBar).toBeHidden();
   await expect(gotoBar).toBeHidden();
   await expect(findButton).toHaveAttribute('aria-expanded', 'false');

@@ -32,7 +32,7 @@ export async function openFind(page: Page): Promise<void> {
 
 export async function openGoto(page: Page): Promise<void> {
   const bar = page.locator('#goto-bar');
-  if (await bar.isHidden()) await page.locator('#goto-open').click();
+  if (await bar.isHidden()) await moreAction(page, '#goto-open');
   await expect(bar).toBeVisible();
 }
 
@@ -59,5 +59,13 @@ export async function selectDocument(page: Page, value: string | { label: string
 /** Open the menu and click one of its actions; the action closes the menu. */
 export async function documentAction(page: Page, selector: string): Promise<void> {
   await openDocuments(page);
+  await page.locator(selector).click();
+}
+
+/** Open the toolbar's ⋯ menu and choose an item (#123, step 4); the item closes the menu. */
+export async function moreAction(page: Page, selector: string): Promise<void> {
+  const menu = page.locator('#more-menu');
+  if (await menu.isHidden()) await page.locator('#more-open').click();
+  await expect(menu).toBeVisible();
   await page.locator(selector).click();
 }

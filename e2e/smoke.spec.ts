@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { documentAction, selectDocument, setAutosave } from './settings-helpers';
+import { documentAction, moreAction, selectDocument, setAutosave } from './settings-helpers';
 
 test('editor types transliteration, edits selections and supports history', async ({ page }) => {
   await page.goto('/');
@@ -31,7 +31,7 @@ test('toggle, paste and composition preserve text', async ({ page }) => {
   await field.evaluate(el => { const node = el as HTMLTextAreaElement; node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles:true })); node.value += '漢'; node.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'insertCompositionText', data:'漢', isComposing:true })); node.dispatchEvent(new CompositionEvent('compositionend', { bubbles:true, data:'漢' })); });
   await expect(field).toHaveValue('hello漢');
   page.once('dialog', dialog => dialog.accept());
-  await page.getByRole('button', { name:'Clear' }).click();
+  await moreAction(page, '#clear');
   await expect(field).toHaveValue('');
 });
 
@@ -161,7 +161,7 @@ test('toggle while editing and undo clear', async ({ page }) => {
   await field.pressSequentially('ab');
   await expect(field).toHaveValue('шab');
   page.once('dialog', dialog => dialog.accept());
-  await page.getByRole('button', { name: 'Clear' }).click();
+  await moreAction(page, '#clear');
   await expect(field).toHaveValue('');
   await field.focus();
   await field.press('ControlOrMeta+z');
@@ -227,7 +227,7 @@ test('toolbar history undoes block clear and supports multiple steps', async ({ 
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
   page.once('dialog', dialog => dialog.accept());
-  await page.getByRole('button', { name: 'Clear' }).click();
+  await moreAction(page, '#clear');
   await expect(field).toHaveValue('');
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(field).toHaveValue('привет');
