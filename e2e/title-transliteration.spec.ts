@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openFind } from './settings-helpers';
 
 test('the draft title transliterates, saves and keeps its own undo (#89)', async ({ page }) => {
   await page.goto('/');
@@ -20,6 +21,7 @@ test('the transliteration shortcut works from every text box (#89)', async ({ pa
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const enabled = page.locator('#enabled');
+  await openFind(page);
   for (const id of ['#editor', '#find-text', '#replace-text', '#draft-title']) {
     const before = await enabled.isChecked();
     await page.locator(id).press('ControlOrMeta+Shift+Space');

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openGoto } from './settings-helpers';
 
 test('Go to line moves the caret, reveals a distant line and updates the position label', async ({ page }) => {
   await page.goto('/');
@@ -11,6 +12,7 @@ test('Go to line moves the caret, reveals a distant line and updates the positio
     node.setSelectionRange(0, 0);
     node.scrollTop = 0;
   });
+  await openGoto(page);
   await page.locator('#goto-line').fill('241:3');
   await page.getByRole('button', { name: 'Go', exact: true }).click();
   const result = await field.evaluate(el => {
@@ -36,6 +38,7 @@ test('Cmd/Ctrl+G focuses Go to line and Enter jumps without changing text', asyn
   await field.focus();
   await page.keyboard.press('ControlOrMeta+g');
   await expect(page.locator('#goto-line')).toBeFocused();
+  await openGoto(page);
   await page.locator('#goto-line').fill('2');
   await page.locator('#goto-line').press('Enter');
   await expect(field).toBeFocused();
@@ -49,6 +52,7 @@ test('Go to line clamps past the end of the document', async ({ page }) => {
   await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('only\ntwo');
+  await openGoto(page);
   await page.locator('#goto-line').fill('99:99');
   await page.getByRole('button', { name: 'Go', exact: true }).click();
   await expect(field).toHaveValue('only\ntwo');
@@ -63,6 +67,7 @@ test('Go to a column inside an emoji snaps to a safe boundary so typing cannot s
   await expect(page.getByLabel('Transliteration on')).toBeChecked();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('🙂x');
+  await openGoto(page);
   await page.locator('#goto-line').fill('1:2');
   await page.getByRole('button', { name: 'Go', exact: true }).click();
   await expect(page.locator('#goto-status')).toHaveText('Clamped to line 1, column 3');
@@ -77,6 +82,7 @@ test('Enter during IME composition in Go to line does not navigate', async ({ pa
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('one\ntwo\nthree');
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
+  await openGoto(page);
   const goto = page.locator('#goto-line');
   await goto.fill('2');
   await goto.focus();

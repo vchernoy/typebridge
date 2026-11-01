@@ -22,3 +22,16 @@ export async function setSetting(page: Page, selector: string, on: boolean): Pro
 }
 
 export const setAutosave = (page: Page, on: boolean): Promise<void> => setSetting(page, '#autosave', on);
+
+/** Find and Go to line open on demand (#123, step 2). */
+export async function openFind(page: Page): Promise<void> {
+  const bar = page.locator('#find-bar');
+  if (await bar.isHidden()) await page.locator('#find-open').click();
+  await expect(bar).toBeVisible();
+}
+
+export async function openGoto(page: Page): Promise<void> {
+  const bar = page.locator('#goto-bar');
+  if (await bar.isHidden()) await page.locator('#goto-open').click();
+  await expect(bar).toBeVisible();
+}

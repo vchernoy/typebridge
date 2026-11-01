@@ -154,6 +154,9 @@ button:disabled {
   width: 190px;
 }
 
+[hidden] {
+  display: none !important;
+}
 .find-bar,
 .goto-bar {
   display: flex;
@@ -173,6 +176,11 @@ button:disabled {
   background: transparent;
   color: inherit;
   font: inherit;
+}
+.bar-close {
+  margin-left: auto;
+  min-width: 44px;
+  padding: 0;
 }
 .find-bar #find-status,
 .goto-bar #goto-status {

@@ -39,6 +39,24 @@
             <button id="focus-mode" type="button" aria-pressed="false" title="Focus mode (Esc or Cmd/Ctrl+Shift+Enter)">
               Focus mode
             </button>
+            <button
+              id="find-open"
+              type="button"
+              aria-expanded="false"
+              aria-controls="find-bar"
+              title="Find and replace (Cmd/Ctrl+F)"
+            >
+              Find
+            </button>
+            <button
+              id="goto-open"
+              type="button"
+              aria-expanded="false"
+              aria-controls="goto-bar"
+              title="Go to line (Cmd/Ctrl+G)"
+            >
+              Go to line
+            </button>
             <button id="copy" type="button">Copy</button> <button id="clear" type="button">Clear</button>
             <button
               id="settings-open"
@@ -108,7 +126,7 @@
             </p>
           </div>
         </aside>
-        <div class="find-bar" role="search" aria-label="Find and replace">
+        <div id="find-bar" class="find-bar" role="search" aria-label="Find and replace" hidden>
           <label for="find-text">Find</label><input id="find-text" type="text" autocomplete="off" /><label
             for="replace-text"
             >Replace</label
@@ -118,12 +136,13 @@
           ><button id="find-next" type="button">Next</button><button id="find-prev" type="button">Previous</button
           ><button id="replace-one" type="button">Replace</button
           ><button id="replace-all" type="button">Replace all</button><span id="find-status" aria-live="polite"></span
+          ><button id="find-close" class="bar-close" type="button" aria-label="Close find">×</button
           ><small
             >Find and Replace text stays in this tab’s session; browser session restore may retain it after
             closing.</small
           >
         </div>
-        <div class="goto-bar" role="navigation" aria-label="Go to line">
+        <div id="goto-bar" class="goto-bar" role="navigation" aria-label="Go to line" hidden>
           <label for="goto-line">Go to line</label
           ><input
             id="goto-line"
@@ -133,7 +152,8 @@
             placeholder="line[:column]"
             spellcheck="false"
             title="Cmd/Ctrl+G"
-          /><button id="goto-go" type="button">Go</button><span id="goto-status" aria-live="polite"></span>
+          /><button id="goto-go" type="button">Go</button><span id="goto-status" aria-live="polite"></span
+          ><button id="goto-close" class="bar-close" type="button" aria-label="Close go to line">×</button>
         </div>
         <div class="draft-bar">
           <label for="drafts">Drafts</label

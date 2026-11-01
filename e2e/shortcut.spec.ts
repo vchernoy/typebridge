@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openSettings } from './settings-helpers';
+import { openFind, openSettings } from './settings-helpers';
 
 test('shortcut toggles global mode, can be remapped, disabled and persists', async ({ page }) => {
   await page.goto('/');
@@ -13,6 +13,7 @@ test('shortcut toggles global mode, can be remapped, disabled and persists', asy
   await page.reload();
   await openSettings(page);
   await expect(page.locator('#translit-shortcut')).toHaveValue('f7');
+  await openFind(page);
   await page.locator('#find-text').focus();
   await page.keyboard.press('Control+Shift+F7');
   await expect(page.locator('#enabled')).toBeChecked();
@@ -122,6 +123,7 @@ test('Escape keeps its cancel role outside the editor and during composition (#6
   await page.goto('/');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
+  await openFind(page);
   await page.locator('#find-text').press('Escape');
   await page.locator('#draft-title').press('Escape');
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
@@ -168,6 +170,7 @@ test('Cmd/Ctrl+Shift+Enter toggles Focus mode without inserting text or searchin
   await editor.press('ControlOrMeta+Shift+Enter');
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
   await expect(editor).toHaveValue('Привет');
+  await openFind(page);
   await page.locator('#find-text').fill('zzz');
   await page.locator('#find-text').press('ControlOrMeta+Shift+Enter');
   await expect(page.locator('body')).toHaveClass(/focus-mode/);

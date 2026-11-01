@@ -241,10 +241,45 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', (
 const { findInput, findEditor, replaceEditor, syncSearchEditors } = setupSearch(field, editor, enabled);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
+// Find and Go to line open on demand (#123): from their toolbar buttons or with
+// Cmd/Ctrl+F and Cmd/Ctrl+G. One bar at a time; Escape or × closes it and returns to the editor.
+const findBar = document.querySelector<HTMLElement>('#find-bar')!;
+const gotoBar = document.querySelector<HTMLElement>('#goto-bar')!;
+const findOpen = document.querySelector<HTMLButtonElement>('#find-open')!;
+const gotoOpen = document.querySelector<HTMLButtonElement>('#goto-open')!;
+function setBar(bar: HTMLElement, button: HTMLButtonElement, open: boolean): void {
+  bar.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+}
+function openFind(): void {
+  if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  setBar(gotoBar, gotoOpen, false);
+  setBar(findBar, findOpen, true);
+  findInput.focus();
+  findInput.select();
+}
 function openGoto(): void {
   if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  setBar(findBar, findOpen, false);
+  setBar(gotoBar, gotoOpen, true);
   gotoInput.focus();
   gotoInput.select();
+}
+function closeBar(bar: HTMLElement, button: HTMLButtonElement): void {
+  setBar(bar, button, false);
+  field.focus({ preventScroll: true });
+}
+findOpen.addEventListener('click', () => { if (findBar.hidden) openFind(); else closeBar(findBar, findOpen); });
+gotoOpen.addEventListener('click', () => { if (gotoBar.hidden) openGoto(); else closeBar(gotoBar, gotoOpen); });
+document.querySelector<HTMLButtonElement>('#find-close')!.addEventListener('click', () => closeBar(findBar, findOpen));
+document.querySelector<HTMLButtonElement>('#goto-close')!.addEventListener('click', () => closeBar(gotoBar, gotoOpen));
+for (const [bar, button] of [[findBar, findOpen], [gotoBar, gotoOpen]] as const) {
+  // Marked handled so the page's Escape handler does not also toggle Focus mode.
+  bar.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.isComposing || event.repeat || event.defaultPrevented) return;
+    event.preventDefault();
+    closeBar(bar, button);
+  });
 }
 function goToLine(): void {
   const parsed = parseGotoInput(gotoInput.value);
@@ -272,7 +307,7 @@ document.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat || event.isComposing) return;
   const key = event.key.toLowerCase();
   if (key === 'f' && !event.shiftKey) {
-    event.preventDefault(); findInput.focus(); findInput.select();
+    event.preventDefault(); openFind();
   } else if (key === 'g' && !event.shiftKey) {
     // Cmd/Ctrl+G: go to line. May also be reserved by the browser's Find UI.
     event.preventDefault();
