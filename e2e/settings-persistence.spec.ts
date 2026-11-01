@@ -170,7 +170,7 @@ test('resize grip follows the editor corner when the width changes (#70)', async
     return b.x < right && right < b.x + b.width && b.y < bottom && bottom < b.y + b.height ? 0 : 99;
   };
   await expect.poll(gap).toBeLessThan(2);
-  await button.scrollIntoViewIfNeeded();
+  await button.evaluate(el => el.scrollIntoView({ block: 'center' }));
   const start = await button.boundingBox();
   if (!start) throw new Error('Resize control has no bounding box');
   const x = start.x + start.width / 2;
@@ -207,7 +207,9 @@ test('corner grip sits on the editor corner and resizes it, down to the new mini
   await expect(page.getByRole('button', { name: 'Resize editor' })).toHaveCount(1);
   await grip.focus();
   await expect(grip).toBeFocused();
-  await grip.scrollIntoViewIfNeeded();
+  // Center the grip so the drag below stays inside the viewport: Firefox reports
+  // wrong pointer positions once the pointer leaves it.
+  await grip.evaluate(el => el.scrollIntoView({ block: 'center' }));
   const onCorner = async (): Promise<boolean> => {
     const [f, g] = await Promise.all([field.boundingBox(), grip.boundingBox()]);
     if (!f || !g) return false;
@@ -300,7 +302,7 @@ for (const mode of ['Normal', 'Focus'] as const) {
       await expect(page.locator('#exit-focus')).toBeVisible();
     }
     const drag = async (selector: string, dx: number, dy: number): Promise<{ right: number; bottom: number; width: number; height: number }> => {
-      await page.locator(selector).scrollIntoViewIfNeeded();
+      await page.locator(selector).evaluate(el => el.scrollIntoView({ block: 'center' }));
       const before = await field.boundingBox();
       const handle = await page.locator(selector).boundingBox();
       if (!before || !handle) throw new Error('Missing bounding box');
@@ -384,7 +386,7 @@ test('Focus mode keeps its own saved size across reload and new tabs, separate f
   await expect(page.locator('#exit-focus')).toBeVisible();
   const focusDefault = await field.boundingBox();
   // Resize in Focus mode with a real drag, wider than Focus mode's 900 px default.
-  await grip.scrollIntoViewIfNeeded();
+  await grip.evaluate(el => el.scrollIntoView({ block: 'center' }));
   const handle = await grip.boundingBox();
   if (!handle || !focusDefault) throw new Error('Missing bounding box');
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
