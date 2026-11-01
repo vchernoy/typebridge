@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { setAutosave } from './settings-helpers';
+import { documentAction, selectDocument, setAutosave } from './settings-helpers';
 
 // Status-line races from #52. Timers are controlled with Playwright's clock and
 // saves are observed in IndexedDB, so no test depends on sleeps or retries.
@@ -29,7 +29,7 @@ async function expectActionsKeep(page: Page, warning: string): Promise<void> {
   const tail = '\\. ' + escape(warning) + '$';
   await page.locator('#copy').click();
   await expect(status(page)).toHaveText(new RegExp('^(Copied|Copy unavailable\\. Text selected; use your device’s copy command)' + tail));
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText(new RegExp('^Text exported' + tail));
   await page.locator('#editor').evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
   await page.getByRole('button', { name: '→ ABC' }).click();
@@ -99,7 +99,7 @@ test('a failed save stays visible after later action feedback until a save succe
   await field.pressSequentially(' несохранено');
   await page.clock.runFor(400);
   await expect(status(page)).toHaveText(SAVE_FAILED);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + SAVE_FAILED);
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
   await page.getByRole('button', { name: '→ ABC' }).click();
@@ -110,7 +110,7 @@ test('a failed save stays visible after later action feedback until a save succe
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Сохранено несохранено!');
   await expect(status(page)).toHaveText('Saved locally');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported');
 });
 
@@ -164,15 +164,15 @@ test('discarding text after a failed save stops reporting unsaved text', async (
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   page.once('dialog', dialog => dialog.accept()); // Discard unsaved changes.
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported');
   // With autosave back on, a stale failure would be appended to action feedback.
   await setAutosave(page, true);
   await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toHaveText('Autosave on');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported');
 });
 
@@ -187,7 +187,7 @@ test('a save that resolves an earlier failure reports success without a new edit
   await expect(status(page)).toContainText('Save failed');
   // Switching drafts saves the failed text first.
   await restoreSaves(page);
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('');
   await expect.poll(() => storedTexts(page)).toContain('Первый два');
   await expect(status(page)).toHaveText('Saved locally');
@@ -202,7 +202,7 @@ test('a background save on hiding the page clears an earlier failure', async ({ 
   await field.press('End');
   await field.pressSequentially(' два');
   await expect(status(page)).toContainText('Save failed');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toContainText('Text exported');
   await restoreSaves(page);
   await page.evaluate(() => {
@@ -231,7 +231,7 @@ test('action feedback during a successful retry does not leave a stale failure',
   await restoreSaves(page);
   await field.pressSequentially('3');
   await expect(status(page)).toHaveText(RETRYING);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toContainText('Text exported');
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Первый23');
@@ -301,7 +301,7 @@ test('with autosave off after a failure, action feedback keeps the unsaved warni
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. Autosave off — changes are unsaved');
 });
 
@@ -315,7 +315,7 @@ test('without browser storage, failures do not advise retrying by editing', asyn
   await expect(status(page)).toContainText('Storage unavailable');
   await field.fill('Нельзя потерять');
   await expect(status(page)).toHaveText('Save failed — browser storage is unavailable. Copy or export your text before closing.');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. Save failed — browser storage is unavailable. Copy or export your text before closing.');
   await expect(field).toHaveValue('Нельзя потерять');
 });
@@ -334,7 +334,7 @@ test('a failed delete with autosave off does not promise another save', async ({
     IDBObjectStore.prototype.delete = function () { throw new DOMException('Unknown', 'UnknownError'); };
   });
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(status(page)).toHaveText('Could not delete document — your changes are unsaved; autosave is off');
   await expect(field).toHaveValue('Сохранено правка');
 });
@@ -379,7 +379,7 @@ test('switching to a clean draft with autosave off does not report unsaved chang
   await field.pressSequentially(' черновик');
   await expect(status(page)).toHaveText('Autosave off — changes are unsaved');
   page.once('dialog', dialog => dialog.accept()); // Discard unsaved changes.
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('');
   await expect(status(page)).toHaveText('Autosave off');
 });
@@ -393,19 +393,19 @@ test('with autosave off, Copy, Export and Convert keep the unsaved-changes warni
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   // Clean draft: no warning yet.
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported');
   await field.press('End');
   await field.pressSequentially(' правка');
   await expect(status(page)).toHaveText(AUTOSAVE_OFF_UNSAVED);
   await expectActionsKeep(page, AUTOSAVE_OFF_UNSAVED);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF_UNSAVED);
   // Saving resolves the risk.
   await setAutosave(page, true);
   await expect.poll(() => storedTexts(page)).toContain('Сохранено правка');
   await expect(status(page)).toHaveText('Saved locally');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported');
 });
 
@@ -430,7 +430,7 @@ test('a failed IndexedDB initialization stays visible after Copy, Export and Con
   page.once('dialog', dialog => dialog.dismiss());
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + SAVE_FAILED_NO_STORAGE);
   await expect(field).toHaveValue('Нельзя потерять');
 });
@@ -447,10 +447,10 @@ test('a blocked database upgrade stays visible after action feedback', async ({ 
   await expect(page.locator('#editor')).toBeEnabled();
   const blocked = 'Database upgrade blocked. Close other TypeBridge tabs, then reload.';
   await expect(status(page)).toHaveText(blocked);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + blocked);
   await page.locator('#editor').fill('Текст');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. Changes are unsaved. ' + blocked);
 });
 
@@ -468,12 +468,12 @@ test('a database upgrade in another tab stays visible after action feedback and 
   }));
   const upgraded = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   await expect(status(page)).toHaveText(upgraded);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + upgraded);
   await field.press('End');
   await field.pressSequentially(' правка');
   await expect(status(page)).toHaveText('Changes are unsaved. ' + upgraded);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. Changes are unsaved. ' + upgraded);
   await expect(field).toHaveValue('Сохранено правка');
 });
@@ -490,7 +490,7 @@ test('recovered text with autosave off keeps the unsaved warning after actions',
   await page.goto('/');
   await expect(page.locator('#editor')).toHaveValue('Восстановленный текст');
   await expect(status(page)).toHaveText('Recovered unsaved text; autosave is off');
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF_UNSAVED);
   await setAutosave(page, true);
   await expect.poll(() => storedTexts(page)).toContain('Восстановленный текст');
@@ -540,7 +540,7 @@ test('a database upgrade during an in-flight save keeps the storage warning', as
   const upgraded = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   await expect.poll(() => storedTexts(page)).toContain('Сохранено правка');
   await expect(status(page)).toHaveText(upgraded);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + upgraded);
 });
 
@@ -648,7 +648,7 @@ for (const failure of ['blocked IndexedDB', 'quota failure'] as const) {
     // Edit, then act before the debounced save runs and fails.
     await field.press('End');
     await field.pressSequentially(' b');
-    await page.locator('#export-txt').click();
+    await documentAction(page, '#export-txt');
     await expect(status(page)).toHaveText('Text exported. ' + warning);
     await page.clock.runFor(400);
     await expect(status(page)).toHaveText('Text exported. ' + warning);
@@ -671,7 +671,7 @@ test('a failed delete without storage and with autosave off keeps the storage wa
   await field.fill('Нельзя потерять');
   await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(status(page)).toHaveText('Could not delete document — your text is kept. ' + SAVE_FAILED_NO_STORAGE);
   await expect(field).toHaveValue('Нельзя потерять');
 });
@@ -703,7 +703,7 @@ async function prepareConflict(page: Page, context: BrowserContext, withTargetDr
     await page.clock.runFor(400);
     await expect(status(page)).toHaveText('Saved locally');
     targetId = await page.locator('#drafts').inputValue();
-    await page.locator('#new-draft').click();
+    await documentAction(page, '#new-draft');
     await expect(field).toHaveValue('');
   }
   const renders = await watchDraftListRenders(page);
@@ -752,7 +752,7 @@ test('a database upgrade while a conflict copy is written keeps the storage warn
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
   await expect(status(page)).toHaveText(CONFLICT_COPY + ' ' + UPGRADED);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + UPGRADED);
 });
 
@@ -768,7 +768,7 @@ test('a database upgrade after a conflict copy keeps the conflict notice with th
   // Upgrade arrives after the conflict copy has already been announced.
   await upgradeCapturedConnection(page);
   await expect(status(page)).toHaveText(CONFLICT_COPY + ' ' + UPGRADED);
-  await page.locator('#export-txt').click();
+  await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + UPGRADED);
 });
 
@@ -873,7 +873,7 @@ for (const upgrade of [false, true]) {
     await expect.poll(renders).toBeGreaterThan(1);
     await expect(status(page)).toHaveText(CONFLICT_COPY);
     if (upgrade) await upgradeCapturedConnection(page);
-    await page.locator('#new-draft').click();
+    await documentAction(page, '#new-draft');
     await expect(field).toHaveValue('');
     await expect(status(page)).toHaveText(upgrade ? UPGRADED : 'Saved locally');
     await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
@@ -885,12 +885,12 @@ test('switch-time conflict is announced after the selected draft loads', async (
   await field.press('End');
   await field.pressSequentially(' — правка');
   // No debounce: selecting B must first flush stale A into a conflict copy.
-  await page.locator('#drafts').selectOption(targetId);
+  await selectDocument(page, targetId);
   await expect(field).toHaveValue('Целевой черновик');
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
   await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Saved locally');
   // Once announced, the notice must not follow the user to another document.
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('');
   await expect(status(page)).toHaveText('Saved locally');
 });
@@ -989,7 +989,7 @@ test('a failed retry during a switch flush still announces the conflict', async 
   });
   await field.press('End');
   await field.pressSequentially(' — правка');
-  const switching = page.locator('#drafts').selectOption(targetId);
+  const switching = selectDocument(page, targetId);
   await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
   // Keep dirty so persist retries after the conflict commit, then fails.
   await field.pressSequentially('!');
@@ -1044,7 +1044,7 @@ test('a failed switch after a conflict flush keeps the open-failure through a la
   }, targetId);
   await field.press('End');
   await field.pressSequentially(' — правка');
-  const switching = page.locator('#drafts').selectOption(targetId);
+  const switching = selectDocument(page, targetId);
   await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
   await field.pressSequentially('!');
   await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });

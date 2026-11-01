@@ -35,3 +35,29 @@ export async function openGoto(page: Page): Promise<void> {
   if (await bar.isHidden()) await page.locator('#goto-open').click();
   await expect(bar).toBeVisible();
 }
+
+/** The document list and its actions live in the ▾ document menu (#123, step 3). */
+export async function openDocuments(page: Page): Promise<void> {
+  const panel = page.locator('#doc-menu');
+  if (await panel.isHidden()) await page.locator('#doc-menu-open').click();
+  await expect(panel).toBeVisible();
+}
+
+export async function closeDocuments(page: Page): Promise<void> {
+  const panel = page.locator('#doc-menu');
+  if (await panel.isVisible()) await page.locator('#doc-menu-open').click();
+  await expect(panel).toBeHidden();
+}
+
+/** Open the menu, pick a document (by value or { label }), and close the menu. */
+export async function selectDocument(page: Page, value: string | { label: string }): Promise<void> {
+  await openDocuments(page);
+  await page.locator('#drafts').selectOption(value);
+  await closeDocuments(page);
+}
+
+/** Open the menu and click one of its actions; the action closes the menu. */
+export async function documentAction(page: Page, selector: string): Promise<void> {
+  await openDocuments(page);
+  await page.locator(selector).click();
+}

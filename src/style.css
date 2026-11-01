@@ -16,22 +16,109 @@ body {
   margin: auto;
   padding: clamp(20px, 5vw, 56px) 20px;
 }
-header {
-  margin-bottom: 28px;
+/* Top bar: a small name, the document's title and its menu (#123, step 3). */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #d9e2ef;
 }
-h1 {
+.brand {
   margin: 0;
-  font-size: clamp(2.4rem, 7vw, 4rem);
-  letter-spacing: -0.04em;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #3153e9;
 }
-header p {
-  margin: 8px 0;
+.doc {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 260px;
+  min-width: 0;
 }
-.eyebrow {
-  color: #315ba8;
-  font-weight: 700;
-  font-size: 0.75rem;
-  letter-spacing: 0.12em;
+#draft-title {
+  width: min(36ch, 100%);
+  min-width: 8ch;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 650;
+}
+/* Size the title to its text where supported, so ▾ sits right after it. */
+@supports (field-sizing: content) {
+  #draft-title {
+    field-sizing: content;
+    width: auto;
+    max-width: 100%;
+  }
+}
+@media (max-width: 640px) {
+  .brand {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+#draft-title:hover {
+  border-color: #d9e2ef;
+}
+#draft-title:focus {
+  border-color: #aab8cd;
+}
+#doc-menu-open {
+  min-width: 44px;
+  padding: 0 10px;
+}
+.doc-menu {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(380px, calc(100vw - 40px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #aab8cd;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px #1830552e;
+}
+.doc-menu .menu-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #50627a;
+}
+.doc-menu select {
+  width: 100%;
+  padding: 4px;
+  border: 1px solid #aab8cd;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#delete-draft {
+  color: #9a4d06;
 }
 section {
   position: relative;
@@ -116,8 +203,21 @@ textarea {
   .hint {
     color: #c4d0e3;
   }
-  .eyebrow {
+  .brand {
     color: #a9c5ff;
+  }
+  .topbar {
+    border-color: #47536a;
+  }
+  .doc-menu {
+    background: #202a3b;
+    border-color: #47536a;
+  }
+  .doc-menu .menu-label {
+    color: #c4d0e3;
+  }
+  #delete-draft {
+    color: #f0b36a;
   }
 }
 
@@ -130,28 +230,6 @@ textarea {
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.draft-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.draft-bar select,
-.draft-bar input[type="text"] {
-  min-height: 40px;
-  max-width: 100%;
-  padding: 6px 10px;
-  border: 1px solid #aab8cd;
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-}
-.draft-bar input[type="text"] {
-  width: 190px;
 }
 
 [hidden] {
@@ -309,7 +387,6 @@ body.focus-mode .find-bar,
 body.focus-mode .goto-bar,
 body.focus-mode .rules-panel,
 body.focus-mode .shortcut-panel,
-body.focus-mode .draft-bar,
 body.focus-mode .hint,
 body.focus-mode label[for="editor"] {
   display: none;

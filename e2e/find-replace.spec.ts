@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openFind } from './settings-helpers';
+import { documentAction, openFind } from './settings-helpers';
 
 test('find navigates forwards and backwards with wrap-around', async ({ page }) => {
   await page.goto('/');
@@ -46,7 +46,7 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
   await page.getByRole('textbox', { name: 'Document title' }).fill('Русский пост');
   const [download] = await Promise.all([
     page.waitForEvent('download'),
-    page.getByRole('button', { name: 'Export JSON' }).click(),
+    documentAction(page, '#export-json'),
   ]);
   expect(download.suggestedFilename().replaceAll('_', ' ')).toBe('Русский пост.typebridge.json');
   const fs = await import('node:fs/promises');

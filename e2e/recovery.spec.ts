@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { setAutosave } from './settings-helpers';
+import { selectDocument, setAutosave } from './settings-helpers';
 
 test('interrupted write and immediate tab close leave a recoverable Unicode copy', async ({ page, context }) => {
   await page.goto('/');
@@ -18,7 +18,7 @@ test('interrupted write and immediate tab close leave a recoverable Unicode copy
   await expect(recover).toBeVisible();
   await recover.click();
   await expect(next.locator('#status')).toContainText('Recovered a copy');
-  await next.locator('#drafts').selectOption({ label: 'Untitled document (recovered)' });
+  await selectDocument(next, { label: 'Untitled document (recovered)' });
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза 🙂\nВторая строка');
   await next.reload();
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза 🙂\nВторая строка');
@@ -38,7 +38,7 @@ test('recovery keeps a newer version from another tab and does not clear a newer
   const third = await context.newPage(); await third.goto('/');
   await third.getByRole('button', { name: /Recover Untitled document/ }).click();
   await expect(third.locator('#status')).toContainText('Recovered a copy');
-  await third.locator('#drafts').selectOption({ label: 'Untitled document (recovered)' });
+  await selectDocument(third, { label: 'Untitled document (recovered)' });
   await expect(third.locator('#editor')).toHaveValue('Несохранённая версия');
   await other.reload(); await expect(other.locator('#editor')).toHaveValue('Новая версия');
 });
