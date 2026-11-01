@@ -38,7 +38,7 @@ test('switching immediately after typing saves the previous document', async ({ 
   await page.locator('#editor').fill('Быстрый набор 🙂');
   await page.locator('#new-draft').click();
   await expect(page.locator('#editor')).toHaveValue('');
-  await page.locator('#drafts').selectOption({ label: 'Untitled draft' });
+  await page.locator('#drafts').selectOption({ label: 'Untitled document' });
   await expect(page.locator('#editor')).toHaveValue('Быстрый набор 🙂');
 });
 
@@ -84,7 +84,7 @@ test('imports a text file into its own saved document', async ({ page }) => {
   await page.locator('#import-file').setInputFiles({
     name: 'post.txt', mimeType: 'text/plain', buffer: Buffer.from('Русский текст 🙂\nВторая строка'),
   });
-  await expect(page.locator('#status')).toContainText('Imported as a new draft');
+  await expect(page.locator('#status')).toContainText('Imported as a new document');
   await expect(page.locator('#editor')).toHaveValue('Русский текст 🙂\nВторая строка');
   await expect(page.locator('#draft-title')).toHaveValue('post');
   await page.reload();
@@ -150,7 +150,7 @@ test('a committed save stays successful if refreshing the draft list fails', asy
     };
   });
   await field.fill('Текст ещё');
-  await expect(page.locator('#status')).toContainText('Saved locally — draft list could not be refreshed');
+  await expect(page.locator('#status')).toContainText('Saved locally — document list could not be refreshed');
   await page.locator('#new-draft').click();
   await expect(field).toHaveValue('');
   await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
@@ -170,7 +170,7 @@ test('JSON export and import round trip preserves Cyrillic, newlines and emoji',
   expect(JSON.parse(bytes.toString()).draft.text).toBe(content);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#import-file').setInputFiles({ name: 'post.typebridge.json', mimeType: 'application/json', buffer: bytes });
-  await expect(page.locator('#status')).toContainText('Imported as a new draft');
+  await expect(page.locator('#status')).toContainText('Imported as a new document');
   await expect(field).toHaveValue(content);
   await page.reload();
   await expect(field).toHaveValue(content);
@@ -215,8 +215,8 @@ test('closing a tab immediately after editing saves or offers recovery', async (
   await next.goto('/');
   await expect(next.locator('#editor')).toBeEnabled();
   if (await next.locator('#editor').inputValue() !== 'Начало — последняя фраза') {
-    await next.getByRole('button', { name: /Recover Untitled draft/ }).click();
-    await next.locator('#drafts').selectOption({ label: 'Untitled draft (recovered)' });
+    await next.getByRole('button', { name: /Recover Untitled document/ }).click();
+    await next.locator('#drafts').selectOption({ label: 'Untitled document (recovered)' });
   }
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза');
 });

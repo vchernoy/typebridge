@@ -14,11 +14,11 @@ test('interrupted write and immediate tab close leave a recoverable Unicode copy
   await page.close({ runBeforeUnload: true });
   const next = await context.newPage();
   await next.goto('/');
-  const recover = next.getByRole('button', { name: /Recover Untitled draft/ });
+  const recover = next.getByRole('button', { name: /Recover Untitled document/ });
   await expect(recover).toBeVisible();
   await recover.click();
   await expect(next.locator('#status')).toContainText('Recovered a copy');
-  await next.locator('#drafts').selectOption({ label: 'Untitled draft (recovered)' });
+  await next.locator('#drafts').selectOption({ label: 'Untitled document (recovered)' });
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза 🙂\nВторая строка');
   await next.reload();
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза 🙂\nВторая строка');
@@ -36,9 +36,9 @@ test('recovery keeps a newer version from another tab and does not clear a newer
   await expect(page.locator('#status')).toContainText('Save failed');
   await page.close();
   const third = await context.newPage(); await third.goto('/');
-  await third.getByRole('button', { name: /Recover Untitled draft/ }).click();
+  await third.getByRole('button', { name: /Recover Untitled document/ }).click();
   await expect(third.locator('#status')).toContainText('Recovered a copy');
-  await third.locator('#drafts').selectOption({ label: 'Untitled draft (recovered)' });
+  await third.locator('#drafts').selectOption({ label: 'Untitled document (recovered)' });
   await expect(third.locator('#editor')).toHaveValue('Несохранённая версия');
   await other.reload(); await expect(other.locator('#editor')).toHaveValue('Новая версия');
 });
@@ -81,7 +81,7 @@ test('retry after committed recovery with failed journal cleanup does not duplic
       return original.call(this, key);
     };
   });
-  const recover = other.getByRole('button', { name: /Recover Untitled draft/ });
+  const recover = other.getByRole('button', { name: /Recover Untitled document/ });
   await recover.click();
   await expect(other.locator('#status')).toContainText('Recovery failed');
   await other.evaluate(() => (window as unknown as { restoreRemove: () => void }).restoreRemove());
@@ -109,11 +109,11 @@ test('already committed emergency snapshot is removed without a duplicate', asyn
   await expect(page.locator('#status')).toContainText('Saved locally');
   await page.evaluate(() => {
     const id = sessionStorage.getItem('typebridge.activeDraft.v1')!;
-    localStorage.setItem(`typebridge.recovery.v1.closed.${id}`, JSON.stringify({ token: 'saved-token', tab: 'closed', documentId: id, revision: 0, timestamp: Date.now(), title: 'Untitled draft', text: 'Сохранённая запись 🙂' }));
+    localStorage.setItem(`typebridge.recovery.v1.closed.${id}`, JSON.stringify({ token: 'saved-token', tab: 'closed', documentId: id, revision: 0, timestamp: Date.now(), title: 'Untitled document', text: 'Сохранённая запись 🙂' }));
   });
   await page.reload();
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('typebridge.recovery.v1.closed.')).length)).toBe(0);
-  await expect(page.getByRole('button', { name: /Recover Untitled draft/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Recover Untitled document/ })).toHaveCount(0);
   await expect(page.locator('#drafts option')).toHaveCount(1);
 });
 
@@ -158,7 +158,7 @@ test('active tab snapshots are not presented as lost; closing exposes them', asy
   const other = await context.newPage(); await other.goto('/');
   await expect(other.locator('#editor')).toBeEnabled();
   await other.evaluate(() => {
-    const observed = document.querySelector('[aria-label="Recover unsaved drafts"]')!;
+    const observed = document.querySelector('[aria-label="Recover unsaved documents"]')!;
     (window as unknown as { recoveryMutations: number }).recoveryMutations = 0;
     new MutationObserver(() => { (window as unknown as { recoveryMutations: number }).recoveryMutations++; }).observe(observed, { childList: true, subtree: true });
   });
@@ -169,21 +169,21 @@ test('active tab snapshots are not presented as lost; closing exposes them', asy
   await page.locator('#editor').fill('Важный черновик');
   await expect(page.locator('#status')).toContainText('Save failed');
   await other.waitForTimeout(1600); // Allow the coalesced journal notification to be processed.
-  await expect(other.getByRole('button', { name: /Recover Untitled draft/ })).toHaveCount(0);
+  await expect(other.getByRole('button', { name: /Recover Untitled document/ })).toHaveCount(0);
   expect(await other.evaluate(() => (window as unknown as { recoveryMutations: number }).recoveryMutations)).toBe(0);
   await page.close();
   const check = other.getByRole('button', { name: 'Check emergency backups' });
-  await expect.poll(async () => await check.isVisible() || await other.getByRole('button', { name: /Recover Untitled draft/ }).isVisible(), { timeout: 10000 }).toBe(true);
+  await expect.poll(async () => await check.isVisible() || await other.getByRole('button', { name: /Recover Untitled document/ }).isVisible(), { timeout: 10000 }).toBe(true);
   if (await check.isVisible()) await check.click();
-  await expect(other.getByRole('button', { name: /Recover Untitled draft/ })).toBeVisible();
+  await expect(other.getByRole('button', { name: /Recover Untitled document/ })).toBeVisible();
 });
 
 test('an empty recovery panel takes no space and is not exposed (#118)', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
-  const panel = page.locator('[aria-label="Recover unsaved drafts"]');
+  const panel = page.locator('[aria-label="Recover unsaved documents"]');
   await expect(panel).toHaveCount(1);
   await expect(panel).toBeEmpty();
   await expect(panel).toBeHidden();
-  await expect(page.getByRole('region', { name: 'Recover unsaved drafts' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Recover unsaved documents' })).toHaveCount(0);
 });

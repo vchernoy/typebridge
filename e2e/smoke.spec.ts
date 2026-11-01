@@ -246,12 +246,12 @@ test('autosave restores text after reload and opens latest draft in a new tab', 
   const second = await context.newPage();
   await second.goto('/');
   await expect(second.getByRole('textbox', { name: 'Your text' })).toHaveValue('привет');
-  await second.getByRole('button', { name: 'New draft' }).click();
+  await second.getByRole('button', { name: 'New document' }).click();
   await second.getByRole('textbox', { name: 'Your text' }).pressSequentially('mir');
   await expect(second.getByRole('status')).toContainText('Saved locally');
   await page.reload();
   await expect(field).toHaveValue('привет');
-  await expect(page.getByRole('combobox', { name: 'Drafts' }).locator('option')).toHaveCount(2);
+  await expect(page.getByRole('combobox', { name: 'Documents' }).locator('option')).toHaveCount(2);
   await second.close();
 });
 
@@ -261,13 +261,13 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
   await expect(page.getByRole('status')).toContainText('Saved locally');
-  await page.getByRole('textbox', { name: 'Draft title' }).fill('First post');
+  await page.getByRole('textbox', { name: 'Document title' }).fill('First post');
   await expect(page.getByRole('status')).toContainText('Saved locally');
-  await page.getByRole('button', { name: 'New draft' }).click();
+  await page.getByRole('button', { name: 'New document' }).click();
   await expect(field).toHaveValue('');
   await field.pressSequentially('mir');
   await expect(page.getByRole('status')).toContainText('Saved locally');
-  await page.getByRole('combobox', { name: 'Drafts' }).selectOption({ label: 'First post' });
+  await page.getByRole('combobox', { name: 'Documents' }).selectOption({ label: 'First post' });
   await expect(field).toHaveValue('привет');
   page.once('dialog', d => d.dismiss());
   await setAutosave(page, false);
@@ -276,7 +276,7 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   await page.reload();
   await expect(field).toHaveValue('привет');
   page.once('dialog', d => d.accept());
-  await page.getByRole('button', { name: 'Delete draft' }).click();
+  await page.getByRole('button', { name: 'Delete document' }).click();
   await expect(field).toHaveValue('');
 });
 
@@ -300,13 +300,13 @@ test('undo and redo survive refresh and stay isolated per draft', async ({ page 
   await redo.click();
   await expect(field).toHaveValue('привет');
   await expect(page.getByRole('status')).toContainText('Saved locally');
-  await page.getByRole('textbox', { name: 'Draft title' }).fill('First');
+  await page.getByRole('textbox', { name: 'Document title' }).fill('First');
   await expect(page.getByRole('status')).toContainText('Saved locally');
-  await page.getByRole('button', { name: 'New draft' }).click();
+  await page.getByRole('button', { name: 'New document' }).click();
   await expect(undo).toBeDisabled();
   await field.pressSequentially('mir');
   await expect(page.getByRole('status')).toContainText('Saved locally');
-  await page.getByRole('combobox', { name: 'Drafts' }).selectOption({ label: 'First' });
+  await page.getByRole('combobox', { name: 'Documents' }).selectOption({ label: 'First' });
   await expect(field).toHaveValue('привет');
   await expect(undo).toBeEnabled();
 });
@@ -338,7 +338,7 @@ test('fresh page opens latest saved draft, reload keeps current tab selection', 
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('First draft');
   await expect(page.getByRole('status')).toContainText('Saved locally');
-  await page.getByRole('button', { name: 'New draft' }).click();
+  await page.getByRole('button', { name: 'New document' }).click();
   await field.fill('Latest draft');
   await expect(page.getByRole('status')).toContainText('Saved locally');
   const fresh = await context.newPage();

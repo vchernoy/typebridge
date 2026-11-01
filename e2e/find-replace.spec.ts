@@ -43,7 +43,7 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
   await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет, мир!\\nВторая строка.');
-  await page.getByRole('textbox', { name: 'Draft title' }).fill('Русский пост');
+  await page.getByRole('textbox', { name: 'Document title' }).fill('Русский пост');
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByRole('button', { name: 'Export JSON' }).click(),
@@ -59,7 +59,7 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(payload)),
   });
-  await expect(page.locator('#status')).toContainText('Imported as a new draft');
+  await expect(page.locator('#status')).toContainText('Imported as a new document');
   await expect(field).toHaveValue('Импортировано 🙂');
   await page.reload();
   await expect(field).toHaveValue('Импортировано 🙂');

@@ -335,7 +335,7 @@ test('a failed delete with autosave off does not promise another save', async ({
   });
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(status(page)).toHaveText('Could not delete draft — your changes are unsaved; autosave is off');
+  await expect(status(page)).toHaveText('Could not delete document — your changes are unsaved; autosave is off');
   await expect(field).toHaveValue('Сохранено правка');
 });
 
@@ -672,12 +672,12 @@ test('a failed delete without storage and with autosave off keeps the storage wa
   await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#delete-draft').click();
-  await expect(status(page)).toHaveText('Could not delete draft — your text is kept. ' + SAVE_FAILED_NO_STORAGE);
+  await expect(status(page)).toHaveText('Could not delete document — your text is kept. ' + SAVE_FAILED_NO_STORAGE);
   await expect(field).toHaveValue('Нельзя потерять');
 });
 
-const CONFLICT_COPY = 'Another tab changed this draft. Your edits were saved as a conflict copy.';
-const CONFLICT_COPY_LEFT = 'Another tab changed the draft you left. Your edits were saved as a conflict copy.';
+const CONFLICT_COPY = 'Another tab changed this document. Your edits were saved as a conflict copy.';
+const CONFLICT_COPY_LEFT = 'Another tab changed the document you left. Your edits were saved as a conflict copy.';
 const UPGRADED = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
 
 /** Force the next save into a conflict copy by committing a newer revision from another tab. */
@@ -857,7 +857,7 @@ for (const upgradeDuringRefresh of [false, true]) {
     await field.pressSequentially(' — правка');
     await page.clock.runFor(400);
     await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-    await expect(status(page)).toHaveText(CONFLICT_COPY + ' Draft list could not be refreshed. ' + UPGRADED);
+    await expect(status(page)).toHaveText(CONFLICT_COPY + ' Document list could not be refreshed. ' + UPGRADED);
   });
 }
 
@@ -907,7 +907,7 @@ test('import after a conflict flush keeps the left-draft conflict notice', async
   });
   await expect(field).toHaveValue('Импортированный текст');
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Imported as a new draft');
+  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Imported as a new document');
 });
 
 test('turning autosave off during an in-flight conflict keeps the notice', async ({ page, context }) => {
@@ -1050,11 +1050,11 @@ test('a failed switch after a conflict flush keeps the open-failure through a la
   await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
   await switching;
   await expect(field).toHaveValue('Исходный — правка!');
-  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Could not open draft — current text was kept');
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Could not open document — current text was kept');
   // The post-commit timer from the flush must not wipe the action while conflict remains.
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
-  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Could not open draft — current text was kept');
+  await expect(status(page)).toHaveText(CONFLICT_COPY + ' Could not open document — current text was kept');
 });
 
 test('refresh failure clears after a later successful conflict-draft refresh', async ({ page, context }) => {
@@ -1072,7 +1072,7 @@ test('refresh failure clears after a later successful conflict-draft refresh', a
   await field.press('End');
   await field.pressSequentially(' — правка');
   await page.clock.runFor(400);
-  await expect(status(page)).toHaveText(new RegExp('draft list could not be refreshed', 'i'));
+  await expect(status(page)).toHaveText(new RegExp('document list could not be refreshed', 'i'));
   await field.pressSequentially('!');
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
