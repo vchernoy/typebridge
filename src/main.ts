@@ -316,6 +316,7 @@ journalWarning.hidden = true;
 status.parentElement?.before(journalWarning);
 const recoveryPanel = document.createElement('section');
 recoveryPanel.setAttribute('aria-label', 'Recover unsaved drafts');
+recoveryPanel.className = 'recovery-panel'; // Hidden by CSS while empty (#118).
 status.parentElement?.before(recoveryPanel);
 
 field.disabled = true;

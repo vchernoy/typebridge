@@ -176,3 +176,13 @@ test('active tab snapshots are not presented as lost; closing exposes them', asy
   if (await check.isVisible()) await check.click();
   await expect(other.getByRole('button', { name: /Recover Untitled draft/ })).toBeVisible();
 });
+
+test('an empty recovery panel takes no space and is not exposed (#118)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const panel = page.locator('[aria-label="Recover unsaved drafts"]');
+  await expect(panel).toHaveCount(1);
+  await expect(panel).toBeEmpty();
+  await expect(panel).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Recover unsaved drafts' })).toHaveCount(0);
+});
