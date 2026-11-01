@@ -24,10 +24,10 @@ test('toggle, paste and composition preserve text', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
-  await page.getByLabel('Transliteration on').uncheck();
+  await page.locator('#enabled').uncheck();
   await field.pressSequentially('hello');
   await expect(field).toHaveValue('hello');
-  await page.getByLabel('Transliteration on').check();
+  await page.locator('#enabled').check();
   await field.evaluate(el => { const node = el as HTMLTextAreaElement; node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles:true })); node.value += '漢'; node.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'insertCompositionText', data:'漢', isComposing:true })); node.dispatchEvent(new CompositionEvent('compositionend', { bubbles:true, data:'漢' })); });
   await expect(field).toHaveValue('hello漢');
   page.once('dialog', dialog => dialog.accept());
@@ -84,7 +84,7 @@ test('cut and selection replacement are undoable with selections intact', async 
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
-  await page.getByLabel('Transliteration on').uncheck();
+  await page.locator('#enabled').uncheck();
   await field.pressSequentially('abcdef');
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(1, 4));
   await field.press('ControlOrMeta+x');
@@ -157,7 +157,7 @@ test('toggle while editing and undo clear', async ({ page }) => {
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('sh');
   await expect(field).toHaveValue('ш');
-  await page.getByLabel('Transliteration on').uncheck();
+  await page.locator('#enabled').uncheck();
   await field.pressSequentially('ab');
   await expect(field).toHaveValue('шab');
   page.once('dialog', dialog => dialog.accept());
@@ -179,7 +179,7 @@ test('touch interactions on a narrow viewport', async ({ browser }) => {
   await field.tap();
   await field.pressSequentially('yo');
   await expect(field).toHaveValue('ё');
-  await page.getByLabel('Transliteration on').tap();
+  await page.locator('#enabled').tap();
   await field.tap();
   await field.pressSequentially('x');
   await expect(field).toHaveValue('ёx');

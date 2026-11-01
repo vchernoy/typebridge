@@ -3,7 +3,7 @@ import { openGoto } from './settings-helpers';
 
 test('Go to line moves the caret, reveals a distant line and updates the position label', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Transliteration on').uncheck();
+  await page.locator('#enabled').uncheck();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const lines = Array.from({ length: 250 }, (_, i) => `Line ${i + 1} content`);
   await field.fill(lines.join('\n'));
@@ -32,7 +32,7 @@ test('Go to line moves the caret, reveals a distant line and updates the positio
 
 test('Cmd/Ctrl+G focuses Go to line and Enter jumps without changing text', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Transliteration on').uncheck();
+  await page.locator('#enabled').uncheck();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('one\ntwo\nthree');
   await field.focus();
@@ -64,7 +64,7 @@ test('Go to line clamps past the end of the document', async ({ page }) => {
 
 test('Go to a column inside an emoji snaps to a safe boundary so typing cannot split it', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByLabel('Transliteration on')).toBeChecked();
+  await expect(page.locator('#enabled')).toBeChecked();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('🙂x');
   await openGoto(page);
@@ -78,7 +78,7 @@ test('Go to a column inside an emoji snaps to a safe boundary so typing cannot s
 
 test('Enter during IME composition in Go to line does not navigate', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Transliteration on').uncheck();
+  await page.locator('#enabled').uncheck();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('one\ntwo\nthree');
   await field.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(0, 0));

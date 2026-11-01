@@ -58,6 +58,16 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
     enabled.checked = !enabled.checked;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));
   });
+  // The words beside the switch choose a side rather than toggling: "Latin" turns
+  // transliteration off and "Кириллица" turns it on (#123, step 5).
+  function choose(on: boolean): void {
+    if (enabled.checked === on) return;
+    enabled.checked = on;
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  const [latinSide, cyrillicSide] = document.querySelectorAll<HTMLElement>('.mode-switch .mode-side');
+  latinSide?.addEventListener('click', () => { choose(false); enabled.focus(); });
+  cyrillicSide?.addEventListener('click', event => { event.preventDefault(); choose(true); enabled.focus(); });
   enabled.addEventListener('change', () => {
     editor.setEnabled(enabled.checked);
     syncSearchEditors();
