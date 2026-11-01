@@ -1,7 +1,7 @@
 /**
  * Document menu (#123, step 3): the ▾ button next to the document title opens a panel
  * with the document list and New, Import, Export and Delete. Escape, a click outside
- * or an action closes it. Picking a document with the pointer closes it; arrow keys in
+ * or an action closes it; Escape and actions return focus to ▾. Picking a document with the pointer closes it; arrow keys in
  * the list keep it open so keyboard users can move through documents.
  */
 export function setupDocumentMenu(): void {
@@ -30,8 +30,10 @@ export function setupDocumentMenu(): void {
     const target = event.target as Node | null;
     if (!panel.hidden && target && !panel.contains(target) && !button.contains(target)) close(false);
   });
+  // An action hides the panel holding the focused button, so give focus back to ▾;
+  // an action that opens a document may then move it to the editor itself.
   for (const action of panel.querySelectorAll<HTMLButtonElement>('.doc-actions button')) {
-    action.addEventListener('click', () => close(false));
+    action.addEventListener('click', () => close(true));
   }
   let pointerPick = false;
   list.addEventListener('pointerdown', () => { pointerPick = true; });

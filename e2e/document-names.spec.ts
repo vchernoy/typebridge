@@ -43,7 +43,12 @@ test('the ▾ document menu opens the list and actions, and closes cleanly (#123
   await expect(menu).toBeHidden();
   await expect(toggle).toBeFocused();
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
-  // An action closes it.
+  // An action closes it and gives keyboard focus back to ▾.
+  await toggle.click();
+  await menu.getByRole('button', { name: 'Export TXT' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeHidden();
+  await expect(toggle).toBeFocused();
   await toggle.click();
   await menu.getByRole('button', { name: 'New document' }).click();
   await expect(menu).toBeHidden();
@@ -51,9 +56,16 @@ test('the ▾ document menu opens the list and actions, and closes cleanly (#123
   // Picking a document with the pointer opens it and closes the menu; a click outside closes it too.
   await toggle.click();
   await expect(page.locator('#drafts option')).toHaveCount(2);
-  const option = await page.locator('#drafts option', { hasText: 'Первый' }).boundingBox();
-  if (!option) throw new Error('Document option has no bounding box');
-  await page.mouse.click(option.x + option.width / 2, option.y + option.height / 2);
+  // Click the option's row in the list. WebKit reports no boxes for listbox options,
+  // so work out the row from the list's own box.
+  const list = await page.locator('#drafts').boundingBox();
+  const rows = await page.locator('#drafts').evaluate((el: HTMLSelectElement) => ({
+    size: el.size,
+    index: [...el.options].findIndex(option => option.text.startsWith('Первый')),
+  }));
+  if (!list || rows.index < 0) throw new Error('Document list or option not found');
+  const rowHeight = list.height / rows.size;
+  await page.mouse.click(list.x + list.width / 2, list.y + rowHeight * (rows.index + 0.5));
   await expect(field).toHaveValue('Первый');
   await expect(menu).toBeHidden();
   await toggle.click();
