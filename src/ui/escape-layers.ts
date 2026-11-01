@@ -1,9 +1,20 @@
 type EscapeLayer = { element: HTMLElement; priority: number; close: () => void };
 const layers: EscapeLayer[] = [];
+let installed = false;
 
-/** Register before the page's Focus shortcut; modal dialogs still win in capture. */
+/**
+ * Install the Escape coordinator before the Focus shortcut listener so a visible
+ * Settings/menu/Find layer closes first when focus is in the editor (#132 / Codex P1).
+ * Modal dialogs still win in the capture phase (#122).
+ */
+export function installEscapeLayers(): void {
+  if (installed) return;
+  installed = true;
+  document.addEventListener('keydown', onEscape);
+}
+
 export function registerEscapeLayer(element: HTMLElement, priority: number, close: () => void): void {
-  if (!layers.length) document.addEventListener('keydown', onEscape);
+  installEscapeLayers();
   layers.push({ element, priority, close });
 }
 

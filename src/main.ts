@@ -15,9 +15,11 @@ import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
 import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
-import { registerEscapeLayer } from './ui/escape-layers';
+import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+// Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
+installEscapeLayers();
 const { setFocusMode, restoreFocusMode } = setupLayout(field);
 setupSettings();
 setupDocumentMenu();
