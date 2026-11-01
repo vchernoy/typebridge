@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setAutosave } from './settings-helpers';
 
 test('interrupted write and immediate tab close leave a recoverable Unicode copy', async ({ page, context }) => {
   await page.goto('/');
@@ -45,7 +46,7 @@ test('recovery keeps a newer version from another tab and does not clear a newer
 test('autosave off does not create an emergency journal for new edits', async ({ page }) => {
   await page.goto('/');
   page.once('dialog', dialog => dialog.dismiss());
-  await page.locator('#autosave').uncheck();
+  await setAutosave(page, false);
   await page.locator('#editor').fill('Только в памяти');
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('typebridge.recovery.v1.')))).toEqual([]);
 });

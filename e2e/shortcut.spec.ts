@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openSettings } from './settings-helpers';
 
 test('shortcut toggles global mode, can be remapped, disabled and persists', async ({ page }) => {
   await page.goto('/');
@@ -7,10 +8,10 @@ test('shortcut toggles global mode, can be remapped, disabled and persists', asy
   await field.focus();
   await page.keyboard.press('Control+Shift+Space');
   await expect(page.locator('#enabled')).not.toBeChecked();
-  await page.locator('.shortcut-panel summary').click();
+  await openSettings(page);
   await page.locator('#translit-shortcut').selectOption('f7');
   await page.reload();
-  await page.locator('.shortcut-panel summary').click();
+  await openSettings(page);
   await expect(page.locator('#translit-shortcut')).toHaveValue('f7');
   await page.locator('#find-text').focus();
   await page.keyboard.press('Control+Shift+F7');
@@ -38,14 +39,14 @@ test('shortcut is not intercepted during composition', async ({ page }) => {
 test('mode announcement and active shortcut remain visible with settings closed', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
-  await expect(page.locator('.shortcut-panel')).not.toHaveAttribute('open');
+  await expect(page.locator('#settings-panel')).toBeHidden();
   await expect(page.locator('#shortcut-label')).toContainText('Ctrl+Shift+Space');
   await page.locator('#editor').focus();
   await page.keyboard.press('Control+Shift+Space');
   await expect(page.locator('#mode-announcement')).toBeVisible();
   await expect(page.locator('#mode-announcement')).toHaveAttribute('aria-live', 'polite');
   await expect(page.locator('#mode-announcement')).toHaveText('Transliteration off');
-  await page.locator('.shortcut-panel summary').click();
+  await openSettings(page);
   await page.locator('#translit-shortcut').selectOption('f7');
   await expect(page.locator('#shortcut-label')).toContainText('Ctrl+Shift+F7');
   await page.locator('#translit-shortcut').selectOption('off');
@@ -83,8 +84,8 @@ test('Focus Mode keeps transliteration feedback visible and hides settings', asy
   await editor.focus();
   await page.keyboard.press('ControlOrMeta+Shift+Enter');
   await expect(page.locator('body')).toHaveClass(/focus-mode/);
-  await expect(page.locator('.shortcut-panel')).toBeHidden();
-  await expect(page.locator('.rules-panel')).toBeHidden();
+  await expect(page.locator('#settings-open')).toBeHidden();
+  await expect(page.locator('#settings-panel')).toBeHidden();
   await expect(page.locator('#find-text')).toBeHidden();
   await page.keyboard.press('Control+Shift+Space');
   const announcement = page.locator('#mode-announcement');
@@ -99,7 +100,7 @@ test('Focus Mode keeps transliteration feedback visible and hides settings', asy
   await expect(editor).toHaveValue('privet мир');
   await page.keyboard.press('Escape');
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
-  await expect(page.locator('.shortcut-panel')).toBeVisible();
+  await expect(page.locator('#settings-open')).toBeVisible();
 });
 
 test('Escape in the editor enters and exits Focus mode (#67)', async ({ page }) => {

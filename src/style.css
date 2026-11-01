@@ -183,15 +183,81 @@ button:disabled {
   white-space: nowrap;
 }
 
-.rules-panel {
-  margin: 0 0 16px;
-  padding: 12px;
-  border: 1px solid #aab8cd;
-  border-radius: 10px;
+/* Settings: a non-modal side panel, so rules can be tried in the editor while it is open (#123). */
+.settings-panel {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 100%);
+  overflow-y: auto;
+  background: #fff;
+  border-left: 1px solid #d9e2ef;
+  box-shadow: -12px 0 32px #18305526;
+  padding: env(safe-area-inset-top, 0px) max(20px, env(safe-area-inset-right, 0px))
+    calc(24px + env(safe-area-inset-bottom, 0px)) 20px;
 }
-.rules-panel summary {
-  cursor: pointer;
-  font-weight: 700;
+.settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  background: inherit;
+  border-bottom: 1px solid #d9e2ef;
+}
+.settings-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.settings-group {
+  padding: 4px 0 16px;
+  border-bottom: 1px solid #d9e2ef;
+}
+.settings-group:last-child {
+  border-bottom: 0;
+}
+.settings-group h3 {
+  margin: 18px 0 6px;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #50627a;
+}
+.settings-group p,
+.setting-note {
+  margin: 4px 0 10px;
+  font-size: 0.9rem;
+  color: #50627a;
+}
+.shortcut-panel label {
+  margin-right: 8px;
+}
+.shortcut-panel select {
+  min-height: 44px;
+  margin: 0 8px 8px 0;
+}
+@media (prefers-color-scheme: dark) {
+  .settings-panel {
+    background: #202a3b;
+    border-color: #47536a;
+  }
+  .settings-head,
+  .settings-group {
+    border-color: #47536a;
+  }
+  .settings-group h3,
+  .settings-group p,
+  .setting-note {
+    color: #c4d0e3;
+  }
+}
+body.focus-mode .settings-panel {
+  display: none;
 }
 .rules-panel p {
   font-size: 0.9rem;

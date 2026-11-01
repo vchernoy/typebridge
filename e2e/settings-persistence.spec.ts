@@ -223,6 +223,7 @@ test('corner grip sits on the editor corner and resizes it, down to the new mini
   expect(Math.round(after!.height)).toBe(Math.round(before.height + 60));
   await expect.poll(() => page.evaluate(() => localStorage.getItem('typebridge.editor.size.v1'))).toContain(`${Math.round(before.width - 120)}px`);
   // Drag far past the top-left: the editor stops at the new 160 × 96 minimum.
+  await grip.scrollIntoViewIfNeeded();
   const now = await grip.boundingBox();
   await page.mouse.move(now!.x + now!.width / 2, now!.y + now!.height / 2);
   await page.mouse.down();
