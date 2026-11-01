@@ -666,3 +666,79 @@ body.focus-mode .bottom {
 .recovery-panel:empty {
   display: none;
 }
+
+/* Phone layout pass (#123, step 6). */
+#focus-mode,
+#settings-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  .workspace {
+    padding: 12px 10px;
+  }
+  section {
+    padding: 14px;
+  }
+  .topbar {
+    gap: 6px 10px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+  }
+  /* Wraps when text is enlarged; at the default size everything fits on one row. */
+  .top-actions {
+    width: 100%;
+    margin-left: 0;
+    gap: 6px;
+  }
+  .mode-switch {
+    gap: 6px;
+  }
+  /* Focus and Settings become icon buttons; their names stay for assistive tech. */
+  #focus-mode,
+  #settings-open {
+    min-width: 44px;
+    padding: 0 10px;
+  }
+  #focus-mode .btn-text,
+  #settings-open .btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  #focus-mode {
+    margin-left: auto;
+  }
+  .toolbar {
+    margin-bottom: 12px;
+  }
+  .actions {
+    gap: 6px;
+  }
+  .actions > button,
+  #more-open {
+    padding: 0 11px;
+  }
+  .tool-sep {
+    display: none;
+  }
+}
+@media (max-width: 360px) {
+  /* Narrowest phones: a slightly smaller switch keeps it on one row with Focus and Settings. */
+  .mode-switch {
+    gap: 4px;
+  }
+  .mode-side {
+    font-size: 0.9rem;
+  }
+  #enabled {
+    width: 40px;
+  }
+  #enabled:checked::before {
+    transform: translateX(14px);
+  }
+}
