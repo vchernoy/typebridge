@@ -1,4 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
+import { selectDocument, documentAction } from './settings-helpers';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -102,14 +103,14 @@ test('each draft and independent tab keeps its own writing position', async ({ p
   await expect(page.locator('#status')).toContainText('Saved locally');
   const first = await page.locator('#drafts').inputValue();
   await field.evaluate((el: HTMLTextAreaElement) => { el.setSelectionRange(3, 7); el.dispatchEvent(new Event('select')); });
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await field.fill('Второй черновик');
   await expect(page.locator('#status')).toContainText('Saved locally');
   const second = await page.locator('#drafts').inputValue();
   await field.evaluate((el: HTMLTextAreaElement) => { el.setSelectionRange(5, 5); el.dispatchEvent(new Event('select')); });
-  await page.locator('#drafts').selectOption(first);
+  await selectDocument(page, first);
   await expect.poll(() => position(field)).toMatchObject({ start: 3, end: 7 });
-  await page.locator('#drafts').selectOption(second);
+  await selectDocument(page, second);
   await expect.poll(() => position(field)).toMatchObject({ start: 5, end: 5 });
   const other = await context.newPage();
   await other.goto('/');

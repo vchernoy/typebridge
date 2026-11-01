@@ -11,10 +11,12 @@ import { setupSearch } from './ui/search';
 import { setupRules } from './ui/rules';
 import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
+import { setupDocumentMenu } from './ui/document-menu';
 import { setupWritingPosition } from './editor/writing-position';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 const { setFocusMode, restoreFocusMode } = setupLayout(field);
 setupSettings();
+setupDocumentMenu();
 const editor = new Editor(field);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
@@ -411,6 +413,8 @@ function renderDrafts(): void {
     draftSelect.append(option);
   }
   draftSelect.value = active.id;
+  // Shown as a list inside the document menu: at least two rows, at most eight.
+  draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
 }
 async function refreshDrafts(): Promise<void> {
   if (db) drafts = await listStoredDrafts(db);

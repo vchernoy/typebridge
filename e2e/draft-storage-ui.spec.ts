@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { selectDocument, documentAction } from './settings-helpers';
 
 test('a stale tab saves a visible conflict copy without overwriting the newer draft', async ({ page, context }) => {
   await page.goto('/');
@@ -29,16 +30,16 @@ test('failed database initialization keeps text editable and reports unsaved sta
   await field.fill('Нельзя потерять');
   await expect(page.locator('#status')).toContainText('Save failed');
   await expect(field).toHaveValue('Нельзя потерять');
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('Нельзя потерять');
 });
 
 test('switching immediately after typing saves the previous document', async ({ page }) => {
   await page.goto('/');
   await page.locator('#editor').fill('Быстрый набор 🙂');
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(page.locator('#editor')).toHaveValue('');
-  await page.locator('#drafts').selectOption({ label: 'Untitled document' });
+  await selectDocument(page, { label: 'Untitled document' });
   await expect(page.locator('#editor')).toHaveValue('Быстрый набор 🙂');
 });
 
@@ -55,7 +56,7 @@ test('failed writes keep current text and can be retried without switching away'
   });
   await page.locator('#editor').fill('Сохраните мои изменения');
   await expect(page.locator('#status')).toContainText('Save failed');
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(page.locator('#editor')).toHaveValue('Сохраните мои изменения');
   await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
   await page.locator('#editor').fill('Сохраните мои изменения!');
@@ -151,7 +152,7 @@ test('a committed save stays successful if refreshing the draft list fails', asy
   });
   await field.fill('Текст ещё');
   await expect(page.locator('#status')).toContainText('Saved locally — document list could not be refreshed');
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('');
   await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
   await page.reload();
@@ -164,7 +165,7 @@ test('JSON export and import round trip preserves Cyrillic, newlines and emoji',
   const content = 'Русский пост 🙂\nВторая строка\nТретья строка 🌍';
   await field.fill(content);
   await page.locator('#draft-title').fill('Проверка');
-  const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#export-json').click()]);
+  const [download] = await Promise.all([page.waitForEvent('download'), documentAction(page, '#export-json')]);
   const fs = await import('node:fs/promises');
   const bytes = await fs.readFile((await download.path())!);
   expect(JSON.parse(bytes.toString()).draft.text).toBe(content);
@@ -188,9 +189,9 @@ test('long editing history survives draft switching and reload', async ({ page }
   await expect(page.locator('#status')).toContainText('Saved locally');
   await page.locator('#draft-title').fill('Длинный пост');
   await expect(page.locator('#status')).toContainText('Saved locally');
-  await page.locator('#new-draft').click();
+  await documentAction(page, '#new-draft');
   await expect(field).toHaveValue('');
-  await page.locator('#drafts').selectOption({ label: 'Длинный пост' });
+  await selectDocument(page, { label: 'Длинный пост' });
   await expect(field).toHaveValue(original + 'Вторая правка');
   await page.locator('#undo').click();
   await expect(field).toHaveValue(original + 'Первая правка');
@@ -216,7 +217,7 @@ test('closing a tab immediately after editing saves or offers recovery', async (
   await expect(next.locator('#editor')).toBeEnabled();
   if (await next.locator('#editor').inputValue() !== 'Начало — последняя фраза') {
     await next.getByRole('button', { name: /Recover Untitled document/ }).click();
-    await next.locator('#drafts').selectOption({ label: 'Untitled document (recovered)' });
+    await selectDocument(next, { label: 'Untitled document (recovered)' });
   }
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза');
 });

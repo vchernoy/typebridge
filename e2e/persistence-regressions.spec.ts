@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { documentAction } from './settings-helpers';
 
 for (const saved of [false, true]) for (const delay of [0, 800]) {
   test(`delete pending edits: saved=${saved}, confirmation delay=${delay}`, async ({ page }) => {
@@ -8,7 +9,7 @@ for (const saved of [false, true]) for (const delay of [0, 800]) {
     if (saved) { await editor.fill('Saved'); await expect(page.locator('#status')).toContainText('Saved locally'); }
     await editor.fill('Pending');
     page.once('dialog', async dialog => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); await dialog.accept(); });
-    await page.locator('#delete-draft').click();
+    await documentAction(page, '#delete-draft');
     await expect(page.locator('#status')).toHaveText('Document deleted');
     await page.waitForTimeout(600);
     await expect(editor).toHaveValue('');
@@ -39,7 +40,7 @@ test('canceling deletion retains pending edits and autosave', async ({ page }) =
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Оставить текст');
   page.once('dialog', dialog => dialog.dismiss());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(page.locator('#editor')).toHaveValue('Оставить текст');
   await expect(page.locator('#status')).toContainText('Saved locally');
   await page.reload();
@@ -61,12 +62,12 @@ test('failed deletion keeps the text and allows retry', async ({ page }) => {
     };
   });
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(page.locator('#status')).toContainText('Could not delete document');
   await expect(editor).toHaveValue('Не потерять');
   await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(page.locator('#status')).toHaveText('Document deleted');
   await expect(editor).toHaveValue('');
 });
@@ -84,7 +85,7 @@ test('stale deletion retries saving pending edits as a conflict copy', async ({ 
   await expect(other.locator('#status')).toContainText('Saved locally');
   await editor.fill('Важная правка первой вкладки 🙂');
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(page.locator('#status-line')).toContainText('conflict copy');
   await page.reload();
   await expect(editor).toHaveValue('Важная правка первой вкладки 🙂');
@@ -121,7 +122,7 @@ test('post-delete list failure does not pretend deleted text is still saved', as
     };
   });
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(page.locator('#status')).toContainText('Document deleted, but');
   await expect(editor).toHaveValue('');
   await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
@@ -145,7 +146,7 @@ test('a failed IndexedDB deletion retries pending autosave without further typin
   });
   await editor.fill('Новая несохранённая правка 🙂');
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#delete-draft').click();
+  await documentAction(page, '#delete-draft');
   await expect(page.locator('#status')).toContainText('Could not delete document');
   await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
   await page.reload();

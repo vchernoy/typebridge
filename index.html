@@ -22,12 +22,36 @@
   </head>
   <body>
     <main class="workspace">
-      <header>
-        <p class="eyebrow">WRITE ACROSS ALPHABETS</p>
-        <h1>TypeBridge</h1>
-        <p>Type Russian using your Latin keyboard.</p>
-      </header>
       <section aria-label="Editor">
+        <header class="topbar">
+          <h1 class="brand">TypeBridge</h1>
+          <div class="doc">
+            <input id="draft-title" type="text" aria-label="Document title" />
+            <button
+              id="doc-menu-open"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="doc-menu"
+              aria-label="Documents"
+              title="Documents"
+            >
+              ▾
+            </button>
+            <div id="doc-menu" class="doc-menu" role="dialog" aria-label="Documents" hidden>
+              <label for="drafts" class="menu-label">Documents</label>
+              <select id="drafts" size="2" aria-label="Documents"></select>
+              <div class="doc-actions">
+                <button id="new-draft" type="button">New document</button>
+                <button id="import-draft" type="button">Import document</button>
+                <button id="export-txt" type="button">Export TXT</button>
+                <button id="export-json" type="button">Export JSON</button>
+                <button id="delete-draft" type="button">Delete document</button>
+              </div>
+              <input id="import-file" type="file" accept=".txt,.json,.typebridge.json" hidden />
+            </div>
+          </div>
+        </header>
         <div class="toolbar">
           <label class="toggle"><input id="enabled" type="checkbox" checked /> Transliteration on</label
           ><span id="shortcut-label"></span>
@@ -154,18 +178,6 @@
             title="Cmd/Ctrl+G"
           /><button id="goto-go" type="button">Go</button><span id="goto-status" aria-live="polite"></span
           ><button id="goto-close" class="bar-close" type="button" aria-label="Close go to line">×</button>
-        </div>
-        <div class="draft-bar">
-          <label for="drafts">Documents</label
-          ><select id="drafts" aria-label="Documents"></select
-          ><button id="new-draft" type="button">New document</button
-          ><button id="delete-draft" type="button">Delete document</button
-          ><button id="export-txt" type="button">Export TXT</button
-          ><button id="export-json" type="button">Export JSON</button
-          ><button id="import-draft" type="button">Import document</button
-          ><input id="import-file" type="file" accept=".txt,.json,.typebridge.json" hidden /><label for="draft-title"
-            >Title</label
-          ><input id="draft-title" type="text" aria-label="Document title" />
         </div>
         <div class="focus-header">
           <span>TypeBridge · Focus mode</span><button id="exit-focus" type="button" hidden>Exit focus (Esc)</button>
