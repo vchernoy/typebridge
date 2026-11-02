@@ -12,10 +12,9 @@
   --brand: #3153e9;
   --warning: #9a4d06;
   --focus: #527fd4;
-  --switch-border: #aab8cd;
+  --switch-border: var(--muted);
   --switch-active-knob: #fff;
   --title-hover-border: #d9e2ef;
-  --search-status-text: #50627a;
   --grip-color: #7d8ca6;
   --dialog-surface: #fff;
   --modal-backdrop: #151b29a6;
@@ -410,7 +409,7 @@ button:disabled {
 .find-bar #find-status,
 .goto-bar #goto-status {
   font-size: 0.85rem;
-  color: var(--search-status-text);
+  color: var(--muted);
 }
 #caret-position {
   white-space: nowrap;
@@ -792,7 +791,7 @@ body.focus-mode .bottom {
     --accent: #8fa8ff;
     --brand: #a9c5ff;
     --warning: #f0b36a;
-    --switch-border: #56647f;
+    --switch-border: var(--muted);
     --switch-active-knob: #151b29;
   }
 }
