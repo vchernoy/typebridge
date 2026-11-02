@@ -87,6 +87,9 @@
                 <circle cx="17" cy="18" r="2" /></svg
               ><span class="btn-text">Settings</span>
             </button>
+            <button id="exit-focus" type="button" aria-label="Exit focus (Esc)" hidden>
+              Exit<span class="focus-exit-hint"> focus (Esc)</span>
+            </button>
           </div>
         </header>
         <div class="toolbar">
@@ -250,13 +253,6 @@
             title="Cmd/Ctrl+G"
           /><button id="goto-go" type="button">Go</button><span id="goto-status" aria-live="polite"></span
           ><button id="goto-close" class="bar-close" type="button" aria-label="Close go to line">×</button>
-        </div>
-        <div class="focus-header">
-          <span class="focus-heading"><span class="focus-brand">TypeBridge · </span>Focus mode</span>
-          <select id="focus-documents" aria-label="Documents" disabled></select>
-          <button id="exit-focus" type="button" aria-label="Exit focus (Esc)" hidden>
-            Exit<span class="focus-exit-hint"> focus (Esc)</span>
-          </button>
         </div>
         <label for="editor">Your text</label
         ><textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea

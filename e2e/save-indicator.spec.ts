@@ -25,8 +25,10 @@ test('compact save state follows commits without replacing action feedback (#131
   await expect(page.locator('#status')).toContainText('text and title are not saved and will be lost on reload');
   await setAutosave(page, true);
   await expect(indicator).toHaveText('Saved');
+  // Focus mode keeps the title bar, including the save state (#104).
   await page.locator('#focus-mode').click();
-  await expect(indicator).toBeHidden();
+  await expect(indicator).toBeVisible();
+  await expect(indicator).toHaveText('Saved');
 });
 
 test('compact failure stays until a retry commits (#131)', async ({ page }) => {
