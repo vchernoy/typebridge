@@ -83,9 +83,10 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     for (const { element } of inertStates) element.inert = true;
     document.body.append(backdrop);
 
-    // Include the message so keyboard users can reach and scroll long sheets
-    // (e.g. Keyboard shortcuts) when actions stay outside the scrollport.
-    const focusables = (): HTMLElement[] => [message, cancel, confirm];
+    // Long sheets (e.g. Keyboard shortcuts) make the message scrollable; include
+    // it in the tab order only then so short confirms keep Cancel↔Confirm wrap.
+    const focusables = (): HTMLElement[] =>
+      message.tabIndex >= 0 ? [message, cancel, confirm] : [cancel, confirm];
 
     const close = (accepted: boolean): void => {
       document.removeEventListener('keydown', onKeyDown, true);
@@ -138,9 +139,13 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     document.addEventListener('keydown', onKeyDown, true);
     // Prefer the safer choice so Enter does not delete by default. preventScroll
     // keeps short-viewport sheets at the top (title + first lines visible) while
-    // actions remain outside the message scrollport.
-    cancel.focus({ preventScroll: true });
-    dialog.scrollTop = 0;
-    message.scrollTop = 0;
+    // actions remain outside the message scrollport. Measure overflow after
+    // layout so short confirms are not treated as scrollable prematurely.
+    requestAnimationFrame(() => {
+      message.tabIndex = message.scrollHeight > message.clientHeight + 1 ? 0 : -1;
+      cancel.focus({ preventScroll: true });
+      dialog.scrollTop = 0;
+      message.scrollTop = 0;
+    });
   });
 }
