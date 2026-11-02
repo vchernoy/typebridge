@@ -63,6 +63,7 @@ function renderStatus(): void {
   const { sep, body } = statusLineParts(statusMessage, conflictNotice.textContent ?? '');
   if (statusSep.textContent !== sep) statusSep.textContent = sep;
   if (status.textContent !== body) status.textContent = body;
+  updateSaveIndicator();
 }
 let saveFailed = false;
 // Non-empty while browser storage cannot be used (failed or blocked
@@ -338,6 +339,15 @@ let saving: Promise<PersistResult> | undefined;
 let transitioning = false;
 let deleting = false;
 let loadingDraft = false;
+const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
+/** Persistence state, independent of action feedback retained in the live status line. */
+function updateSaveIndicator(): void {
+  const state = storageProblem || saveFailed ? 'failed'
+    : !autosave.checked || !db ? 'unsaved' : dirty ? 'saving' : 'saved';
+  const label = { failed: 'Save failed', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[state];
+  if (saveIndicator.textContent !== label) saveIndicator.textContent = label;
+  saveIndicator.dataset.state = state;
+}
 const writingPosition = setupWritingPosition(field, () => loadingDraft || field.disabled ? undefined : active.id);
 const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
@@ -443,6 +453,7 @@ function showDraft(): void {
   writingPosition.restore(active.id);
   renderDrafts();
   updateStats();
+  updateSaveIndicator();
 }
 async function persist(): Promise<PersistResult> {
   clearTimeout(saveTimer);
@@ -465,6 +476,7 @@ async function persist(): Promise<PersistResult> {
         rememberActive();
         saveFailed = false;
         dirty = generation !== version;
+        updateSaveIndicator();
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || UNTITLED_TITLE) === saved.title) draftTitle.value = active.title;
