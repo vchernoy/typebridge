@@ -225,6 +225,17 @@
               off, moves focus as usual.
             </p>
           </div>
+          <div id="settings-about-documents" class="settings-group" role="group" aria-labelledby="settings-about-title">
+            <h3 id="settings-about-title" tabindex="-1">About your documents</h3>
+            <p>
+              Saved documents stay in this browser only and are not synced between devices. Undo history is saved with
+              documents. Browser storage can be cleared or evicted; export important work.
+            </p>
+            <p>
+              Resize the editor from its bottom-right corner. After a successful online service-worker installation, the
+              editor can reopen offline on this device.
+            </p>
+          </div>
         </aside>
         <div id="find-bar" class="find-bar" role="search" aria-label="Find and replace" hidden>
           <label for="find-text">Find</label><input id="find-text" type="text" autocomplete="off" /><label
@@ -276,9 +287,9 @@
           ></span>
         </div>
         <p class="hint">
-          Documents are saved in this browser only. They are not synced between devices. Undo history is saved with
-          documents. Resize the editor from its bottom-right corner. After the first successful online load, the editor
-          can reopen offline on this device.
+          <button id="about-documents-open" class="text-button" type="button" aria-controls="settings-about-documents">
+            <span aria-hidden="true">ⓘ </span>About your documents
+          </button>
         </p>
       </section>
     </main>
