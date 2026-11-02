@@ -27,12 +27,25 @@ function canReceiveFocus(element: HTMLElement): boolean {
  * opener (or the element focused when the dialog opened). Resolves true for
  * confirm, false for cancel.
  */
+let confirmationQueue: Promise<unknown> = Promise.resolve();
+
 export function askConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
+  // Async file reads and saves may finish while another choice is open. Capture
+  // inert state only when this request actually owns the modal interaction.
+  const choice = confirmationQueue.then(() => showConfirmChoice(options));
+  confirmationQueue = choice.then(() => undefined, () => undefined);
+  return choice;
+}
+
+function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
   return new Promise(resolve => {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const backdrop = document.createElement('div');
     backdrop.className = 'confirm-backdrop';
     backdrop.setAttribute('role', 'presentation');
+    // Modal interactions must not close underlying menus or invoke page shortcuts.
+    backdrop.addEventListener('pointerdown', event => event.stopPropagation());
+    backdrop.addEventListener('keydown', event => event.stopPropagation());
 
     const dialog = document.createElement('div');
     dialog.className = 'confirm-dialog';

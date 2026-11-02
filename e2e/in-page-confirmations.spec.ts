@@ -75,3 +75,36 @@ for (const accept of [false, true]) {
     expect(await page.evaluate(() => localStorage.getItem('typebridge.recovery.v1.closed.backup') !== null)).toBe(!accept);
   });
 }
+
+
+test('delayed import queues behind Clear without leaking inert state (#137 U2)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Original text');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => {
+    const text = File.prototype.text;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    Object.assign(window, { releaseImport: release });
+    File.prototype.text = async function () { await gate; return text.call(this); };
+  });
+  await page.locator('#import-file').setInputFiles({ name: 'incoming.txt', mimeType: 'text/plain', buffer: Buffer.from('Imported text') });
+  await moreAction(page, '#clear');
+  await expect(page.getByRole('dialog', { name: 'Clear text?', exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { releaseImport: () => void }).releaseImport());
+  await expect(page.locator('.confirm-dialog')).toHaveCount(1);
+  await page.keyboard.press('ControlOrMeta+Shift+Enter');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await page.keyboard.press('Escape');
+  const imported = page.getByRole('dialog', { name: 'Import document?', exact: true });
+  await expect(imported).toBeVisible();
+  await expect(page.locator('.confirm-dialog')).toHaveCount(1);
+  await expect(page.locator('main')).toHaveAttribute('inert');
+  await expect(imported.getByRole('button', { name: 'Cancel import' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.confirm-dialog')).toHaveCount(0);
+  await expect(page.locator('main')).not.toHaveAttribute('inert');
+  await expect(page.locator('#editor')).toHaveValue('Original text');
+  await page.locator('#editor').fill('Editing still works');
+});
