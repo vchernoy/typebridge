@@ -11,12 +11,14 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   findEditor: Editor;
   replaceEditor: Editor;
   syncSearchEditors: () => void;
+  showMatchCount: () => void;
 } {
   const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
   const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
   const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
   const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
   const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+  const findBar = document.querySelector<HTMLElement>('#find-bar')!;
   const searchStorageWarning = document.createElement('span');
   searchStorageWarning.setAttribute('aria-live', 'polite');
   findStatus.before(searchStorageWarning);
@@ -93,6 +95,9 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
     findStatus.textContent = `${found.indexOf(match) + 1} of ${found.length}`;
   }
   function showMatchCount(): void {
+    // Closed Find must not scan on every keystroke — retained regex queries can
+    // catastrophic-backtrack and freeze typing (#140 Codex P2).
+    if (findBar.hidden) return;
     resetSearchPosition();
     const found = matches();
     if (findStatus.textContent.startsWith('Invalid regex')) return;
@@ -131,5 +136,5 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   findInput.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
   });
-  return { findInput, findEditor, replaceEditor, syncSearchEditors };
+  return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount };
 }

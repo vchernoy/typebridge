@@ -44,3 +44,23 @@ test('Find position includes zero-width regex navigation (#137 U3)', async ({ pa
   await page.locator('#find-next').click();
   await expect(page.locator('#find-status')).toHaveText('2 of 2');
 });
+
+test('closed Find does not recount matches on editor input (#137 U3)', async ({ page }) => {
+  await page.goto('/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('aaa');
+  await openFind(page);
+  await page.locator('#regex-mode').check();
+  await page.locator('#find-text').fill('a+');
+  await expect(page.locator('#find-status')).toHaveText('1 match');
+  await page.locator('#find-close').click();
+  await expect(page.locator('#find-bar')).toBeHidden();
+  const status = await page.locator('#find-status').textContent();
+  await editor.focus();
+  await editor.pressSequentially('!');
+  await expect(editor).toHaveValue('aaa!');
+  await expect(page.locator('#find-status')).toHaveText(status ?? '');
+  await openFind(page);
+  await expect(page.locator('#find-status')).toHaveText('1 match');
+});
