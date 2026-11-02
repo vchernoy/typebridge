@@ -1,3 +1,4 @@
+import { SHORTCUTS } from '../editor/keyboard-shortcuts';
 import { Editor } from '../editor/editor';
 import { replaceMatchAt } from '../editor/search';
 import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from '../editor/search-settings';
@@ -135,7 +136,7 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
     field.focus({ preventScroll: true });
   });
   findInput.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
+    if (event.key === SHORTCUTS.nextMatch.key && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
   });
   return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount };
 }

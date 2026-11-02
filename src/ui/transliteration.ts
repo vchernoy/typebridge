@@ -1,3 +1,4 @@
+import { TRANSLITERATION_SHORTCUTS, transliterationShortcutLabel, transliterationBinding, type TransliterationShortcut } from '../editor/keyboard-shortcuts';
 import type { Editor } from '../editor/editor';
 
 /**
@@ -20,8 +21,8 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
   const modeAnnouncement = document.querySelector<HTMLElement>('#mode-announcement')!;
   const shortcutStatus = document.querySelector<HTMLElement>('#shortcut-status')!;
   const SHORTCUT_KEY = 'typebridge.transliteration.shortcut.v1';
-  const shortcutOptions = ['default', 'f7', 'f8', 'f9', 'off'] as const;
-  type Shortcut = typeof shortcutOptions[number];
+  const shortcutOptions = TRANSLITERATION_SHORTCUTS;
+  type Shortcut = TransliterationShortcut;
   let shortcut: Shortcut = 'default';
   try {
     const stored = localStorage.getItem(SHORTCUT_KEY);
@@ -29,10 +30,7 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
   } catch { /* Keep the default if preferences are unavailable. */ }
   shortcutSelect.value = shortcut;
   function renderShortcut(): void {
-    // The default uses Control on every platform: Command+Shift+Space can invoke Siri.
-    // Keep the established Command modifier for explicitly saved macOS F-key choices.
-    const modifier = shortcut !== 'default' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
-    const label = shortcut === 'off' ? 'Shortcut disabled' : `${modifier}+Shift+${shortcut === 'default' ? 'Space' : shortcut.toUpperCase()}`;
+    const label = transliterationShortcutLabel(shortcut, /Mac|iPhone|iPad/.test(navigator.platform));
     shortcutLabel.textContent = `(${label})`;
     enabled.title = label;
   }
@@ -51,7 +49,7 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
     if (event.isComposing || event.keyCode === 229 || event.repeat || event.altKey || !event.shiftKey || shortcut === 'off') return;
     const usesCommand = shortcut !== 'default' && /Mac|iPhone|iPad/.test(navigator.platform);
     if (usesCommand ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
-    if (event.code !== (shortcut === 'default' ? 'Space' : shortcut.toUpperCase())) return;
+    if (event.code !== transliterationBinding(shortcut, usesCommand)?.key) return;
     if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
     if (!['editor', 'find-text', 'replace-text', 'draft-title'].includes(event.target.id)) return;
     event.preventDefault();

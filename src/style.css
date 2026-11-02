@@ -646,6 +646,10 @@ body.focus-mode .bottom {
   background: var(--modal-backdrop);
 }
 .confirm-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 40px);
+  overflow: hidden;
   width: min(100%, 420px);
   padding: 20px 22px;
   border: 1px solid var(--control-border);
@@ -655,14 +659,20 @@ body.focus-mode .bottom {
   color: inherit;
 }
 .confirm-dialog h2 {
+  flex: 0 0 auto;
   margin: 0 0 10px;
   font-size: 1.15rem;
 }
 .confirm-dialog p {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  white-space: pre-line;
   margin: 0 0 18px;
   line-height: 1.45;
 }
 .confirm-dialog-actions {
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -772,6 +782,7 @@ body.focus-mode .bottom {
   :root {
     --background: #151b29;
     --surface: #202a3b;
+    --dialog-surface: var(--surface);
     --text: #edf2fb;
     --muted: #c4d0e3;
     --border: #47536a;

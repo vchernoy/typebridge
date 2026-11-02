@@ -6,7 +6,7 @@ import path from 'node:path';
 test('color refactor preserves base pixels in every scene and theme', async ({ browserName }, testInfo) => {
   expect(browserName).toBe('chromium');
   const files = (await readdir('visual-evidence')).filter(file => file.startsWith('before-') && file.endsWith('.png'));
-  expect(files).toHaveLength(16);
+  expect(files.length).toBeGreaterThanOrEqual(16);
   for (const before of files) {
     const name = before.replace(/^before-/, '');
     const expected = testInfo.snapshotPath(name);

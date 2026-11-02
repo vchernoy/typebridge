@@ -30,6 +30,8 @@ test('the ⋯ menu works with the keyboard and closes cleanly (#123)', async ({ 
   await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('menuitem', { name: 'Clear text…' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Keyboard shortcuts…' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('menuitem', { name: 'Go to line…' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();

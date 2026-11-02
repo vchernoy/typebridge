@@ -1,3 +1,4 @@
+import { SHORTCUTS } from './keyboard-shortcuts';
 import { createTransliterator } from '../core/transliterate';
 import { effectivePack, loadOverrides, type Overrides } from '../core/custom-rules';
 import { cyrillicToLatin } from '../core/reverse-russian';
@@ -126,9 +127,9 @@ export class Editor {
     this.field.addEventListener('input', event => this.onInput(event));
     this.field.addEventListener('keydown', event => {
       if (this.composing || event.isComposing) return;
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === SHORTCUTS.undo.key) {
         event.preventDefault(); this.history(event.shiftKey ? 'redo' : 'undo');
-      } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'y') {
+      } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === SHORTCUTS.redoAlternate.key) {
         event.preventDefault(); this.history('redo');
       }
     });
