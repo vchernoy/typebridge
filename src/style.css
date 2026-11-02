@@ -778,23 +778,25 @@ body.focus-mode .bottom {
   outline-offset: 2px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #151b29;
-    --surface: #202a3b;
-    --dialog-surface: var(--surface);
-    --text: #edf2fb;
-    --muted: #c4d0e3;
-    --border: #47536a;
-    --panel-border: #47536a;
-    --button-background: #33445f;
-    --button-text: #fff;
-    --accent: #8fa8ff;
-    --brand: #a9c5ff;
-    --warning: #f0b36a;
-    --switch-border: #56647f;
-    --switch-active-knob: #151b29;
-  }
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --background: #151b29;
+  --surface: #202a3b;
+  --dialog-surface: var(--surface);
+  --text: #edf2fb;
+  --muted: #c4d0e3;
+  --border: #47536a;
+  --panel-border: #47536a;
+  --button-background: #33445f;
+  --button-text: #fff;
+  --accent: #8fa8ff;
+  --brand: #a9c5ff;
+  --warning: #f0b36a;
+  --switch-border: #56647f;
+  --switch-active-knob: #151b29;
+}
+:root[data-color-scheme="light"] {
+  color-scheme: light;
 }
 
 .text-button {
@@ -847,4 +849,10 @@ body.focus-mode .bottom {
     clip-path: inset(50%);
     white-space: nowrap;
   }
+}
+
+#appearance {
+  min-height: 44px;
+  margin: 0 8px 8px;
+  font: inherit;
 }
