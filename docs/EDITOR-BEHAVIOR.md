@@ -14,11 +14,11 @@ Cmd/Ctrl+G focuses **Go to line** (exiting Focus mode when needed). Enter or **G
 
 ## Writing view across reloads
 
-Focus mode is a saved browser preference: it reopens on reload, in a new tab and after browser restart where localStorage survives. The editor receives focus after its draft has loaded. Exiting Focus mode persists too, and Normal-mode dimensions remain independent. Caret, selection direction and editor scroll are saved per draft in this tab's session and restored after loading; stale positions clamp safely. This does not change text or Undo/Redo history. Settings panels stay collapsed on reload; page scroll remains browser managed. See [settings lifetimes](SETTINGS-PERSISTENCE.md).
+Focus mode is a saved browser preference: it reopens on reload, in a new tab and after browser restart where localStorage survives. The editor receives focus after its document has loaded. Exiting Focus mode persists too, and Normal-mode dimensions remain independent. Caret, selection direction and editor scroll are saved per document in this tab's session and restored after loading; stale positions clamp safely. This does not change text or Undo/Redo history. Settings panels stay collapsed on reload; page scroll remains browser managed. See [settings lifetimes](SETTINGS-PERSISTENCE.md).
 
 ## Transliteration in other fields
 
-The draft title, Find and Replace follow the same transliteration mode and custom rules as the editor, and the transliteration shortcut toggles the mode from any of them. This includes Regex mode: to mix Russian letters with Latin regex syntax such as `\s`, `[a-z]` or `$<name>`, toggle transliteration with the shortcut while typing the pattern (#102). The mappings box always keeps Latin rule text.
+The document title, Find and Replace follow the same transliteration mode and custom rules as the editor, and the transliteration shortcut toggles the mode from any of them. This includes Regex mode: to mix Russian letters with Latin regex syntax such as `\s`, `[a-z]` or `$<name>`, toggle transliteration with the shortcut while typing the pattern (#102). The mappings box always keeps Latin rule text.
 
 ## Indentation
 
@@ -37,6 +37,6 @@ Playwright exercises desktop Chromium, Firefox and WebKit typing, selection repl
 - Test real iOS Safari and Android Chrome keyboards, including predictive text, multi-character input, autocorrect, selection, deletion and virtual keyboard undo/redo. Live conversion currently handles single-character cancelable insertText; multi-character and non-cancelable insertions remain unchanged.
 - Test real Japanese/Chinese and other IMEs, cancellation and commit, caret and undo after composition, and event ordering around compositionend.
 - Verify native context-menu/OS undo and redo after transformed and native edits in Safari, Firefox and Chromium; repair or replace the history strategy if these paths lose or duplicate text.
-- Verify drag-and-drop and unusual clipboard/selection edits on devices. Committed drafts and delta Undo/Redo history persist in IndexedDB; autosave, conflict copies and emergency text recovery exist. The tab's reload snapshot keeps unsaved Undo history; the cross-tab emergency journal keeps only text and title. See [architecture](ARCHITECTURE.md) for durability limits.
+- Verify drag-and-drop and unusual clipboard/selection edits on devices. Committed documents and delta Undo/Redo history persist in IndexedDB; autosave, conflict copies and emergency text recovery exist. The tab's reload snapshot keeps unsaved Undo history; the cross-tab emergency journal keeps only text and title. See [architecture](ARCHITECTURE.md) for durability limits.
 
 PR #16 and subsequent editor/persistence work are merged; Pages is enabled. The original CI run above is historical evidence, not a claim that later changes or real devices were verified. Record current checks on the relevant PR. Full version history, real-device input testing and broader recovery hardening remain separate work in #37/#11.

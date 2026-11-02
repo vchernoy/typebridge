@@ -20,7 +20,7 @@ Run on iPhone Safari and iPhone Chrome (both use WebKit on iOS), plus desktop Ch
 - Select a range and replace it; use Backspace and Delete around Cyrillic, punctuation and emoji.
 - Toggle transliteration mid-edit; paste Latin/Cyrillic/emoji, cut a selection and verify content and selection.
 - Undo and redo typing, replacement, deletion, paste, cut and clear using keyboard shortcuts and native menu/gestures. Check for lost or duplicated text and restored selection.
-- Reload, go offline and reopen, and check that drafts and storage-failure warnings behave as documented.
+- Reload, go offline and reopen, and check that documents and storage-failure warnings behave as documented.
 - On iPhone, use the real software keyboard with predictive text and autocorrect on and off; try selection handles and undo gesture. Test an IME composition commit and cancellation if available.
 - On desktop, try native context menus and real IME composition; record any failures or event sequences.
 
