@@ -323,6 +323,8 @@ document.addEventListener('keydown', event => {
 setupRules(() => [editor, findEditor, replaceEditor, titleEditor]);
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
+const focusDocuments = document.querySelector<HTMLSelectElement>('#focus-documents')!;
+const documentPickers = [draftSelect, focusDocuments];
 const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
 // The draft title follows the global transliteration mode and rules (#89).
 const titleEditor = new Editor(draftTitle);
@@ -415,22 +417,24 @@ function clearPending(saved: StoredDraft): void {
 }
 function rememberActive(): void { try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
 function renderDrafts(): void {
-  draftSelect.replaceChildren();
   const visible = drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
   const displayTitle = draftTitle.value.trim() || UNTITLED_TITLE;
-  for (const draft of visible) {
-    const option = document.createElement('option');
-    option.value = draft.id;
-    const isCurrent = draft.id === active.id;
-    option.textContent = draftOptionLabel({
-      savedTitle: draft.title,
-      displayTitle,
-      isCurrent,
-      unsaved: isCurrent && dirty,
-    });
-    draftSelect.append(option);
+  for (const picker of documentPickers) {
+    picker.replaceChildren();
+    for (const draft of visible) {
+      const option = document.createElement('option');
+      option.value = draft.id;
+      const isCurrent = draft.id === active.id;
+      option.textContent = draftOptionLabel({
+        savedTitle: draft.title,
+        displayTitle,
+        isCurrent,
+        unsaved: isCurrent && dirty,
+      });
+      picker.append(option);
+    }
+    picker.value = active.id;
   }
-  draftSelect.value = active.id;
   // Shown as a list inside the document menu: at least two rows, at most eight.
   draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
 }
@@ -645,7 +649,9 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   finally { transitioning = false; renderDrafts(); }
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
-draftSelect.addEventListener('change', () => { void switchDraft(draftSelect.value); });
+for (const picker of documentPickers) {
+  picker.addEventListener('change', () => { void switchDraft(picker.value); });
+}
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (transitioning) return;
   clearTimeout(saveTimer);
@@ -820,7 +826,7 @@ async function initializeDrafts(): Promise<void> {
     setSaveStatus(storageProblem, 'failure');
     renderDrafts();
   } finally {
-    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
+    field.disabled = false; draftSelect.disabled = false; focusDocuments.disabled = false; draftTitle.disabled = false;
     restoreFocusMode();
     writingPosition.restore(active.id);
     updateStats();

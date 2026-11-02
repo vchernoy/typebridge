@@ -565,6 +565,25 @@ body.focus-mode .settings-panel {
   gap: 12px;
   margin-bottom: 12px;
 }
+.focus-heading,
+#exit-focus {
+  flex: none;
+  white-space: nowrap;
+}
+#focus-documents {
+  flex: 1 1 160px;
+  min-width: 0;
+  max-width: 320px;
+  min-height: 44px;
+  font: inherit;
+  text-overflow: ellipsis;
+}
+@media (max-width: 640px) {
+  .focus-brand,
+  .focus-exit-hint {
+    display: none;
+  }
+}
 body.focus-mode {
   background: #f4f7fc;
 }
