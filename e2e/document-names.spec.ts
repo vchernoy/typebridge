@@ -13,7 +13,9 @@ test('documents are called documents throughout the page (#108)', async ({ page 
     await expect(menu.getByRole('button', { name, exact: true })).toBeVisible();
   }
   await closeDocuments(page);
-  await expect(page.getByText('Documents are saved in this browser only.')).toBeVisible();
+  await page.getByRole('button', { name: 'About your documents', exact: true }).click();
+  await expect(page.locator('#settings-about-documents')).toContainText('Saved documents stay in this browser only');
+  await page.locator('#settings-close').click();
   // A title the user typed, including the old default wording, is kept as is.
   await page.getByRole('textbox', { name: 'Document title' }).fill('Untitled draft');
   await expect(page.locator('#status')).toContainText('Saved locally');
