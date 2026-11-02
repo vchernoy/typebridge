@@ -9,7 +9,7 @@ test('documents are called documents throughout the page (#108)', async ({ page 
   const menu = page.getByRole('dialog', { name: 'Documents' });
   await expect(menu.getByRole('listbox', { name: 'Documents' })).toBeVisible();
   await expect(page.locator('#drafts option')).toHaveText(['Untitled document (current)']);
-  for (const name of ['New document', 'Delete document', 'Import document']) {
+  for (const name of ['New document', 'Delete…', 'Import…']) {
     await expect(menu.getByRole('button', { name, exact: true })).toBeVisible();
   }
   await closeDocuments(page);
@@ -45,7 +45,7 @@ test('the ▾ document menu opens the list and actions, and closes cleanly (#123
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
   // An action closes it and gives keyboard focus back to ▾.
   await toggle.click();
-  await menu.getByRole('button', { name: 'Export TXT' }).focus();
+  await menu.getByRole('button', { name: 'Export as TXT' }).focus();
   await page.keyboard.press('Enter');
   await expect(menu).toBeHidden();
   await expect(toggle).toBeFocused();
