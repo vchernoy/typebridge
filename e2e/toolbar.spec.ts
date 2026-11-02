@@ -1,3 +1,4 @@
+import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 
 test('the toolbar holds editing actions; Focus and Settings sit in the top bar (#123)', async ({ page }) => {
@@ -41,14 +42,16 @@ test('the ⋯ menu works with the keyboard and closes cleanly (#123)', async ({ 
   await expect(page.locator('#goto-bar')).toBeVisible();
   await expect(page.locator('#goto-line')).toBeFocused();
   // Clear text… asks first; Cancel keeps the text, OK clears it.
-  page.once('dialog', dialog => dialog.dismiss());
+  const confirmation1 = answerNextConfirmation(page, false);
   await more.click();
   await page.getByRole('menuitem', { name: 'Clear text…' }).click();
+  await confirmation1;
   await expect(field).toHaveValue('Текст');
   await expect(more).toBeFocused();
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation2 = answerNextConfirmation(page, true);
   await more.click();
   await page.getByRole('menuitem', { name: 'Clear text…' }).click();
+  await confirmation2;
   await expect(field).toHaveValue('');
   // A click outside closes it.
   await more.click();

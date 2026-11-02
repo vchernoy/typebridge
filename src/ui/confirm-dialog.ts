@@ -10,7 +10,7 @@ export type ConfirmChoiceOptions = {
    * opener may be disabled for the modal duration — capture it before disabling.
    * Focus is restored on a following microtask so the caller can re-enable first.
    */
-  returnFocus?: HTMLElement;
+  returnFocus?: HTMLElement | ((accepted: boolean) => HTMLElement);
 };
 
 function canReceiveFocus(element: HTMLElement): boolean {
@@ -27,13 +27,25 @@ function canReceiveFocus(element: HTMLElement): boolean {
  * opener (or the element focused when the dialog opened). Resolves true for
  * confirm, false for cancel.
  */
+let confirmationQueue: Promise<unknown> = Promise.resolve();
+
 export function askConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
+  // Async file reads and saves may finish while another choice is open. Capture
+  // inert state only when this request actually owns the modal interaction.
+  const choice = confirmationQueue.then(() => showConfirmChoice(options));
+  confirmationQueue = choice.then(() => undefined, () => undefined);
+  return choice;
+}
+
+function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
   return new Promise(resolve => {
-    const previouslyFocused = options.returnFocus
-      ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const backdrop = document.createElement('div');
     backdrop.className = 'confirm-backdrop';
     backdrop.setAttribute('role', 'presentation');
+    // Modal interactions must not close underlying menus or invoke page shortcuts.
+    backdrop.addEventListener('pointerdown', event => event.stopPropagation());
+    backdrop.addEventListener('keydown', event => event.stopPropagation());
 
     const dialog = document.createElement('div');
     dialog.className = 'confirm-dialog';
@@ -64,6 +76,11 @@ export function askConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean
     actions.append(cancel, confirm);
     dialog.append(title, message, actions);
     backdrop.append(dialog);
+    // Native confirm blocked the whole page. Preserve that interaction boundary
+    // for pointer, keyboard and assistive technology while the async choice is open.
+    const background = [...document.body.children].filter((node): node is HTMLElement => node instanceof HTMLElement);
+    const inertStates = background.map(element => ({ element, inert: element.inert }));
+    for (const { element } of inertStates) element.inert = true;
     document.body.append(backdrop);
 
     const focusables = (): HTMLElement[] => [cancel, confirm];
@@ -71,12 +88,14 @@ export function askConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean
     const close = (accepted: boolean): void => {
       document.removeEventListener('keydown', onKeyDown, true);
       backdrop.remove();
+      for (const { element, inert } of inertStates) element.inert = inert;
       // Resolve first so the caller's await/finally can re-enable a temporarily
       // disabled opener; then restore focus on the next microtask (#114 review).
       resolve(accepted);
       queueMicrotask(() => {
-        if (previouslyFocused && canReceiveFocus(previouslyFocused)) {
-          previouslyFocused.focus({ preventScroll: true });
+        const target = typeof options.returnFocus === 'function' ? options.returnFocus(accepted) : options.returnFocus ?? previouslyFocused;
+        if (target && canReceiveFocus(target)) {
+          target.focus({ preventScroll: true });
         }
       });
     };

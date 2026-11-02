@@ -92,3 +92,12 @@ export async function moreAction(page: Page, selector: string): Promise<void> {
   await expect(menu).toBeVisible();
   await page.locator(selector).click();
 }
+
+/** Arm before an action that opens an in-page confirmation, as with native dialog handlers. */
+export async function answerNextConfirmation(page: Page, accept: boolean, delay = 0): Promise<void> {
+  const dialog = page.locator('.confirm-dialog');
+  await expect(dialog).toBeVisible();
+  if (delay) await page.waitForTimeout(delay);
+  await dialog.getByRole('button').nth(accept ? 1 : 0).click();
+  await expect(dialog).toHaveCount(0);
+}

@@ -1,3 +1,4 @@
+import { answerNextConfirmation } from './settings-helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { documentAction, openDocuments, selectDocument, setAutosave } from './settings-helpers';
 
@@ -67,9 +68,9 @@ test('canceling a document switch in Focus mode keeps unsaved text (#104)', asyn
   const second = await page.locator('#drafts').inputValue();
   await page.locator('#focus-mode').click();
   await page.locator('#editor').fill('Не сохранено');
-  const dialog = page.waitForEvent('dialog');
+  const dialog = answerNextConfirmation(page, false);
   const switching = selectDocument(page, first);
-  await (await dialog).dismiss();
+  await dialog;
   await switching;
   await expect(page.locator('#drafts')).toHaveValue(second);
   await expect(page.locator('#editor')).toHaveValue('Не сохранено');

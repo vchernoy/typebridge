@@ -1,3 +1,4 @@
+import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { documentAction, openFind } from './settings-helpers';
 
@@ -53,12 +54,13 @@ test('exports a Unicode draft and imports a JSON draft as a new document', async
   const payload = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
   expect(payload.draft.text).toBe('Привет, мир!\\nВторая строка.');
   payload.draft.text = 'Импортировано 🙂';
-  page.on('dialog', dialog => dialog.accept());
+  const confirmation1 = answerNextConfirmation(page, true);
   await page.locator('#import-file').setInputFiles({
     name: 'backup.typebridge.json',
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(payload)),
   });
+  await confirmation1;
   await expect(page.locator('#status')).toContainText('Imported as a new document');
   await expect(field).toHaveValue('Импортировано 🙂');
   await page.reload();
