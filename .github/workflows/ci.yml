@@ -58,11 +58,16 @@ jobs:
           VISUAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           VISUAL_EXPECT_IDENTICAL: ${{ contains(github.event.pull_request.body, '<!-- visual-identical -->') }}
         run: node scripts/capture-ui.mjs
+      - name: Compare before and after pixels
+        if: matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-identical -->')
+        run: npx playwright test --config=playwright.visual.config.ts
       - name: Upload UI evidence
         if: always() && matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
         uses: actions/upload-artifact@v4
         with:
           name: ui-before-after-${{ github.event.pull_request.number }}
-          path: visual-evidence/
+          path: |
+            visual-evidence/
+            test-results/
           retention-days: 7
           if-no-files-found: error

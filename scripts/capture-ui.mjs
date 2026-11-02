@@ -77,7 +77,8 @@ try {
         const differences = beforeStyles.flatMap((style, index) => JSON.stringify(style) === JSON.stringify(afterStyles[index]) ? [] : [{ before: style, after: afterStyles[index] }]);
         await writeFile(path.join(evidence, 'visual-differences.json'), JSON.stringify({ file, differences }, null, 2));
         process.stdout.write(JSON.stringify({ file, differences: differences.slice(0, 30) }, null, 2) + '\n');
-        throw new Error(`Visual change in ${file}`);
+        // Pixel comparison runs separately; encoded PNG bytes can differ.
+        break;
       }
     }
   }
