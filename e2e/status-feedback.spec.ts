@@ -1,3 +1,4 @@
+import { answerNextConfirmation } from './settings-helpers';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { documentAction, selectDocument, setAutosave } from './settings-helpers';
 
@@ -160,8 +161,9 @@ test('discarding text after a failed save stops reporting unsaved text', async (
   await expect(status(page)).toContainText('Save failed');
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  page.once('dialog', dialog => dialog.accept()); // Discard unsaved changes.
+  const confirmation1 = answerNextConfirmation(page, true);
   await documentAction(page, '#new-draft');
+  await confirmation1;
   await expect(field).toHaveValue('');
   await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported');
@@ -326,8 +328,9 @@ test('a failed delete with autosave off does not promise another save', async ({
   await page.evaluate(() => {
     IDBObjectStore.prototype.delete = function () { throw new DOMException('Unknown', 'UnknownError'); };
   });
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation2 = answerNextConfirmation(page, true);
   await documentAction(page, '#delete-draft');
+  await confirmation2;
   await expect(status(page)).toHaveText('Could not delete document — your changes are unsaved; autosave is off');
   await expect(field).toHaveValue('Сохранено правка');
 });
@@ -369,8 +372,9 @@ test('switching to a clean draft with autosave off does not report unsaved chang
   await field.press('End');
   await field.pressSequentially(' черновик');
   await expect(status(page)).toHaveText(AUTOSAVE_OFF);
-  page.once('dialog', dialog => dialog.accept()); // Discard unsaved changes.
+  const confirmation3 = answerNextConfirmation(page, true);
   await documentAction(page, '#new-draft');
+  await confirmation3;
   await expect(field).toHaveValue('');
   await expect(status(page)).toHaveText(AUTOSAVE_OFF);
 });
@@ -538,8 +542,9 @@ test('importing without browser storage reports the storage warning once', async
   });
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation4 = answerNextConfirmation(page, true);
   await page.locator('#import-file').setInputFiles({ name: 'post.txt', mimeType: 'text/plain', buffer: Buffer.from('Текст') });
+  await confirmation4;
   await expect(status(page)).toHaveText('Import failed: browser storage cannot be used. ' + STORAGE_UNAVAILABLE);
 });
 
@@ -657,8 +662,9 @@ test('a failed delete without storage and with autosave off keeps the storage wa
   await expect(page.locator('#autosave')).toBeEnabled();
   await field.fill('Нельзя потерять');
   await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation5 = answerNextConfirmation(page, true);
   await documentAction(page, '#delete-draft');
+  await confirmation5;
   await expect(status(page)).toHaveText('Could not delete document — your text is kept. ' + SAVE_FAILED_NO_STORAGE);
   await expect(field).toHaveValue('Нельзя потерять');
 });
@@ -886,12 +892,13 @@ test('import after a conflict flush keeps the left-draft conflict notice', async
   const { field } = await prepareConflict(page, context);
   await field.press('End');
   await field.pressSequentially(' — правка');
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation6 = answerNextConfirmation(page, true);
   await page.locator('#import-file').setInputFiles({
     name: 'import.txt',
     mimeType: 'text/plain',
     buffer: Buffer.from('Импортированный текст'),
   });
+  await confirmation6;
   await expect(field).toHaveValue('Импортированный текст');
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
   await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Imported as a new document');

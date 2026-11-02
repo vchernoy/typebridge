@@ -1,3 +1,4 @@
+import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { selectDocument, setAutosave } from './settings-helpers';
 
@@ -134,14 +135,14 @@ test('confirmed discard removes only the selected unsaved snapshot', async ({ pa
   const discardA = page.getByRole('button', { name: 'Discard backup for a' });
   await expect(check.or(discardA)).toBeVisible();
   if (await check.isVisible()) await check.click();
-  // Discard awaits an ownership check before confirm(), so the click can resolve before the
+  // Discard awaits an ownership check before the confirmation, so the click can resolve before the
   // dialog opens. Wait for each dialog so a later handler never consumes an earlier one.
-  const dismissed = page.waitForEvent('dialog').then(dialog => dialog.dismiss());
+  const dismissed = answerNextConfirmation(page, false);
   await discardA.click();
   await dismissed;
   await expect(discardA).toBeVisible();
   expect(await backupText('a')).toBe('Несохранённый текст a');
-  const accepted = page.waitForEvent('dialog').then(dialog => dialog.accept());
+  const accepted = answerNextConfirmation(page, true);
   await discardA.click();
   await accepted;
   await expect(discardA).toHaveCount(0);

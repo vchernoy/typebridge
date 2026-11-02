@@ -1,3 +1,4 @@
+import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { documentAction, moreAction, selectDocument, setAutosave } from './settings-helpers';
 
@@ -30,8 +31,9 @@ test('toggle, paste and composition preserve text', async ({ page }) => {
   await page.locator('#enabled').check();
   await field.evaluate(el => { const node = el as HTMLTextAreaElement; node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles:true })); node.value += '漢'; node.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'insertCompositionText', data:'漢', isComposing:true })); node.dispatchEvent(new CompositionEvent('compositionend', { bubbles:true, data:'漢' })); });
   await expect(field).toHaveValue('hello漢');
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation1 = answerNextConfirmation(page, true);
   await moreAction(page, '#clear');
+  await confirmation1;
   await expect(field).toHaveValue('');
 });
 
@@ -160,8 +162,9 @@ test('toggle while editing and undo clear', async ({ page }) => {
   await page.locator('#enabled').uncheck();
   await field.pressSequentially('ab');
   await expect(field).toHaveValue('шab');
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation2 = answerNextConfirmation(page, true);
   await moreAction(page, '#clear');
+  await confirmation2;
   await expect(field).toHaveValue('');
   await field.focus();
   await field.press('ControlOrMeta+z');
@@ -226,8 +229,9 @@ test('toolbar history undoes block clear and supports multiple steps', async ({ 
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation3 = answerNextConfirmation(page, true);
   await moreAction(page, '#clear');
+  await confirmation3;
   await expect(field).toHaveValue('');
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(field).toHaveValue('привет');
@@ -274,8 +278,9 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
   page.once('dialog', d => d.accept());
   await page.reload();
   await expect(field).toHaveValue('привет');
-  page.once('dialog', d => d.accept());
+  const confirmation4 = answerNextConfirmation(page, true);
   await documentAction(page, '#delete-draft');
+  await confirmation4;
   await expect(field).toHaveValue('');
 });
 

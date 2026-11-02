@@ -242,8 +242,8 @@ document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', as
   try { await navigator.clipboard.writeText(field.value); announceAction('Copied'); }
   catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
 });
-document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', () => {
-  if (field.value && window.confirm('Clear the text? You can undo this action.')) { editor.clear(); field.focus(); announceAction('Cleared'); }
+document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
+  if (field.value && await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
 });
 
 
@@ -620,7 +620,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
           return { opened: false, conflict: flushConflict };
         }
       }
-      if (dirty && !autosave.checked && !window.confirm('Discard unsaved changes? Copy or export them first to keep them.')) {
+      if (dirty && !autosave.checked && !await askConfirmChoice({ title: 'Discard unsaved changes?', message: 'Copy or export unsaved changes first to keep them.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
         announceAbortedFlushConflict();
         return { opened: false, conflict: flushConflict };
       }
@@ -656,7 +656,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   if (transitioning) return;
   clearTimeout(saveTimer);
   const requestedId = active.id;
-  if (!window.confirm('Permanently delete this saved document?')) {
+  if (!await askConfirmChoice({ title: 'Delete document?', message: 'Permanently delete this saved document?', confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
     if (dirty && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
     return;
   }
@@ -783,7 +783,7 @@ async function renderRecovery(): Promise<void> {
     discard.type = 'button'; discard.textContent = `Discard backup for ${item.title}`;
     discard.addEventListener('click', async () => {
       if (await ownerIsActive(item.tab) === true) { announceAction('The original tab is still open; backup kept.'); queueRecovery(); return; }
-      if (!window.confirm('Discard this emergency backup? Unsaved text in this backup will be lost.')) return;
+      if (!await askConfirmChoice({ title: 'Discard emergency backup?', message: 'Unsaved text in this backup will be lost.', confirmLabel: 'Discard backup', cancelLabel: 'Keep backup', returnFocus: accepted => accepted ? field : discard })) return;
       try { clearRecovery(localStorage, item); panelSignature = ''; await renderRecovery(); }
       catch { announceAction('Could not discard backup; it was kept.'); }
     });
@@ -874,7 +874,7 @@ importFile.addEventListener('change', async () => {
       title = parsed.draft.title;
       text = parsed.draft.text;
     } else if (!/\.txt$/i.test(file.name)) throw new Error('Choose a .txt or .typebridge.json file');
-    if (!window.confirm('Import as a new document? Your current document will be kept.')) return;
+    if (!await askConfirmChoice({ title: 'Import document?', message: 'Import as a new document? Your current document will be kept.', confirmLabel: 'Import document', cancelLabel: 'Cancel import', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) return;
     const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported document' };
     // Save even when autosave is off: importing is an explicit save action.
     if (!db) throw new Error('browser storage cannot be used');

@@ -1,3 +1,4 @@
+import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { selectDocument, documentAction } from './settings-helpers';
 
@@ -81,10 +82,11 @@ test('repeated edits during autosave persist the latest text', async ({ page }) 
 test('imports a text file into its own saved document', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation1 = answerNextConfirmation(page, true);
   await page.locator('#import-file').setInputFiles({
     name: 'post.txt', mimeType: 'text/plain', buffer: Buffer.from('Русский текст 🙂\nВторая строка'),
   });
+  await confirmation1;
   await expect(page.locator('#status')).toContainText('Imported as a new document');
   await expect(page.locator('#editor')).toHaveValue('Русский текст 🙂\nВторая строка');
   await expect(page.locator('#draft-title')).toHaveValue('post');
@@ -169,8 +171,9 @@ test('JSON export and import round trip preserves Cyrillic, newlines and emoji',
   const fs = await import('node:fs/promises');
   const bytes = await fs.readFile((await download.path())!);
   expect(JSON.parse(bytes.toString()).draft.text).toBe(content);
-  page.once('dialog', dialog => dialog.accept());
+  const confirmation2 = answerNextConfirmation(page, true);
   await page.locator('#import-file').setInputFiles({ name: 'post.typebridge.json', mimeType: 'application/json', buffer: bytes });
+  await confirmation2;
   await expect(page.locator('#status')).toContainText('Imported as a new document');
   await expect(field).toHaveValue(content);
   await page.reload();
