@@ -25,3 +25,7 @@ Run on iPhone Safari and iPhone Chrome (both use WebKit on iOS), plus desktop Ch
 - On desktop, try native context menus and real IME composition; record any failures or event sequences.
 
 Playwright mobile viewport/touch emulation, Linux WebKit and synthetic IME/input events are not real mobile keyboard or IME tests. No real-device verification is claimed.
+
+## UI screenshot evidence
+
+Visual PRs can include `<!-- visual-evidence -->` in the PR description. Chromium CI then builds the exact base revision and captures before/after PNGs at 390 and 1400 px in light and dark appearance, using a synthetic document with Find open. The `ui-before-after-<PR>` Actions artifact includes the screenshots and commit provenance and is retained for seven days. This is review evidence, not a hosted PR preview or physical-device verification. Other browser jobs still gate merging.

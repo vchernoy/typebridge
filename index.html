@@ -229,10 +229,11 @@
           <label for="find-text">Find</label><input id="find-text" type="text" autocomplete="off" /><label
             for="replace-text"
             >Replace</label
-          ><input id="replace-text" type="text" autocomplete="off" /><label class="toggle"
+          ><input id="replace-text" type="text" autocomplete="off" /><label class="toggle search-chip"
             ><input id="match-case" type="checkbox" /> Match case</label
-          ><label class="toggle"><input id="regex-mode" type="checkbox" /> Regex (.*)</label
-          ><button id="find-next" type="button">Next</button><button id="find-prev" type="button">Previous</button
+          ><label class="toggle search-chip"><input id="regex-mode" type="checkbox" /> Regex (.*)</label
+          ><button id="find-prev" type="button" aria-label="Previous match" title="Previous match">↑</button
+          ><button id="find-next" type="button" aria-label="Next match" title="Next match">↓</button
           ><button id="replace-one" type="button">Replace</button
           ><button id="replace-all" type="button">Replace all</button><span id="find-status" aria-live="polite"></span
           ><button id="find-close" class="bar-close" type="button" aria-label="Close find">×</button

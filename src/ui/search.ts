@@ -90,8 +90,18 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
       ? { position: match[0], text: field.value, query: findInput.value, matchCase: matchCase.checked, regex: regexMode.checked }
       : undefined;
     editor.revealSelection();
-    findStatus.textContent = `${found.length} match${found.length === 1 ? '' : 'es'}`;
+    findStatus.textContent = `${found.indexOf(match) + 1} of ${found.length}`;
   }
+  function showMatchCount(): void {
+    resetSearchPosition();
+    const found = matches();
+    if (findStatus.textContent.startsWith('Invalid regex')) return;
+    findStatus.textContent = !findInput.value ? '' : found.length
+      ? `${found.length} match${found.length === 1 ? '' : 'es'}` : 'No matches';
+  }
+  for (const input of [findInput, field]) input.addEventListener('input', showMatchCount);
+  field.addEventListener('historychange', showMatchCount);
+  for (const input of [matchCase, regexMode]) input.addEventListener('change', showMatchCount);
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
   document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
