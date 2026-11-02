@@ -8,13 +8,13 @@ test('find navigates forwards and backwards with wrap-around', async ({ page }) 
   await field.fill('Alpha beta alpha');
   await openFind(page);
   await page.getByLabel('Find', { exact: true }).fill('alpha');
-  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('button', { name: 'Next match' }).click();
   expect(await field.evaluate(el => [(el as HTMLTextAreaElement).selectionStart, (el as HTMLTextAreaElement).selectionEnd])).toEqual([0, 5]);
-  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('button', { name: 'Next match' }).click();
   expect(await field.evaluate(el => (el as HTMLTextAreaElement).selectionStart)).toBe(11);
-  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('button', { name: 'Next match' }).click();
   expect(await field.evaluate(el => (el as HTMLTextAreaElement).selectionStart)).toBe(0);
-  await page.getByRole('button', { name: 'Previous' }).click();
+  await page.getByRole('button', { name: 'Previous match' }).click();
   expect(await field.evaluate(el => (el as HTMLTextAreaElement).selectionStart)).toBe(11);
 });
 
@@ -90,7 +90,7 @@ test('regex find and replace supports captures, named groups, undo and invalid p
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(field).toHaveValue('2026-10-27 and 2026-11-03');
   await page.getByLabel('Find', { exact: true }).fill('(');
-  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('button', { name: 'Next match' }).click();
   await expect(page.locator('#find-status')).toContainText('Invalid regex');
 });
 

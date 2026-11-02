@@ -172,9 +172,11 @@ test('Cmd/Ctrl+Shift+Enter toggles Focus mode without inserting text or searchin
   await expect(editor).toHaveValue('Привет');
   await openFind(page);
   await page.locator('#find-text').fill('zzz');
+  await expect(page.locator('#find-status')).toHaveText('No matches');
   await page.locator('#find-text').press('ControlOrMeta+Shift+Enter');
   await expect(page.locator('body')).toHaveClass(/focus-mode/);
-  await expect(page.locator('#find-status')).toHaveText('');
+  // Chord toggles Focus only; it must not clear or re-run Find (#137 U3).
+  await expect(page.locator('#find-status')).toHaveText('No matches');
   // The old shortcut no longer switches modes.
   await editor.press('ControlOrMeta+Shift+E');
   await expect(page.locator('body')).toHaveClass(/focus-mode/);
