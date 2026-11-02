@@ -98,7 +98,8 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
     // Closed Find must not scan on every keystroke — retained regex queries can
     // catastrophic-backtrack and freeze typing (#140 Codex P2).
     if (findBar.hidden || findBar.getClientRects().length === 0) return;
-    resetSearchPosition();
+    // Do not reset zero-width skip state here: openFind/Ctrl+F refreshes totals and
+    // must keep advancing past the current zero-width hit (#140 review P1).
     const found = matches();
     if (findStatus.textContent.startsWith('Invalid regex')) return;
     findStatus.textContent = !findInput.value ? '' : found.length
