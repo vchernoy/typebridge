@@ -64,3 +64,27 @@ test('closed Find does not recount matches on editor input (#137 U3)', async ({ 
   await openFind(page);
   await expect(page.locator('#find-status')).toHaveText('1 match');
 });
+
+test('closed Find skips match enumeration and reopening refreshes totals (#137 U3)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('text');
+  await openFind(page);
+  await page.locator('#find-text').fill('text');
+  await expect(page.locator('#find-status')).toHaveText('1 match');
+  await page.locator('#find-close').click();
+  await page.evaluate(() => {
+    const original = RegExp.prototype[Symbol.matchAll];
+    const state = { matchEnumerations: 0 };
+    Object.assign(window, state);
+    RegExp.prototype[Symbol.matchAll] = function (text) {
+      (window as unknown as typeof state).matchEnumerations++;
+      return original.call(this, text);
+    };
+  });
+  await page.locator('#editor').fill('text text');
+  expect(await page.evaluate(() => (window as unknown as { matchEnumerations: number }).matchEnumerations)).toBe(0);
+  await openFind(page);
+  await expect(page.locator('#find-status')).toHaveText('2 matches');
+  expect(await page.evaluate(() => (window as unknown as { matchEnumerations: number }).matchEnumerations)).toBeGreaterThan(0);
+});

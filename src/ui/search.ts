@@ -97,7 +97,7 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   function showMatchCount(): void {
     // Closed Find must not scan on every keystroke — retained regex queries can
     // catastrophic-backtrack and freeze typing (#140 Codex P2).
-    if (findBar.hidden) return;
+    if (findBar.hidden || findBar.getClientRects().length === 0) return;
     resetSearchPosition();
     const found = matches();
     if (findStatus.textContent.startsWith('Invalid regex')) return;

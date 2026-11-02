@@ -155,7 +155,9 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
       }
     }
     // Cmd/Ctrl+Shift+Enter toggles Focus mode; Cmd/Ctrl+Shift+E opened Firefox's Network panel.
-    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Enter' && !event.repeat && !event.isComposing) {
+    // Skip while an in-page confirmation owns the keyboard (#137 / Firefox).
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Enter' && !event.repeat && !event.isComposing
+      && !document.querySelector('.confirm-backdrop')) {
       event.preventDefault();
       setFocusMode(!document.body.classList.contains('focus-mode'));
     }
