@@ -39,7 +39,6 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     try { localStorage.setItem(key, next); savedSizes[key] = next; editorSizeWarning.textContent = ''; }
     catch { editorSizeWarning.textContent = 'Editor size could not be saved in this browser.'; }
   }
-  window.addEventListener('pointerup', persistEditorSize);
   // The resize control is a grip drawn on the editor's bottom-right corner: iOS Safari
   // ignores CSS resize, so a native grip never appears there (#70). It is a real button,
   // so keyboard users can Tab to it and resize with the arrow keys.
@@ -76,15 +75,23 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     if (!field.style.width) field.style.width = field.getBoundingClientRect().width + 'px';
     field.style.maxWidth = '100%';
   }
-  let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number; widthFactor: number } | undefined;
+  let resizeDrag: { pointer: number; x: number; y: number; width: number; height: number; widthFactor: number; initial: { width: string; height: string; maxWidth: string } } | undefined;
+  function cancelResize(): void {
+    const drag = resizeDrag;
+    if (!drag) return;
+    resizeDrag = undefined;
+    Object.assign(field.style, drag.initial);
+    if (resizeEditor.hasPointerCapture(drag.pointer)) resizeEditor.releasePointerCapture(drag.pointer);
+    alignResizeControls();
+  }
   function enableDragResize(handle: HTMLElement): void {
     handle.addEventListener('pointerdown', event => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || resizeDrag) return;
       const rect = field.getBoundingClientRect();
       // Focus mode centers the editor, so its right edge moves half as far as its width
       // changes; doubling the width change keeps the corner under the pointer (#70).
       const widthFactor = document.body.classList.contains('focus-mode') ? 2 : 1;
-      resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, widthFactor };
+      resizeDrag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, widthFactor, initial: { width: field.style.width, height: field.style.height, maxWidth: field.style.maxWidth } };
       handle.setPointerCapture(event.pointerId);
       event.preventDefault();
     });
@@ -95,9 +102,16 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
       field.style.height = Math.max(MIN_HEIGHT, resizeDrag.height + event.clientY - resizeDrag.y) + 'px';
     });
     handle.addEventListener('pointerup', event => {
-      if (resizeDrag?.pointer === event.pointerId) resizeDrag = undefined;
+      if (resizeDrag?.pointer !== event.pointerId) return;
+      resizeDrag = undefined;
+      persistEditorSize();
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
     });
-    handle.addEventListener('pointercancel', () => { resizeDrag = undefined; });
+    for (const type of ['pointercancel', 'lostpointercapture']) {
+      handle.addEventListener(type, event => {
+        if (resizeDrag?.pointer === (event as PointerEvent).pointerId) cancelResize();
+      });
+    }
   }
   enableDragResize(resizeEditor);
   resizeEditor.addEventListener('keydown', event => {
@@ -113,6 +127,7 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
   let normalEditorSize = { width: '', height: '' };
   function applyFocusMode(enabled: boolean): void {
+    cancelResize();
     if (enabled && !document.body.classList.contains('focus-mode')) {
       normalEditorSize = { width: field.style.width, height: field.style.height };
       field.style.width = ''; field.style.height = ''; field.style.maxWidth = '';
@@ -164,6 +179,7 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     }
   });
   function resetLayout(): boolean {
+    cancelResize();
     applyFocusMode(false);
     field.style.width = ''; field.style.height = ''; field.style.maxWidth = '';
     normalEditorSize = { width: '', height: '' };
