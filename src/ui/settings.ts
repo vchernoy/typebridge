@@ -3,6 +3,8 @@
  * autosave and Tab indents (#123). Non-modal, so a rule can be tried in the editor
  * while the panel stays open. Escape or the close button closes it and returns focus.
  */
+import { registerEscapeLayer } from './escape-layers';
+
 export function setupSettings(): void {
   const panel = document.querySelector<HTMLElement>('#settings-panel')!;
   const openButton = document.querySelector<HTMLButtonElement>('#settings-open')!;
@@ -22,10 +24,5 @@ export function setupSettings(): void {
   }
   openButton.addEventListener('click', () => { if (panel.hidden) open(); else close(); });
   closeButton.addEventListener('click', close);
-  // Handled here so the page's Escape handler (Focus mode) sees it as already used.
-  panel.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.isComposing || event.repeat || event.defaultPrevented) return;
-    event.preventDefault();
-    close();
-  });
+  registerEscapeLayer(panel, 30, close);
 }

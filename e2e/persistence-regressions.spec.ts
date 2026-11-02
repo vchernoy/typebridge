@@ -73,16 +73,23 @@ test('failed deletion keeps the text and allows retry', async ({ page }) => {
 });
 
 test('stale deletion retries saving pending edits as a conflict copy', async ({ page, context }) => {
+  // install() alone lets fake time flow; pause so only runFor() fires timers (#132 CI).
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/');
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Исходный длинный пост');
+  await page.clock.runFor(400);
   await expect(page.locator('#status')).toContainText('Saved locally');
   const other = await context.newPage();
   await other.goto('/');
   await expect(other.locator('#editor')).toHaveValue('Исходный длинный пост');
   await other.locator('#editor').fill('Версия другой вкладки');
+  await page.clock.runFor(400); // Shared fake clock covers the other tab's autosave.
   await expect(other.locator('#status')).toContainText('Saved locally');
+  // Leave the pending edit's 300ms autosave unfired so Delete still sees dirty text
+  // and must flush a conflict copy (slow Documents menu must not win the race).
   await editor.fill('Важная правка первой вкладки 🙂');
   page.once('dialog', dialog => dialog.accept());
   await documentAction(page, '#delete-draft');

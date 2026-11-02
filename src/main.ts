@@ -15,8 +15,11 @@ import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
 import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
+import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+// Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
+installEscapeLayers();
 const { setFocusMode, restoreFocusMode } = setupLayout(field);
 setupSettings();
 setupDocumentMenu();
@@ -279,12 +282,7 @@ gotoOpen.addEventListener('click', () => { if (gotoBar.hidden) openGoto(); else 
 document.querySelector<HTMLButtonElement>('#find-close')!.addEventListener('click', () => closeBar(findBar, findOpen));
 document.querySelector<HTMLButtonElement>('#goto-close')!.addEventListener('click', () => closeBar(gotoBar, gotoOpen));
 for (const [bar, button] of [[findBar, findOpen], [gotoBar, gotoOpen]] as const) {
-  // Marked handled so the page's Escape handler does not also toggle Focus mode.
-  bar.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.isComposing || event.repeat || event.defaultPrevented) return;
-    event.preventDefault();
-    closeBar(bar, button);
-  });
+  registerEscapeLayer(bar, 10, () => closeBar(bar, button));
 }
 function goToLine(): void {
   const parsed = parseGotoInput(gotoInput.value);
