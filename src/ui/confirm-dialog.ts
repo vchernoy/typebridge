@@ -60,7 +60,6 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
 
     const message = document.createElement('p');
     message.id = 'confirm-dialog-message';
-    message.tabIndex = 0;
     message.textContent = options.message;
 
     const actions = document.createElement('div');
