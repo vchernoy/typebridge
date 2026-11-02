@@ -56,6 +56,7 @@ jobs:
         if: matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
         env:
           VISUAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          VISUAL_EXPECT_IDENTICAL: ${{ contains(github.event.pull_request.body, '<!-- visual-identical -->') }}
         run: node scripts/capture-ui.mjs
       - name: Upload UI evidence
         if: always() && matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
