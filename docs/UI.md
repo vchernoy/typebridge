@@ -39,3 +39,7 @@ Controls use semantic buttons, labels, dialogs, listbox/menu patterns and visibl
 ## Updates
 
 When a newer offline worker is waiting, a non-blocking New version available notice offers Reload or Not now. It never reloads automatically. Reload first saves or verifies a tab-local reload backup; if neither is available, editing stays open. Autosave-off edits are never silently written: an explicit discard/reload choice warns about losing private changes. Not now hides the notice for this tab's session. Activation failure leaves text on screen. Real browser termination and storage eviction remain outside these guarantees.
+
+## Reset settings
+
+Settings → Reset settings to defaults asks explicitly before resetting typing mode/shortcut, custom rules, Tab indents, Find options, Normal/Focus editor sizes and Focus preference. It does not reload the page, delete documents, change current text/history or enable Autosave. Partial storage failures are reported; they do not prevent other preferences from being reset.

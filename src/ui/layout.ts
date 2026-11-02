@@ -3,7 +3,7 @@ import { SHORTCUTS } from '../editor/keyboard-shortcuts';
  * Editor layout: resize control with separately saved Normal and Focus sizes, and Focus mode
  * with its Escape and Cmd/Ctrl+Shift+Enter keys (#67, #83).
  */
-export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void } {
+export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
   const FOCUS_KEY = 'typebridge.focusMode.v1';
   const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
   const editorSizeWarning = document.createElement('span');
@@ -163,5 +163,17 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
       setFocusMode(!document.body.classList.contains('focus-mode'));
     }
   });
-  return { setFocusMode, restoreFocusMode };
+  function resetLayout(): boolean {
+    applyFocusMode(false);
+    field.style.width = ''; field.style.height = ''; field.style.maxWidth = '';
+    normalEditorSize = { width: '', height: '' };
+    savedSizes[EDITOR_SIZE_KEY] = savedSizes[FOCUS_SIZE_KEY] = JSON.stringify(normalEditorSize);
+    let saved = true;
+    for (const key of [EDITOR_SIZE_KEY, FOCUS_SIZE_KEY, FOCUS_KEY]) {
+      try { localStorage.removeItem(key); } catch { saved = false; }
+    }
+    editorSizeWarning.textContent = saved ? '' : 'Editor layout defaults could not be saved in this browser.';
+    return saved;
+  }
+  return { setFocusMode, restoreFocusMode, resetLayout };
 }

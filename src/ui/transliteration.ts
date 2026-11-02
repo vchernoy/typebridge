@@ -9,7 +9,7 @@ import type { Editor } from '../editor/editor';
 export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, deps: {
   syncSearchEditors: () => void;
   preferenceSaved: (name: string, saved: boolean) => void;
-}): void {
+}): { reset: () => boolean } {
   const { syncSearchEditors, preferenceSaved } = deps;
   // Plain-text writing is a first-class mode. Remember the choice per browser.
   const TRANSLITERATION_KEY = 'typebridge.transliteration.enabled.v1';
@@ -35,10 +35,10 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
     enabled.title = label;
   }
   renderShortcut();
-  function saveShortcut(value: Shortcut): void {
+  function saveShortcut(value: Shortcut): boolean {
     shortcut = value; shortcutSelect.value = value; renderShortcut();
-    try { localStorage.setItem(SHORTCUT_KEY, value); shortcutStatus.textContent = 'Shortcut saved'; }
-    catch { shortcutStatus.textContent = 'Shortcut could not be saved'; }
+    try { localStorage.setItem(SHORTCUT_KEY, value); shortcutStatus.textContent = 'Shortcut saved'; return true; }
+    catch { shortcutStatus.textContent = 'Shortcut could not be saved'; return false; }
   }
   shortcutSelect.addEventListener('change', () => {
     const value = shortcutSelect.value;
@@ -66,12 +66,19 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
   const [latinSide, cyrillicSide] = document.querySelectorAll<HTMLElement>('.mode-switch .mode-side');
   latinSide?.addEventListener('click', () => { choose(false); enabled.focus(); });
   cyrillicSide?.addEventListener('click', event => { event.preventDefault(); choose(true); enabled.focus(); });
+  let modeSaved = true;
   enabled.addEventListener('change', () => {
     editor.setEnabled(enabled.checked);
     syncSearchEditors();
     modeAnnouncement.textContent = enabled.checked ? 'Transliteration on' : 'Transliteration off';
     // Editing continues even when browser storage is blocked.
-    try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); preferenceSaved('transliteration', true); }
-    catch { preferenceSaved('transliteration', false); }
+    try { localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off'); modeSaved = true; preferenceSaved('transliteration', true); }
+    catch { modeSaved = false; preferenceSaved('transliteration', false); }
   });
+  return { reset: () => {
+    enabled.checked = true;
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+    const shortcutSaved = saveShortcut('default');
+    return modeSaved && shortcutSaved;
+  } };
 }

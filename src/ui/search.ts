@@ -13,6 +13,7 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   replaceEditor: Editor;
   syncSearchEditors: () => void;
   showMatchCount: () => void;
+  resetOptions: () => boolean;
 } {
   const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
   const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
@@ -138,5 +139,15 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   findInput.addEventListener('keydown', event => {
     if (event.key === SHORTCUTS.nextMatch.key && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
   });
-  return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount };
+  function resetOptions(): boolean {
+    let saved = true;
+    for (const [input, key] of [[regexMode, REGEX_KEY], [matchCase, CASE_KEY]] as const) {
+      input.checked = false;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      try { if (readSearchOption(localStorage, key)) saved = false; }
+      catch { searchStorageResult(key, false); saved = false; }
+    }
+    return saved;
+  }
+  return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions };
 }
