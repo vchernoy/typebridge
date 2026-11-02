@@ -1,7 +1,31 @@
 :root {
+  --background: #f4f7fc;
+  --surface: #fff;
+  --text: #1b2840;
+  --muted: #50627a;
+  --border: #d9e2ef;
+  --control-border: #aab8cd;
+  --panel-border: #aab8cd;
+  --button-background: #edf3ff;
+  --button-text: #1b2840;
+  --accent: #3153e9;
+  --brand: #3153e9;
+  --warning: #9a4d06;
+  --focus: #527fd4;
+  --switch-border: #aab8cd;
+  --switch-active-knob: #fff;
+  --title-hover-border: #d9e2ef;
+  --search-status-text: #50627a;
+  --grip-color: #7d8ca6;
+  --dialog-surface: #fff;
+  --modal-backdrop: #151b29a6;
+  --surface-shadow: #1830550a;
+  --menu-shadow: #1830552e;
+  --settings-shadow: #18305526;
+  --dialog-shadow: #18305533;
   font-family: system-ui, sans-serif;
-  color: #1b2840;
-  background: #f4f7fc;
+  color: var(--text);
+  background: var(--background);
   color-scheme: light dark;
 }
 * {
@@ -35,7 +59,7 @@ body {
   width: 1px;
   align-self: stretch;
   margin: 6px 4px;
-  background: #d9e2ef;
+  background: var(--border);
 }
 .more-wrap {
   position: relative;
@@ -53,10 +77,10 @@ body {
   display: grid;
   min-width: 200px;
   padding: 6px;
-  background: #fff;
-  border: 1px solid #aab8cd;
+  background: var(--surface);
+  border: 1px solid var(--panel-border);
   border-radius: 10px;
-  box-shadow: 0 12px 32px #1830552e;
+  box-shadow: 0 12px 32px var(--menu-shadow);
 }
 .more-menu [role="menuitem"] {
   border: 0;
@@ -66,10 +90,10 @@ body {
 }
 .more-menu [role="menuitem"]:hover,
 .more-menu [role="menuitem"]:focus-visible {
-  background: #edf3ff;
+  background: var(--button-background);
 }
 #clear {
-  color: #9a4d06;
+  color: var(--warning);
 }
 .top-actions {
   display: flex;
@@ -94,7 +118,7 @@ body {
 }
 .mode-side {
   font-weight: 400;
-  color: #50627a;
+  color: var(--muted);
   cursor: pointer;
 }
 #enabled {
@@ -104,9 +128,9 @@ body {
   width: 46px;
   height: 26px;
   margin: 0;
-  border: 1px solid #aab8cd;
+  border: 1px solid var(--switch-border);
   border-radius: 999px;
-  background: #f4f7fc;
+  background: var(--background);
   cursor: pointer;
 }
 #enabled::before {
@@ -117,16 +141,16 @@ body {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #50627a;
+  background: var(--muted);
   transition: transform 0.15s;
 }
 #enabled:checked {
-  background: #3153e9;
-  border-color: #3153e9;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 #enabled:checked::before {
   transform: translateX(20px);
-  background: #fff;
+  background: var(--switch-active-knob);
 }
 .mode-switch:has(#enabled:not(:checked)) .mode-side:first-child,
 .mode-switch:has(#enabled:checked) label.mode-side {
@@ -135,7 +159,7 @@ body {
 }
 .shortcut-hint {
   font-size: 0.8rem;
-  color: #50627a;
+  color: var(--muted);
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -162,14 +186,14 @@ body {
   gap: 8px 16px;
   margin: 0 0 16px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #d9e2ef;
+  border-bottom: 1px solid var(--border);
 }
 .brand {
   margin: 0;
   font-size: 1.15rem;
   font-weight: 800;
   letter-spacing: -0.02em;
-  color: #3153e9;
+  color: var(--brand);
 }
 .doc {
   position: relative;
@@ -212,10 +236,10 @@ body {
   }
 }
 #draft-title:hover {
-  border-color: #d9e2ef;
+  border-color: var(--title-hover-border);
 }
 #draft-title:focus {
-  border-color: #aab8cd;
+  border-color: var(--control-border);
 }
 .save-indicator {
   flex: none;
@@ -247,22 +271,22 @@ body {
   display: grid;
   gap: 10px;
   padding: 12px;
-  background: #fff;
-  border: 1px solid #aab8cd;
+  background: var(--surface);
+  border: 1px solid var(--panel-border);
   border-radius: 12px;
-  box-shadow: 0 12px 32px #1830552e;
+  box-shadow: 0 12px 32px var(--menu-shadow);
 }
 .doc-menu .menu-label {
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #50627a;
+  color: var(--muted);
 }
 .doc-menu select {
   width: 100%;
   padding: 4px;
-  border: 1px solid #aab8cd;
+  border: 1px solid var(--control-border);
   border-radius: 8px;
   background: transparent;
   color: inherit;
@@ -274,15 +298,15 @@ body {
   gap: 8px;
 }
 #delete-draft {
-  color: #9a4d06;
+  color: var(--warning);
 }
 section {
   position: relative;
-  background: #fff;
+  background: var(--surface);
   padding: clamp(16px, 3vw, 28px);
-  border: 1px solid #d9e2ef;
+  border: 1px solid var(--border);
   border-radius: 16px;
-  box-shadow: 0 12px 32px #1830550a;
+  box-shadow: 0 12px 32px var(--surface-shadow);
 }
 .toolbar,
 .bottom {
@@ -299,10 +323,10 @@ section {
 button {
   min-height: 44px;
   padding: 0 17px;
-  border: 1px solid #aab8cd;
+  border: 1px solid var(--control-border);
   border-radius: 8px;
-  background: #edf3ff;
-  color: #1b2840;
+  background: var(--button-background);
+  color: var(--button-text);
   font: inherit;
   cursor: pointer;
 }
@@ -330,86 +354,18 @@ textarea {
     sans-serif;
   color: inherit;
   background: transparent;
-  border: 1px solid #aab8cd;
+  border: 1px solid var(--control-border);
   border-radius: 10px;
 }
 :focus-visible {
-  outline: 3px solid #527fd4;
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 .bottom,
 .hint {
-  color: #50627a;
+  color: var(--muted);
   font-size: 0.9rem;
   margin-top: 10px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #edf2fb;
-    background: #151b29;
-  }
-  section {
-    background: #202a3b;
-    border-color: #47536a;
-  }
-  button {
-    background: #33445f;
-    color: #fff;
-  }
-  .bottom,
-  .hint {
-    color: #c4d0e3;
-  }
-  .brand {
-    color: #a9c5ff;
-  }
-  .topbar {
-    border-color: #47536a;
-  }
-  .confirm-dialog {
-    background: #202a3b;
-    border-color: #47536a;
-  }
-  .doc-menu {
-    background: #202a3b;
-    border-color: #47536a;
-  }
-  .doc-menu .menu-label {
-    color: #c4d0e3;
-  }
-  #delete-draft,
-  #clear {
-    color: #f0b36a;
-  }
-  .mode-side,
-  .shortcut-hint {
-    color: #c4d0e3;
-  }
-  #enabled {
-    background: #151b29;
-    border-color: #56647f;
-  }
-  #enabled::before {
-    background: #c4d0e3;
-  }
-  #enabled:checked {
-    background: #8fa8ff;
-    border-color: #8fa8ff;
-  }
-  #enabled:checked::before {
-    background: #151b29;
-  }
-  .more-menu {
-    background: #202a3b;
-    border-color: #47536a;
-  }
-  .more-menu [role="menuitem"]:hover,
-  .more-menu [role="menuitem"]:focus-visible {
-    background: #33445f;
-  }
-  .tool-sep {
-    background: #47536a;
-  }
 }
 
 .actions {
@@ -440,7 +396,7 @@ button:disabled {
   max-width: 100%;
   min-height: 40px;
   padding: 6px 10px;
-  border: 1px solid #aab8cd;
+  border: 1px solid var(--control-border);
   border-radius: 8px;
   background: transparent;
   color: inherit;
@@ -454,7 +410,7 @@ button:disabled {
 .find-bar #find-status,
 .goto-bar #goto-status {
   font-size: 0.85rem;
-  color: #50627a;
+  color: var(--search-status-text);
 }
 #caret-position {
   white-space: nowrap;
@@ -469,9 +425,9 @@ button:disabled {
   bottom: 0;
   width: min(440px, 100%);
   overflow-y: auto;
-  background: #fff;
-  border-left: 1px solid #d9e2ef;
-  box-shadow: -12px 0 32px #18305526;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px var(--settings-shadow);
   padding: env(safe-area-inset-top, 0px) max(20px, env(safe-area-inset-right, 0px))
     calc(24px + env(safe-area-inset-bottom, 0px)) 20px;
 }
@@ -485,7 +441,7 @@ button:disabled {
   gap: 12px;
   padding: 12px 0;
   background: inherit;
-  border-bottom: 1px solid #d9e2ef;
+  border-bottom: 1px solid var(--border);
 }
 .settings-head h2 {
   margin: 0;
@@ -493,7 +449,7 @@ button:disabled {
 }
 .settings-group {
   padding: 4px 0 16px;
-  border-bottom: 1px solid #d9e2ef;
+  border-bottom: 1px solid var(--border);
 }
 .settings-group:last-child {
   border-bottom: 0;
@@ -503,13 +459,13 @@ button:disabled {
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #50627a;
+  color: var(--muted);
 }
 .settings-group p,
 .setting-note {
   margin: 4px 0 10px;
   font-size: 0.9rem;
-  color: #50627a;
+  color: var(--muted);
 }
 .shortcut-panel label {
   margin-right: 8px;
@@ -518,21 +474,7 @@ button:disabled {
   min-height: 44px;
   margin: 0 8px 8px 0;
 }
-@media (prefers-color-scheme: dark) {
-  .settings-panel {
-    background: #202a3b;
-    border-color: #47536a;
-  }
-  .settings-head,
-  .settings-group {
-    border-color: #47536a;
-  }
-  .settings-group h3,
-  .settings-group p,
-  .setting-note {
-    color: #c4d0e3;
-  }
-}
+
 body.focus-mode .settings-panel {
   display: none;
 }
@@ -570,7 +512,7 @@ body.focus-mode .settings-panel {
   }
 }
 body.focus-mode {
-  background: #f4f7fc;
+  background: var(--background);
 }
 body.focus-mode .workspace {
   max-width: none;
@@ -620,11 +562,6 @@ body.focus-mode .bottom {
   max-width: 900px;
   margin-inline: auto;
 }
-@media (prefers-color-scheme: dark) {
-  body.focus-mode {
-    background: #151b29;
-  }
-}
 
 /* The same minimums for the main editor in Normal and Focus mode (#70). The bottom
    margin keeps the text below clear of the grip's touch target, which extends
@@ -663,11 +600,11 @@ body.focus-mode .bottom {
   background: linear-gradient(
       135deg,
       transparent 0 40%,
-      #7d8ca6 40% 48%,
+      var(--grip-color) 40% 48%,
       transparent 48% 60%,
-      #7d8ca6 60% 68%,
+      var(--grip-color) 60% 68%,
       transparent 68% 80%,
-      #7d8ca6 80% 88%,
+      var(--grip-color) 80% 88%,
       transparent 88%
     )
     no-repeat right calc(var(--grip-outset-x) + 3px) bottom calc(var(--grip-outset-y) + 3px) / 14px 14px;
@@ -706,15 +643,15 @@ body.focus-mode .bottom {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: #151b29a6;
+  background: var(--modal-backdrop);
 }
 .confirm-dialog {
   width: min(100%, 420px);
   padding: 20px 22px;
-  border: 1px solid #aab8cd;
+  border: 1px solid var(--control-border);
   border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 16px 40px #18305533;
+  background: var(--dialog-surface);
+  box-shadow: 0 16px 40px var(--dialog-shadow);
   color: inherit;
 }
 .confirm-dialog h2 {
@@ -829,4 +766,22 @@ body.focus-mode .bottom {
 .search-chip:focus-within {
   outline: 2px solid currentColor;
   outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #151b29;
+    --surface: #202a3b;
+    --text: #edf2fb;
+    --muted: #c4d0e3;
+    --border: #47536a;
+    --panel-border: #47536a;
+    --button-background: #33445f;
+    --button-text: #fff;
+    --accent: #8fa8ff;
+    --brand: #a9c5ff;
+    --warning: #f0b36a;
+    --switch-border: #56647f;
+    --switch-active-knob: #151b29;
+  }
 }
