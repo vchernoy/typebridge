@@ -107,6 +107,14 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
         close(false);
         return;
       }
+      // Firefox activates the focused button on Enter even with Ctrl/Cmd+Shift
+      // (Chromium does not). Swallow modified Enter so it cannot dismiss the
+      // choice or fire page shortcuts such as Focus mode behind the modal.
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (event.key !== 'Tab') return;
       const items = focusables();
       const first = items[0]!;
