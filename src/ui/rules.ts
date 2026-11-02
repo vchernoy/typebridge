@@ -7,7 +7,7 @@ import type { Editor } from '../editor/editor';
  * push the effective rules to every transliterating field. `targets` is read when rules
  * change, so fields created after setup (the draft title) still receive them.
  */
-export function setupRules(targets: () => Editor[]): void {
+export function setupRules(targets: () => Editor[]): () => boolean {
   function applyRules(): void {
     for (const target of targets()) target.setRules(overrides);
   }
@@ -47,10 +47,11 @@ export function setupRules(targets: () => Editor[]): void {
       rulesStatus.textContent = 'Rules saved locally';
     } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules'; }
   });
-  document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', () => {
-    try { saveOverrides({}); overrides = {}; applyRules(); renderRules(); rulesStatus.textContent = 'Default rules restored'; }
-    catch { rulesStatus.textContent = 'Unable to save rules'; }
-  });
+  function resetRules(): boolean {
+    try { saveOverrides({}); overrides = {}; applyRules(); renderRules(); rulesStatus.textContent = 'Default rules restored'; return true; }
+    catch { rulesStatus.textContent = 'Unable to save rules'; return false; }
+  }
+  document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', resetRules);
   document.querySelector<HTMLButtonElement>('#rules-export')!.addEventListener('click', () => {
     const blob = new Blob([exportRules(overrides)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -71,4 +72,5 @@ export function setupRules(targets: () => Editor[]): void {
     finally { input.value = ''; }
   });
   renderRules();
+  return resetRules;
 }

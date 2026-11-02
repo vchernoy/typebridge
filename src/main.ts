@@ -1,3 +1,4 @@
+import { setupResetSettings } from './ui/reset-settings';
 import { SHORTCUTS } from './editor/keyboard-shortcuts';
 import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
@@ -22,7 +23,7 @@ import { setupWritingPosition } from './editor/writing-position';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
-const { setFocusMode, restoreFocusMode } = setupLayout(field);
+const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field);
 setupSettings();
 setupDocumentMenu();
 setupMoreMenu();
@@ -215,9 +216,10 @@ function updateCaretPosition(): void {
 const TAB_INDENT_KEY = 'typebridge.editor.tabIndent.v1';
 const tabIndent = document.querySelector<HTMLInputElement>('#tab-indent')!;
 try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* Keep the default. */ }
-tabIndent.addEventListener('change', () => {
-  try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); } catch { /* The choice still applies to this page. */ }
-});
+function saveTabIndent(): boolean {
+  try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); return true; } catch { return false; }
+}
+tabIndent.addEventListener('change', saveTabIndent);
 field.addEventListener('keydown', event => {
   if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
   const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
@@ -240,7 +242,7 @@ field.addEventListener('historychange', updateStats);
 field.addEventListener('keyup', updateCaretPosition);
 field.addEventListener('click', updateCaretPosition);
 field.addEventListener('select', updateCaretPosition);
-setupTransliteration(enabled, editor, { syncSearchEditors: () => syncSearchEditors(), preferenceSaved });
+const typingSettings = setupTransliteration(enabled, editor, { syncSearchEditors: () => syncSearchEditors(), preferenceSaved });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); announceAction('Copied'); }
   catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
@@ -250,7 +252,7 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', a
 });
 
 
-const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount } = setupSearch(field, editor, enabled);
+const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(field, editor, enabled);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
 // Find and Go to line open on demand (#123): from their toolbar buttons or with
@@ -324,7 +326,7 @@ document.addEventListener('keydown', event => {
 });
 
 
-setupRules(() => [editor, findEditor, replaceEditor, titleEditor]);
+const resetRules = setupRules(() => [editor, findEditor, replaceEditor, titleEditor]);
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 // One document list, in the ▾ menu; Focus mode shows the same title bar (#104).
@@ -900,6 +902,11 @@ window.addEventListener('beforeunload', event => {
 });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
 updateStats();
+
+setupResetSettings({ actions: [
+  ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
+  ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
+], announce: announceAction });
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
