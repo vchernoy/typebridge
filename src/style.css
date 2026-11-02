@@ -181,7 +181,8 @@ body {
 }
 #draft-title {
   width: min(36ch, 100%);
-  min-width: 8ch;
+  min-width: 0;
+  flex-shrink: 1;
   min-height: 44px;
   padding: 6px 8px;
   border: 1px solid transparent;
@@ -215,6 +216,23 @@ body {
 }
 #draft-title:focus {
   border-color: #aab8cd;
+}
+.save-indicator {
+  flex: none;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.save-indicator::before {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin-right: 0.4em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.save-indicator[data-state="saved"]::before {
+  background: currentColor;
 }
 #doc-menu-open {
   min-width: 44px;
