@@ -26,7 +26,7 @@ Escape from the editor or Cmd/Ctrl+Shift+Enter toggles Focus. The Exit button le
 
 ## Phones and resizing
 
-At 640 px and below, the brand is visually hidden, the title/menu/save state occupy the first row, and the typing switch and icon-only Focus/Settings controls follow. In Focus mode, the switch and Exit follow the title row. The shortcut hint and toolbar separators are hidden and margins shrink. Controls can wrap onto more rows with enlarged text or wider fonts; no fixed row count takes priority over visibility or avoiding horizontal overflow. Coverage includes 320/390 px and a 24 px root font.
+At 640 px and below, the brand is visually hidden, the title/menu/save state occupy the first row, and the typing switch and icon-only Focus/Settings controls follow. In Focus mode, the switch and Exit follow the title row. The shortcut hint and toolbar separators are hidden and margins shrink. At 400 px and below, Find and Copy use icons with their accessible names retained and 44 px targets. Full conversion labels remain available. Controls can wrap onto more rows with enlarged text or wider fonts; no fixed row count takes priority over visibility or avoiding horizontal overflow. Coverage includes 320/390 px and a 24 px root font.
 
 The editor has one custom corner grip ([#70](https://github.com/vchernoy/typebridge/issues/70)); iPhone Safari does not provide a usable native CSS resize grip. Dragging changes width and height. Keyboard users can focus the grip and use arrow keys to resize. Text selection and native editing remain available.
 
