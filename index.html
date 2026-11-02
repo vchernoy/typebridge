@@ -3,6 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      // Keep the stored palette on first paint, before the application bundle loads.
+      (() => {
+        let choice = "system";
+        try {
+          const saved = localStorage.getItem("typebridge.appearance.v1");
+          if (saved === "light" || saved === "dark") choice = saved;
+        } catch {
+          /* System remains usable when storage is blocked. */
+        }
+        document.documentElement.dataset.colorScheme =
+          choice === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : choice;
+      })();
+    </script>
     <title>TypeBridge</title>
     <meta name="description" content="A local-first text editor with optional Russian transliteration." />
     <meta name="theme-color" content="#3153e9" />
@@ -232,6 +246,18 @@
             <p id="tab-indent-note" class="setting-note">
               When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this
               off, moves focus as usual.
+            </p>
+          </div>
+          <div class="settings-group" role="group" aria-labelledby="settings-appearance-title">
+            <h3 id="settings-appearance-title">Appearance</h3>
+            <label for="appearance">Color scheme</label>
+            <select id="appearance" aria-describedby="appearance-hint">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+            <p id="appearance-hint" class="setting-note">
+              System follows your device. Your choice is saved in this browser.
             </p>
           </div>
           <div class="settings-group" role="group" aria-labelledby="settings-defaults-title">

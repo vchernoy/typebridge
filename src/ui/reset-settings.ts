@@ -9,7 +9,7 @@ export function setupResetSettings(deps: {
   button.addEventListener('click', async () => {
     if (!await askConfirmChoice({
       title: 'Reset settings to defaults?',
-      message: 'Reset typing mode, typing shortcut, custom rules, Tab indents, Find options, both editor sizes and Focus preference. Documents, current text, Undo history and the Autosave privacy choice are kept.',
+      message: 'Reset appearance, typing mode, typing shortcut, custom rules, Tab indents, Find options, both editor sizes and Focus preference. Documents, current text, Undo history and the Autosave privacy choice are kept.',
       confirmLabel: 'Reset settings', cancelLabel: 'Keep settings', returnFocus: button,
     })) return;
     const failed: string[] = [];

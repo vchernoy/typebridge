@@ -4,7 +4,7 @@ TypeBridge is an open-source, local-first browser text editor with optional Russ
 
 ## Current capabilities
 
-Implemented on `main`: live transliteration and literal input; selected-text conversion in both directions; custom mapping rules with JSON import/export; Find & Replace with optional regex; Undo/Redo saved with documents; document creation, naming and deletion; TXT/JSON backup and import; Focus Mode; resizing; word/character counts and system light/dark appearance.
+Implemented on `main`: live transliteration and literal input; selected-text conversion in both directions; custom mapping rules with JSON import/export; Find & Replace with optional regex; Undo/Redo saved with documents; document creation, naming and deletion; TXT/JSON backup and import; Focus Mode; resizing; word/character counts and saved System/Light/Dark appearance.
 
 Documents and history use IndexedDB. Settings and custom rules use localStorage; tab selection and Find/Replace strings use sessionStorage. Revision checks preserve conflicting tab edits as copies. With autosave enabled, each edit also writes unsaved text to a temporary emergency journal in localStorage (text and title, visible to other tabs), and on pagehide or beforeunload the tab attempts a reload snapshot in its sessionStorage (text, title and Undo history). These copies are cleared once the edit is saved; clearing IndexedDB alone does not remove them. These are browser-local copies, subject to quota, eviction and browser lifecycle limits: export important work. See [architecture](docs/ARCHITECTURE.md) and [settings lifetimes](docs/SETTINGS-PERSISTENCE.md).
 

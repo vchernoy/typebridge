@@ -1,3 +1,4 @@
+import { setupAppearance } from './ui/appearance';
 import { setupResetSettings } from './ui/reset-settings';
 import { watchForUpdates } from './ui/update-notice';
 import { SHORTCUTS } from './editor/keyboard-shortcuts';
@@ -47,6 +48,8 @@ function preferenceSaved(name: string, saved: boolean): void {
     : `Could not save the ${names.join(' and ')} settings; they may reset on reload.`;
   preferenceWarning.hidden = names.length === 0;
 }
+const appearanceSettings = setupAppearance(preferenceSaved);
+
 // One status line carries both save state and action feedback (#52).
 // 'progress' is save state that a later save may replace; 'action' is
 // feedback the user caused; 'conflict' and 'failure' come from saving and
@@ -936,7 +939,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 updateStats();
 
 setupResetSettings({ actions: [
-  ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
+  ['appearance', appearanceSettings.reset], ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
   ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
 ], announce: announceAction });
 
