@@ -1,6 +1,6 @@
 # TypeBridge — Product Roadmap
 
-TypeBridge is a **local-first, desktop-first writing editor** for long-form text (especially Russian-language Facebook posts). Transliteration is optional, not the whole product. Fast typing, predictable undo/redo, privacy, and safe recovery of drafts come before visual complexity.
+TypeBridge is a **local-first, desktop-first writing editor** for long-form text (especially Russian-language Facebook posts). Transliteration is optional, not the whole product. Fast typing, predictable undo/redo, privacy, and safe recovery of documents come before visual complexity.
 
 This document tracks ideas and priorities. A feature is **not shipped** until merged to `main` and verified in production. PR status may change; check linked PRs for current CI results.
 
@@ -11,11 +11,11 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | Issue | Feature | Current stage |
 | --- | --- | --- |
 | [#32](https://github.com/vchernoy/typebridge/issues/32) | Offline refresh | Merged in PR #30; production checks recorded separately |
-| [#33](https://github.com/vchernoy/typebridge/issues/33) | Draft backup | Merged in PR #27; production checks recorded separately |
+| [#33](https://github.com/vchernoy/typebridge/issues/33) | Document backup | Merged in PR #27; production checks recorded separately |
 | [#34](https://github.com/vchernoy/typebridge/issues/34) | Custom mappings | Merged in PR #25; production checks recorded separately |
 | [#35](https://github.com/vchernoy/typebridge/issues/35) | Regex replace | Merged in PR #26; production checks recorded separately |
 | [#36](https://github.com/vchernoy/typebridge/issues/36) | Word statistics | Merged in PR #28; production checks recorded separately |
-| [#37](https://github.com/vchernoy/typebridge/issues/37) | Draft recovery / version history | Emergency recovery merged (#53); retained version snapshots remain research |
+| [#37](https://github.com/vchernoy/typebridge/issues/37) | Document recovery / version history | Emergency recovery merged (#53); retained version snapshots remain research |
 | [#38](https://github.com/vchernoy/typebridge/issues/38) | Customizable UI/UX | Research |
 | [#39](https://github.com/vchernoy/typebridge/issues/39) | Portable share links | Ready for implementation |
 | [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Plain-text preference merged (#42); Reading View remains open |
@@ -31,12 +31,12 @@ This document is a snapshot. A merged implementation and a production-verified r
 
 | Feature | Why / acceptance criteria | Tracking |
 | --- | --- | --- |
-| Offline refresh and reopening | After one successful online installation, refresh/reopen while offline; preserve and continue editing saved Russian drafts; test Chromium, Firefox and WebKit. | [PR #30](https://github.com/vchernoy/typebridge/pull/30) — merged; verify production separately |
-| Draft export/import (TXT, JSON) | Explicit local backup and restore; Unicode and WebKit filenames; never silently overwrite existing drafts. | [PR #27](https://github.com/vchernoy/typebridge/pull/27) — merged; verify production separately |
+| Offline refresh and reopening | After one successful online installation, refresh/reopen while offline; preserve and continue editing saved Russian documents; test Chromium, Firefox and WebKit. | [PR #30](https://github.com/vchernoy/typebridge/pull/30) — merged; verify production separately |
+| Document export/import (TXT, JSON) | Explicit local backup and restore; Unicode and WebKit filenames; never silently overwrite existing documents. | [PR #27](https://github.com/vchernoy/typebridge/pull/27) — merged; verify production separately |
 | Custom transliteration mappings | Local persistence, validation, import/export; do not mutate existing text when mappings change. | [PR #25](https://github.com/vchernoy/typebridge/pull/25) — merged; verify production separately |
 | Regex Find & Replace | Optional regex, capture groups, invalid-pattern feedback, undo support and browser tests. | [PR #26](https://github.com/vchernoy/typebridge/pull/26) — merged; verify production separately |
 | Live word count / reading time | Correct Unicode word boundaries and updates during editing. | [PR #28](https://github.com/vchernoy/typebridge/pull/28) — merged; verify production separately |
-| Draft recovery hardening | Continue real-device/crash verification and design retained snapshots separately from emergency recovery. | IndexedDB #45 and emergency journal #53 merged; #37 remains open |
+| Document recovery hardening | Continue real-device/crash verification and design retained snapshots separately from emergency recovery. | IndexedDB #45 and emergency journal #53 merged; #37 remains open |
 
 ## P1 — Product UX and sharing
 
@@ -54,7 +54,7 @@ This document is a snapshot. A merged implementation and a production-verified r
 - **Reading View**: compact, distraction-free document with **Fork / Edit a copy**.
 - **Editing View**: immediately create an editable *local copy* with editor tools.
 - These are **presentation choices, not permissions or security controls**; recipients can always copy/edit.
-- Never overwrite recipient drafts or auto-save an incoming document before explicit fork.
+- Never overwrite recipient documents or auto-save an incoming document before explicit fork.
 - Show URL length and compatibility warnings; impose encoded/decompressed size limits; reject corrupt input safely.
 - Test share/open/fork, Unicode, long documents, browser compatibility and offline app-shell behavior.
 - A true short URL requires persistent server-side mapping or a third-party shortener; **defer backend/shortener** until measurements justify it.
@@ -62,11 +62,11 @@ This document is a snapshot. A merged implementation and a production-verified r
 ### Universal writing editor
 - Plain-text editing and the remembered transliteration toggle are implemented (#42). Keep them first-class while adding optional modes.
 - Distinguish **Document** (content), **Workspace** (tool layout) and **View Mode** (reading/editing presentation).
-- Provide an uncluttered Reading View for own drafts as well as shared links.
+- Provide an uncluttered Reading View for own documents as well as shared links.
 
 ## P2 — Further exploration
 
-- Versioned draft snapshots / restore previous versions (distinct from undo history).
+- Versioned document snapshots / restore previous versions (distinct from undo history).
 - Markdown authoring and optional preview, without making plain-text writing slower.
 - Smart paste / clean text formatting.
 - Copy for Facebook: preserve line breaks and consider optional Unicode formatting.

@@ -4,13 +4,19 @@ TypeBridge is an open-source, local-first browser text editor with optional Russ
 
 ## Current capabilities
 
-Implemented on `main`: live transliteration and literal input; selected-text conversion in both directions; custom mapping rules with JSON import/export; Find & Replace with optional regex; Undo/Redo saved with drafts; draft creation, naming and deletion; TXT/JSON backup and import; Focus Mode; resizing; word/character counts and system light/dark appearance.
+Implemented on `main`: live transliteration and literal input; selected-text conversion in both directions; custom mapping rules with JSON import/export; Find & Replace with optional regex; Undo/Redo saved with documents; document creation, naming and deletion; TXT/JSON backup and import; Focus Mode; resizing; word/character counts and system light/dark appearance.
 
-Drafts and history use IndexedDB. Settings and custom rules use localStorage; tab selection and Find/Replace strings use sessionStorage. Revision checks preserve conflicting tab edits as copies. With autosave enabled, each edit also writes unsaved text to a temporary emergency journal in localStorage (text and title, visible to other tabs), and on pagehide or beforeunload the tab attempts a reload snapshot in its sessionStorage (text, title and Undo history). These copies are cleared once the edit is saved; clearing IndexedDB alone does not remove them. These are browser-local copies, subject to quota, eviction and browser lifecycle limits: export important work. See [architecture](docs/ARCHITECTURE.md) and [settings lifetimes](docs/SETTINGS-PERSISTENCE.md).
+Documents and history use IndexedDB. Settings and custom rules use localStorage; tab selection and Find/Replace strings use sessionStorage. Revision checks preserve conflicting tab edits as copies. With autosave enabled, each edit also writes unsaved text to a temporary emergency journal in localStorage (text and title, visible to other tabs), and on pagehide or beforeunload the tab attempts a reload snapshot in its sessionStorage (text, title and Undo history). These copies are cleared once the edit is saved; clearing IndexedDB alone does not remove them. These are browser-local copies, subject to quota, eviction and browser lifecycle limits: export important work. See [architecture](docs/ARCHITECTURE.md) and [settings lifetimes](docs/SETTINGS-PERSISTENCE.md).
 
-After a successful online service-worker installation, the production build can reopen offline on the same origin and browser profile. Offline support does not guarantee storage durability. A new independent tab currently opens the latest saved draft; reload uses the tab's selected draft when available. Older blank-tab requirements are historical, not the current behavior.
+After a successful online service-worker installation, the production build can reopen offline on the same origin and browser profile. Offline support does not guarantee storage durability. A new independent tab currently opens the latest saved document; reload uses the tab's selected document when available. Older blank-tab requirements are historical, not the current behavior.
 
 GitHub Pages deployment is enabled for main. Successful Actions deployment is not proof of every production interaction; record browser/device checks separately. PRs are not automatically hosted previews. See [preview and deployment notes](docs/PREVIEW.md).
+
+## Workspace
+
+The top bar holds the editable document title, ▾ Documents menu, compact save state, Latin/Кириллица typing switch, Focus and Settings. The editing toolbar offers Undo/Redo, selected-text conversion, Find and Copy; its ⋯ menu contains Go to line and Clear text. Find/Replace and Go to line open on demand. Settings groups the shortcut, mapping rules, Autosave and Tab indents.
+
+Focus mode keeps the same title, document menu, save state and typing switch above the editor, plus Exit focus. On phones controls wrap to fit; larger text may need extra rows. The detailed status line under the editor retains storage and conflict warnings. See the [current UI](docs/UI.md).
 
 ## Development
 
@@ -21,8 +27,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the issue, review and merge workflow.
 ## Requirements and remaining work
 
 - [Product roadmap](docs/ROADMAP.md) and [GitHub backlog](docs/BACKLOG.md)
-- [Original product requirements](docs/PRD.md) and [UI design intent](docs/UI.md)
+- [Original product requirements](docs/PRD.md) and [Current UI](docs/UI.md)
 - [Russian mappings](docs/RUSSIAN-MAPPING.md) and [competitor research](docs/RESEARCH.md)
 - [Audit and AI handoff](https://github.com/vchernoy/typebridge/issues/71)
 
-The PRD/UI specification include future design intent. Dual panels, portable document links, rich/Markdown preview, retained version snapshots and broader editing commands are not implemented just because they appear there. Current UX work and the audit fixes are tracked in issues; check PR merge and production verification separately.
+The PRD includes historical design intent; the UI document describes the current workspace. Dual panels, portable document links, rich/Markdown preview, retained version snapshots and broader editing commands are not implemented just because they appear there. Current UX work and the audit fixes are tracked in issues; check PR merge and production verification separately.
