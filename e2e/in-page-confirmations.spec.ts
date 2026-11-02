@@ -94,9 +94,9 @@ test('delayed import queues behind Clear without leaking inert state (#137 U2)',
   await expect(page.getByRole('dialog', { name: 'Clear text?', exact: true })).toBeVisible();
   await page.evaluate(() => (window as unknown as { releaseImport: () => void }).releaseImport());
   await expect(page.locator('.confirm-dialog')).toHaveCount(1);
-  // Dispatch on the dialog: Firefox also treats physical modified Enter on a
-  // focused button as button activation, which would legitimately take the safe choice.
-  await page.locator('.confirm-dialog').dispatchEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+  // Physical modified Enter: Firefox would activate the focused Cancel without
+  // the confirm capture handler swallowing it (#137 Firefox CI).
+  await page.keyboard.press('ControlOrMeta+Shift+Enter');
   await expect(page.getByRole('dialog', { name: 'Clear text?', exact: true })).toBeVisible();
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
   await page.keyboard.press('Escape');
@@ -110,4 +110,24 @@ test('delayed import queues behind Clear without leaking inert state (#137 U2)',
   await expect(page.locator('main')).not.toHaveAttribute('inert');
   await expect(page.locator('#editor')).toHaveValue('Original text');
   await page.locator('#editor').fill('Editing still works');
+});
+
+test('Focus chord does not confirm Delete on Firefox modified Enter (#137 U2)', async ({ page }) => {
+  await page.goto('/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Must stay');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await documentAction(page, '#delete-draft');
+  const dialog = page.getByRole('dialog', { name: 'Delete document?', exact: true });
+  await expect(dialog.getByRole('button', { name: 'Keep document', exact: true })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: 'Delete document', exact: true })).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+Shift+Enter');
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await expect(editor).toHaveValue('Must stay');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(editor).toHaveValue('Must stay');
 });

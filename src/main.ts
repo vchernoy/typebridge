@@ -247,7 +247,7 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', a
 });
 
 
-const { findInput, findEditor, replaceEditor, syncSearchEditors } = setupSearch(field, editor, enabled);
+const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount } = setupSearch(field, editor, enabled);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
 // Find and Go to line open on demand (#123): from their toolbar buttons or with
@@ -264,6 +264,7 @@ function openFind(): void {
   if (document.body.classList.contains('focus-mode')) setFocusMode(false);
   setBar(gotoBar, gotoOpen, false);
   setBar(findBar, findOpen, true);
+  showMatchCount();
   findInput.focus();
   findInput.select();
 }
