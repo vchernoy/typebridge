@@ -822,3 +822,29 @@ body.focus-mode .bottom {
 .update-notice [role="status"] {
   flex: 1 1 220px;
 }
+
+.phone-icon {
+  display: none;
+}
+@media (max-width: 400px) {
+  #find-open,
+  #copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+  }
+  .phone-icon {
+    display: inline-block;
+  }
+  .phone-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
