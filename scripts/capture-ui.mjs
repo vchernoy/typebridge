@@ -38,6 +38,9 @@ try {
       await page.locator('#editor').fill('Example text. More example text.');
       await page.locator('#draft-title').fill('Example document');
       await page.locator('#save-indicator').filter({ hasText: /^Saved$/ }).waitFor();
+      await page.locator('#doc-menu-open').click();
+      await page.screenshot({ path: path.join(evidence, `${revision}-documents-${colorScheme}-${width}.png`), fullPage: true, animations: 'disabled' });
+      await page.locator('#doc-menu-open').click();
       await page.locator('#find-open').click();
       await page.locator('#find-text').fill('text');
       await page.locator('#find-next').click();
@@ -46,7 +49,7 @@ try {
       await context.close();
     }
   }
-  await writeFile(path.join(evidence, 'provenance.json'), JSON.stringify({ base, head: process.env.GITHUB_SHA, widths: [390, 1400], themes: ['light', 'dark'], browser: 'chromium', sample: 'Synthetic document; Find open after navigation' }, null, 2));
+  await writeFile(path.join(evidence, 'provenance.json'), JSON.stringify({ base, head: process.env.GITHUB_SHA, widths: [390, 1400], themes: ['light', 'dark'], browser: 'chromium', sample: 'Synthetic document; Documents menu and Find after navigation' }, null, 2));
 } finally {
   await browser?.close();
   try { execFileSync('git', ['worktree', 'remove', '--force', before], { stdio: 'inherit' }); } finally { await rm(temporary, { recursive: true, force: true }); }
