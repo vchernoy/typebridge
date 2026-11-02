@@ -53,8 +53,8 @@ test('blocked settings storage keeps search usable and reports the problem', asy
   await openFind(page);
   await page.locator('#find-text').fill('текст');
   await expect(page.getByText('Find settings could not be saved or restored in this browser.')).toBeVisible();
-  await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.locator('#find-status')).toContainText('1 match');
+  await page.getByRole('button', { name: 'Next match', exact: true }).click();
+  await expect(page.locator('#find-status')).toHaveText('1 of 1');
   await expect(page.locator('#editor')).toHaveValue('Русский текст');
 });
 

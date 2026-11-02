@@ -52,3 +52,16 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - run: npx playwright test --project=${{ matrix.browser }}
+      - name: Capture before and after UI
+        if: matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
+        env:
+          VISUAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/capture-ui.mjs
+      - name: Upload UI evidence
+        if: always() && matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-before-after-${{ github.event.pull_request.number }}
+          path: visual-evidence/
+          retention-days: 7
+          if-no-files-found: error

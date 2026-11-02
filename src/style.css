@@ -812,3 +812,21 @@ body.focus-mode .bottom {
     transform: translateX(14px);
   }
 }
+
+/* Compact search options retain native checkboxes and a visible checked state. */
+.search-chip {
+  min-height: 44px;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+.search-chip:has(input:checked) {
+  font-weight: 700;
+  border-width: 2px;
+  padding-inline: 9px;
+}
+.search-chip:focus-within {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

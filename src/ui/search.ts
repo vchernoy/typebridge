@@ -11,12 +11,14 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   findEditor: Editor;
   replaceEditor: Editor;
   syncSearchEditors: () => void;
+  showMatchCount: () => void;
 } {
   const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
   const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
   const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
   const regexMode = document.querySelector<HTMLInputElement>('#regex-mode')!;
   const findStatus = document.querySelector<HTMLElement>('#find-status')!;
+  const findBar = document.querySelector<HTMLElement>('#find-bar')!;
   const searchStorageWarning = document.createElement('span');
   searchStorageWarning.setAttribute('aria-live', 'polite');
   findStatus.before(searchStorageWarning);
@@ -90,8 +92,21 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
       ? { position: match[0], text: field.value, query: findInput.value, matchCase: matchCase.checked, regex: regexMode.checked }
       : undefined;
     editor.revealSelection();
-    findStatus.textContent = `${found.length} match${found.length === 1 ? '' : 'es'}`;
+    findStatus.textContent = `${found.indexOf(match) + 1} of ${found.length}`;
   }
+  function showMatchCount(): void {
+    // Closed Find must not scan on every keystroke — retained regex queries can
+    // catastrophic-backtrack and freeze typing (#140 Codex P2).
+    if (findBar.hidden || findBar.getClientRects().length === 0) return;
+    // Do not reset zero-width skip state here: openFind/Ctrl+F refreshes totals and
+    // must keep advancing past the current zero-width hit (#140 review P1).
+    const found = matches();
+    if (findStatus.textContent.startsWith('Invalid regex')) return;
+    findStatus.textContent = !findInput.value ? '' : found.length
+      ? `${found.length} match${found.length === 1 ? '' : 'es'}` : 'No matches';
+  }
+  for (const input of [findInput, field]) input.addEventListener('input', showMatchCount);
+  for (const input of [matchCase, regexMode]) input.addEventListener('change', showMatchCount);
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
   document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
@@ -122,5 +137,5 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   findInput.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }
   });
-  return { findInput, findEditor, replaceEditor, syncSearchEditors };
+  return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount };
 }
