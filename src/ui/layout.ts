@@ -143,7 +143,8 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   focusButton.addEventListener('click', () => setFocusMode(!document.body.classList.contains('focus-mode')));
   exitFocusButton.addEventListener('click', () => setFocusMode(false));
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !event.repeat && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented) {
+    if (event.key === 'Escape' && !event.repeat && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented
+      && !(event.target instanceof HTMLSelectElement && event.target.size <= 1)) {
       // Escape toggles Focus mode from the editor or with nothing focused (body),
       // and always exits it; it keeps its cancel role in Find/Replace, selects
       // and other controls (#67).

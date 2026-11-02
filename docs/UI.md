@@ -16,6 +16,10 @@ Implemented so far ([#123](https://github.com/vchernoy/typebridge/issues/123)): 
 
 Target Sections: Input and mappings (preset, per-rule edit, conflicts, preview and reset); Editor (height, font size and panel mode); Appearance (system/light/dark); Privacy (auto-save drafts on by default, disable toggle, local-only explanation, retain/delete saved drafts); Drafts (list, open, rename, delete existing drafts; a new independent tab starts blank); shortcuts and restore defaults. Explicitly state local storage is browser/device-specific and may be cleared. Show unsaved-storage errors without removing text.
 
+## Focus documents
+
+Focus mode keeps a labeled native Documents picker in its existing header row, between the Focus mode heading and Exit button (#104). Switching uses the same save, conflict and unsaved-discard handling as the normal document menu and stays in Focus mode. Both pickers show the same current title and selection. On phones the heading and Exit text shorten to leave room for the picker; long titles shrink within the row. Escape in the native picker belongs to its popup; Escape from the editor still exits Focus.
+
 ## Responsive and accessibility
 
 Escape closes one visible UI layer before the Focus shortcut: a confirmation dialog first, then Settings, then a document/More menu, then Find/Go to line. This applies even when focus has moved back into the editor. CSS-hidden Focus-mode panels do not intercept it. Composition, repeated/already-handled Escape and collapsed native select popups retain their existing ownership. See [#132](https://github.com/vchernoy/typebridge/issues/132).

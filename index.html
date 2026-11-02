@@ -252,7 +252,11 @@
           ><button id="goto-close" class="bar-close" type="button" aria-label="Close go to line">×</button>
         </div>
         <div class="focus-header">
-          <span>TypeBridge · Focus mode</span><button id="exit-focus" type="button" hidden>Exit focus (Esc)</button>
+          <span class="focus-heading"><span class="focus-brand">TypeBridge · </span>Focus mode</span>
+          <select id="focus-documents" aria-label="Documents" disabled></select>
+          <button id="exit-focus" type="button" aria-label="Exit focus (Esc)" hidden>
+            Exit<span class="focus-exit-hint"> focus (Esc)</span>
+          </button>
         </div>
         <label for="editor">Your text</label
         ><textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea
