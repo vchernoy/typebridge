@@ -33,7 +33,10 @@ function offlineServiceWorker(): Plugin {
 const ASSETS = ${JSON.stringify(assets)};
 const HOME = ${JSON.stringify(BASE)};
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));
+});
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') event.waitUntil(self.skipWaiting());
 });
 self.addEventListener('activate', event => {
   event.waitUntil(Promise.all([

@@ -9,7 +9,7 @@ async function configured(page: Page): Promise<void> {
       'typebridge.transliteration.enabled.v1': 'off', 'typebridge.transliteration.shortcut.v1': 'f8',
       'typebridge.editor.tabIndent.v1': 'off', 'typebridge.find.matchCase.v1': 'true',
       'typebridge.find.regex.v1': 'true', 'typebridge.autosave.v1': 'off',
-      'typebridge-rules-v1': JSON.stringify({ a: 'я' }),
+      'typebridge-rules-v1': JSON.stringify({ version: 1, overrides: { a: 'я' } }),
       'typebridge.editor.size.v1': JSON.stringify({ width: '480px', height: '320px' }),
       'typebridge.editor.focusSize.v1': JSON.stringify({ width: '600px', height: '500px' }),
       'typebridge.focusMode.v1': 'on',
@@ -23,6 +23,7 @@ async function configured(page: Page): Promise<void> {
   await page.locator('#editor').fill('Unsaved private text');
   await page.locator('#draft-title').fill('Private title');
   await openSettings(page);
+  await expect(page.locator('#rules-text')).toHaveValue(/^a = я$/m);
 }
 
 test('confirmed reset keeps private text, title, Undo and Autosave (#137 U11)', async ({ page }) => {
@@ -45,12 +46,12 @@ test('confirmed reset keeps private text, title, Undo and Autosave (#137 U11)', 
   await expect(page.locator('#undo')).toBeEnabled();
   await expect(page.locator('#save-indicator')).toHaveText('Not saved');
   const preferences = await page.evaluate(() => ({
-    rules: localStorage.getItem('typebridge-rules-v1'),
+    rules: JSON.parse(localStorage.getItem('typebridge-rules-v1') ?? 'null'),
     normal: localStorage.getItem('typebridge.editor.size.v1'),
     focus: localStorage.getItem('typebridge.editor.focusSize.v1'),
     focusMode: localStorage.getItem('typebridge.focusMode.v1'),
   }));
-  expect(preferences).toEqual({ rules: '{}', normal: null, focus: null, focusMode: null });
+  expect(preferences).toEqual({ rules: { version: 1, overrides: {} }, normal: null, focus: null, focusMode: null });
   await expect(page.locator('#status')).toContainText('Settings reset to defaults');
 });
 
