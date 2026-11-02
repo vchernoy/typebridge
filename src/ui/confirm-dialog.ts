@@ -60,6 +60,7 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
 
     const message = document.createElement('p');
     message.id = 'confirm-dialog-message';
+    message.tabIndex = 0;
     message.textContent = options.message;
 
     const actions = document.createElement('div');
@@ -83,7 +84,9 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     for (const { element } of inertStates) element.inert = true;
     document.body.append(backdrop);
 
-    const focusables = (): HTMLElement[] => [cancel, confirm];
+    // Include the message so keyboard users can reach and scroll long sheets
+    // (e.g. Keyboard shortcuts) when actions stay outside the scrollport.
+    const focusables = (): HTMLElement[] => [message, cancel, confirm];
 
     const close = (accepted: boolean): void => {
       document.removeEventListener('keydown', onKeyDown, true);
@@ -134,7 +137,11 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     cancel.addEventListener('click', () => close(false));
     confirm.addEventListener('click', () => close(true));
     document.addEventListener('keydown', onKeyDown, true);
-    // Prefer the safer choice so Enter does not delete by default.
-    cancel.focus();
+    // Prefer the safer choice so Enter does not delete by default. preventScroll
+    // keeps short-viewport sheets at the top (title + first lines visible) while
+    // actions remain outside the message scrollport.
+    cancel.focus({ preventScroll: true });
+    dialog.scrollTop = 0;
+    message.scrollTop = 0;
   });
 }

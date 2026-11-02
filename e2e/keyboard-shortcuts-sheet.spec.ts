@@ -31,3 +31,15 @@ for (const apple of [false, true]) {
     await expect(dialog).toContainText('Tab indents is off');
   });
 }
+
+test('shortcuts sheet keeps the first lines visible on a short viewport (#137 U7)', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 420 });
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await moreAction(page, '#keyboard-shortcuts');
+  const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true });
+  await expect(dialog.getByRole('heading', { name: 'Keyboard shortcuts', exact: true })).toBeInViewport();
+  await expect(dialog.getByText('Toggle typing mode: Ctrl+Shift+Space')).toBeInViewport();
+  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
+  await expect(dialog.getByRole('button', { name: 'Change typing shortcut', exact: true })).toBeInViewport();
+});
