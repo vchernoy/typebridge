@@ -59,6 +59,14 @@ try {
       await capture(`${revision}-settings-${colorScheme}-${width}`);
       await page.locator('#settings-close').click();
       await page.locator('#more-open').click();
+      await capture(`${revision}-more-${colorScheme}-${width}`);
+      if (await page.locator('#keyboard-shortcuts').count()) {
+        await page.locator('#keyboard-shortcuts').click();
+        await page.locator('.confirm-dialog').waitFor();
+        await capture(`${revision}-shortcuts-${colorScheme}-${width}`);
+        await page.keyboard.press('Escape');
+        await page.locator('#more-open').click();
+      }
       await page.locator('#clear').click();
       await page.locator('.confirm-dialog').waitFor();
       await capture(`${revision}-confirmation-${colorScheme}-${width}`);

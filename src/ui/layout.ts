@@ -1,3 +1,4 @@
+import { SHORTCUTS } from '../editor/keyboard-shortcuts';
 /**
  * Editor layout: resize control with separately saved Normal and Focus sizes, and Focus mode
  * with its Escape and Cmd/Ctrl+Shift+Enter keys (#67, #83).
@@ -143,7 +144,7 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   focusButton.addEventListener('click', () => setFocusMode(!document.body.classList.contains('focus-mode')));
   exitFocusButton.addEventListener('click', () => setFocusMode(false));
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !event.repeat && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented
+    if (event.key === SHORTCUTS.escape.key && !event.repeat && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented
       && !(event.target instanceof HTMLSelectElement && event.target.size <= 1)) {
       // Escape toggles Focus mode from the editor or with nothing focused (body),
       // and always exits it; it keeps its cancel role in Find/Replace, selects
@@ -156,7 +157,7 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     }
     // Cmd/Ctrl+Shift+Enter toggles Focus mode; Cmd/Ctrl+Shift+E opened Firefox's Network panel.
     // Skip while an in-page confirmation owns the keyboard (#137 / Firefox).
-    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Enter' && !event.repeat && !event.isComposing
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === SHORTCUTS.focus.key && !event.repeat && !event.isComposing
       && !document.querySelector('.confirm-backdrop')) {
       event.preventDefault();
       setFocusMode(!document.body.classList.contains('focus-mode'));

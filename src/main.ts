@@ -1,3 +1,5 @@
+import { SHORTCUTS } from './editor/keyboard-shortcuts';
+import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
@@ -24,6 +26,7 @@ const { setFocusMode, restoreFocusMode } = setupLayout(field);
 setupSettings();
 setupDocumentMenu();
 setupMoreMenu();
+setupKeyboardShortcuts();
 const editor = new Editor(field);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
@@ -197,10 +200,10 @@ for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-la
 field.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
   const key = event.key.toLowerCase();
-  if (key !== 'l' && key !== 'k') return;
+  if (key !== SHORTCUTS.convertCyrillic.key && key !== SHORTCUTS.convertLatin.key) return;
   if (field.selectionStart === field.selectionEnd) return;
   event.preventDefault();
-  editor.convertSelection(key === 'l' ? 'to-cyrillic' : 'to-latin');
+  editor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
 });
 function updateCaretPosition(): void {
   const { line, column } = lineColumnAtOffset(field.value, field.selectionStart);
@@ -216,7 +219,7 @@ tabIndent.addEventListener('change', () => {
   try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); } catch { /* The choice still applies to this page. */ }
 });
 field.addEventListener('keydown', event => {
-  if (event.key !== 'Tab' || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
+  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
   const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
   // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
   if (!change && event.shiftKey) return;
@@ -311,9 +314,9 @@ gotoInput.addEventListener('keydown', event => {
 document.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat || event.isComposing) return;
   const key = event.key.toLowerCase();
-  if (key === 'f' && !event.shiftKey) {
+  if (key === SHORTCUTS.find.key && !event.shiftKey) {
     event.preventDefault(); openFind();
-  } else if (key === 'g' && !event.shiftKey) {
+  } else if (key === SHORTCUTS.goto.key && !event.shiftKey) {
     // Cmd/Ctrl+G: go to line. May also be reserved by the browser's Find UI.
     event.preventDefault();
     openGoto();
