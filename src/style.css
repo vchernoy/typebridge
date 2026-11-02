@@ -785,14 +785,3 @@ body.focus-mode .bottom {
     --switch-active-knob: #151b29;
   }
 }
-
-.text-button {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  text-decoration: underline;
-}
-#settings-about-title {
-  scroll-margin-top: 72px;
-}

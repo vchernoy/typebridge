@@ -24,13 +24,5 @@ export function setupSettings(): void {
   }
   openButton.addEventListener('click', () => { if (panel.hidden) open(); else close(); });
   closeButton.addEventListener('click', close);
-  const aboutButton = document.querySelector<HTMLButtonElement>('#about-documents-open')!;
-  const aboutTitle = document.querySelector<HTMLElement>('#settings-about-title')!;
-  aboutButton.addEventListener('click', () => {
-    open();
-    returnFocus = aboutButton;
-    aboutTitle.focus();
-    aboutTitle.scrollIntoView({ block: 'start' });
-  });
   registerEscapeLayer(panel, 30, close);
 }
