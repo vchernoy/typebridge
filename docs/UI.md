@@ -18,7 +18,7 @@ Target Sections: Input and mappings (preset, per-rule edit, conflicts, preview a
 
 ## Focus documents
 
-Focus mode keeps a labeled native Documents picker in its existing header row, between the Focus mode heading and Exit button (#104). Switching uses the same save, conflict and unsaved-discard handling as the normal document menu and stays in Focus mode. Both pickers show the same current title and selection. On phones the heading and Exit text shorten to leave room for the picker; long titles shrink within the row. Escape in the native picker belongs to its popup; Escape from the editor still exits Focus.
+Focus mode keeps one line of the top bar above the editor (#104): the same document title (rename in place), the ▾ document menu (switch, New, Import, Export, Delete), the save state, the Latin ⬤ Кириллица switch and Exit focus. There is no second picker; the controls are the Normal-mode ones. Switching uses the same save, conflict and unsaved-discard handling and stays in Focus mode. The brand, Focus, Settings and the shortcut hint are hidden in Focus mode. On phones the line wraps to two rows (title, menu and save state; then the switch and Exit).
 
 ## Responsive and accessibility
 

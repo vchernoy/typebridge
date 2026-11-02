@@ -557,29 +557,14 @@ body.focus-mode .settings-panel {
   display: block;
   margin-top: 8px;
 }
-/* Focus mode keeps the same textarea and editor instance, preserving selection and history. */
-.focus-header {
-  display: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.focus-heading,
+/* Focus mode keeps the same textarea and editor instance, preserving selection and history.
+   It also keeps one line of the top bar: the document title with its ▾ menu and save
+   state, the typing switch and Exit focus (#104). */
 #exit-focus {
   flex: none;
   white-space: nowrap;
 }
-#focus-documents {
-  flex: 1 1 160px;
-  min-width: 0;
-  max-width: 320px;
-  min-height: 44px;
-  font: inherit;
-  text-overflow: ellipsis;
-}
 @media (max-width: 640px) {
-  .focus-brand,
   .focus-exit-hint {
     display: none;
   }
@@ -591,7 +576,6 @@ body.focus-mode .workspace {
   max-width: none;
   padding: 16px clamp(12px, 4vw, 48px);
 }
-body.focus-mode header,
 body.focus-mode .toolbar,
 body.focus-mode .find-bar,
 body.focus-mode .goto-bar,
@@ -607,10 +591,21 @@ body.focus-mode section {
   padding: clamp(12px, 2vw, 28px);
   min-height: calc(100dvh - 32px);
 }
-body.focus-mode .focus-header {
-  display: flex;
+body.focus-mode .topbar {
   max-width: 900px;
-  margin-inline: auto;
+  margin: 0 auto 10px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+body.focus-mode .brand,
+body.focus-mode #focus-mode,
+body.focus-mode #settings-open,
+body.focus-mode .shortcut-hint {
+  display: none;
+}
+body.focus-mode .top-actions {
+  width: auto;
+  margin-left: auto;
 }
 body.focus-mode textarea {
   width: 100%;

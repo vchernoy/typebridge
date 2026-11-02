@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, setAutosave } from './settings-helpers';
+import { documentAction, openDocuments, selectDocument, setAutosave } from './settings-helpers';
 
 async function twoDocuments(page: Page): Promise<string> {
   await page.goto('/');
@@ -16,52 +16,61 @@ async function twoDocuments(page: Page): Promise<string> {
 }
 
 for (const width of [390, 1280]) {
-  test(`Focus document picker shares the header and switches at ${width}px (#104)`, async ({ page }) => {
+  test(`Focus mode keeps the document title bar: rename, switch and create at ${width}px (#104)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     const first = await twoDocuments(page);
-    const picker = page.getByRole('combobox', { name: 'Documents', exact: true });
-    await expect(picker).toBeHidden();
     await page.locator('#focus-mode').click();
-    await expect(picker).toBeVisible();
-    const rows = await Promise.all(['.focus-heading', '#focus-documents', '#exit-focus'].map(async id => {
-      const box = (await page.locator(id).boundingBox())!;
-      expect(box.x + box.width).toBeLessThanOrEqual(width);
-      expect(box.width).toBeGreaterThan(0);
-      return box.y + box.height / 2;
-    }));
-    expect(Math.max(...rows) - Math.min(...rows)).toBeLessThanOrEqual(2);
-    await picker.focus();
-    await picker.press('Escape');
     await expect(page.locator('body')).toHaveClass(/focus-mode/);
-    await picker.press('Tab');
-    await expect(page.locator('#exit-focus')).toBeFocused();
-    await picker.selectOption(first);
+    const title = page.getByRole('textbox', { name: 'Document title' });
+    const menu = page.getByRole('button', { name: 'Documents', exact: true });
+    // The same controls as Normal mode, with Exit focus; the rest of the top bar is hidden.
+    for (const control of [title, menu, page.locator('#save-indicator'), page.locator('#enabled'), page.locator('#exit-focus')]) {
+      await expect(control).toBeVisible();
+      const box = (await control.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
+    for (const id of ['.brand', '#focus-mode', '#settings-open']) await expect(page.locator(id)).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    if (width >= 1000) {
+      // One line above the editor on wide screens.
+      const rows = await Promise.all(['#draft-title', '#doc-menu-open', '#enabled', '#exit-focus'].map(async id => {
+        const box = (await page.locator(id).boundingBox())!;
+        return box.y + box.height / 2;
+      }));
+      expect(Math.max(...rows) - Math.min(...rows)).toBeLessThanOrEqual(4);
+    }
+    // Rename in place.
+    await title.fill('Новое имя');
+    await expect(page.locator('#save-indicator')).toHaveText('Saved');
+    await expect(page.locator('#drafts option', { hasText: 'Новое имя' })).toHaveCount(1);
+    // Switch documents from the ▾ menu, staying in Focus mode.
+    await selectDocument(page, first);
     await expect(page.locator('#editor')).toHaveValue('Первый текст');
     await expect(page.locator('body')).toHaveClass(/focus-mode/);
-    await expect(page.locator('#drafts')).toHaveValue(first);
-    await expect(picker).toHaveValue(first);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    await page.locator('#editor').fill('Правка перед переключением');
-    const second = await picker.locator('option').evaluateAll((options, id) =>
-      (options as HTMLOptionElement[]).find(option => option.value !== id)!.value, first);
-    await picker.selectOption(second);
-    await expect(page.locator('#editor')).toHaveValue('Второй текст');
-    await picker.selectOption(first);
-    await expect(page.locator('#editor')).toHaveValue('Правка перед переключением');
+    // Escape inside the menu closes it but keeps Focus mode.
+    await openDocuments(page);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#doc-menu')).toBeHidden();
+    await expect(page.locator('body')).toHaveClass(/focus-mode/);
+    // Create a new document from the menu.
+    await documentAction(page, '#new-draft');
+    await expect(page.locator('#editor')).toHaveValue('');
+    await expect(title).toHaveValue('Untitled document');
+    await expect(page.locator('body')).toHaveClass(/focus-mode/);
+    await expect(page.locator('#drafts option')).toHaveCount(3);
   });
 }
 
-test('canceling a Focus document switch keeps unsaved text and restores both pickers (#104)', async ({ page }) => {
+test('canceling a document switch in Focus mode keeps unsaved text (#104)', async ({ page }) => {
   const first = await twoDocuments(page);
   await setAutosave(page, false);
   const second = await page.locator('#drafts').inputValue();
   await page.locator('#focus-mode').click();
   await page.locator('#editor').fill('Не сохранено');
   const dialog = page.waitForEvent('dialog');
-  const switching = page.locator('#focus-documents').selectOption(first);
+  const switching = selectDocument(page, first);
   await (await dialog).dismiss();
   await switching;
-  await expect(page.locator('#focus-documents')).toHaveValue(second);
   await expect(page.locator('#drafts')).toHaveValue(second);
   await expect(page.locator('#editor')).toHaveValue('Не сохранено');
   await expect(page.locator('body')).toHaveClass(/focus-mode/);

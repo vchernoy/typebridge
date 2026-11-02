@@ -323,8 +323,8 @@ document.addEventListener('keydown', event => {
 setupRules(() => [editor, findEditor, replaceEditor, titleEditor]);
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
-const focusDocuments = document.querySelector<HTMLSelectElement>('#focus-documents')!;
-const documentPickers = [draftSelect, focusDocuments];
+// One document list, in the ▾ menu; Focus mode shows the same title bar (#104).
+const documentPickers = [draftSelect];
 const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
 // The draft title follows the global transliteration mode and rules (#89).
 const titleEditor = new Editor(draftTitle);
@@ -826,7 +826,7 @@ async function initializeDrafts(): Promise<void> {
     setSaveStatus(storageProblem, 'failure');
     renderDrafts();
   } finally {
-    field.disabled = false; draftSelect.disabled = false; focusDocuments.disabled = false; draftTitle.disabled = false;
+    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
     restoreFocusMode();
     writingPosition.restore(active.id);
     updateStats();
