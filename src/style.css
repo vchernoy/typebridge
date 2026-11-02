@@ -807,3 +807,18 @@ body.focus-mode .bottom {
 #settings-about-title {
   scroll-margin-top: 72px;
 }
+
+.update-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+}
+.update-notice [role="status"] {
+  flex: 1 1 220px;
+}

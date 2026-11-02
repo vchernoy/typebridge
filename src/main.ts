@@ -1,3 +1,4 @@
+import { watchForUpdates } from './ui/update-notice';
 import { SHORTCUTS } from './editor/keyboard-shortcuts';
 import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
@@ -895,8 +896,39 @@ importFile.addEventListener('change', async () => {
 });
 
 window.addEventListener('pagehide', () => { savePending(); clearTimeout(saveTimer); void persist(); });
+let allowUpdateReload = false;
+let privateReloadChoice: { id: string; generation: number } | undefined;
+async function prepareUpdateReload(): Promise<boolean> {
+  if (transitioning || deleting || field.disabled) return false;
+  privateReloadChoice = undefined;
+  if (dirty && !autosave.checked) {
+    const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#update-reload')! });
+    if (discard) privateReloadChoice = { id: active.id, generation };
+    return discard;
+  }
+  savePending();
+  if (dirty) await persist();
+  if (!dirty) return true;
+  savePending();
+  const pending = readPending();
+  return !!pending && sameContent(pending, snapshot());
+}
+function reloadAfterUpdate(): void {
+  if (transitioning || deleting || field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
+  if (dirty) {
+    if (!autosave.checked) {
+      if (privateReloadChoice?.id !== active.id || privateReloadChoice.generation !== generation) throw new Error('Private edits changed');
+    } else {
+      savePending();
+      const pending = readPending();
+      if (!pending || !sameContent(pending, snapshot())) throw new Error('Reload backup unavailable');
+    }
+  }
+  allowUpdateReload = true;
+  try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
+}
 window.addEventListener('beforeunload', event => {
-  if (dirty) { savePending(); clearTimeout(saveTimer); void persist(); event.preventDefault(); event.returnValue = ''; }
+  if (dirty) { savePending(); clearTimeout(saveTimer); void persist(); if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; } }
 });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
 updateStats();
@@ -904,6 +936,7 @@ updateStats();
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(registration => watchForUpdates(registration, { prepareReload: prepareUpdateReload, reload: reloadAfterUpdate, cancelReload: () => { allowUpdateReload = false; } }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
   });
 }
