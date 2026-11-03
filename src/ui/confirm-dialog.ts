@@ -1,6 +1,7 @@
 export type ConfirmChoiceOptions = {
   title: string;
-  message: string;
+  /** Plain text, or structured content (e.g. a shortcuts `<dl>`). */
+  message: string | Node;
   /** Label for the affirmative action (e.g. Delete saved copy). */
   confirmLabel: string;
   /** Label for the safe/cancel action (e.g. Keep saved copy). Escape chooses this. */
@@ -58,9 +59,11 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     title.id = 'confirm-dialog-title';
     title.textContent = options.title;
 
-    const message = document.createElement('p');
+    const message = document.createElement('div');
     message.id = 'confirm-dialog-message';
-    message.textContent = options.message;
+    message.className = 'confirm-dialog-message';
+    if (typeof options.message === 'string') message.textContent = options.message;
+    else message.append(options.message);
 
     const actions = document.createElement('div');
     actions.className = 'confirm-dialog-actions';

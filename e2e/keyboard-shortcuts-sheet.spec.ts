@@ -8,9 +8,12 @@ for (const apple of [false, true]) {
     await expect(page.locator('#editor')).toBeEnabled();
     await moreAction(page, '#keyboard-shortcuts');
     const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true });
-    await expect(dialog).toContainText('Toggle typing mode: Ctrl+Shift+Space');
-    await expect(dialog).toContainText(`Find: ${apple ? '⌘' : 'Ctrl'}+F`);
-    await expect(dialog).toContainText('Resize grip: arrow keys');
+    const list = dialog.locator('dl.shortcut-list');
+    await expect(list.locator('dt', { hasText: 'Toggle typing mode' })).toBeVisible();
+    await expect(list.locator('dd', { hasText: 'Ctrl+Shift+Space' }).first()).toBeVisible();
+    await expect(list.locator('dt', { hasText: /^Find$/ })).toBeVisible();
+    await expect(list.locator('dd', { hasText: `${apple ? '⌘' : 'Ctrl'}+F` }).first()).toBeVisible();
+    await expect(list.locator('dt', { hasText: 'Resize grip' })).toBeVisible();
     await expect(dialog).toContainText('Some systems reserve Ctrl+Shift+Space');
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
@@ -24,11 +27,11 @@ for (const apple of [false, true]) {
     await expect(page.locator('#settings-panel')).toBeHidden();
     await expect(page.locator('#more-open')).toBeFocused();
     await moreAction(page, '#keyboard-shortcuts');
-    await expect(dialog).toContainText(`Toggle typing mode: ${apple ? '⌘' : 'Ctrl'}+Shift+F8`);
+    await expect(dialog.locator('dl.shortcut-list dd').first()).toHaveText(`${apple ? '⌘' : 'Ctrl'}+Shift+F8`);
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await setSetting(page, '#tab-indent', false);
     await moreAction(page, '#keyboard-shortcuts');
-    await expect(dialog).toContainText('Tab indents is off');
+    await expect(dialog.locator('dl.shortcut-list dd', { hasText: 'Tab indents is off' })).toBeVisible();
   });
 }
 
@@ -39,7 +42,7 @@ test('shortcuts sheet keeps the first lines visible on a short viewport (#137 U7
   await moreAction(page, '#keyboard-shortcuts');
   const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true });
   await expect(dialog.getByRole('heading', { name: 'Keyboard shortcuts', exact: true })).toBeInViewport();
-  await expect(dialog.getByText('Toggle typing mode: Ctrl+Shift+Space')).toBeInViewport();
+  await expect(dialog.locator('dl.shortcut-list dt', { hasText: 'Toggle typing mode' })).toBeInViewport();
   await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
   await expect(dialog.getByRole('button', { name: 'Change typing shortcut', exact: true })).toBeInViewport();
 });

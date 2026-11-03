@@ -17,23 +17,37 @@ export function setupKeyboardShortcuts(): void {
     const choice: TransliterationShortcut = TRANSLITERATION_SHORTCUTS.some(value => value === shortcut.value)
       ? shortcut.value as TransliterationShortcut : 'default';
     const indent = document.querySelector<HTMLInputElement>('#tab-indent')!.checked;
-    const lines = [
-      `Toggle typing mode: ${transliterationShortcutLabel(choice, apple)}`,
-      `Convert selection to Cyrillic: ${label('convertCyrillic')}`,
-      `Convert selection to Latin: ${label('convertLatin')}`,
-      `Find: ${label('find')}`,
-      `Go to line: ${label('goto')}`,
-      `Focus mode: ${label('focus')}`,
-      `Undo: ${label('undo')}`,
-      `Redo: ${label('redo')} or ${label('redoAlternate')}`,
-      `Indent / outdent: ${label('indent')} / ${label('outdent')}${indent ? '' : ' (Tab indents is off)'}`,
-      `Next / previous match in Find: ${label('nextMatch')} / ${label('previousMatch')}`,
-      'Resize grip: arrow keys',
-      `${label('escape')}: closes the current dialog, panel, menu or search bar first; otherwise toggles Focus from the editor, or exits Focus.`,
-      '',
-      'Some systems reserve Ctrl+Shift+Space for keyboard-language switching. Use Change typing shortcut to choose another binding or disable it. Browser/OS-reserved shortcuts may take priority.',
+    const rows: Array<[string, string]> = [
+      ['Toggle typing mode', transliterationShortcutLabel(choice, apple)],
+      ['Convert selection to Cyrillic', label('convertCyrillic')],
+      ['Convert selection to Latin', label('convertLatin')],
+      ['Find', label('find')],
+      ['Go to line', label('goto')],
+      ['Focus mode', label('focus')],
+      ['Undo', label('undo')],
+      ['Redo', `${label('redo')} or ${label('redoAlternate')}`],
+      ['Indent / outdent', `${label('indent')} / ${label('outdent')}${indent ? '' : ' (Tab indents is off)'}`],
+      ['Next / previous match in Find', `${label('nextMatch')} / ${label('previousMatch')}`],
+      ['Resize grip', 'arrow keys'],
     ];
-    const change = await askConfirmChoice({ title: 'Keyboard shortcuts', message: lines.join('\n'),
+    const content = document.createElement('div');
+    const list = document.createElement('dl');
+    list.className = 'shortcut-list';
+    for (const [action, keys] of rows) {
+      const dt = document.createElement('dt');
+      dt.textContent = action;
+      const dd = document.createElement('dd');
+      dd.textContent = keys;
+      list.append(dt, dd);
+    }
+    const escapeNote = document.createElement('p');
+    escapeNote.className = 'shortcut-note';
+    escapeNote.textContent = `${label('escape')}: closes the current dialog, panel, menu or search bar first; otherwise toggles Focus from the editor, or exits Focus.`;
+    const reserveNote = document.createElement('p');
+    reserveNote.className = 'shortcut-note';
+    reserveNote.textContent = 'Some systems reserve Ctrl+Shift+Space for keyboard-language switching. Use Change typing shortcut to choose another binding or disable it. Browser/OS-reserved shortcuts may take priority.';
+    content.append(list, escapeNote, reserveNote);
+    const change = await askConfirmChoice({ title: 'Keyboard shortcuts', message: content,
       confirmLabel: 'Change typing shortcut', cancelLabel: 'Close', returnFocus: accepted => accepted ? shortcut : more });
     if (change) openSettingsTo(shortcut, more);
   });

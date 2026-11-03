@@ -72,7 +72,7 @@ test('word statistics count Cyrillic, Latin, punctuation and update on undo', as
   await page.goto('/');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет, мир! Hello 2026.');
-  await expect(page.locator('#count')).toHaveText('24 characters · 4 words · 1 min read');
+  await expect(page.locator('#count')).toHaveText('24 characters · 4 words · 1 min read'); // plural forms (#156)
   await field.fill('');
   await expect(page.locator('#count')).toHaveText('0 characters · 0 words · 0 min read');
 });

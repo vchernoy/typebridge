@@ -132,12 +132,20 @@
             <button
               id="convert-cyrillic"
               type="button"
+              aria-label="To Cyrillic"
               title="Convert the selected text to Cyrillic (Cmd/Ctrl+Shift+L)"
             >
-              To Cyrillic
+              <span class="convert-label-full">To Cyrillic</span
+              ><span class="convert-label-phone" aria-hidden="true">Cyr</span>
             </button>
-            <button id="convert-latin" type="button" title="Convert the selected text to Latin (Cmd/Ctrl+Shift+K)">
-              To Latin
+            <button
+              id="convert-latin"
+              type="button"
+              aria-label="To Latin"
+              title="Convert the selected text to Latin (Cmd/Ctrl+Shift+K)"
+            >
+              <span class="convert-label-full">To Latin</span
+              ><span class="convert-label-phone" aria-hidden="true">Lat</span>
             </button>
             <span class="tool-sep" aria-hidden="true"></span>
             <button
@@ -278,11 +286,13 @@
           </div>
         </aside>
         <div id="find-bar" class="find-bar" role="search" aria-label="Find and replace" hidden>
-          <label for="find-text">Find</label><input id="find-text" type="text" autocomplete="off" /><label
-            for="replace-text"
-            >Replace</label
-          ><input id="replace-text" type="text" autocomplete="off" /><label class="toggle search-chip"
-            ><input id="match-case" type="checkbox" /> Match case</label
+          <div class="find-field">
+            <label for="find-text">Find</label><input id="find-text" type="text" autocomplete="off" />
+          </div>
+          <div class="find-field">
+            <label for="replace-text">Replace</label><input id="replace-text" type="text" autocomplete="off" />
+          </div>
+          <label class="toggle search-chip"><input id="match-case" type="checkbox" /> Match case</label
           ><label class="toggle search-chip"><input id="regex-mode" type="checkbox" /> Regex (.*)</label
           ><button id="find-prev" type="button" aria-label="Previous match" title="Previous match">↑</button
           ><button id="find-next" type="button" aria-label="Next match" title="Next match">↓</button

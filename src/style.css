@@ -215,6 +215,9 @@ body {
   font: inherit;
   font-size: 1.1rem;
   font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Size the title to its text where supported, so ▾ sits right after it. */
 @supports (field-sizing: content) {
@@ -389,7 +392,13 @@ button:disabled {
   gap: 8px;
   margin-bottom: 16px;
 }
-.find-bar input[type="text"],
+.find-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.find-field input[type="text"],
 .goto-bar input[type="text"] {
   width: 160px;
   max-width: 100%;
@@ -662,13 +671,47 @@ body.focus-mode .bottom {
   margin: 0 0 10px;
   font-size: 1.15rem;
 }
-.confirm-dialog p {
+.confirm-dialog-message {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   white-space: pre-line;
   margin: 0 0 18px;
   line-height: 1.45;
+}
+.confirm-dialog-message .shortcut-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  white-space: normal;
+}
+.confirm-dialog-message .shortcut-list dt {
+  margin: 0;
+  font-weight: 600;
+}
+.confirm-dialog-message .shortcut-list dd {
+  margin: 0;
+  text-align: end;
+}
+.confirm-dialog-message .shortcut-note {
+  margin: 0 0 10px;
+  white-space: normal;
+}
+.confirm-dialog-message .shortcut-note:last-child {
+  margin-bottom: 0;
+}
+/* Routine save progress stays announced but is shown only in the top bar (#156). */
+.status--announced-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.convert-label-phone {
+  display: none;
 }
 .confirm-dialog-actions {
   flex: 0 0 auto;
@@ -741,6 +784,33 @@ body.focus-mode .bottom {
   }
   .tool-sep {
     display: none;
+  }
+  /* Shorter convert labels leave room for Find/Copy/⋯ on one row at ~390 px (#156). */
+  .convert-label-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .convert-label-phone {
+    display: inline;
+  }
+  #convert-cyrillic,
+  #convert-latin {
+    padding: 0 8px;
+  }
+  .toolbar .actions {
+    gap: 4px;
+  }
+  .find-field {
+    flex: 1 1 100%;
+  }
+  .find-field input[type="text"] {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
   }
 }
 @media (max-width: 360px) {

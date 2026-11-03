@@ -22,6 +22,7 @@ import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
+import { formatDocumentStats } from './editor/document-stats';
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
@@ -66,11 +67,17 @@ type SwitchResult = { opened: boolean; conflict: boolean };
 let conflictAnnounceToken = 0;
 /** True between clearing the live region and the rAF rewrite for an identical conflict. */
 let conflictReannouncePending = false;
+/** Routine save progress that the top-bar indicator already shows (#156). */
+function isRoutineSaveAnnouncement(body: string): boolean {
+  return body === 'Saved locally' || body === 'Saving…';
+}
 /** Body/separator only — conflict live region is owned by setConflict. */
 function renderStatus(): void {
   const { sep, body } = statusLineParts(statusMessage, conflictNotice.textContent ?? '');
   if (statusSep.textContent !== sep) statusSep.textContent = sep;
   if (status.textContent !== body) status.textContent = body;
+  // Keep announcing save progress, but show it once in the top bar (#156).
+  status.classList.toggle('status--announced-only', isRoutineSaveAnnouncement(body));
   updateSaveIndicator();
 }
 let saveFailed = false;
@@ -234,11 +241,7 @@ field.addEventListener('keydown', event => {
   editor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
 });
 function updateStats(): void {
-  const value = field.value;
-  const characters = Array.from(value).length;
-  const words = (value.match(/[\p{L}\p{N}]+(?:['’\u2010-\u2015-][\p{L}\p{N}]+)*/gu) ?? []).length;
-  const minutes = words === 0 ? 0 : Math.max(1, Math.ceil(words / 180));
-  count.textContent = `${characters} characters · ${words} words · ${minutes} min read`;
+  count.textContent = formatDocumentStats(field.value);
   updateCaretPosition();
 }
 field.addEventListener('input', updateStats);
@@ -461,6 +464,7 @@ function showDraft(): void {
     editor.load(active.text);
     editor.restoreHistory(active.history);
     draftTitle.value = active.title;
+    syncTitleTooltip();
     dirty = false;
     saveFailed = false; // The editor no longer holds the unsaved text.
   } finally { loadingDraft = false; }
@@ -555,7 +559,12 @@ function scheduleSave(fromTitle = false): void {
 }
 field.addEventListener('input', () => scheduleSave());
 field.addEventListener('historychange', () => scheduleSave());
-draftTitle.addEventListener('input', () => scheduleSave(true));
+function syncTitleTooltip(): void {
+  // Ellipsis may clip the field; the accessible name and tooltip keep the full title (#156).
+  draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
+}
+syncTitleTooltip();
+draftTitle.addEventListener('input', () => { syncTitleTooltip(); scheduleSave(true); });
 autosave.addEventListener('change', async () => {
   autosave.disabled = true;
   try {

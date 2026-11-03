@@ -54,7 +54,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await textContrast(page.locator('#doc-menu .menu-label'));
     await closeDocuments(page);
     await moreAction(page, '#keyboard-shortcuts');
-    await textContrast(page.locator('.confirm-dialog p'));
+    await textContrast(page.locator('.confirm-dialog-message .shortcut-list dt').first());
     await textContrast(page.locator('.confirm-dialog button').first());
   });
 }
