@@ -681,18 +681,32 @@ body.focus-mode .bottom {
 }
 .confirm-dialog-message .shortcut-list {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 12px;
   margin: 0 0 12px;
   white-space: normal;
 }
-.confirm-dialog-message .shortcut-list dt {
+.confirm-dialog-message .shortcut-list dt,
+.confirm-dialog-message .shortcut-list dd {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+.confirm-dialog-message .shortcut-list dt {
   font-weight: 600;
 }
 .confirm-dialog-message .shortcut-list dd {
-  margin: 0;
   text-align: end;
+}
+@media (max-width: 420px) {
+  .confirm-dialog-message .shortcut-list {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+  .confirm-dialog-message .shortcut-list dd {
+    text-align: start;
+    margin-bottom: 8px;
+    color: var(--muted);
+  }
 }
 .confirm-dialog-message .shortcut-note {
   margin: 0 0 10px;

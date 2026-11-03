@@ -497,7 +497,10 @@ async function persist(): Promise<PersistResult> {
         updateSaveIndicator();
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
-          if ((draftTitle.value.trim() || UNTITLED_TITLE) === saved.title) draftTitle.value = active.title;
+          if ((draftTitle.value.trim() || UNTITLED_TITLE) === saved.title) {
+            draftTitle.value = active.title;
+            syncTitleTooltip();
+          }
           // Storage may have become unusable while the copy was written.
           createdConflict = true;
           // While switching, leave announcement to switchDraft so early returns and
