@@ -563,7 +563,7 @@ function scheduleSave(fromTitle = false): void {
 field.addEventListener('input', () => scheduleSave());
 field.addEventListener('historychange', () => scheduleSave());
 function syncTitleTooltip(): void {
-  // Ellipsis may clip the field; the accessible name and tooltip keep the full title (#156).
+  // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
   draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
 }
 syncTitleTooltip();
