@@ -140,13 +140,18 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     cancel.addEventListener('click', () => close(false));
     confirm.addEventListener('click', () => close(true));
     document.addEventListener('keydown', onKeyDown, true);
-    // Prefer the safer choice so Enter does not delete by default. preventScroll
-    // keeps short-viewport sheets at the top (title + first lines visible) while
-    // actions remain outside the message scrollport. Measure overflow after
-    // layout so short confirms are not treated as scrollable prematurely.
+    // Prefer the safer choice so Enter does not delete by default. Focus Cancel
+    // synchronously so Tab/Enter work before the next frame (Playwright and fast
+    // typists). preventScroll keeps short-viewport sheets at the top.
+    cancel.focus({ preventScroll: true });
+    // Measure overflow after layout so short confirms are not treated as
+    // scrollable prematurely. Do not steal focus if the user already Tabbed away.
     requestAnimationFrame(() => {
       message.tabIndex = message.scrollHeight > message.clientHeight + 1 ? 0 : -1;
-      cancel.focus({ preventScroll: true });
+      const active = document.activeElement;
+      if (active === cancel || !dialog.contains(active)) {
+        cancel.focus({ preventScroll: true });
+      }
       dialog.scrollTop = 0;
       message.scrollTop = 0;
     });
