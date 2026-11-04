@@ -246,6 +246,23 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
   expect((await readStoredDocs(other)).map(row => row.id)).not.toContain(id);
 });
 
+test('an editing owner still reconciles a missed newer revision on focus', async ({ page, context }) => {
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });
+  });
+  await openOrdinary(page);
+  await saveAs(page, 'Owned text');
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+  await writeForeignRevision(page, { text: 'Foreign newer' });
+  await expect(page.locator('#version-notice')).toBeHidden();
+  await expect(page.locator('#editor')).toHaveValue('Owned text');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.locator('#version-notice')).toBeVisible();
+  await expect(page.locator('#version-notice')).toContainText('newer saved version');
+  await expect(page.locator('#editor')).toHaveValue('Owned text');
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+});
+
 test('focus applies a missed newer revision before taking ownership', async ({ page, context }) => {
   await openOrdinary(page);
   const id = await saveAs(page, 'Версия один');

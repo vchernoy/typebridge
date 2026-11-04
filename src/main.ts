@@ -614,6 +614,8 @@ function loseOwnership(): void {
   showSaveState();
 }
 let ownershipRetry: Promise<void> | undefined;
+/** A BroadcastChannel reread arrived while ownershipRetry held the transition; run after it finishes. */
+let rereadAfterOwnershipRetry = false;
 /**
  * A read-only ordinary window tries again when shown or focused; it becomes editor only if the lock is free.
  * Always rereads first (single-flight with the acquire): a concurrent refresh must not bump viewGeneration
@@ -653,7 +655,12 @@ function retryOwnership(): void {
     installOwnership(access);
     announceAction('You can edit this document in this window now.', { keepConflict: true });
     if (dirty && autosave.checked) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { void persist(); }, 300); }
-  })().finally(() => { ownershipRetry = undefined; });
+  })().finally(() => {
+    ownershipRetry = undefined;
+    if (!rereadAfterOwnershipRetry) return;
+    rereadAfterOwnershipRetry = false;
+    void rereadDisplayed();
+  });
 }
 async function persist(): Promise<PersistResult> {
   if (viewMode) return { saved: true, conflict: false };
@@ -1290,13 +1297,16 @@ signalChannel?.addEventListener('message', event => {
   if (field.disabled) { rereadAfterInit = true; return; }
   scheduleListRefresh();
   if (!shouldApplyDocumentSignal(signal, active.id, active.revision)) return;
+  // Do not bump viewGeneration under an in-flight ownership acquire (stillHere would release).
+  if (ownershipRetry) { rereadAfterOwnershipRetry = true; return; }
   void rereadDisplayed();
 });
 function reconcileSignals(): void {
   if (document.visibilityState !== 'visible') return;
   scheduleListRefresh();
-  // Ownership retry itself awaits the authoritative reread first (see retryOwnership).
-  retryOwnership();
+  // Readers: single-flight reread+acquire. Owners/viewers: still reread so missed signals surface.
+  if (mayRetryEditOwnership(editBlock)) retryOwnership();
+  else void rereadDisplayed();
 }
 // Focusing the text is the clearest sign the user wants to edit here; it never steals a held lock.
 field.addEventListener('focus', retryOwnership);
