@@ -7,6 +7,14 @@ import { isDocumentId } from './route';
 
 export const EDIT_HANDOFF_CHANNEL = 'typebridge.edit-handoff.v1';
 
+/** How long a Transfer editing prompt remains valid after the request `at` timestamp. */
+export const HANDOFF_REQUEST_TTL_MS = 15_000;
+
+/** True when a request is too old to release ownership for (owner and requester share this budget). */
+export function handoffRequestExpired(at: number, now = Date.now(), ttlMs = HANDOFF_REQUEST_TTL_MS): boolean {
+  return !Number.isFinite(at) || now - at > ttlMs;
+}
+
 /**
  * Why a live owner cannot transfer editing yet (or declined).
  * - declined: owner chose Keep editing

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  HANDOFF_REQUEST_TTL_MS,
   createHandoffRefused,
   createHandoffReleased,
   createHandoffRequest,
   handoffRefuseGuidance,
+  handoffRequestExpired,
   mayShowEditHere,
   ownerHandoffBlock,
   parseHandoffSignal,
@@ -89,5 +91,13 @@ describe('handoffRefuseGuidance', () => {
   it('explains private and declined refusals', () => {
     expect(handoffRefuseGuidance('private')).toContain('unsaved or private');
     expect(handoffRefuseGuidance('declined')).toContain('still editing');
+  });
+});
+
+describe('handoffRequestExpired', () => {
+  it('expires after the shared TTL', () => {
+    expect(handoffRequestExpired(1000, 1000 + HANDOFF_REQUEST_TTL_MS)).toBe(false);
+    expect(handoffRequestExpired(1000, 1000 + HANDOFF_REQUEST_TTL_MS + 1)).toBe(true);
+    expect(handoffRequestExpired(1000, 1500, 400)).toBe(true);
   });
 });

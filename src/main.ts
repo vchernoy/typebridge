@@ -15,10 +15,12 @@ import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownershi
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
 import {
   EDIT_HANDOFF_CHANNEL,
+  HANDOFF_REQUEST_TTL_MS,
   createHandoffRefused,
   createHandoffReleased,
   createHandoffRequest,
   handoffRefuseGuidance,
+  handoffRequestExpired,
   mayShowEditHere,
   ownerHandoffBlock,
   parseHandoffSignal,
@@ -1484,6 +1486,13 @@ function postHandoff(signal: HandoffSignal): void {
   if (!handoffChannel) return;
   try { handoffChannel.postMessage(signal); } catch { /* Advisory; requester times out. */ }
 }
+function handoffTtlMs(): number {
+  const override = (window as Window & { __typebridgeHandoffTtlMs?: number }).__typebridgeHandoffTtlMs;
+  return typeof override === 'number' && override > 0 ? override : HANDOFF_REQUEST_TTL_MS;
+}
+function requestExpired(at: number): boolean {
+  return handoffRequestExpired(at, Date.now(), handoffTtlMs());
+}
 function wireEditorLifecycle(): void {
   if (editorLifecycleWired) return;
   editorLifecycleWired = true;
@@ -1550,6 +1559,8 @@ async function becomeEditorFor(documentId: string, attempt: { view: number }): P
       }
       wireEditorLifecycle();
       wireRecoveryWatch();
+      // Reload must read the ordinary editor key, not the viewer-prefixed one.
+      writingPosition.setNamespace('');
       syncOrdinaryEditorUrl(fresh.id);
     }
     // Follow retryOwnership: never replace unsaved in-memory text/title/history.
@@ -1610,7 +1621,7 @@ async function requestEditHere(): Promise<void> {
           pendingHandoff = undefined;
           resolve(undefined);
         }
-      }, 15_000);
+      }, handoffTtlMs());
     });
     if (pendingHandoff?.requestId === requestId) pendingHandoff = undefined;
     // Navigation cancelled this attempt — do not toast a timeout or install A over B.
@@ -1671,6 +1682,10 @@ handoffChannel?.addEventListener('message', event => {
   if (signal.type !== 'request') return;
   if (viewMode || ownership?.documentId !== signal.documentId || editBlock) return;
   void (async () => {
+    if (requestExpired(signal.at)) {
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), 'busy'));
+      return;
+    }
     const block = ownerHandoffBlock({
       isOwner: !!ownership && ownership.documentId === signal.documentId && !editBlock,
       composing: editor.isComposing || titleEditor.isComposing,
@@ -1695,6 +1710,11 @@ handoffChannel?.addEventListener('message', event => {
     });
     if (!transfer) {
       postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), 'declined'));
+      return;
+    }
+    // Requester may have timed out while the dialog was open — keep ownership.
+    if (requestExpired(signal.at)) {
+      announceAction('The Edit here request expired. You still have editing in this window.', { keepConflict: true });
       return;
     }
     const stillBlocked = ownerHandoffBlock({
@@ -1723,6 +1743,10 @@ handoffChannel?.addEventListener('message', event => {
           ));
           return;
         }
+      }
+      if (requestExpired(signal.at)) {
+        announceAction('The Edit here request expired. You still have editing in this window.', { keepConflict: true });
+        return;
       }
       if (ownership?.documentId === signal.documentId) {
         const previous = ownership;

@@ -221,6 +221,51 @@ test('navigating during a delayed acquire does not install stale ownership', asy
   expect(new URL(viewer.url()).searchParams.get('doc')).toBe(idB);
 });
 
+test('an expired transfer prompt keeps the owner editing', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'Expire transfer');
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeHandoffTtlMs?: number }).__typebridgeHandoffTtlMs = 400;
+  });
+  const viewer = await context.newPage();
+  await viewer.goto(`/?doc=${id}&mode=view`);
+  await viewer.evaluate(() => {
+    (window as Window & { __typebridgeHandoffTtlMs?: number }).__typebridgeHandoffTtlMs = 400;
+  });
+  await viewer.locator('#edit-here').click();
+  const dialog = page.getByRole('dialog', { name: 'Transfer editing?' });
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(600);
+  await dialog.getByRole('button', { name: 'Transfer editing' }).click();
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#status')).toContainText('expired');
+  await expect(role(viewer)).toHaveAttribute('data-role', 'viewer');
+  expect((await readOwnership(page, id))?.ownerInstanceId).toBe(await instanceOf(page));
+});
+
+test('a promoted viewer stores writing position under the editor namespace', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'Position after promote');
+  await page.close();
+  const viewer = await context.newPage();
+  await viewer.goto(`/?doc=${id}&mode=view`);
+  await viewer.locator('#edit-here').click();
+  await expect.poll(async () => role(viewer).getAttribute('data-role')).toBe('editor');
+  await viewer.locator('#editor').fill('Position after promote!');
+  await viewer.locator('#editor').evaluate(node => {
+    const field = node as HTMLTextAreaElement;
+    field.setSelectionRange(3, 5, 'forward');
+    field.dispatchEvent(new Event('select'));
+  });
+  await expect.poll(async () => viewer.evaluate(docId => {
+    const keys = Object.keys(sessionStorage).filter(key => key.includes('writingPosition'));
+    return {
+      viewerKey: keys.some(key => key.includes(`view:${docId}`)),
+      editorKey: keys.includes(`typebridge.writingPosition.v1.${docId}`),
+    };
+  }, id)).toEqual({ viewerKey: false, editorKey: true });
+});
+
 test('a promoted viewer holds recovery ownership while it is still open', async ({ page, context }) => {
   await openOrdinary(page);
   const id = await saveAs(page, 'Recovery promote');
