@@ -20,6 +20,8 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | [#39](https://github.com/vchernoy/typebridge/issues/39) | Portable share links | Ready for implementation |
 | [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Plain-text preference merged (#42); Reading View remains open |
 | [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
+| [#48](https://github.com/vchernoy/typebridge/issues/48) | Cross-tab saved-version notifications | Partial scope planned via [#159](https://github.com/vchernoy/typebridge/issues/159) W3; do not close #48 automatically |
+| [#159](https://github.com/vchernoy/typebridge/issues/159) | Comparison window + single editing owner | W1 ADR/contracts; implementation W2–W6 — see [ADR](adr/159-comparison-window.md) |
 
 ## Audit and current reliability follow-ups
 
