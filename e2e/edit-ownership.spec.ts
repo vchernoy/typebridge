@@ -246,6 +246,35 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
   expect((await readStoredDocs(other)).map(row => row.id)).not.toContain(id);
 });
 
+test('document switch waits for Autosave-off delete prompt before changing documents', async ({ page }) => {
+  await openOrdinary(page);
+  const first = await saveAs(page, 'first saved copy');
+  await documentAction(page, '#new-draft');
+  await saveAs(page, 'second saved copy');
+  await page.locator('#settings-open').click();
+  await expect(page.locator('#settings-panel')).toBeVisible();
+  await page.locator('#autosave').uncheck();
+  const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
+  await expect(dialog).toBeVisible();
+  // Queue a switch while the prompt owns the document; it must not apply until the prompt closes.
+  const switching = page.evaluate(id => new Promise<void>(resolve => {
+    const select = document.querySelector<HTMLSelectElement>('#drafts')!;
+    select.value = id;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    // switchDraft awaits the Autosave toggle gate; resolve on the next task after dispatch.
+    queueMicrotask(() => resolve());
+  }), first);
+  await switching;
+  await expect(page.locator('#editor')).toHaveValue('second saved copy');
+  await dialog.getByRole('button', { name: 'Keep saved copy' }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(async () => page.locator('#editor').inputValue()).toBe('first saved copy');
+  await expect.poll(async () => (await readStoredDocs(page)).map(row => row.text).sort()).toEqual([
+    'first saved copy',
+    'second saved copy',
+  ]);
+});
+
 test('a database upgrade releases the editing lock so another tab can acquire', async ({ page, context }) => {
   await openOrdinary(page);
   const id = await saveAs(page, 'upgrade me');

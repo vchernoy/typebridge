@@ -688,6 +688,9 @@ async function persist(): Promise<PersistResult> {
   if (editBlock) return { saved: false, conflict: false };
   if (saving) return saving;
   saving = (async () => {
+    // E2E may delay the in-flight save so Autosave-off can race a document switch (#159 W4).
+    const delayMs = (window as Window & { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+    if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     let createdConflict = false;
     try {
       if (!db) throw new Error('Storage unavailable');
@@ -789,9 +792,26 @@ function syncTitleTooltip(): void {
 }
 syncTitleTooltip();
 draftTitle.addEventListener('input', () => { syncTitleTooltip(); scheduleSave(true); });
+/** While Autosave is toggling (including delete-saved-copy), document switches wait. */
+let autosaveToggleGate: Promise<void> | undefined;
+let releaseAutosaveToggleGate: (() => void) | undefined;
+function beginAutosaveToggleGate(): void {
+  if (autosaveToggleGate) return;
+  autosaveToggleGate = new Promise(resolve => {
+    releaseAutosaveToggleGate = () => {
+      autosaveToggleGate = undefined;
+      releaseAutosaveToggleGate = undefined;
+      resolve();
+    };
+  });
+}
+function endAutosaveToggleGate(): void {
+  releaseAutosaveToggleGate?.();
+}
 autosave.addEventListener('change', async () => {
   if (readOnlyNow()) return;
   autosave.disabled = true;
+  beginAutosaveToggleGate();
   try {
   try { setAutosaveEnabled(autosave.checked); preferenceSaved('autosave', true); }
   catch { preferenceSaved('autosave', false); }
@@ -808,11 +828,24 @@ autosave.addEventListener('change', async () => {
   }
   else {
     clearTimeout(saveTimer);
+    // Bind deletion to this document before any await — defense if a switch somehow races the gate.
+    const startedId = active.id;
+    const startedOwnership = ownership;
     // Await an in-flight save without clearing first — it may create a conflict copy
     // that the delete prompt then targets, and the user must see that notice.
     // Older conflict notices still clear when the toggle did not itself create one.
     const inFlight = saving ? await saving : undefined;
     if (!inFlight?.conflict) clearNotices();
+    const stayed = active.id === startedId && ownership === startedOwnership;
+    const conflictCopy = !!(inFlight?.conflict && ownership && ownership !== startedOwnership && active.id !== startedId);
+    // Navigated away during the wait: do not offer to delete a different document's saved copy.
+    if (!stayed && !conflictCopy) {
+      announce(AUTOSAVE_OFF);
+      return;
+    }
+    const targetId = active.id;
+    const targetRevision = active.revision;
+    const targetOwnership = ownership!;
     // returnFocus is the checkbox itself: it is disabled for this handler, so
     // capture it here and let askConfirmChoice restore after finally re-enables.
     const deleteSaved = await askConfirmChoice({
@@ -825,11 +858,16 @@ autosave.addEventListener('change', async () => {
     if (deleteSaved) {
       try {
         // Keep the fence: this window goes on editing the same id privately.
-        if (!db || !ownership || ownership.documentId !== active.id) throw new Error('Storage unavailable');
-        if (!await deleteStoredDraft(db, active.id, active.revision, await ownership.writeFence())) throw new Error('Draft changed');
-        if (active.revision >= 1) postSignal('deleted', active.id, active.revision);
-        active = { ...active, revision: 0 };
-        dirty = true;
+        if (!db || targetOwnership.documentId !== targetId) throw new Error('Storage unavailable');
+        if (active.id !== targetId || ownership !== targetOwnership || editBlock || transferFrozen || transitioning) {
+          throw new Error('Document changed');
+        }
+        if (!await deleteStoredDraft(db, targetId, targetRevision, await targetOwnership.writeFence())) throw new Error('Draft changed');
+        if (targetRevision >= 1) postSignal('deleted', targetId, targetRevision);
+        if (active.id === targetId) {
+          active = { ...active, revision: 0 };
+          dirty = true;
+        }
         clearNotices();
         await refreshDrafts();
       } catch (error) {
@@ -841,6 +879,7 @@ autosave.addEventListener('change', async () => {
     announce(AUTOSAVE_OFF);
   }
   } finally {
+    endAutosaveToggleGate();
     // Match applyEditAccess / readOnlyNow — a concurrent switch may have set transferFrozen.
     autosave.disabled = editBlock !== '' || transferFrozen;
     // Re-focus after re-enabling: the dialog cannot restore while this control
@@ -850,6 +889,8 @@ autosave.addEventListener('change', async () => {
 });
 async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
+  if (autosaveToggleGate) await autosaveToggleGate;
+  if (transitioning) return { opened: false, conflict: false };
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
   let flushConflict = false;
