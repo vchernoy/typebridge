@@ -4,22 +4,22 @@ Status: **Clarified goal — two document panes in one browser tab** (maintainer
 
 **S1 (this slice):** revised contracts + UX only — no runtime behavior change.
 
-## Context (audit of current code)
+## Context (audit of current code — post W1–W4)
 
-Relevant entry points today (no comparison UI yet):
+Baseline **after** merged W1–W4 (S1 starts here). The original W1 table (no routing, no BroadcastChannel, insufficient read-only) is historical only; see [W2](#w2-implementation-notes)–[W4](#w4-implementation-notes) for what shipped.
 
-| Concern | Location | Notes |
+| Concern | Location | Notes (current) |
 | --- | --- | --- |
-| IndexedDB documents | `src/editor/indexeddb.ts` | Store `documents`, `StoredDraft` with `revision` CAS; `commitOrCreateConflictCopy`; delete checks revision |
-| Boot / open document | `initializeDrafts` in `src/main.ts` | After recovery Web Lock: open DB → list → sessionStorage active hint → pending restore → else most recent → `showDraft` → optional `persist` → enable fields → `renderRecovery` |
-| Autosave / privacy | `src/editor/drafts.ts`, `persist` / `journalEdit` / `savePending` | Autosave off skips IDB/journal/pending writes; import and recovery Recover still commit |
-| “Committed” document | Successful IDB row with `revision >= 1` | `revision === 0` means never written or after Delete saved copy |
-| Recovery ownership | `OWNER_LOCK = 'typebridge-recovery-owner:'` + `journalTab` UUID | Web Lock suppresses recovery prompts; **not** document edit ownership |
-| sessionStorage | active draft hint, pending reload snapshot, writing position, Find strings | Duplicate-tab can clone; `window.open` normally does not |
-| URL routing | None for documents | Vite `base: '/'`; hash reserved for future #39 share links |
-| Cross-tab signals | None (`BroadcastChannel` unused) | CAS + recovery `storage` events only |
-| Document menu | `#doc-menu` / `.doc-actions` in `index.html`, `setupDocumentMenu` | Natural hang for **Open in comparison window** |
-| Read-only today | Temporary `readOnly` during Delete; boot `disabled` until init | Insufficient for companion (Editor, Replace, convert, menus, lifecycle flush) |
+| IndexedDB documents | `src/editor/indexeddb.ts` | `documents` + fence-gated writes; `editOwnership` store (DB v2); CAS conflict copies retained |
+| Boot / open document | `initializeDrafts` / `initializeViewer` in `src/main.ts` | Ordinary vs `?doc=&mode=view` branch before ordinary boot; viewers never take recovery ownership or pending restore |
+| Autosave / privacy | `persist` / `journalEdit` / `savePending` | Autosave off skips IDB/journal/pending; unchanged by split |
+| Recovery ownership | `typebridge-recovery-owner:{journalTab}` | Separate from edit ownership |
+| Edit ownership | `edit-ownership.ts`, `view/ownership.ts` | Web Lock `typebridge-edit-owner:{id}` + fence; ordinary tabs participate; viewers never acquire |
+| Cross-tab signals | `BroadcastChannel('typebridge.documents.v1')` | Metadata only; IDB reread; focus/visibility reconcile |
+| URL routing | `src/view/route.ts` | Comparison viewer query params; hash reserved for #39 |
+| Document menu | `#doc-menu` | **Open in comparison window** (separate window) ships; **Split editor** (in-tab) is S3+ |
+| Read-only | `viewMode`, `editBlock`, `Editor.setReadOnly` | Separate-window viewer + non-owner ordinary windows; in-tab pane roles not yet extracted |
+| Singletons blocking split | `main.ts` (`active`, one `#editor`, global toolbar) | See [S1 singleton audit](#singleton-audit-blocks-multi-pane-until-s2); contracts in `src/view/session.ts` |
 
 Constraints from #159 and AGENTS.md remain: client-only, no text logging/telemetry, IndexedDB authoritative, conflict copies retained, Autosave-off privacy unchanged.
 
