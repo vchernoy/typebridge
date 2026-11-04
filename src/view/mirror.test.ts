@@ -66,4 +66,16 @@ describe('mirrorTextarea', () => {
     expect(target.selectionStart).toBe(1);
     expect(target.selectionEnd).toBe(3);
   });
+
+  it('snaps restored selection off surrogate-pair interiors', () => {
+    const source = fakeField('😀x');
+    const target = fakeField('ax');
+    target.selectionStart = 1;
+    target.selectionEnd = 1;
+    mirrorTextarea(source, target);
+    expect(target.value).toBe('😀x');
+    // Offset 1 would split the emoji; snap to a code-point boundary.
+    expect(target.selectionStart === 0 || target.selectionStart === 2).toBe(true);
+    expect(target.selectionEnd).toBe(target.selectionStart);
+  });
 });
