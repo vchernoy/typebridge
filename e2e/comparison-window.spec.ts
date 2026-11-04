@@ -359,11 +359,59 @@ test('viewer badge fits a narrow enlarged-text layout without horizontal overflo
   await page.goto('/');
   const row = await saveDocument(page, 'Badge layout');
   await page.setViewportSize({ width: 320, height: 720 });
-  await page.addStyleTag({ content: 'html { font-size: 24px; }' });
   await page.goto(`/?doc=${row.id}&mode=view`);
   await expectViewerReady(page, 'Badge layout');
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  expect(overflow).toBe(false);
+  // Style after navigation — addStyleTag before goto is destroyed by the load.
+  await page.addStyleTag({ content: 'html { font-size: 24px; }' });
+  await expect.poll(async () => page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe('24px');
+  const layout = await page.evaluate(() => {
+    const title = document.querySelector('#draft-title') as HTMLInputElement;
+    return {
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      titleWidth: title.getBoundingClientRect().width,
+    };
+  });
+  expect(layout.overflow).toBe(false);
+  expect(layout.titleWidth).toBeGreaterThan(40);
   await expect(page.locator('#viewer-badge')).toBeVisible();
-  await expect(page.locator('#draft-title')).toBeVisible();
+});
+
+test('comparison open fails closed when inherited session cleanup throws', async ({ page, context }) => {
+  await page.goto('/');
+  await saveDocument(page, 'Cleanup guard');
+  const canary = 'PRIVATE-CLEANUP-CANARY';
+  await page.evaluate(text => {
+    sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify({
+      id: 'a1b2c3d4-e5f6-4789-a012-3456789abcde', title: 'x', text, revision: 1, updatedAt: Date.now(),
+    }));
+  }, canary);
+  await page.evaluate(() => {
+    const original = window.open.bind(window);
+    window.open = ((...args: Parameters<typeof window.open>) => {
+      const win = original(...args);
+      if (!win) return win;
+      const storage = win.sessionStorage;
+      Object.defineProperty(win, 'sessionStorage', {
+        configurable: true,
+        get() {
+          // First length access is the cleanup scan — fail closed instead of navigating.
+          throw new DOMException('blocked', 'SecurityError');
+        },
+      });
+      // Keep a real storage object available if cleanup somehow succeeds.
+      void storage;
+      return win;
+    }) as typeof window.open;
+  });
+  const pages: Page[] = [];
+  context.on('page', opened => pages.push(opened));
+  await documentAction(page, '#open-comparison');
+  await expect(page.locator('#status')).toContainText('Could not open a private comparison window safely');
+  await expect(page.locator('#status')).not.toContainText('Unsaved typing was not sent');
+  await expect(page.locator('#editor')).toHaveValue('Cleanup guard');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1') ?? '')).toContain(canary);
+  await page.waitForTimeout(400);
+  for (const opened of pages) {
+    if (!opened.isClosed()) await opened.close();
+  }
 });

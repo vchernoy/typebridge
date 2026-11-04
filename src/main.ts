@@ -1000,16 +1000,22 @@ async function explainNoComparison(message: string): Promise<void> {
     returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
   });
 }
+type ComparisonOpenResult =
+  | { ok: true; window: Window }
+  | { ok: false; reason: 'blocked' | 'cleanup' };
+
 /**
  * Open a same-origin companion without inheriting the source tab's sessionStorage.
  * Some browsers (notably Firefox) clone sessionStorage into window.open targets when an
  * opener relationship exists, which would copy private pending text. Opening about:blank,
  * stripping TypeBridge session keys, then navigating preserves popup-blocked detection
  * (unlike noopener, which returns null even on success) without clearing the source.
+ * If inherited-session cleanup throws, fail closed: close the blank window and do not
+ * navigate (private keys may still be present).
  */
-function openComparisonWindow(href: string): Window | null {
+function openComparisonWindow(href: string): ComparisonOpenResult {
   const opened = window.open('about:blank', '_blank');
-  if (!opened) return null;
+  if (!opened) return { ok: false, reason: 'blocked' };
   try {
     const doomed: string[] = [];
     for (let i = 0; i < opened.sessionStorage.length; i++) {
@@ -1017,15 +1023,18 @@ function openComparisonWindow(href: string): Window | null {
       if (key?.startsWith('typebridge.')) doomed.push(key);
     }
     for (const key of doomed) opened.sessionStorage.removeItem(key);
-  } catch { /* Navigation still proceeds if the new context blocks storage. */ }
+  } catch {
+    try { opened.close(); } catch { /* Ignore. */ }
+    return { ok: false, reason: 'cleanup' };
+  }
   try { opened.opener = null; } catch { /* Optional severance. */ }
   try {
     opened.location.replace(new URL(href, window.location.href).href);
   } catch {
     try { opened.close(); } catch { /* Ignore. */ }
-    return null;
+    return { ok: false, reason: 'blocked' };
   }
-  return opened;
+  return { ok: true, window: opened };
 }
 
 // window.open must run inside this click, so eligibility uses the in-memory IndexedDB revision
@@ -1045,8 +1054,12 @@ openComparison.addEventListener('click', () => {
     return;
   }
   const opened = openComparisonWindow(href);
-  if (!opened) {
-    announceAction('The comparison window was blocked. Allow pop-ups for TypeBridge and try again. Your text is still here.', { kind: 'failure' });
+  if (!opened.ok) {
+    if (opened.reason === 'cleanup') {
+      announceAction('Could not open a private comparison window safely. Your text is still only in this window; try again or export a copy.', { kind: 'failure' });
+    } else {
+      announceAction('The comparison window was blocked. Allow pop-ups for TypeBridge and try again. Your text is still here.', { kind: 'failure' });
+    }
     return;
   }
   announceAction(dirty
