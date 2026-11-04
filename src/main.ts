@@ -438,13 +438,24 @@ const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
 let ownershipAvailable = false;
 const ownerReady = new Promise<void>(resolve => {
-  // Viewers write no recovery journals, so they never take recovery ownership.
+  // Viewers write no recovery journals at boot; Edit here claims the lock on promotion (#159 W5).
   if (!navigator.locks || viewMode) { resolve(); return; }
   void navigator.locks.request(OWNER_LOCK + journalTab, async () => {
     ownershipAvailable = true; resolve();
     await new Promise<void>(() => { /* The browser releases this lock with the page. */ });
   }).catch(() => { resolve(); });
 });
+/** Hold the per-page recovery lock after viewer → editor promotion. */
+function ensureRecoveryOwnership(): Promise<void> {
+  if (ownershipAvailable || !navigator.locks) return Promise.resolve();
+  return new Promise<void>(resolve => {
+    void navigator.locks.request(OWNER_LOCK + journalTab, async () => {
+      ownershipAvailable = true;
+      resolve();
+      await new Promise<void>(() => { /* The browser releases this lock with the page. */ });
+    }).catch(() => { resolve(); });
+  });
+}
 let currentJournal: RecoverySnapshot | undefined;
 const journalWarning = document.createElement('p');
 journalWarning.setAttribute('role', 'alert');
@@ -1151,10 +1162,14 @@ async function renderRecovery(): Promise<void> {
     group.append(button, discard); recoveryPanel.append(group);
   }
 }
-if (!viewMode) {
+let recoveryWatchWired = false;
+function wireRecoveryWatch(): void {
+  if (recoveryWatchWired) return;
+  recoveryWatchWired = true;
   window.addEventListener('storage', event => { if (event.key?.startsWith(RECOVERY_PREFIX)) queueRecovery(); });
   setInterval(queueRecovery, 5000);
 }
+if (!viewMode) wireRecoveryWatch();
 function handleDatabaseUpgrade(): void {
   // Invalidate in-flight acquires, then free any installed Web Lock so an upgraded tab can own.
   storageGeneration++;
@@ -1492,6 +1507,8 @@ async function becomeEditorFor(documentId: string): Promise<boolean> {
       return false;
     }
     if (viewMode) {
+      // Claim before clearing viewMode so the first journalEdit is covered by the lock.
+      await ensureRecoveryOwnership();
       viewMode = false;
       document.body.classList.remove('viewer');
       document.title = 'TypeBridge';
@@ -1503,6 +1520,7 @@ async function becomeEditorFor(documentId: string): Promise<boolean> {
         document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
       }
       wireEditorLifecycle();
+      wireRecoveryWatch();
       syncOrdinaryEditorUrl(fresh.id);
     }
     // Follow retryOwnership: never replace unsaved in-memory text/title/history.

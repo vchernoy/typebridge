@@ -145,3 +145,42 @@ test('promoting a viewer re-enables New document and Open in comparison window',
   await expect(viewer.locator('#import-draft')).toBeEnabled();
   await expect(viewer.locator('#open-comparison')).toBeEnabled();
 });
+
+test('a promoted viewer holds recovery ownership while it is still open', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'Recovery promote');
+  await page.close();
+  const viewer = await context.newPage();
+  await viewer.goto(`/?doc=${id}&mode=view`);
+  await viewer.locator('#edit-here').click();
+  await expect.poll(async () => role(viewer).getAttribute('data-role')).toBe('editor');
+
+  const sibling = await context.newPage();
+  await sibling.goto('/');
+  await expect(sibling.locator('#editor')).toBeEnabled();
+  await sibling.evaluate(() => {
+    const observed = document.querySelector('[aria-label="Recover unsaved documents"]')!;
+    (window as unknown as { recoveryMutations: number }).recoveryMutations = 0;
+    new MutationObserver(() => { (window as unknown as { recoveryMutations: number }).recoveryMutations++; })
+      .observe(observed, { childList: true, subtree: true });
+  });
+
+  await viewer.evaluate(() => {
+    IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); };
+    IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); };
+  });
+  await viewer.locator('#editor').fill('Promoted private text');
+  await expect(viewer.locator('#status')).toContainText('Save failed');
+  await sibling.waitForTimeout(1600);
+  await expect(sibling.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  expect(await sibling.evaluate(() => (window as unknown as { recoveryMutations: number }).recoveryMutations)).toBe(0);
+
+  await viewer.close();
+  const check = sibling.getByRole('button', { name: 'Check emergency backups' });
+  await expect.poll(
+    async () => await check.isVisible() || await sibling.getByRole('button', { name: /Recover / }).isVisible(),
+    { timeout: 10000 },
+  ).toBe(true);
+  if (await check.isVisible()) await check.click();
+  await expect(sibling.getByRole('button', { name: /Recover / })).toBeVisible();
+});
