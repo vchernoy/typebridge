@@ -614,22 +614,38 @@ function loseOwnership(): void {
   showSaveState();
 }
 let ownershipRetry: Promise<void> | undefined;
-/** A read-only ordinary window tries again when shown or focused; it becomes editor only if the lock is free. */
+/**
+ * A read-only ordinary window tries again when shown or focused; it becomes editor only if the lock is free.
+ * Always rereads first (single-flight with the acquire): a concurrent refresh must not bump viewGeneration
+ * under an in-flight acquire and force a release that leaves the window stuck read-only.
+ */
 function retryOwnership(): void {
   const store = db;
   if (viewMode || !store || !mayRetryEditOwnership(editBlock) || ownershipRetry || transitioning || deleting || field.disabled) return;
   ownershipRetry = (async () => {
+    await rereadDisplayed();
+    if (!mayRetryEditOwnership(editBlock) || transitioning || deleting || field.disabled) return;
     const id = active.id;
+    // Capture the view only after the preliminary reread so applying a missed revision does not
+    // look like "the user navigated away" to stillHere().
     const view = viewGeneration;
     const stillHere = (): boolean => active.id === id && viewGeneration === view && !transitioning && !deleting && mayRetryEditOwnership(editBlock);
+    if (!stillHere()) return;
     const access = await acquireFor(id);
     if (!access.ownership) return;
-    let fresh: StoredDraft | undefined;
+    // null = skipped (dirty); undefined = authoritative absence after a clean reread.
+    let fresh: StoredDraft | undefined | null = null;
     try { if (stillHere() && !dirty) fresh = await getStoredDraft(store, id); }
     catch { void access.ownership.release(); return; }
     if (!stillHere()) { void access.ownership.release(); return; }
+    if (fresh === undefined) {
+      // Another window deleted this row and released the lock; do not edit a ghost snapshot.
+      void access.ownership.release();
+      if (active.revision >= 1) showVersionNotice(DELETED_NOTICE);
+      return;
+    }
     // Reread under the new fence before enabling editing; unsaved text in memory is never replaced.
-    if (!dirty && fresh && fresh.revision > active.revision) {
+    if (fresh && fresh.revision > active.revision) {
       writingPosition.save();
       active = fresh;
       showDraft();
@@ -1279,7 +1295,7 @@ signalChannel?.addEventListener('message', event => {
 function reconcileSignals(): void {
   if (document.visibilityState !== 'visible') return;
   scheduleListRefresh();
-  void rereadDisplayed();
+  // Ownership retry itself awaits the authoritative reread first (see retryOwnership).
   retryOwnership();
 }
 // Focusing the text is the clearest sign the user wants to edit here; it never steals a held lock.

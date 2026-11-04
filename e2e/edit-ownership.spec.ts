@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { documentAction, selectDocument } from './settings-helpers';
-import { claimFenceElsewhere, heldEditLocks, readOwnership, readStoredDocs } from './storage-helpers';
+import { claimFenceElsewhere, heldEditLocks, readOwnership, readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 // Single editing owner per document (#159 W4): Web Lock + IndexedDB fence.
 
@@ -218,6 +218,57 @@ test('windows opening the same document at once elect exactly one editor', async
   const editor = pages[roles.indexOf('editor')];
   expect((await readOwnership(editor, id))?.ownerInstanceId).toBe(await instanceOf(editor));
   expect(await heldEditLocks(editor)).toEqual([`typebridge-edit-owner:${id}`]);
+});
+
+test('retry does not claim ownership after the document was deleted elsewhere', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'К удалению');
+  const other = await context.newPage();
+  await openOrdinary(other);
+  await expect(role(other)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#editor')).toHaveValue('К удалению');
+
+  await documentAction(page, '#delete-draft');
+  await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();
+  await expect(page.locator('#status')).toContainText('Document deleted');
+  await expect.poll(async () => (await readStoredDocs(page)).some(row => row.id === id)).toBe(false);
+
+  // Owner already moved on; the reader must not resurrect the deleted id by claiming the free lock.
+  await expect.poll(async () => {
+    await nudge(other);
+    return other.locator('#version-notice').isVisible();
+  }).toBe(true);
+  await expect(other.locator('#version-notice')).toContainText('deleted in another window');
+  await expect(role(other)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#ownership-notice')).toBeVisible();
+  await expect(other.locator('#status')).not.toContainText('You can edit this document in this window now.');
+  expect((await readOwnership(other, id))?.ownerInstanceId ?? '').not.toBe(await instanceOf(other));
+  expect((await readStoredDocs(other)).map(row => row.id)).not.toContain(id);
+});
+
+test('focus applies a missed newer revision before taking ownership', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'Версия один');
+  const other = await context.newPage();
+  await openOrdinary(other);
+  await expect(role(other)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#editor')).toHaveValue('Версия один');
+
+  // Silent IDB write (no BroadcastChannel) leaves the reader on the old snapshot until focus.
+  await writeForeignRevision(page, { text: 'Версия два' }, id);
+  await expect(other.locator('#editor')).toHaveValue('Версия один');
+  await page.close();
+  await expect.poll(async () => heldEditLocks(other)).toEqual([]);
+
+  await expect.poll(async () => {
+    await nudge(other);
+    return role(other).getAttribute('data-role');
+  }).toBe('editor');
+  await expect(other.locator('#editor')).toHaveValue('Версия два');
+  await expect(other.locator('#ownership-notice')).toBeHidden();
+  expect((await readOwnership(other, id))?.ownerInstanceId).toBe(await instanceOf(other));
+  await other.locator('#editor').fill('Версия два, правка');
+  await expect(other.locator('#save-indicator')).toHaveText('Saved');
 });
 
 test('typing during delayed delete refresh stays frozen then can dirty after completion', async ({ page }) => {
