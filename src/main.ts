@@ -13,6 +13,7 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
+import { createSinglePaneWorkspace } from './view/workspace';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
@@ -55,6 +56,9 @@ const readOnlyNow = (): boolean => viewMode || editBlock !== '' || transferFroze
 // backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
 // navigation; initializeViewer never reads pending/active hints.
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const workspaceRoot = document.querySelector<HTMLElement>('main.workspace')!;
+const workspace = createSinglePaneWorkspace({ root: workspaceRoot, paneSurface: field });
+
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
 const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field);
@@ -63,7 +67,10 @@ setupDocumentMenu();
 setupMoreMenu();
 setupKeyboardShortcuts();
 const editor = new Editor(field);
-if (viewMode) editor.setReadOnly(true);
+if (viewMode) {
+  editor.setReadOnly(true);
+  workspace.setPaneRole('readonly');
+}
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
 const statusSep = document.querySelector<HTMLElement>('#status-sep')!;
@@ -175,12 +182,12 @@ function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'prog
 /** The warning that must stay visible while text or storage is at risk. */
 function riskText(): string {
   if (storageProblem) {
-    if (!dirty) return storageProblem;
+    if (!workspace.dirty()) return storageProblem;
     return storageProblem === STORAGE_UNAVAILABLE ? SAVE_FAILED_NO_STORAGE : 'Changes are unsaved. ' + storageProblem;
   }
-  if (editBlock && dirty) return NOT_OWNER_UNSAVED;
+  if (editBlock && workspace.dirty()) return NOT_OWNER_UNSAVED;
   if (saveFailed && autosave.checked) return SAVE_FAILED;
-  if (dirty && !autosave.checked) return AUTOSAVE_OFF;
+  if (workspace.dirty() && !autosave.checked) return AUTOSAVE_OFF;
   return '';
 }
 function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): void {
@@ -231,7 +238,7 @@ function markDraftListRefreshFailed(): void {
 }
 /** Same gate for persist and switch refresh failures — never attach to newer action feedback. */
 function shouldAttachDraftListRefreshFailure(): boolean {
-  return !dirty && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict');
+  return !workspace.dirty() && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict');
 }
 const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
@@ -395,21 +402,18 @@ const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
 let drafts: StoredDraft[] = [];
-let dirty = false;
-let generation = 0;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let saving: Promise<PersistResult> | undefined;
 let loadingDraft = false;
 /** Companion window shows the missing-document state (nothing to save or restore). */
 let viewMissing = false;
-/** Bumped whenever the displayed document changes so late rereads cannot apply to a newer view. */
-let viewGeneration = 0;
+/** Document-identity counter lives on the workspace as sessionGeneration (formerly viewGeneration). */
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
   const state = storageProblem || saveFailed ? 'failed'
-    : editBlock ? (dirty ? 'unsaved' : 'readonly')
-    : !autosave.checked || !db ? 'unsaved' : dirty ? 'saving' : 'saved';
+    : editBlock ? (workspace.dirty() ? 'unsaved' : 'readonly')
+    : !autosave.checked || !db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
   const label = { failed: 'Save failed', readonly: 'Read-only', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[state];
   if (saveIndicator.textContent !== label) saveIndicator.textContent = label;
   saveIndicator.dataset.state = state;
@@ -473,7 +477,7 @@ function sameContent(a: StoredDraft, b: StoredDraft): boolean {
   return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
 }
 function savePending(): void {
-  if (viewMode || !dirty || !autosave.checked || deleting) return;
+  if (viewMode || !workspace.dirty() || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
   catch {
     // Keep any conflict notice and the current risk; only replace the primary.
@@ -499,7 +503,7 @@ function renderDrafts(): void {
         savedTitle: draft.title,
         displayTitle,
         isCurrent,
-        unsaved: isCurrent && dirty,
+        unsaved: isCurrent && workspace.dirty(),
       });
       picker.append(option);
     }
@@ -517,7 +521,8 @@ async function refreshDrafts(): Promise<void> {
 }
 function showDraft(): void {
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
-  viewGeneration++;
+  workspace.bumpSessionGeneration();
+  workspace.setDocumentId(active.id);
   clearVersionNotice();
   clearNotices();
   loadingDraft = true;
@@ -526,7 +531,7 @@ function showDraft(): void {
     if (!viewMode) editor.restoreHistory(active.history);
     draftTitle.value = active.title;
     syncTitleTooltip();
-    dirty = false;
+    workspace.setDirty(false);
     saveFailed = false; // The editor no longer holds the unsaved text.
   } finally { loadingDraft = false; }
   writingPosition.restore(active.id);
@@ -543,6 +548,7 @@ function applyEditAccess(): void {
   // Must match readOnlyNow: stay frozen for the whole switch/delete interval even if
   // installOwnership runs before the handler finishes (e.g. refreshDrafts after delete).
   const blocked = editBlock !== '' || transferFrozen;
+  workspace.setPaneRole(blocked ? 'readonly' : 'editable');
   if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
   if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
@@ -550,7 +556,7 @@ function applyEditAccess(): void {
   autosave.disabled = blocked || autosaveToggleActive;
   document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
   // Temporary transfer freeze must not announce "another window is editing".
-  const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, dirty);
+  const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, workspace.dirty());
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
   syncHistory();
@@ -592,6 +598,7 @@ async function acquireFor(documentId: string): Promise<EditAccess> {
 /** Freeze Editor + title gates and mutation controls for the ownership-transfer window. */
 function freezeEditorsForTransition(): void {
   transferFrozen = true;
+  workspace.setPaneRole('readonly');
   editor.setReadOnly(true);
   titleEditor.setReadOnly(true);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
@@ -640,7 +647,7 @@ let ownershipRetry: Promise<void> | undefined;
 let rereadAfterOwnershipRetry = false;
 /**
  * A read-only ordinary window tries again when shown or focused; it becomes editor only if the lock is free.
- * Always rereads first (single-flight with the acquire): a concurrent refresh must not bump viewGeneration
+ * Always rereads first (single-flight with the acquire): a concurrent refresh must not bump sessionGeneration
  * under an in-flight acquire and force a release that leaves the window stuck read-only.
  */
 function retryOwnership(): void {
@@ -652,14 +659,14 @@ function retryOwnership(): void {
     const id = active.id;
     // Capture the view only after the preliminary reread so applying a missed revision does not
     // look like "the user navigated away" to stillHere().
-    const view = viewGeneration;
-    const stillHere = (): boolean => active.id === id && viewGeneration === view && !transitioning && !deleting && mayRetryEditOwnership(editBlock);
+    const view = workspace.sessionGeneration();
+    const stillHere = (): boolean => active.id === id && workspace.sessionGeneration() === view && !transitioning && !deleting && mayRetryEditOwnership(editBlock);
     if (!stillHere()) return;
     const access = await acquireFor(id);
     if (!access.ownership) return;
     // null = skipped (dirty); undefined = authoritative absence after a clean reread.
     let fresh: StoredDraft | undefined | null = null;
-    try { if (stillHere() && !dirty) fresh = await getStoredDraft(store, id); }
+    try { if (stillHere() && !workspace.dirty()) fresh = await getStoredDraft(store, id); }
     catch { void access.ownership.release(); return; }
     if (!stillHere()) { void access.ownership.release(); return; }
     if (fresh === undefined) {
@@ -677,7 +684,7 @@ function retryOwnership(): void {
     }
     installOwnership(access);
     announceAction('You can edit this document in this window now.', { keepConflict: true });
-    if (dirty && autosave.checked) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { void persist(); }, 300); }
+    if (workspace.dirty() && autosave.checked) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { void persist(); }, 300); }
   })().finally(() => {
     ownershipRetry = undefined;
     if (!rereadAfterOwnershipRetry) return;
@@ -688,7 +695,7 @@ function retryOwnership(): void {
 async function persist(): Promise<PersistResult> {
   if (viewMode) return { saved: true, conflict: false };
   clearTimeout(saveTimer);
-  if (deleting || !autosave.checked || !dirty) return { saved: !dirty, conflict: false };
+  if (deleting || !autosave.checked || !workspace.dirty()) return { saved: !workspace.dirty(), conflict: false };
   if (editBlock) return { saved: false, conflict: false };
   if (saving) return saving;
   saving = (async () => {
@@ -698,8 +705,8 @@ async function persist(): Promise<PersistResult> {
     let createdConflict = false;
     try {
       if (!db) throw new Error('Storage unavailable');
-      while (dirty && autosave.checked && !editBlock) {
-        const version = generation;
+      while (workspace.dirty() && autosave.checked && !editBlock) {
+        const version = workspace.contentRevision();
         const saved = snapshot();
         if (ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
         const owner = await ownership.writeFence();
@@ -712,10 +719,10 @@ async function persist(): Promise<PersistResult> {
         clearVersionNotice();
         postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
         writingPosition.save();
-        if (generation !== version && autosave.checked) journalEdit();
+        if (workspace.contentRevision() !== version && autosave.checked) journalEdit();
         rememberActive();
         saveFailed = false;
-        dirty = generation !== version;
+        workspace.setDirty(workspace.contentRevision() !== version);
         updateSaveIndicator();
         if (result.conflict) {
           // Retain new edits typed while the transaction was in flight.
@@ -729,7 +736,7 @@ async function persist(): Promise<PersistResult> {
           // the success path each announce once (avoids CONFLICT_COPY then LEFT).
           if (!transitioning) setConflict(CONFLICT_COPY, true);
           updateStatus({
-            primary: dirty && !storageProblem ? 'Saving…' : '',
+            primary: workspace.dirty() && !storageProblem ? 'Saving…' : '',
             risk: riskText(),
           }, transitioning ? statusKind : 'conflict');
           // The copy is a new document; later saves in this loop need its fence.
@@ -739,7 +746,7 @@ async function persist(): Promise<PersistResult> {
         // notice, but it must replace progress and an earlier failure it resolved.
         // Use statusKind (not merely a pending conflict string) so an action that
         // kept a conflict notice — e.g. a failed draft switch — is not wiped.
-        if (!dirty && !result.conflict && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict')) {
+        if (!workspace.dirty() && !result.conflict && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict')) {
           // Storage can become unusable while this save was in flight (an
           // upgrade in another tab); never replace that warning.
           const risk = riskText();
@@ -751,7 +758,7 @@ async function persist(): Promise<PersistResult> {
       catch {
         if (shouldAttachDraftListRefreshFailure()) markDraftListRefreshFailed();
       }
-      return { saved: !dirty, conflict: createdConflict };
+      return { saved: !workspace.dirty(), conflict: createdConflict };
     } catch (error) {
       if (error instanceof EditOwnershipLostError) {
         loseOwnership();
@@ -769,7 +776,7 @@ async function persist(): Promise<PersistResult> {
   try { return await saving; } finally {
     saving = undefined;
     // An edit can arrive while the post-commit draft list is loading.
-    if (!deleting && dirty && autosave.checked && !saveFailed && !editBlock) {
+    if (!deleting && workspace.dirty() && autosave.checked && !saveFailed && !editBlock) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => { void persist(); }, 300);
     }
@@ -777,9 +784,9 @@ async function persist(): Promise<PersistResult> {
 }
 function scheduleSave(fromTitle = false): void {
   if (readOnlyNow() || loadingDraft) return;
-  const becameDirty = !dirty;
-  dirty = true;
-  generation++;
+  const becameDirty = !workspace.dirty();
+  workspace.setDirty(true);
+  workspace.bumpContentRevision();
   journalEdit();
   // With autosave off nothing is committed, so refresh the Documents label from the
   // on-screen title (and mark unsaved) without waiting for a save (#114).
@@ -828,8 +835,8 @@ autosave.addEventListener('change', async () => {
   };
   if (autosave.checked) {
     clearNotices();
-    if (dirty) showSaving(); else announce('Autosave on');
-    if (dirty) { journalEdit(); void persist(); }
+    if (workspace.dirty()) showSaving(); else announce('Autosave on');
+    if (workspace.dirty()) { journalEdit(); void persist(); }
   }
   else {
     clearTimeout(saveTimer);
@@ -871,7 +878,7 @@ autosave.addEventListener('change', async () => {
         if (targetRevision >= 1) postSignal('deleted', targetId, targetRevision);
         if (active.id === targetId) {
           active = { ...active, revision: 0 };
-          dirty = true;
+          workspace.setDirty(true);
         }
         clearNotices();
         await refreshDrafts();
@@ -909,7 +916,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
     clearTimeout(saveTimer);
     let next: StoredDraft | undefined;
     while (true) {
-      while (dirty && autosave.checked && !editBlock) {
+      while (workspace.dirty() && autosave.checked && !editBlock) {
         const result = await persist();
         if (result.conflict) flushConflict = true;
         if (!result.saved && saveFailed) {
@@ -918,16 +925,16 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
         }
       }
       // Text this window cannot save (Autosave off, or another window owns the document) needs consent to drop.
-      if (dirty && (!autosave.checked || editBlock) && !await askConfirmChoice({ title: 'Discard unsaved changes?', message: editBlock
+      if (workspace.dirty() && (!autosave.checked || editBlock) && !await askConfirmChoice({ title: 'Discard unsaved changes?', message: editBlock
         ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them.'
         : 'Copy or export unsaved changes first to keep them.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
         announceAbortedFlushConflict();
         return { opened: false, conflict: flushConflict };
       }
-      const version = generation;
+      const version = workspace.contentRevision();
       next = id && db ? await getStoredDraft(db, id) : undefined;
       if (id && !next) throw new Error('Draft no longer exists');
-      if (generation === version) break;
+      if (workspace.contentRevision() === version) break;
     }
     // Freeze Editor mutation gates (not only DOM readOnly) for the whole acquire/reread window.
     freezeEditorsForTransition();
@@ -975,7 +982,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   clearTimeout(saveTimer);
   const requestedId = active.id;
   if (!await askConfirmChoice({ title: 'Delete document?', message: 'Permanently delete this saved document?', confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
-    if (dirty && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
+    if (workspace.dirty() && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
     return;
   }
   transitioning = true;
@@ -984,7 +991,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   let savedBeforeDelete = false;
   try {
     if (saving && !(await saving).saved) throw new Error('Save failed');
-    if (dirty && autosave.checked) {
+    if (workspace.dirty() && autosave.checked) {
       if (!(await persist()).saved) throw new Error('Save failed');
       savedBeforeDelete = true;
     }
@@ -1017,16 +1024,16 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     // state the save situation, so they do not also append riskText().
     if (editBlock) {
       announceAction('Could not delete document — another window is editing it. Your text is kept.', { kind: 'failure' });
-    } else if (dirty && !saveFailed && autosave.checked && !storageProblem) {
+    } else if (workspace.dirty() && !saveFailed && autosave.checked && !storageProblem) {
       announceAction('Could not delete document — your changes are unsaved; saving again…', { kind: 'progress', omitRisk: true });
-    } else if (dirty && !autosave.checked && !storageProblem) {
+    } else if (workspace.dirty() && !autosave.checked && !storageProblem) {
       announceAction('Could not delete document — your changes are unsaved; autosave is off', { kind: 'progress', omitRisk: true });
     } else announceAction(savedBeforeDelete ? 'Could not delete document — Saved locally; your text is kept.' : 'Could not delete document — your text is kept.');
   } finally {
     transitioning = false;
     deleting = false;
     unfreezeEditorsAfterTransition();
-    if (!committed && dirty && autosave.checked && !editBlock) {
+    if (!committed && workspace.dirty() && autosave.checked && !editBlock) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => { void persist(); }, 300);
     }
@@ -1173,7 +1180,7 @@ async function initializeDrafts(): Promise<void> {
     installOwnership(bootAccess);
     bootAccess = undefined;
     if (restorePending) {
-      dirty = true; generation++;
+      workspace.setDirty(true); workspace.bumpContentRevision();
       applyEditAccess();
       // Another window owns the document: keep the recovered text here (and its reload backup) for copy/export.
       if (editBlock) setSaveStatus('Recovered unsaved text, but another window is editing this document, so it was not saved. Copy or export it.', 'failure');
@@ -1184,7 +1191,7 @@ async function initializeDrafts(): Promise<void> {
     void bootAccess?.ownership?.release();
     db?.close(); db = undefined;
     const pending = readPending();
-    if (pending) { active = pending; showDraft(); dirty = true; generation++; saveFailed = true; }
+    if (pending) { active = pending; showDraft(); workspace.setDirty(true); workspace.bumpContentRevision(); saveFailed = true; }
     storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
     setSaveStatus(storageProblem, 'failure');
     renderDrafts();
@@ -1224,13 +1231,14 @@ function showViewerStatus(): void {
   else setSaveStatus(viewMissing ? '' : VIEWER_STATUS);
 }
 function showViewerMissing(message: string): void {
-  viewGeneration++;
+  workspace.bumpSessionGeneration();
+  workspace.setDocumentId('');
   viewMissing = true;
   loadingDraft = true;
   try { editor.load(''); draftTitle.value = ''; syncTitleTooltip(); }
   finally { loadingDraft = false; }
   active = { ...newDraft(), revision: 0 };
-  dirty = false;
+  workspace.setDirty(false);
   viewerNotice.textContent = message;
   viewerNotice.hidden = false;
   viewerBadge.textContent = 'Read-only comparison view';
@@ -1260,7 +1268,7 @@ function syncViewerUrl(id: string): void {
 let viewerLoad = 0;
 async function viewerOpen(id: string): Promise<void> {
   const load = ++viewerLoad;
-  viewGeneration++;
+  workspace.bumpSessionGeneration();
   try {
     if (!db) throw new Error('Storage unavailable');
     const next = await getStoredDraft(db, id);
@@ -1341,14 +1349,14 @@ async function rereadDisplayed(): Promise<void> {
   // A local commit may be mid-flight; wait so the displayed revision is current.
   while (!viewMode && saving) await saving.catch(() => undefined);
   const id = active.id;
-  const generationAtStart = viewGeneration;
+  const generationAtStart = workspace.sessionGeneration();
   const seq = ++rereadSeq;
   let stored: StoredDraft | undefined;
   try { stored = await getStoredDraft(db, id); } catch { return; }
-  if (seq !== rereadSeq || generationAtStart !== viewGeneration || active.id !== id) return;
+  if (seq !== rereadSeq || generationAtStart !== workspace.sessionGeneration() || active.id !== id) return;
   if (!viewMode && saving) { void rereadDisplayed(); return; }
   // A clean read-only ordinary window follows the saved version like a viewer; unsaved text is never replaced.
-  const reader = !viewMode && editBlock !== '' && !dirty;
+  const reader = !viewMode && editBlock !== '' && !workspace.dirty();
   const action = decideReread({
     role: viewMode || reader ? 'viewer' : 'editor',
     displayedRevision: active.revision,
@@ -1387,7 +1395,7 @@ signalChannel?.addEventListener('message', event => {
   if (field.disabled) { rereadAfterInit = true; return; }
   scheduleListRefresh();
   if (!shouldApplyDocumentSignal(signal, active.id, active.revision)) return;
-  // Do not bump viewGeneration under an in-flight ownership acquire (stillHere would release).
+  // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
   if (ownershipRetry) { rereadAfterOwnershipRetry = true; return; }
   void rereadDisplayed();
 });
@@ -1477,7 +1485,7 @@ openComparison.addEventListener('click', () => {
     }
     return;
   }
-  announceAction(dirty
+  announceAction(workspace.dirty()
     ? 'Opened the last saved version in a comparison window. Unsaved typing was not sent.'
     : 'Opened the last saved version in a comparison window.');
 });
@@ -1545,23 +1553,23 @@ let privateReloadChoice: { id: string; generation: number } | undefined;
 async function prepareUpdateReload(): Promise<boolean> {
   if (transitioning || deleting || field.disabled) return false;
   privateReloadChoice = undefined;
-  if (dirty && !autosave.checked) {
+  if (workspace.dirty() && !autosave.checked) {
     const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#update-reload')! });
-    if (discard) privateReloadChoice = { id: active.id, generation };
+    if (discard) privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
     return discard;
   }
   savePending();
-  if (dirty) await persist();
-  if (!dirty) return true;
+  if (workspace.dirty()) await persist();
+  if (!workspace.dirty()) return true;
   savePending();
   const pending = readPending();
   return !!pending && sameContent(pending, snapshot());
 }
 function reloadAfterUpdate(): void {
   if (transitioning || deleting || field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
-  if (dirty) {
+  if (workspace.dirty()) {
     if (!autosave.checked) {
-      if (privateReloadChoice?.id !== active.id || privateReloadChoice.generation !== generation) throw new Error('Private edits changed');
+      if (privateReloadChoice?.id !== active.id || privateReloadChoice.generation !== workspace.contentRevision()) throw new Error('Private edits changed');
     } else {
       savePending();
       const pending = readPending();
@@ -1572,7 +1580,7 @@ function reloadAfterUpdate(): void {
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
 if (!viewMode) window.addEventListener('beforeunload', event => {
-  if (dirty) { savePending(); clearTimeout(saveTimer); void persist(); if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; } }
+  if (workspace.dirty()) { savePending(); clearTimeout(saveTimer); void persist(); if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; } }
 });
 if (!viewMode) document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
 updateStats();
