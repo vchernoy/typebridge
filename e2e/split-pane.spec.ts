@@ -85,6 +85,47 @@ test('comparison viewers cannot open the in-tab split or clear the editor prefer
   await expect(page.locator('main.workspace')).toHaveAttribute('data-split', 'on');
 });
 
+test('split open keeps the primary editor within its pane despite a saved pixel width', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').evaluate(el => {
+    (el as HTMLTextAreaElement).style.width = '900px';
+  });
+  await openSplit(page);
+  const primary = await page.locator('.editor-pane-primary').boundingBox();
+  const editor = await page.locator('#editor').boundingBox();
+  expect(primary).toBeTruthy();
+  expect(editor).toBeTruthy();
+  expect(editor!.width).toBeLessThanOrEqual(primary!.width + 1);
+});
+
+test('switching documents while split is closed restores companion position against the new text', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('first document text for companion');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.setSelectionRange(0, 5);
+    node.dispatchEvent(new Event('select'));
+  });
+  await documentAction(page, '#toggle-split');
+  await expect(page.locator('#editor-b')).toBeHidden();
+
+  await documentAction(page, '#new-draft');
+  await page.locator('#editor').fill('short');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await expect(page.locator('#editor-b')).toHaveValue('short');
+  const sel = await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    return { start: node.selectionStart, end: node.selectionEnd, value: node.value };
+  });
+  expect(sel.value).toBe('short');
+  expect(sel.end).toBeLessThanOrEqual(sel.value.length);
+});
+
 test('stacked split divider changes pane heights on a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto('/');

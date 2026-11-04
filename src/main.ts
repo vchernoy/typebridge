@@ -87,8 +87,9 @@ if (viewMode) {
   workspace.setPaneRole('readonly');
 }
 
-function mirrorCompanion(): void {
-  if (!workspace.splitOpen()) return;
+/** Keep the companion text current even while hidden so position restore uses the right length. */
+function mirrorCompanion(force = false): void {
+  if (!force && !workspace.splitOpen()) return;
   mirrorTextarea(field, companionField);
 }
 
@@ -582,10 +583,11 @@ function showDraft(): void {
     syncTitleTooltip();
     workspace.setDirty(false);
     saveFailed = false; // The editor no longer holds the unsaved text.
-    mirrorCompanion();
+    // Mirror before restoring companion offsets (including when split is closed).
+    mirrorCompanion(true);
+    companionWritingPosition.restore(active.id);
   } finally { loadingDraft = false; }
   writingPosition.restore(active.id);
-  companionWritingPosition.restore(active.id);
   renderDrafts();
   updateStats();
   updateSaveIndicator();

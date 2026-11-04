@@ -638,6 +638,11 @@ body.focus-mode .bottom {
 .editor-split[data-split="on"] .editor-pane-companion {
   flex: 1 1 0;
 }
+/* Saved Normal/Focus pixel widths on #editor must not overflow the allocated pane. */
+.editor-split[data-split="on"] #editor {
+  width: 100% !important;
+  max-width: none !important;
+}
 .pane-chrome {
   display: flex;
   flex-wrap: wrap;
