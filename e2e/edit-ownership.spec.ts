@@ -271,6 +271,29 @@ test('a database upgrade releases the editing lock so another tab can acquire', 
   expect(await heldEditLocks(other)).toEqual([`typebridge-edit-owner:${id}`]);
 });
 
+test('boot does not own a document deleted during acquire', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'gone at boot');
+
+  const booting = await context.newPage();
+  await booting.addInitScript(() => {
+    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1000;
+  });
+  const booted = booting.goto('/');
+  await page.waitForTimeout(200);
+  await documentAction(page, '#delete-draft');
+  await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();
+  await expect(page.locator('#status')).toContainText('Document deleted');
+  await booted;
+  await expect(booting.locator('#editor')).toBeEnabled();
+  await expect.poll(async () => (await readStoredDocs(booting)).some(row => row.id === id)).toBe(false);
+  expect((await readOwnership(booting, id))?.ownerInstanceId ?? '').not.toBe(await instanceOf(booting));
+  await expect(role(booting)).toHaveAttribute('data-role', 'editor');
+  await booting.locator('#editor').fill('fresh after miss');
+  await expect(booting.locator('#save-indicator')).toHaveText('Saved');
+  expect((await readStoredDocs(booting)).map(row => row.id)).not.toContain(id);
+});
+
 test('upgrade during acquire releases the new lock before it is installed', async ({ page, context }) => {
   await openOrdinary(page);
   await page.evaluate(() => {

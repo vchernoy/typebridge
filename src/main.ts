@@ -1107,7 +1107,18 @@ async function initializeDrafts(): Promise<void> {
     // First acquirer among cooperating windows edits; the others open this document read-only.
     bootAccess = await acquireFor(chosen.id);
     // The list was read before this window owned the document; reread under the fence.
-    if (bootAccess.ownership && !restorePending) chosen = await getStoredDraft(db, chosen.id) ?? chosen;
+    if (bootAccess.ownership && !restorePending) {
+      const fresh = await getStoredDraft(db, chosen.id);
+      if (!fresh) {
+        // Deleted while we acquired — do not install ownership over the stale list snapshot.
+        void bootAccess.ownership.release();
+        bootAccess = undefined;
+        chosen = { ...newDraft(), revision: 0 };
+        bootAccess = await acquireFor(chosen.id);
+      } else {
+        chosen = fresh;
+      }
+    }
     active = chosen;
     rememberActive();
     showDraft();
