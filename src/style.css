@@ -727,7 +727,8 @@ body.focus-mode .bottom {
     cursor: row-resize;
   }
 }
-@media (pointer: coarse) {
+/* Match the resize-grip rule: hybrid mouse+touch devices still need a 44px target. */
+@media (any-pointer: coarse) {
   .editor-split {
     --split-divider-size: 44px;
   }
