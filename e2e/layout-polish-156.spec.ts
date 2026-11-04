@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { moreAction, openFind, setSetting } from './settings-helpers';
+import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 test('editing toolbar stays one row at 390px (#156)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
@@ -86,20 +87,17 @@ test('narrow shortcuts sheet stacks long keys without overflow (#156)', async ({
   expect(box.y).toBeGreaterThanOrEqual(actionBox.y + actionBox.height - 2);
 });
 
-test('conflict-copy title updates the tooltip (#156)', async ({ page, context }) => {
+test('conflict-copy title updates the tooltip (#156)', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#draft-title').fill('Shared note');
   await page.locator('#editor').fill('Исходный текст');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
-  const other = await context.newPage();
-  await other.goto('/');
-  await expect(other.locator('#editor')).toHaveValue('Исходный текст');
-  await expect(other.locator('#draft-title')).toHaveValue('Shared note');
-  await page.locator('#editor').fill('Новое содержание');
-  await expect(page.locator('#save-indicator')).toHaveText('Saved');
-  await other.locator('#editor').fill('Другой вариант');
-  await expect(other.locator('#status-line')).toContainText('conflict copy');
-  await expect(other.locator('#draft-title')).toHaveValue(/conflict copy/);
-  await expect(other.locator('#draft-title')).toHaveAttribute('title', /conflict copy/);
+  await expect.poll(async () => (await readStoredDocs(page))[0]?.text).toBe('Исходный текст');
+  // An older build without edit ownership commits a newer revision (#159 W4).
+  await writeForeignRevision(page, { text: 'Новое содержание' });
+  await page.locator('#editor').fill('Другой вариант');
+  await expect(page.locator('#status-line')).toContainText('conflict copy');
+  await expect(page.locator('#draft-title')).toHaveValue(/conflict copy/);
+  await expect(page.locator('#draft-title')).toHaveAttribute('title', /conflict copy/);
 });

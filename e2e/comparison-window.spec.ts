@@ -7,7 +7,7 @@ const MISSING_ID = 'b2c3d4e5-f6a7-4890-b123-456789abcdef';
 
 async function readDocs(page: Page): Promise<Row[]> {
   return page.evaluate(() => new Promise<Row[]>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 1);
+    const open = indexedDB.open('typebridge', 2);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
@@ -169,6 +169,36 @@ test('a missing-document viewer can still switch to a saved document without gai
 
   await viewer.reload();
   await expectViewerReady(viewer, 'Second saved');
+});
+
+test('choosing a document that vanished keeps its id in the address so reload stays missing', async ({ page, context }) => {
+  await page.goto('/');
+  const first = await saveDocument(page, 'Stays');
+  await documentAction(page, '#new-draft');
+  const second = await saveDocument(page, 'Vanishes');
+  const viewer = await context.newPage();
+  await viewer.goto(`/?doc=${first.id}&mode=view`);
+  await expectViewerReady(viewer, 'Stays');
+  await expect(viewer.locator('#drafts option')).toHaveCount(2);
+  // Removed without a signal, so the viewer's list still offers it.
+  await viewer.evaluate(id => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readwrite');
+      tx.objectStore('documents').delete(id);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), second.id);
+  await selectDocument(viewer, second.id);
+  await expect(viewer.locator('#viewer-notice')).toContainText('no longer available');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(second.id);
+  await viewer.reload();
+  await expect(viewer.locator('#viewer-notice')).toContainText('no longer available');
+  await expect(viewer.locator('#editor')).toHaveValue('');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(second.id);
 });
 
 test('reloading the companion stays a viewer for the same document with a fresh instance', async ({ page, context }) => {
@@ -354,7 +384,7 @@ test('selecting a recovery-* document updates the URL so reload keeps it', async
   const first = await saveDocument(page, 'Ordinary saved');
   const recoveryId = `recovery-${MISSING_ID}`;
   await page.evaluate(({ id }) => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 1);
+    const open = indexedDB.open('typebridge', 2);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
