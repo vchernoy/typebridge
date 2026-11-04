@@ -143,6 +143,23 @@ test('stacked split divider changes pane heights on a narrow viewport', async ({
   expect(after!.height).toBeGreaterThan(before!.height + 4);
 });
 
+test('stacked End ratio keeps a usable companion pane after the divider', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await openSplit(page);
+  const divider = page.locator('#split-divider');
+  await divider.focus();
+  await page.keyboard.press('End');
+  await expect(divider).toHaveAttribute('aria-valuenow', '80');
+  const companion = await page.locator('.editor-pane-companion').boundingBox();
+  const field = await page.locator('#editor-b').boundingBox();
+  expect(companion).toBeTruthy();
+  expect(field).toBeTruthy();
+  expect(companion!.height).toBeGreaterThan(90);
+  expect(field!.height).toBeGreaterThan(40);
+});
+
 test('conflict-copy creation syncs workspace document identity', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

@@ -614,6 +614,8 @@ body.focus-mode .bottom {
 /* In-tab split workspace (#159 S3): optional same-document live companion. */
 .editor-split {
   --split-ratio: 50%;
+  --split-primary-share: 0.5;
+  --split-divider-size: 12px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -631,12 +633,19 @@ body.focus-mode .bottom {
   min-width: 0;
   flex: 1 1 auto;
 }
+/* Ratio applies to space remaining after the divider so both panes stay usable. */
 .editor-split[data-split="on"] .editor-pane-primary {
-  flex: 0 0 var(--split-ratio);
-  max-width: var(--split-ratio);
+  flex: 0 0 calc((100% - var(--split-divider-size)) * var(--split-primary-share));
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 .editor-split[data-split="on"] .editor-pane-companion {
   flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 /* Saved Normal/Focus pixel widths on #editor must not overflow the allocated pane. */
 .editor-split[data-split="on"] #editor {
@@ -654,7 +663,7 @@ body.focus-mode .bottom {
   position: static;
 }
 .split-divider {
-  flex: 0 0 12px;
+  flex: 0 0 var(--split-divider-size);
   align-self: stretch;
   margin: 0;
   border: 0;
@@ -668,24 +677,12 @@ body.focus-mode .bottom {
   outline-offset: 2px;
 }
 .editor-split[data-split-orientation="stacked"] .split-divider {
-  flex-basis: 12px;
   cursor: row-resize;
 }
-/* Stacked orientation needs a definite shell height so --split-ratio can size panes. */
+/* Stacked orientation needs a definite shell height so percentage shares resolve. */
 .editor-split[data-split="on"][data-split-orientation="stacked"] {
   flex-direction: column;
   height: min(70dvh, 560px);
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] .editor-pane-primary {
-  flex: 0 0 var(--split-ratio);
-  max-width: none;
-  min-height: 0;
-  overflow: hidden;
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] .editor-pane-companion {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow: hidden;
 }
 .editor-split[data-split="on"][data-split-orientation="stacked"] #editor,
 .editor-split[data-split="on"][data-split-orientation="stacked"] #editor-b {
@@ -693,14 +690,33 @@ body.focus-mode .bottom {
   height: auto;
   min-height: 0;
 }
+/* Keep the companion textarea usable when the primary takes most of a short stack. */
+.editor-split[data-split="on"][data-split-orientation="stacked"] .editor-pane-companion label[for="editor-b"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome {
+  margin-bottom: 2px;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] #split-reset {
+  min-height: 32px;
+  padding: 0 10px;
+}
 @media (max-width: 640px) {
   .split-divider {
     cursor: row-resize;
   }
 }
 @media (pointer: coarse) {
-  .split-divider {
-    flex-basis: 44px;
+  .editor-split {
+    --split-divider-size: 44px;
   }
 }
 

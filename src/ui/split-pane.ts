@@ -62,7 +62,9 @@ export function setupSplitPane(options: {
   function applyRatio(): void {
     const clamped = Math.min(MAX_RATIO, Math.max(MIN_RATIO, Math.round(ratio)));
     ratio = clamped;
+    // Share is of the space remaining after the divider, not the full shell.
     options.shell.style.setProperty('--split-ratio', `${clamped}%`);
+    options.shell.style.setProperty('--split-primary-share', String(clamped / 100));
     options.divider.setAttribute('aria-valuenow', String(clamped));
   }
 
