@@ -416,7 +416,8 @@ Shipped in this PR: optional same-document live companion pane in one tab.
 - **UI:** Documents → **Split editor** / **Close split**. Companion `#editor-b` is read-only (`Editor.setReadOnly`), badge **Live view · Read-only** (never “Saved version”). Divider: drag, arrow keys, Home/End, **Reset split**. Narrow viewports stack panes.
 - **Mirror:** `mirrorTextarea` copies primary → companion on `input` / `historychange` / `showDraft` / split open. Preserves companion selection and scroll. No BroadcastChannel or URL body text.
 - **One pipeline:** persist, ownership, history and recovery stay on the primary session in `main.ts`. Companion never schedules saves. Workspace `documentId` syncs on `showDraft` and on conflict-copy creation (no mid-persist `sessionGeneration` bump).
-- **Hooks:** `data-split`, `data-document-id`, pane ids/roles. Layout preference `typebridge.split.v1` stores open/ratio only. Viewers force split off.
+- **Hooks:** `data-split`, `data-document-id`, pane ids/roles, `data-active-pane`. Layout preference `typebridge.split.v1` stores open/ratio only. Viewers force split off without overwriting the editor preference.
+- **Active pane:** focus on `#editor` / `#editor-b` sets the active target. Shared mutations (Undo/Convert/Clear/Replace) use `commandAllowedOnPane` and are disabled/refused while the read-only companion is active; Find/Copy remain available. Toolbar mousedown preserves the last pane target.
 - **Not in S3:** second document session, Edit in this pane, dual pickers, toolbar `CommandGeneration` capture.
 
 ## Implementation notes for later PRs

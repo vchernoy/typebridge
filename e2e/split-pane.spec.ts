@@ -85,6 +85,33 @@ test('comparison viewers cannot open the in-tab split or clear the editor prefer
   await expect(page.locator('main.workspace')).toHaveAttribute('data-split', 'on');
 });
 
+test('companion focus refuses Convert/Replace on the primary selection', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const field = page.locator('#editor');
+  await field.fill('alpha beta');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await field.evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.focus();
+    node.setSelectionRange(0, 5);
+  });
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.focus();
+    node.setSelectionRange(6, 10);
+  });
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await expect(page.locator('#convert-cyrillic')).toBeDisabled();
+  await expect(page.locator('#replace-one')).toBeDisabled();
+  await page.locator('#convert-cyrillic').click({ force: true });
+  await expect(field).toHaveValue('alpha beta');
+  await field.focus();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-a');
+  await expect(page.locator('#convert-cyrillic')).toBeEnabled();
+});
+
 test('split open keeps the primary editor within its pane despite a saved pixel width', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

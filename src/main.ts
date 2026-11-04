@@ -13,7 +13,8 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
-import { createSinglePaneWorkspace } from './view/workspace';
+import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
+import { commandAllowedOnPane } from './view/session';
 import { mirrorTextarea } from './view/mirror';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
@@ -94,6 +95,8 @@ function mirrorCompanion(force = false): void {
 }
 
 const resizeGrip = document.querySelector<HTMLButtonElement>('#resize-editor')!;
+/** Filled after mutation chrome exists; split open/close runs before those listeners are wired. */
+const paneChrome = { syncMutations: (): void => {} };
 const splitControls = setupSplitPane({
   shell: editorSplit,
   divider: splitDivider,
@@ -109,6 +112,8 @@ const splitControls = setupSplitPane({
     resizeGrip.hidden = open;
     resizeGrip.tabIndex = open ? -1 : 0;
     if (open) mirrorCompanion();
+    else workspace.setActivePane(PRIMARY_PANE_ID);
+    paneChrome.syncMutations();
   },
 });
 if (viewMode) {
@@ -292,12 +297,30 @@ const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
-const syncHistory = () => { undo.disabled = readOnlyNow() || !editor.canUndo; redo.disabled = readOnlyNow() || !editor.canRedo; };
+/** Shared chrome mutates only the primary editable pane; refuse while the companion is active. */
+function canMutatePrimary(): boolean {
+  return commandAllowedOnPane({
+    activePaneId: workspace.activePaneId(),
+    targetPaneId: PRIMARY_PANE_ID,
+    role: readOnlyNow() ? 'readonly' : 'editable',
+    mutatesDocument: true,
+  });
+}
+function syncMutationControls(): void {
+  const blocked = !canMutatePrimary();
+  undo.disabled = blocked || !editor.canUndo;
+  redo.disabled = blocked || !editor.canRedo;
+  for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
+    document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
+  }
+}
+const syncHistory = () => { syncMutationControls(); };
+paneChrome.syncMutations = syncMutationControls;
 field.addEventListener('historychange', syncHistory);
 for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
-    if (readOnlyNow()) return;
+    if (!canMutatePrimary()) return;
     action();
     field.focus({ preventScroll: true });
   });
@@ -307,7 +330,7 @@ for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-la
   const button = document.querySelector<HTMLButtonElement>('#' + id)!;
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
-    if (readOnlyNow()) return;
+    if (!canMutatePrimary()) return;
     if (!editor.convertSelection(direction)) announceAction('Select text to convert');
   });
 }
@@ -315,9 +338,17 @@ field.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
   const key = event.key.toLowerCase();
   if (key !== SHORTCUTS.convertCyrillic.key && key !== SHORTCUTS.convertLatin.key) return;
-  if (readOnlyNow() || field.selectionStart === field.selectionEnd) return;
+  if (!canMutatePrimary() || field.selectionStart === field.selectionEnd) return;
   event.preventDefault();
   editor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
+});
+field.addEventListener('focus', () => {
+  workspace.setActivePane(PRIMARY_PANE_ID);
+  syncMutationControls();
+});
+companionField.addEventListener('focus', () => {
+  workspace.setActivePane(SECOND_PANE_ID);
+  syncMutationControls();
 });
 function updateCaretPosition(): void {
   const { line, column } = lineColumnAtOffset(field.value, field.selectionStart);
@@ -334,7 +365,7 @@ function saveTabIndent(): boolean {
 }
 tabIndent.addEventListener('change', saveTabIndent);
 field.addEventListener('keydown', event => {
-  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
+  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly || !canMutatePrimary()) return;
   const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
   // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
   if (!change && event.shiftKey) return;
@@ -357,11 +388,12 @@ document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', as
   catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
-  if (!readOnlyNow() && field.value && await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
+  if (!canMutatePrimary() || !field.value) return;
+  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
 });
 
 
-const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(field, editor, enabled);
+const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(field, editor, enabled, canMutatePrimary);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
 // Find and Go to line open on demand (#123): from their toolbar buttons or with
@@ -617,6 +649,7 @@ function applyEditAccess(): void {
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
   syncHistory();
+  syncMutationControls();
   updateSaveIndicator();
 }
 /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */

@@ -45,7 +45,8 @@ export type Workspace = {
   splitOpen(): boolean;
   setSplitOpen(open: boolean): void;
   setPaneRole(role: PaneRole): void;
-  setActive(active: boolean): void;
+  activePaneId(): PaneId;
+  setActivePane(id: PaneId): void;
   captureCommandGeneration(extra?: { contentRevision?: number }): CommandGeneration;
   capturePersistGeneration(): SessionPersistGeneration;
   snapshotSession(extra: {
@@ -74,12 +75,12 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
   let contentRevision = 0;
   let paneGeneration = 0;
   let role: PaneRole = 'editable';
-  let active = true;
+  let activePane: PaneId = paneId;
   let splitOpen = false;
 
   function syncDom(): void {
     options.root.dataset.sessionId = sessionId;
-    options.root.dataset.activePane = active ? paneId : '';
+    options.root.dataset.activePane = activePane;
     options.root.dataset.split = splitOpen ? 'on' : 'off';
     if (documentId) options.root.dataset.documentId = documentId;
     else delete options.root.dataset.documentId;
@@ -113,6 +114,7 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
       if (!companionPaneId) return;
       if (splitOpen === open) return;
       splitOpen = open;
+      if (!open) activePane = paneId;
       paneGeneration += 1;
       syncDom();
     },
@@ -122,14 +124,17 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
       paneGeneration += 1;
       syncDom();
     },
-    setActive: next => {
-      if (next === active) return;
-      active = next;
+    activePaneId: () => activePane,
+    setActivePane: id => {
+      if (id !== paneId && id !== companionPaneId) return;
+      if (id === companionPaneId && !splitOpen) return;
+      if (activePane === id) return;
+      activePane = id;
       syncDom();
     },
     captureCommandGeneration: extra => ({
       sessionId,
-      paneId,
+      paneId: activePane,
       paneGeneration,
       sessionGeneration,
       ...(extra?.contentRevision !== undefined ? { contentRevision: extra.contentRevision } : {}),
@@ -158,7 +163,7 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
           sessionId,
           role: 'readonly',
           paneGeneration,
-          active: false,
+          active: activePane === companionPaneId,
         };
       }
       return {
@@ -166,7 +171,7 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
         sessionId,
         role,
         paneGeneration,
-        active,
+        active: activePane === paneId,
       };
     },
     syncDom,

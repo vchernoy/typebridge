@@ -7,7 +7,12 @@ import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearc
  * Find & Replace: query/replacement persistence, Match case/Regex options, transliterating
  * Find/Replace inputs, navigation (including zero-width matches) and Replace/Replace all.
  */
-export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled: HTMLInputElement): {
+export function setupSearch(
+  field: HTMLTextAreaElement,
+  editor: Editor,
+  enabled: HTMLInputElement,
+  canMutate: () => boolean = () => true,
+): {
   findInput: HTMLInputElement;
   findEditor: Editor;
   replaceEditor: Editor;
@@ -112,6 +117,7 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
   document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
+    if (!canMutate()) return;
     const found = matches();
     if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = 'No matches'; return; }
     const match = found.find(([start, end]) => start === field.selectionStart && end === field.selectionEnd)
@@ -125,6 +131,7 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
     field.focus({ preventScroll: true });
   });
   document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('click', () => {
+    if (!canMutate()) return;
     const pattern = searchPattern();
     if (!pattern) return;
     const original = field.value;

@@ -98,6 +98,26 @@ describe('createSinglePaneWorkspace', () => {
     expect(workspace.snapshotPane(SECOND_PANE_ID).role).toBe('readonly');
   });
 
+  it('tracks the active pane for shared chrome without changing sessionGeneration', () => {
+    const root = fakeElement();
+    const workspace = createSinglePaneWorkspace({
+      root,
+      paneSurface: fakeElement(),
+      companionSurface: fakeElement(),
+    });
+    workspace.setSplitOpen(true);
+    expect(workspace.activePaneId()).toBe(PRIMARY_PANE_ID);
+    expect(root.dataset.activePane).toBe(PRIMARY_PANE_ID);
+    workspace.setActivePane(SECOND_PANE_ID);
+    expect(workspace.activePaneId()).toBe(SECOND_PANE_ID);
+    expect(root.dataset.activePane).toBe(SECOND_PANE_ID);
+    expect(workspace.snapshotPane(SECOND_PANE_ID).active).toBe(true);
+    expect(workspace.snapshotPane(PRIMARY_PANE_ID).active).toBe(false);
+    expect(workspace.sessionGeneration()).toBe(0);
+    workspace.setSplitOpen(false);
+    expect(workspace.activePaneId()).toBe(PRIMARY_PANE_ID);
+  });
+
   it('syncs documentId into the root dataset without bumping sessionGeneration', () => {
     const root = fakeElement();
     const workspace = createSinglePaneWorkspace({ root, paneSurface: fakeElement() });
