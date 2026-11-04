@@ -246,6 +246,35 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
   expect((await readStoredDocs(other)).map(row => row.id)).not.toContain(id);
 });
 
+test('a clean reader adopts a recreated document after Delete saved copy', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'first save');
+  await page.locator('#editor').fill('second save');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const other = await context.newPage();
+  await openOrdinary(other);
+  await expect(role(other)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#editor')).toHaveValue('second save');
+
+  await page.locator('#settings-open').click();
+  await page.locator('#autosave').uncheck();
+  await page.getByRole('dialog', { name: 'Delete the saved copy?' }).getByRole('button', { name: 'Delete saved copy' }).click();
+  await expect(page.locator('#status')).toContainText('Autosave off');
+  await page.locator('#autosave').check();
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === id)?.revision).toBe(1);
+
+  await page.close();
+  await expect.poll(async () => {
+    await nudge(other);
+    return role(other).getAttribute('data-role');
+  }).toBe('editor');
+  await expect(other.locator('#editor')).toHaveValue('second save');
+  await other.locator('#editor').fill('reader continues');
+  await expect(other.locator('#save-indicator')).toHaveText('Saved');
+  expect((await readStoredDocs(other)).map(row => [row.id, row.text])).toEqual([[id, 'reader continues']]);
+});
+
 test('document switch waits for Autosave-off delete prompt before changing documents', async ({ page }) => {
   await openOrdinary(page);
   const first = await saveAs(page, 'first saved copy');

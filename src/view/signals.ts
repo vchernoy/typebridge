@@ -90,7 +90,8 @@ export function decideReread(input: {
   const committed = stored !== undefined && stored.revision >= 1;
   if (role === 'viewer') {
     if (!committed) return 'missing';
-    return stored.revision > displayedRevision ? 'refresh' : 'none';
+    // Refresh on any committed revision change, including a reset after Delete saved copy.
+    return stored.revision !== displayedRevision ? 'refresh' : 'none';
   }
   if (displayedRevision < 1) return 'none';
   if (!committed) return 'notice-deleted';

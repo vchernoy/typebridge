@@ -669,7 +669,8 @@ function retryOwnership(): void {
       return;
     }
     // Reread under the new fence before enabling editing; unsaved text in memory is never replaced.
-    if (fresh && fresh.revision > active.revision) {
+    // Any revision change counts (including a reset after Delete saved copy recreates the row).
+    if (fresh && fresh.revision !== active.revision) {
       writingPosition.save();
       active = fresh;
       showDraft();

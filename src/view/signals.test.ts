@@ -55,10 +55,11 @@ describe('createDocumentSignal', () => {
 });
 
 describe('decideReread', () => {
-  it('refreshes a viewer only for a strictly newer committed revision', () => {
+  it('refreshes a viewer when the committed revision changes either way', () => {
     expect(decideReread({ role: 'viewer', displayedRevision: 2, stored: { revision: 3 } })).toBe('refresh');
     expect(decideReread({ role: 'viewer', displayedRevision: 3, stored: { revision: 3 } })).toBe('none');
-    expect(decideReread({ role: 'viewer', displayedRevision: 3, stored: { revision: 2 } })).toBe('none');
+    // Delete saved copy then recreate can reset the revision below what a reader still shows.
+    expect(decideReread({ role: 'viewer', displayedRevision: 3, stored: { revision: 1 } })).toBe('refresh');
   });
 
   it('shows the missing state for a viewer when the row is absent or uncommitted', () => {
