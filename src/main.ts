@@ -44,6 +44,8 @@ let transitioning = false;
 let deleting = false;
 /** True only during the post-flush ownership acquire/reread window (not while flushing). */
 let transferFrozen = false;
+/** True for the whole Autosave change handler (including awaits); keeps the checkbox disabled. */
+let autosaveToggleActive = false;
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
@@ -544,7 +546,8 @@ function applyEditAccess(): void {
   if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
   if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
-  autosave.disabled = blocked;
+  // installOwnership during an in-flight Autosave-off save must not re-enable the checkbox.
+  autosave.disabled = blocked || autosaveToggleActive;
   document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
   // Temporary transfer freeze must not announce "another window is editing".
   const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, dirty);
@@ -809,7 +812,8 @@ function endAutosaveToggleGate(): void {
   releaseAutosaveToggleGate?.();
 }
 autosave.addEventListener('change', async () => {
-  if (readOnlyNow()) return;
+  if (readOnlyNow() || autosaveToggleActive) return;
+  autosaveToggleActive = true;
   autosave.disabled = true;
   beginAutosaveToggleGate();
   try {
@@ -880,6 +884,7 @@ autosave.addEventListener('change', async () => {
   }
   } finally {
     endAutosaveToggleGate();
+    autosaveToggleActive = false;
     // Match applyEditAccess / readOnlyNow — a concurrent switch may have set transferFrozen.
     autosave.disabled = editBlock !== '' || transferFrozen;
     // Re-focus after re-enabling: the dialog cannot restore while this control

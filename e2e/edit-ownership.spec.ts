@@ -256,6 +256,7 @@ test('document switch waits for Autosave-off delete prompt before changing docum
   await page.locator('#autosave').uncheck();
   const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
   await expect(dialog).toBeVisible();
+  await expect(page.locator('#autosave')).toBeDisabled();
   // Queue a switch while the prompt owns the document; it must not apply until the prompt closes.
   const switching = page.evaluate(id => new Promise<void>(resolve => {
     const select = document.querySelector<HTMLSelectElement>('#drafts')!;
