@@ -1,6 +1,6 @@
 # ADR: Comparison window and single editing owner (#159)
 
-Status: **Accepted for implementation** (W1); **W2 read-only companion implemented** (see [W2 implementation notes](#w2-implementation-notes)); **W3 saved-version signals implemented** (see [W3 implementation notes](#w3-implementation-notes)); **W4 single editing owner implemented** (see [W4 implementation notes](#w4-implementation-notes)). Implements in sequential PRs W2–W6 on `main`. Does **not** close #159, #48, #40 or #37.
+Status: **Accepted for implementation** (W1); **W2 read-only companion implemented** (see [W2 implementation notes](#w2-implementation-notes)); **W3 saved-version signals implemented** (see [W3 implementation notes](#w3-implementation-notes)); **W4 single editing owner implemented** (see [W4 implementation notes](#w4-implementation-notes)); **W5 Edit here / handoff implemented** (see [W5 implementation notes](#w5-implementation-notes)). Implements in sequential PRs W2–W6 on `main`. Does **not** close #159, #48, #40 or #37.
 
 ## Context (audit of current code)
 
@@ -277,7 +277,7 @@ Status: This saved document is no longer available.
 | **W2** (implemented) | Open action, `mode=view` boot branch, RO gates, popup/missing/blocked storage | Unit + Playwright multi-page: same/different doc, reload, cloned sessionStorage, privacy no-write, invalid id |
 | **W3** (implemented) | Broadcast + reread + visibility fallback | Stale/out-of-order/missed, delete, dirty editor notice, no channel |
 | **W4** (implemented) | Lock + fence at write boundary; ordinary tabs participate | Simultaneous acquire, crash/release, unsupported locks, stale wake |
-| **W5** | Edit here UX + refusals | Busy/dirty/IME/private/conflict; gone owner acquire |
+| **W5** (implemented) | Edit here UX + refusals | Busy/dirty/IME/private/conflict; gone owner acquire |
 | **W6** | Docs, ROADMAP, evidence, small cleanups | Full matrix; mark real-device/AT pending |
 
 Playwright: Chromium, Firefox, WebKit; multiple pages in one context. Screenshots for visual chrome in W2/W6. Real OS windows, physical iPhone, real IME, VoiceOver/NVDA = manual evidence only.
@@ -323,6 +323,17 @@ Shipped in `src/editor/edit-ownership.ts` (`acquireEditOwnership`), `src/editor/
 - **Storage unavailable:** with no IndexedDB, no ownership is claimed and the window stays editable with the existing storage warnings (nothing can be written, so there is nothing to protect). This keeps transliteration typing usable when storage is blocked; the ADR capability table's “fail closed to read-only” is narrowed to “no document writes”.
 - **W3 follow-ups folded in:** a signal or focus reread that arrives while a window is still initializing is replayed once it is ready (`rereadAfterInit`); choosing a vanished document in a viewer keeps its id in the address (`syncViewerUrl`) so a reload shows the same missing state.
 - **Not in W4:** no Edit here / handoff prompt (W5); no force-steal; no automatic acquisition while hidden; Documents lists of editors are still not refreshed from signals (#48). bfcache restore is covered by the fence only (no explicit re-verification on `pageshow`).
+
+## W5 implementation notes
+
+Shipped in `src/view/handoff.ts`, `src/main.ts` (`#edit-here`), `e2e/edit-here.spec.ts`:
+
+- **Control:** **Edit here** (`#edit-here`) is shown for comparison viewers and for ordinary windows that are read-only because of `busy` / `lost` / `error` (not while this window is already the editor, and not without Web Locks).
+- **Free lock:** the requester calls `acquireFor(..., { allowViewer: true })`, rereads IndexedDB, and enables editing. A viewer drops `viewMode`, hides the comparison badge, restores ordinary save chrome, wires pagehide/beforeunload flushes, and clears `mode=view` from the address.
+- **Live owner:** channel `typebridge.edit-handoff.v1` carries metadata-only `{ request | released | refused, documentId, requesterId, at[, reason] }` (no text). The owner auto-refuses while composing (IME), Autosave-off dirty/private, save in flight, save failed, conflict notice, or mid switch/delete; otherwise prompts **Transfer editing** / **Keep editing** (default Keep). On transfer the owner flushes when Autosave is on, awaits Web Lock release, then posts `released`. The requester acquires only after that signal.
+- **Refusals:** the requester shows **Cannot edit here yet** with reason-specific guidance; never force-steals, never auto-enables Autosave, never discards private text.
+- **Still available:** focus/visibility retry for ordinary readers when the lock is already free (W4) remains; Edit here is the explicit path for viewers and for asking a live owner.
+- **Not in W5:** force-steal; automatic focus-based ownership; Documents list refresh from signals (#48); W6 docs/evidence matrix.
 
 ## Non-goals
 

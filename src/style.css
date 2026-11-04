@@ -287,6 +287,15 @@ body {
 .viewer-notice[hidden] {
   display: none;
 }
+.edit-here-row {
+  margin: 0 0 8px;
+}
+.edit-here-row[hidden] {
+  display: none;
+}
+#edit-here {
+  min-height: 44px;
+}
 #doc-menu-open {
   min-width: 44px;
   padding: 0 10px;
