@@ -668,9 +668,9 @@ function retryOwnership(): void {
       if (active.revision >= 1) showVersionNotice(DELETED_NOTICE);
       return;
     }
-    // Reread under the new fence before enabling editing; unsaved text in memory is never replaced.
-    // Any revision change counts (including a reset after Delete saved copy recreates the row).
-    if (fresh && fresh.revision !== active.revision) {
+    // Authoritative snapshot under the new fence; unsaved text in memory is never replaced.
+    // Always install when clean: Delete saved copy can recreate the same revision with new content.
+    if (fresh) {
       writingPosition.save();
       active = fresh;
       showDraft();
@@ -1349,7 +1349,12 @@ async function rereadDisplayed(): Promise<void> {
   if (!viewMode && saving) { void rereadDisplayed(); return; }
   // A clean read-only ordinary window follows the saved version like a viewer; unsaved text is never replaced.
   const reader = !viewMode && editBlock !== '' && !dirty;
-  const action = decideReread({ role: viewMode || reader ? 'viewer' : 'editor', displayedRevision: active.revision, stored });
+  const action = decideReread({
+    role: viewMode || reader ? 'viewer' : 'editor',
+    displayedRevision: active.revision,
+    displayedUpdatedAt: active.updatedAt,
+    stored,
+  });
   if (action === 'refresh' && stored) {
     writingPosition.save();
     if (viewMode) {

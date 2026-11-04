@@ -248,28 +248,29 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
 
 test('a clean reader adopts a recreated document after Delete saved copy', async ({ page, context }) => {
   await openOrdinary(page);
-  const id = await saveAs(page, 'first save');
-  await page.locator('#editor').fill('second save');
-  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const id = await saveAs(page, 'original text');
   const other = await context.newPage();
   await openOrdinary(other);
   await expect(role(other)).toHaveAttribute('data-role', 'reader');
-  await expect(other.locator('#editor')).toHaveValue('second save');
+  await expect(other.locator('#editor')).toHaveValue('original text');
+  await expect.poll(async () => (await readStoredDocs(other)).find(row => row.id === id)?.revision).toBe(1);
 
   await page.locator('#settings-open').click();
   await page.locator('#autosave').uncheck();
   await page.getByRole('dialog', { name: 'Delete the saved copy?' }).getByRole('button', { name: 'Delete saved copy' }).click();
   await expect(page.locator('#status')).toContainText('Autosave off');
+  await page.locator('#editor').fill('recreated at revision 1');
   await page.locator('#autosave').check();
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === id)?.revision).toBe(1);
+  await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === id)?.text).toBe('recreated at revision 1');
 
   await page.close();
   await expect.poll(async () => {
     await nudge(other);
     return role(other).getAttribute('data-role');
   }).toBe('editor');
-  await expect(other.locator('#editor')).toHaveValue('second save');
+  await expect(other.locator('#editor')).toHaveValue('recreated at revision 1');
   await other.locator('#editor').fill('reader continues');
   await expect(other.locator('#save-indicator')).toHaveText('Saved');
   expect((await readStoredDocs(other)).map(row => [row.id, row.text])).toEqual([[id, 'reader continues']]);

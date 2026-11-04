@@ -84,14 +84,19 @@ export type RereadAction =
 export function decideReread(input: {
   role: 'viewer' | 'editor';
   displayedRevision: number;
-  stored: { revision: number } | undefined;
+  displayedUpdatedAt?: number;
+  stored: { revision: number; updatedAt?: number } | undefined;
 }): RereadAction {
-  const { role, displayedRevision, stored } = input;
+  const { role, displayedRevision, displayedUpdatedAt, stored } = input;
   const committed = stored !== undefined && stored.revision >= 1;
   if (role === 'viewer') {
     if (!committed) return 'missing';
-    // Refresh on any committed revision change, including a reset after Delete saved copy.
-    return stored.revision !== displayedRevision ? 'refresh' : 'none';
+    // Refresh when revision or updatedAt differs (Delete saved copy can recreate the same revision).
+    if (stored.revision !== displayedRevision) return 'refresh';
+    if (displayedUpdatedAt !== undefined && stored.updatedAt !== undefined && stored.updatedAt !== displayedUpdatedAt) {
+      return 'refresh';
+    }
+    return 'none';
   }
   if (displayedRevision < 1) return 'none';
   if (!committed) return 'notice-deleted';
