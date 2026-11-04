@@ -81,6 +81,9 @@ test('delete-saved-copy dialog Keep and Delete choices work with keyboard', asyn
   await autosaveToggle.focus();
   await autosaveToggle.uncheck();
   await expect(dialog).toBeVisible();
+  // Wait for Cancel focus before Tab — otherwise the trap may land on Keep when
+  // Tab races the dialog open (Chromium CI flake).
+  await expect(page.getByRole('button', { name: 'Keep saved copy' })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Delete saved copy' })).toBeFocused();
   await page.keyboard.press('Enter');
