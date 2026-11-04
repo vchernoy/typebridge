@@ -271,6 +271,40 @@ test('a database upgrade releases the editing lock so another tab can acquire', 
   expect(await heldEditLocks(other)).toEqual([`typebridge-edit-owner:${id}`]);
 });
 
+test('upgrade during acquire releases the new lock before it is installed', async ({ page, context }) => {
+  await openOrdinary(page);
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      (window as Window & { __typebridgeDb?: IDBDatabase }).__typebridgeDb = this.transaction.db;
+      return put.apply(this, args);
+    };
+  });
+  const id = await saveAs(page, 'acquire then upgrade');
+  await documentAction(page, '#new-draft');
+  await expect(page.locator('#editor')).toHaveValue('');
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayAfterAcquireMs?: number }).__typebridgeDelayAfterAcquireMs = 900;
+  });
+  const switching = selectDocument(page, id);
+  // Post-acquire delay: Web Lock is held but not yet installed as this window's ownership.
+  await expect.poll(() => heldEditLocks(page)).toEqual([`typebridge-edit-owner:${id}`]);
+  await page.evaluate(() => {
+    const db = (window as Window & { __typebridgeDb?: IDBDatabase }).__typebridgeDb!;
+    db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 2, newVersion: 3 }));
+  });
+  await switching;
+  await expect(page.locator('#status')).toContainText('Storage was upgraded in another tab');
+  await expect.poll(() => heldEditLocks(page)).toEqual([]);
+
+  const other = await context.newPage();
+  await openOrdinary(other);
+  await expect(role(other)).toHaveAttribute('data-role', 'editor');
+  expect((await readOwnership(other, id))?.ownerInstanceId).toBe(await instanceOf(other));
+});
+
 test('an editing owner still reconciles a missed newer revision on focus', async ({ page, context }) => {
   await context.addInitScript(() => {
     Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });

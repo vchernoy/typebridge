@@ -553,24 +553,37 @@ function applyEditAccess(): void {
   syncHistory();
   updateSaveIndicator();
 }
-type EditAccess = { ownership?: EditOwnership; block: EditBlock };
+/** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
+let storageGeneration = 0;
+type EditAccess = { ownership?: EditOwnership; block: EditBlock; generation: number };
 /** Try to own `documentId` without waiting; never steals from a live owner. */
 async function acquireFor(documentId: string): Promise<EditAccess> {
   // Without storage nothing can be written, so there is nothing to own.
-  if (viewMode || !db) return { block: '' };
+  if (viewMode || !db) return { block: '', generation: storageGeneration };
+  const generation = storageGeneration;
   // E2E may set a delay to assert mutations are frozen during ownership transfer (#159 W4).
   const delayMs = (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs;
   if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  if (generation !== storageGeneration || !db) return { block: 'error', generation: storageGeneration };
   let held: EditOwnership | undefined;
   try {
     const result = await acquireEditOwnership({
       db, locks: webLocks, documentId, instanceId,
       onLost: () => { if (held && ownership === held) loseOwnership(); },
     });
-    if (result.status !== 'acquired') return { block: result.status };
+    // E2E: hold the lock briefly before returning so a mid-flight versionchange can be asserted.
+    const afterMs = (window as Window & { __typebridgeDelayAfterAcquireMs?: number }).__typebridgeDelayAfterAcquireMs;
+    if (typeof afterMs === 'number' && afterMs > 0 && result.status === 'acquired') {
+      await new Promise(resolve => setTimeout(resolve, afterMs));
+    }
+    if (generation !== storageGeneration || !db) {
+      if (result.status === 'acquired') void result.ownership.release();
+      return { block: 'error', generation: storageGeneration };
+    }
+    if (result.status !== 'acquired') return { block: result.status, generation };
     held = result.ownership;
-    return { ownership: held, block: '' };
-  } catch { return { block: 'error' }; }
+    return { ownership: held, block: '', generation };
+  } catch { return { block: 'error', generation: storageGeneration }; }
 }
 
 /** Freeze Editor + title gates and mutation controls for the ownership-transfer window. */
@@ -590,9 +603,15 @@ function unfreezeEditorsAfterTransition(): void {
 }
 /** Make `access` current and release whatever this window owned before. */
 function installOwnership(access: EditAccess): void {
+  let next = access;
+  // Drop a handle acquired before storage was invalidated (versionchange mid-switch/boot).
+  if (access.ownership && (access.generation !== storageGeneration || !db)) {
+    void access.ownership.release();
+    next = { block: access.block === '' ? 'error' : access.block, generation: storageGeneration };
+  }
   const previous = ownership;
-  ownership = access.ownership;
-  editBlock = access.block;
+  ownership = next.ownership;
+  editBlock = next.block;
   if (previous && previous !== ownership) void previous.release();
   applyEditAccess();
 }
@@ -1058,7 +1077,8 @@ if (!viewMode) {
   setInterval(queueRecovery, 5000);
 }
 function handleDatabaseUpgrade(): void {
-  // Free the Web Lock before dropping the connection so an upgraded tab can acquire.
+  // Invalidate in-flight acquires, then free any installed Web Lock so an upgraded tab can own.
+  storageGeneration++;
   const previous = ownership;
   ownership = undefined;
   clearTimeout(saveTimer);
