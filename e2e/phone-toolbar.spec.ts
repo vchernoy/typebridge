@@ -8,9 +8,10 @@ for (const width of [320, 390]) {
     for (const name of ['Find', 'Copy']) {
       const button = page.getByRole('button', { name, exact: true });
       const box = (await button.boundingBox())!;
-      expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.width).toBeLessThanOrEqual(48);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      // Firefox can report subpixel widths just under the CSS px (e.g. 43.99998).
+      expect(Math.round(box.width)).toBeGreaterThanOrEqual(44);
+      expect(Math.round(box.width)).toBeLessThanOrEqual(48);
+      expect(Math.round(box.height)).toBeGreaterThanOrEqual(44);
       await expect(button.locator('svg')).toBeVisible();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);

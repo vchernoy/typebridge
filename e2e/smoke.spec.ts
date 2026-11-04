@@ -2,6 +2,16 @@ import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { documentAction, moreAction, selectDocument, setAutosave } from './settings-helpers';
 
+test('single-pane workspace exposes session and pane hooks', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const root = page.locator('main.workspace');
+  await expect(root).toHaveAttribute('data-session-id', 'session-1');
+  await expect(root).toHaveAttribute('data-active-pane', 'pane-a');
+  await expect(page.locator('#editor')).toHaveAttribute('data-pane-id', 'pane-a');
+  await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'editable');
+});
+
 test('editor types transliteration, edits selections and supports history', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

@@ -309,8 +309,8 @@ Status: This saved document is no longer available.
 | **W3** (done #162) | Saved-version signals | Stale/missed/delete/dirty notice |
 | **W4** (done #163) | Web Lock + fence | Simultaneous acquire, crash, unsupported |
 | **W5/W6** (deferred #164) | Cross-window Edit here | Paused — do not merge for that goal |
-| **S1** (this PR) | Revised split ADR/UX + `session` contracts | Vitest session/pane helpers; runtime unchanged |
-| **S2** | Session/pane separation, single-pane parity | Existing e2e still green; no split UI yet |
+| **S1** (done #165) | Revised split ADR/UX + `session` contracts | Vitest session/pane helpers; runtime unchanged |
+| **S2** (this PR) | Session/pane separation, single-pane parity | Vitest workspace; existing e2e still green; no split UI yet |
 | **S3** | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
 | **S4** | Two different editable documents | Independent sessions, locks, Undo, switch/close |
 | **S5** | Local Edit in this pane + lifecycle | Transfer, IME/transition guards, delayed commands |
@@ -380,7 +380,7 @@ Shipped in this PR: `src/view/session.ts` (+ tests), this ADR revision, and doc 
 | Ownership | `ownership`, `editBlock`, `acquireFor` | **Session** (one lock per documentId for the page) |
 | Persist / save timer | `persist`, `saving`, `saveTimer` | **Session** — one serialized stream per document |
 | Recovery journal | `journalTab`, `journalEdit` | **Session** / page instance — not per pane |
-| View generation | `viewGeneration` | Evolve into pane + session generations (`CommandGeneration`) |
+| View generation | workspace `sessionGeneration` (+ `paneGeneration`) | Content edits use `contentRevision`; S5 wires `CommandGeneration` on toolbar commands |
 | `viewMode` boot | comparison route flag | Separate-window only; in-tab RO is pane **role** |
 | Writing position | `setupWritingPosition` on one field | **Pane** (key by paneId + documentId) |
 | Toolbar / Find / Go to line | global `#undo`, `#find-bar`, … | Route via **active pane** + session token |
@@ -400,9 +400,17 @@ Reuse: `src/view/route.ts`, `signals.ts`, `ownership.ts`; `src/editor/edit-owner
 
 W4 lifecycle/BFCache, acquisition-gap, editor list refresh (#48), storage-wording follow-ups remain unless verified fixed. #164’s stale pending-handoff finding stays on that paused PR.
 
+## S2 implementation notes
+
+Shipped in this PR: `src/view/workspace.ts` (+ tests) and wiring in `src/main.ts`. **No split UI.** Persist, ownership, recovery and signals stay in `main.ts`.
+
+- **`createSinglePaneWorkspace`:** one `session-1` + one `pane-a` surface. Owns `sessionGeneration` (document identity; formerly `viewGeneration`), `contentRevision` (committed text/title edits; formerly `generation`), `paneGeneration` (role/binding), dirty flag, and pane role.
+- **DOM hooks:** `main.workspace` gets `data-session-id` / `data-active-pane`; `#editor` gets `data-pane-id` / `data-pane-role`. Role tracks ownership/transfer freeze (`editable` ↔ `readonly`); viewers start `readonly`.
+- **Parity:** schedule/save/switch/reread/ownership retry still use the same bump rules; counters live on the workspace instead of free locals. `SessionPersistGeneration` / `CommandGeneration` helpers are exercised from the workspace unit tests; toolbar commands do not yet capture them (S5).
+- **Not in S2:** second pane, live mirror, dual sessions, local Edit in this pane, moving persist/ownership out of `main.ts`.
+
 ## Implementation notes for later PRs
 
-- S2: extract minimal session/controller boundaries; prove single-pane parity before split UI.
 - S3: attach a second pane to the same session; live mirror; divider a11y; unique pane ids.
 - S4: second session + picker; per-document lock/save; safe last-view close.
 - S5: `localPaneTransferBlock` wiring; generation-guarded delayed commands.
