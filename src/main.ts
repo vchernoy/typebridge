@@ -393,7 +393,16 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', a
 });
 
 
-const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(field, editor, enabled, canMutatePrimary);
+const primarySearch: { field: HTMLTextAreaElement; editor: Editor } = { field, editor };
+const companionSearch: { field: HTMLTextAreaElement; editor: Editor } = { field: companionField, editor: companionEditor };
+const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(
+  primarySearch,
+  enabled,
+  {
+    canMutate: canMutatePrimary,
+    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionSearch : primarySearch,
+  },
+);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
 // Find and Go to line open on demand (#123): from their toolbar buttons or with
@@ -421,9 +430,12 @@ function openGoto(): void {
   gotoInput.focus();
   gotoInput.select();
 }
+function activeEditorSurface(): HTMLTextAreaElement {
+  return workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
+}
 function closeBar(bar: HTMLElement, button: HTMLButtonElement): void {
   setBar(bar, button, false);
-  field.focus({ preventScroll: true });
+  activeEditorSurface().focus({ preventScroll: true });
 }
 findOpen.addEventListener('click', () => { if (findBar.hidden) openFind(); else closeBar(findBar, findOpen); });
 gotoOpen.addEventListener('click', () => { if (gotoBar.hidden) openGoto(); else closeBar(gotoBar, gotoOpen); });
@@ -438,11 +450,13 @@ function goToLine(): void {
     gotoStatus.textContent = gotoInput.value.trim() ? 'Use line or line:column' : 'Enter a line number';
     return;
   }
-  const target = offsetForLineColumn(field.value, parsed.line, parsed.column ?? 1);
-  field.focus({ preventScroll: true });
-  field.setSelectionRange(target.offset, target.offset);
-  editor.revealSelection();
-  updateCaretPosition();
+  const surface = activeEditorSurface();
+  const surfaceEditor = surface === companionField ? companionEditor : editor;
+  const target = offsetForLineColumn(surface.value, parsed.line, parsed.column ?? 1);
+  surface.focus({ preventScroll: true });
+  surface.setSelectionRange(target.offset, target.offset);
+  surfaceEditor.revealSelection();
+  if (surface === field) updateCaretPosition();
   gotoStatus.textContent = target.line === parsed.line && (parsed.column === undefined || target.column === parsed.column)
     ? `Line ${target.line}, column ${target.column}`
     : `Clamped to line ${target.line}, column ${target.column}`;

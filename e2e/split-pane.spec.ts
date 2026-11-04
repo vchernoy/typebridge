@@ -85,6 +85,36 @@ test('comparison viewers cannot open the in-tab split or clear the editor prefer
   await expect(page.locator('main.workspace')).toHaveAttribute('data-split', 'on');
 });
 
+test('Find next targets the active companion pane without mutating primary selection', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('one two one');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#editor').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.focus();
+    node.setSelectionRange(0, 0);
+  });
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await page.locator('#find-open').click();
+  await page.locator('#find-text').fill('one');
+  await page.locator('#find-next').click();
+  await expect(page.locator('#editor-b')).toBeFocused();
+  const companionSel = await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    return { start: node.selectionStart, end: node.selectionEnd };
+  });
+  const primarySel = await page.locator('#editor').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    return { start: node.selectionStart, end: node.selectionEnd };
+  });
+  expect(companionSel).toEqual({ start: 0, end: 3 });
+  expect(primarySel).toEqual({ start: 0, end: 0 });
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+});
+
 test('companion focus refuses Convert/Replace on the primary selection', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
