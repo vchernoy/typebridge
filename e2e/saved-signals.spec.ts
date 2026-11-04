@@ -7,7 +7,7 @@ const CHANNEL = 'typebridge.documents.v1';
 
 async function readDocs(page: Page): Promise<Row[]> {
   return page.evaluate(() => new Promise<Row[]>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 1);
+    const open = indexedDB.open('typebridge', 2);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
@@ -25,7 +25,7 @@ async function readDocs(page: Page): Promise<Row[]> {
 /** Commit a newer revision straight into IndexedDB without any signal (simulates a missed message). */
 async function writeSilently(page: Page, id: string, patch: { text?: string; title?: string }): Promise<number> {
   return page.evaluate(({ id, patch }) => new Promise<number>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 1);
+    const open = indexedDB.open('typebridge', 2);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
@@ -183,27 +183,59 @@ test('signals carry metadata only', async ({ page, context }) => {
   expect(context.pages()).toContain(page);
 });
 
-test('a dirty editor gets a notice and its text is never replaced or saved over', async ({ page, context }) => {
+test('a dirty editor gets a notice and its text is never replaced or saved over', async ({ page }) => {
   await page.goto('/');
   const row = await saveDocument(page, 'Shared base');
-  const other = await context.newPage();
-  await other.goto('/');
-  await expect(other.locator('#editor')).toHaveValue('Shared base');
-  await setAutosave(other, false, 'keep');
-  await other.locator('#editor').fill('Private unsaved edits');
-  await expect(other.locator('#version-notice')).toBeHidden();
+  await setAutosave(page, false, 'keep');
+  await page.locator('#editor').fill('Private unsaved edits');
+  await expect(page.locator('#version-notice')).toBeHidden();
 
-  await page.locator('#editor').fill('Saved elsewhere');
-  await expect(page.locator('#save-indicator')).toHaveText('Saved');
-  await expect(other.locator('#version-notice')).toBeVisible();
-  await expect(other.locator('#version-notice')).toContainText('newer saved version');
-  await expect(other.locator('#editor')).toHaveValue('Private unsaved edits');
-  await expect(other.locator('#editor')).toBeEditable();
+  // Since #159 W4 a second current tab is read-only, so the newer revision comes from a build
+  // that signals but does not take part in edit ownership.
+  const revision = await writeSilently(page, row.id, { text: 'Saved elsewhere' });
+  await postSignal(page, { v: 1, type: 'saved', documentId: row.id, revision, at: Date.now() });
+  await expect(page.locator('#version-notice')).toBeVisible();
+  await expect(page.locator('#version-notice')).toContainText('newer saved version');
+  await expect(page.locator('#editor')).toHaveValue('Private unsaved edits');
+  await expect(page.locator('#editor')).toBeEditable();
   await page.waitForTimeout(500);
   const rows = await readDocs(page);
   expect(rows).toHaveLength(1);
   expect(rows[0].id).toBe(row.id);
   expect(rows[0].text).toBe('Saved elsewhere');
+});
+
+test('a signal that arrives while the viewer is still loading is applied once it is ready', async ({ page, context }) => {
+  await page.goto('/');
+  const row = await saveDocument(page, 'Loaded version');
+  const viewer = await context.newPage();
+  // Hold the viewer's Documents list read, so it is still initializing when the signal arrives.
+  await viewer.addInitScript(() => {
+    const getAll = IDBObjectStore.prototype.getAll;
+    const state = window as unknown as { listHeld?: boolean; releaseList?: () => void };
+    IDBObjectStore.prototype.getAll = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['getAll']>) {
+      const request = getAll.apply(this, args);
+      if (state.listHeld || this.name !== 'documents') return request;
+      state.listHeld = true;
+      const handler = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')!;
+      Object.defineProperty(request, 'onsuccess', {
+        configurable: true,
+        get: () => handler.get!.call(request),
+        set: (fn: (event: Event) => void) => handler.set!.call(request, (event: Event) => { state.releaseList = () => fn.call(request, event); }),
+      });
+      return request;
+    };
+  });
+  await viewer.goto(`/?doc=${row.id}&mode=view`);
+  await expect.poll(() => viewer.evaluate(() => typeof (window as unknown as { releaseList?: () => void }).releaseList)).toBe('function');
+  await expect(viewer.locator('#editor')).toBeDisabled();
+
+  await page.locator('#editor').fill('Saved during load');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await expect.poll(async () => (await readDocs(page))[0].text).toBe('Saved during load');
+  await viewer.evaluate(() => (window as unknown as { releaseList: () => void }).releaseList());
+  await expect(viewer.locator('#editor')).toBeEnabled();
+  await expect(viewer.locator('#editor')).toHaveValue('Saved during load');
 });
 
 test('focus and visibility reconcile a signal that was missed', async ({ page, context }) => {
@@ -228,7 +260,7 @@ test('focus reconciliation covers a deletion that was missed', async ({ page, co
   const row = await saveDocument(page, 'Will vanish');
   const viewer = await openViewer(context, row.id, 'Will vanish');
   await page.evaluate(id => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 1);
+    const open = indexedDB.open('typebridge', 2);
     open.onsuccess = () => {
       const db = open.result;
       const tx = db.transaction('documents', 'readwrite');

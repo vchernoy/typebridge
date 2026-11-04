@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  editBlockGuidance,
   editOwnerLockName,
   mayAcquireEditOwnership,
+  mayRetryEditOwnership,
   nextOwnershipFence,
   ownershipFenceAllowsWrite,
   ownershipHeartbeatExpired,
@@ -50,5 +52,47 @@ describe('edit ownership helpers', () => {
     expect(ownershipFenceAllowsWrite(record(), 'owner-1', 1)).toBe(false);
     expect(ownershipFenceAllowsWrite(record(), 'other', 2)).toBe(false);
     expect(ownershipFenceAllowsWrite(undefined, 'owner-1', 2)).toBe(false);
+  });
+
+  it('rejects a released record and a later tenure of the same window', () => {
+    const released = record({ ownerInstanceId: '' });
+    expect(ownershipFenceAllowsWrite(released, 'owner-1', 2)).toBe(false);
+    expect(ownershipFenceAllowsWrite(released, '', 2)).toBe(false);
+    // Re-acquiring after release raises the fence, so a write still carrying the old one fails.
+    const reacquired = record({ fence: nextOwnershipFence(released) });
+    expect(ownershipFenceAllowsWrite(reacquired, 'owner-1', 2)).toBe(false);
+    expect(ownershipFenceAllowsWrite(reacquired, 'owner-1', 3)).toBe(true);
+  });
+});
+
+describe('read-only access guidance', () => {
+  it('retries only blocks that a free lock could resolve', () => {
+    expect(mayRetryEditOwnership('busy')).toBe(true);
+    expect(mayRetryEditOwnership('lost')).toBe(true);
+    expect(mayRetryEditOwnership('error')).toBe(true);
+    expect(mayRetryEditOwnership('unsupported')).toBe(false);
+    expect(mayRetryEditOwnership('')).toBe(false);
+  });
+
+  it('says nothing while this window is the owner', () => {
+    expect(editBlockGuidance('', false)).toBe('');
+    expect(editBlockGuidance('', true)).toBe('');
+  });
+
+  it('explains each read-only reason and points to copy/export', () => {
+    expect(editBlockGuidance('busy', false)).toContain('open for editing in another TypeBridge window');
+    expect(editBlockGuidance('busy', false)).toContain('close the other window');
+    expect(editBlockGuidance('lost', false)).toContain('Another TypeBridge window is now editing this document');
+    expect(editBlockGuidance('unsupported', false)).toContain('Web Locks');
+    expect(editBlockGuidance('unsupported', false)).toContain('copy and export');
+    expect(editBlockGuidance('error', false)).toContain('Reload to try again');
+  });
+
+  it('adds the unsaved-text warning only when this window holds unsaved text', () => {
+    const warning = 'Your unsaved changes here were not saved; copy or export them to keep them.';
+    for (const block of ['busy', 'lost', 'error'] as const) {
+      expect(editBlockGuidance(block, true)).toContain(warning);
+      expect(editBlockGuidance(block, false)).not.toContain(warning);
+    }
   });
 });

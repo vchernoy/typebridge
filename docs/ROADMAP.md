@@ -21,7 +21,7 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Plain-text preference merged (#42); Reading View remains open |
 | [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
 | [#48](https://github.com/vchernoy/typebridge/issues/48) | Cross-tab saved-version notifications | Saved/renamed/deleted signals for viewers and notice-only editors landed via [#159](https://github.com/vchernoy/typebridge/issues/159) W3; remaining scope (clean-editor refresh, editor list refresh, other preference signals) stays on #48, do not close it automatically |
-| [#159](https://github.com/vchernoy/typebridge/issues/159) | Comparison window + single editing owner | W1 ADR/contracts and W2 read-only companion (open action, `mode=view` boot, read-only gates) landed; W3 saved-version signals (BroadcastChannel + reread + focus/visibility fallback) landed; W4–W6 remain (ownership, Edit here, docs/evidence) — see [ADR](adr/159-comparison-window.md) |
+| [#159](https://github.com/vchernoy/typebridge/issues/159) | Comparison window + single editing owner | W1 ADR/contracts and W2 read-only companion (open action, `mode=view` boot, read-only gates) landed; W3 saved-version signals (BroadcastChannel + reread + focus/visibility fallback) landed; W4 single editing owner (per-document Web Lock + IndexedDB fence; ordinary windows participate, second window read-only) landed; W5–W6 remain (Edit here, docs/evidence) — see [ADR](adr/159-comparison-window.md) |
 
 ## Audit and current reliability follow-ups
 

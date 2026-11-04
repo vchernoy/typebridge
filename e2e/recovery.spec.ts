@@ -1,6 +1,7 @@
 import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { selectDocument, setAutosave } from './settings-helpers';
+import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 test('interrupted write and immediate tab close leave a recoverable Unicode copy', async ({ page, context }) => {
   await page.goto('/');
@@ -29,9 +30,8 @@ test('recovery keeps a newer version from another tab and does not clear a newer
   await page.goto('/');
   await page.locator('#editor').fill('Оригинал');
   await expect(page.locator('#status')).toContainText('Saved locally');
-  const other = await context.newPage(); await other.goto('/');
-  await other.locator('#editor').fill('Новая версия');
-  await expect(other.locator('#status')).toContainText('Saved locally');
+  // A newer revision from a build without edit ownership (#159 W4 keeps current tabs read-only).
+  await writeForeignRevision(page, { text: 'Новая версия' });
   await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Несохранённая версия');
   await expect(page.locator('#status')).toContainText('Save failed');
@@ -41,7 +41,7 @@ test('recovery keeps a newer version from another tab and does not clear a newer
   await expect(third.locator('#status')).toContainText('Recovered a copy');
   await selectDocument(third, { label: 'Untitled document (recovered)' });
   await expect(third.locator('#editor')).toHaveValue('Несохранённая версия');
-  await other.reload(); await expect(other.locator('#editor')).toHaveValue('Новая версия');
+  expect((await readStoredDocs(third)).map(row => row.text).sort()).toEqual(['Новая версия', 'Несохранённая версия'].sort());
 });
 
 test('autosave off does not create an emergency journal for new edits', async ({ page }) => {

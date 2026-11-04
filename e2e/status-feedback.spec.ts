@@ -1,6 +1,7 @@
 import { answerNextConfirmation } from './settings-helpers';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { documentAction, selectDocument, setAutosave } from './settings-helpers';
+import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 // Status-line races from #52. Timers are controlled with Playwright's clock and
 // saves are observed in IndexedDB, so no test depends on sleeps or retries.
@@ -455,7 +456,7 @@ test('a database upgrade in another tab stays visible after action feedback and 
   const other = await context.newPage();
   await other.goto('/404');
   await other.evaluate(() => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge', 3);
     open.onsuccess = () => { open.result.close(); resolve(); };
     open.onerror = () => reject(open.error);
   }));
@@ -673,15 +674,14 @@ const CONFLICT_COPY = 'Another tab changed this document. Your edits were saved 
 const CONFLICT_COPY_LEFT = 'Another tab changed the document you left. Your edits were saved as a conflict copy.';
 const UPGRADED = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
 
-/** Force the next save into a conflict copy by committing a newer revision from another tab. */
-async function createForeignRevision(page: Page, context: BrowserContext, text: string): Promise<void> {
-  const other = await context.newPage();
-  await other.goto('/');
-  await expect(other.locator('#editor')).toHaveValue(text);
-  await other.locator('#editor').fill('Версия другой вкладки');
-  await page.clock.runFor(400); // The fake clock is shared by both tabs.
-  await expect(other.locator('#status-line')).toHaveText('Saved locally');
-  await other.close();
+/**
+ * Force the next save into a conflict copy by committing a newer revision the way an older
+ * TypeBridge build without edit ownership would (#159 W4 keeps a second current tab read-only).
+ */
+async function createForeignRevision(page: Page, _context: BrowserContext, text: string): Promise<void> {
+  const row = (await readStoredDocs(page)).find(draft => draft.text === text);
+  expect(row).toBeDefined();
+  await writeForeignRevision(page, { text: 'Версия другой вкладки' }, row!.id);
 }
 
 async function prepareConflict(page: Page, context: BrowserContext, withTargetDraft = false) {

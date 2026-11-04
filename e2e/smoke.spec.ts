@@ -250,7 +250,11 @@ test('autosave restores text after reload and opens latest draft in a new tab', 
   const second = await context.newPage();
   await second.goto('/');
   await expect(second.getByRole('textbox', { name: 'Your text' })).toHaveValue('привет');
+  // The first tab still owns that document (#159 W4); a new document is owned once it opens.
+  await expect(second.locator('html')).toHaveAttribute('data-role', 'reader');
   await documentAction(second, '#new-draft');
+  await expect(second.getByRole('textbox', { name: 'Your text' })).toHaveValue('');
+  await expect(second.getByRole('textbox', { name: 'Your text' })).toBeEditable();
   await second.getByRole('textbox', { name: 'Your text' }).pressSequentially('mir');
   await expect(second.getByRole('status')).toContainText('Saved locally');
   await page.reload();

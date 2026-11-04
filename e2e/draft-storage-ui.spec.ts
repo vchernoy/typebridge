@@ -1,23 +1,21 @@
 import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { selectDocument, documentAction } from './settings-helpers';
+import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
-test('a stale tab saves a visible conflict copy without overwriting the newer draft', async ({ page, context }) => {
+test('a stale tab saves a visible conflict copy without overwriting the newer draft', async ({ page }) => {
   await page.goto('/');
   await page.locator('#editor').fill('Исходный текст');
   await expect(page.locator('#status')).toContainText('Saved locally');
-  const other = await context.newPage();
-  await other.goto('/');
-  await expect(other.locator('#editor')).toHaveValue('Исходный текст');
-  await page.locator('#editor').fill('Новое содержание');
-  await expect(page.locator('#status')).toContainText('Saved locally');
-  await other.locator('#editor').fill('Другой вариант 🙂');
-  await expect(other.locator('#status-line')).toContainText('conflict copy');
-  await expect(other.locator('#drafts option')).toHaveCount(2);
-  await other.reload();
-  await expect(other.locator('#editor')).toHaveValue('Другой вариант 🙂');
+  // An older build without edit ownership commits a newer revision (#159 W4 keeps current tabs read-only).
+  const id = (await readStoredDocs(page))[0].id;
+  await writeForeignRevision(page, { text: 'Новое содержание' }, id);
+  await page.locator('#editor').fill('Другой вариант 🙂');
+  await expect(page.locator('#status-line')).toContainText('conflict copy');
+  await expect(page.locator('#drafts option')).toHaveCount(2);
   await page.reload();
-  await expect(page.locator('#editor')).toHaveValue('Новое содержание');
+  await expect(page.locator('#editor')).toHaveValue('Другой вариант 🙂');
+  expect((await readStoredDocs(page)).find(row => row.id === id)?.text).toBe('Новое содержание');
 });
 
 test('failed database initialization keeps text editable and reports unsaved state', async ({ page }) => {
@@ -225,26 +223,22 @@ test('closing a tab immediately after editing saves or offers recovery', async (
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза');
 });
 
-test('reload recovery preserves another tab’s newer revision', async ({ page, context }) => {
+test('reload recovery preserves another tab’s newer revision', async ({ page }) => {
   await page.goto('/');
   const field = page.locator('#editor');
   await field.fill('Исходный документ');
   await expect(page.locator('#status')).toContainText('Saved locally');
   const pending = await page.evaluate(() => new Promise<{ id: string; title: string; text: string; updatedAt: number; revision: number }>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 1);
+    const open = indexedDB.open('typebridge', 2);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => { const db = open.result; const tx = db.transaction('documents'); const get = tx.objectStore('documents').getAll(); get.onsuccess = () => { db.close(); resolve({ ...get.result[0], text: 'Несохранённый вариант 🙂', history: undefined }); }; get.onerror = () => reject(get.error); };
   }));
-  const other = await context.newPage();
-  await other.goto('/');
-  await expect(other.locator('#editor')).toHaveValue('Исходный документ');
-  await other.locator('#editor').fill('Новая версия другой вкладки');
-  await expect(other.locator('#status')).toContainText('Saved locally');
+  // A newer revision from a build without edit ownership (#159 W4).
+  await writeForeignRevision(page, { text: 'Новая версия другой вкладки' }, pending.id);
   await page.evaluate(draft => sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify(draft)), pending);
   await page.reload();
   await expect(field).toHaveValue('Несохранённый вариант 🙂');
   await expect(page.locator('#status-line')).toContainText('conflict copy');
   await expect(page.locator('#drafts option')).toHaveCount(2);
-  await other.reload();
-  await expect(other.locator('#editor')).toHaveValue('Новая версия другой вкладки');
+  expect((await readStoredDocs(page)).find(row => row.id === pending.id)?.text).toBe('Новая версия другой вкладки');
 });

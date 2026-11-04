@@ -1,6 +1,7 @@
 import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { documentAction } from './settings-helpers';
+import { writeForeignRevision } from './storage-helpers';
 
 for (const saved of [false, true]) for (const delay of [0, 800]) {
   test(`delete pending edits: saved=${saved}, confirmation delay=${delay}`, async ({ page }) => {
@@ -29,7 +30,7 @@ test('database version change closes the old connection and warns the editor', a
   await second.goto('/');
   await expect(second.locator('#editor')).toBeEnabled();
   const upgraded = await second.evaluate(() => new Promise<boolean>((resolve, reject) => {
-    const request = indexedDB.open('typebridge', 2);
+    const request = indexedDB.open('typebridge', 3);
     request.onsuccess = () => { request.result.close(); resolve(true); };
     request.onerror = () => reject(request.error);
   }));
@@ -77,7 +78,7 @@ test('failed deletion keeps the text and allows retry', async ({ page }) => {
   await expect(editor).toHaveValue('');
 });
 
-test('stale deletion retries saving pending edits as a conflict copy', async ({ page, context }) => {
+test('stale deletion retries saving pending edits as a conflict copy', async ({ page }) => {
   // install() alone lets fake time flow; pause so only runFor() fires timers (#132 CI).
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
   await page.goto('/');
@@ -87,12 +88,8 @@ test('stale deletion retries saving pending edits as a conflict copy', async ({ 
   await editor.fill('Исходный длинный пост');
   await page.clock.runFor(400);
   await expect(page.locator('#status')).toContainText('Saved locally');
-  const other = await context.newPage();
-  await other.goto('/');
-  await expect(other.locator('#editor')).toHaveValue('Исходный длинный пост');
-  await other.locator('#editor').fill('Версия другой вкладки');
-  await page.clock.runFor(400); // Shared fake clock covers the other tab's autosave.
-  await expect(other.locator('#status')).toContainText('Saved locally');
+  // A newer revision from a build without edit ownership (#159 W4 keeps current tabs read-only).
+  await writeForeignRevision(page, { text: 'Версия другой вкладки' });
   // Leave the pending edit's 300ms autosave unfired so Delete still sees dirty text
   // and must flush a conflict copy (slow Documents menu must not win the race).
   await editor.fill('Важная правка первой вкладки 🙂');
