@@ -163,6 +163,23 @@ test('stacked End ratio keeps a usable companion pane after the divider', async 
   expect(field!.height).toBeGreaterThan(40);
 });
 
+test('Focus mode stacked End ratio does not clip the companion textarea', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await openSplit(page);
+  await page.locator('#split-divider').focus();
+  await page.keyboard.press('End');
+  const pane = await page.locator('.editor-pane-companion').boundingBox();
+  const field = await page.locator('#editor-b').boundingBox();
+  expect(pane).toBeTruthy();
+  expect(field).toBeTruthy();
+  expect(field!.height).toBeLessThanOrEqual(pane!.height + 1);
+  expect(field!.height).toBeGreaterThan(30);
+});
+
 test('conflict-copy creation syncs workspace document identity', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

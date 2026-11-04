@@ -595,16 +595,25 @@ body.focus-mode #editor {
   resize: vertical;
   margin: 0 auto;
 }
-body.focus-mode .editor-split[data-split="on"] #editor {
-  max-width: none;
-  height: calc(100dvh - 200px);
-}
+body.focus-mode .editor-split[data-split="on"] #editor,
 body.focus-mode .editor-split[data-split="on"] #editor-b {
+  max-width: none;
   width: 100%;
   min-width: 0;
-  height: calc(100dvh - 200px);
-  min-height: 12rem;
+  min-height: 0;
   resize: none;
+}
+body.focus-mode .editor-split[data-split="on"]:not([data-split-orientation="stacked"]) #editor,
+body.focus-mode .editor-split[data-split="on"]:not([data-split-orientation="stacked"]) #editor-b {
+  height: calc(100dvh - 200px);
+}
+body.focus-mode .editor-split[data-split="on"][data-split-orientation="stacked"] {
+  height: min(calc(100dvh - 140px), 560px);
+}
+body.focus-mode .editor-split[data-split="on"][data-split-orientation="stacked"] #editor,
+body.focus-mode .editor-split[data-split="on"][data-split-orientation="stacked"] #editor-b {
+  height: auto;
+  flex: 1 1 auto;
 }
 body.focus-mode .bottom {
   max-width: 900px;
