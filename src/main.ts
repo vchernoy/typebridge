@@ -841,7 +841,8 @@ autosave.addEventListener('change', async () => {
     announce(AUTOSAVE_OFF);
   }
   } finally {
-    autosave.disabled = editBlock !== '';
+    // Match applyEditAccess / readOnlyNow — a concurrent switch may have set transferFrozen.
+    autosave.disabled = editBlock !== '' || transferFrozen;
     // Re-focus after re-enabling: the dialog cannot restore while this control
     // is disabled, and a delete may await before this finally runs (#114 review).
     autosave.focus({ preventScroll: true });

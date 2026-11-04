@@ -420,6 +420,7 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   });
   const switchPromise = selectDocument(page, second);
   await expect.poll(async () => page.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.readOnly)).toBe(true);
+  await expect(page.locator('#autosave')).toBeDisabled();
   await page.locator('#undo').click({ force: true });
   await page.locator('#redo').click({ force: true });
   await page.locator('#convert-latin').click({ force: true });
@@ -430,6 +431,7 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   await page.locator('#replace-all').click({ force: true });
   await page.keyboard.press('ControlOrMeta+z');
   await switchPromise;
+  await expect(page.locator('#autosave')).toBeEnabled();
 
   await expect(page.locator('#editor')).toHaveValue('second document');
   await expect(role(page)).toHaveAttribute('data-role', 'editor');
