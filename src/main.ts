@@ -415,8 +415,16 @@ function setBar(bar: HTMLElement, button: HTMLButtonElement, open: boolean): voi
   bar.hidden = !open;
   button.setAttribute('aria-expanded', String(open));
 }
+function leaveFocusPreservingActivePane(): void {
+  if (!document.body.classList.contains('focus-mode')) return;
+  // setFocusMode focuses #editor and would otherwise steal activePane to pane-a.
+  const pane = workspace.activePaneId();
+  setFocusMode(false);
+  workspace.setActivePane(pane);
+  syncMutationControls();
+}
 function openFind(): void {
-  if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  leaveFocusPreservingActivePane();
   setBar(gotoBar, gotoOpen, false);
   setBar(findBar, findOpen, true);
   showMatchCount();
@@ -424,7 +432,7 @@ function openFind(): void {
   findInput.select();
 }
 function openGoto(): void {
-  if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  leaveFocusPreservingActivePane();
   setBar(findBar, findOpen, false);
   setBar(gotoBar, gotoOpen, true);
   gotoInput.focus();

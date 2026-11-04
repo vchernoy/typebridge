@@ -88,7 +88,14 @@ export function setupSearch(
     if (!pattern) return [];
     return Array.from(text.matchAll(pattern), m => [m.index, m.index + m[0].length]);
   }
-  let lastZeroWidthMatch: { position: number; text: string; query: string; matchCase: boolean; regex: boolean } | undefined;
+  let lastZeroWidthMatch: {
+    field: HTMLTextAreaElement;
+    position: number;
+    text: string;
+    query: string;
+    matchCase: boolean;
+    regex: boolean;
+  } | undefined;
   function resetSearchPosition(): void { lastZeroWidthMatch = undefined; }
   // Caret moves and edits are caught by the position and text checks in findNext.
   field.addEventListener('input', resetSearchPosition);
@@ -97,16 +104,25 @@ export function setupSearch(
     const found = matches(target.field.value);
     if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
     const position = backwards ? target.field.selectionStart : target.field.selectionEnd;
-    const skipCurrent = lastZeroWidthMatch?.position === position && target.field.selectionStart === target.field.selectionEnd &&
-      lastZeroWidthMatch.text === target.field.value && lastZeroWidthMatch.query === findInput.value &&
-      lastZeroWidthMatch.matchCase === matchCase.checked && lastZeroWidthMatch.regex === regexMode.checked;
+    // Zero-width skip state is per pane: mirrored text alone must not skip the first hit.
+    const skipCurrent = lastZeroWidthMatch?.field === target.field && lastZeroWidthMatch.position === position
+      && target.field.selectionStart === target.field.selectionEnd
+      && lastZeroWidthMatch.text === target.field.value && lastZeroWidthMatch.query === findInput.value
+      && lastZeroWidthMatch.matchCase === matchCase.checked && lastZeroWidthMatch.regex === regexMode.checked;
     const match = backwards
       ? [...found].reverse().find(([start]) => start < position) ?? found[found.length - 1]
       : found.find(([start]) => skipCurrent ? start > position : start >= position) ?? found[0];
     target.field.focus({ preventScroll: true });
     target.field.setSelectionRange(match[0], match[1]);
     lastZeroWidthMatch = match[0] === match[1]
-      ? { position: match[0], text: target.field.value, query: findInput.value, matchCase: matchCase.checked, regex: regexMode.checked }
+      ? {
+        field: target.field,
+        position: match[0],
+        text: target.field.value,
+        query: findInput.value,
+        matchCase: matchCase.checked,
+        regex: regexMode.checked,
+      }
       : undefined;
     target.editor.revealSelection();
     findStatus.textContent = `${found.indexOf(match) + 1} of ${found.length}`;

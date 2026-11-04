@@ -115,6 +115,26 @@ test('Find next targets the active companion pane without mutating primary selec
   await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
 });
 
+test('opening Find from Focus mode keeps the companion as the active pane', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('focus find target');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await page.keyboard.press('ControlOrMeta+f');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await page.locator('#find-text').fill('target');
+  await page.locator('#find-next').click();
+  await expect(page.locator('#editor-b')).toBeFocused();
+  await expect(page.locator('#editor-b')).toHaveJSProperty('selectionStart', 11);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('selectionEnd', 17);
+});
+
 test('companion focus refuses Convert/Replace on the primary selection', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
