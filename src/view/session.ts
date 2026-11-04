@@ -1,0 +1,146 @@
+/**
+ * In-tab split-workspace contracts for #159 (S1).
+ * Document sessions are distinct from pane views. Pure helpers only — no DOM.
+ */
+
+import { isDocumentId } from './route';
+
+/** Stable id for a pane surface inside one browser tab (not a document id). */
+export type PaneId = string;
+
+/** Stable id for an in-memory document session attached to zero or more panes. */
+export type SessionId = string;
+
+export type PaneRole = 'editable' | 'readonly';
+
+export type CommandTarget =
+  | { kind: 'session'; sessionId: SessionId; paneId: PaneId }
+  | { kind: 'pane-only'; paneId: PaneId };
+
+/**
+ * Captured when a shared toolbar/shortcut command starts. Async completion must
+ * revalidate against the live routing table before mutating a session.
+ */
+export type CommandGeneration = {
+  sessionId: SessionId;
+  paneId: PaneId;
+  /** Bumped whenever the pane's bound session or role changes. */
+  paneGeneration: number;
+  /** Bumped whenever the session's document identity or canonical content owner changes. */
+  sessionGeneration: number;
+};
+
+export type DocumentSessionSnapshot = {
+  sessionId: SessionId;
+  documentId: string;
+  roleEditablePaneId: PaneId | undefined;
+  paneIds: readonly PaneId[];
+  dirty: boolean;
+  autosaveOn: boolean;
+  composing: boolean;
+  saving: boolean;
+  saveFailed: boolean;
+  conflict: boolean;
+  editBlock: string;
+  sessionGeneration: number;
+};
+
+export type PaneViewSnapshot = {
+  paneId: PaneId;
+  sessionId: SessionId | undefined;
+  role: PaneRole;
+  paneGeneration: number;
+  /** True when this pane is the shared toolbar / shortcut target. */
+  active: boolean;
+};
+
+/** True for opaque pane ids used in the DOM (`pane-a`, `pane-b`, …). */
+export function isPaneId(value: string): boolean {
+  return /^pane-[a-z0-9-]+$/i.test(value) && value.length <= 64;
+}
+
+export function isSessionId(value: string): boolean {
+  return /^session-[a-z0-9-]+$/i.test(value) && value.length <= 64;
+}
+
+/**
+ * Whether a command captured at `started` may still mutate the live session/pane.
+ * Stale dialogs and delayed saves must no-op when the user switched documents or roles.
+ */
+export function commandStillCurrent(
+  started: CommandGeneration,
+  live: { sessionId: SessionId; paneId: PaneId; paneGeneration: number; sessionGeneration: number },
+): boolean {
+  return (
+    started.sessionId === live.sessionId
+    && started.paneId === live.paneId
+    && started.paneGeneration === live.paneGeneration
+    && started.sessionGeneration === live.sessionGeneration
+  );
+}
+
+/**
+ * Same-document local Edit in this pane (S5). Never a cross-window handoff (#164 deferred).
+ * Returns '' when the transfer may proceed; otherwise a short refuse token.
+ */
+export function localPaneTransferBlock(input: {
+  sameSession: boolean;
+  targetAlreadyEditable: boolean;
+  composing: boolean;
+  transitioning: boolean;
+  /** External tab holds the document lock — neither local pane may edit. */
+  externallyBlocked: boolean;
+}): '' | 'different-session' | 'already-editable' | 'composing' | 'busy' | 'external' {
+  if (!input.sameSession) return 'different-session';
+  if (input.targetAlreadyEditable) return 'already-editable';
+  if (input.externallyBlocked) return 'external';
+  if (input.transitioning) return 'busy';
+  if (input.composing) return 'composing';
+  return '';
+}
+
+/**
+ * Closing a pane: whether the session must still be retained in memory.
+ * Last view of a dirty/private/failed session needs existing discard protection.
+ */
+export function paneCloseDisposition(input: {
+  remainingPanesForSession: number;
+  dirty: boolean;
+  autosaveOn: boolean;
+  saveFailed: boolean;
+  wasEditable: boolean;
+}): 'detach-only' | 'transfer-editable' | 'ask-discard' | 'release-clean' {
+  if (input.remainingPanesForSession > 0) {
+    return input.wasEditable ? 'transfer-editable' : 'detach-only';
+  }
+  if (input.dirty && (!input.autosaveOn || input.saveFailed)) return 'ask-discard';
+  if (input.dirty) return 'ask-discard';
+  return 'release-clean';
+}
+
+/**
+ * Choosing a document already open in another pane must reuse that session
+ * (never invent a second session for the same documentId in one tab).
+ */
+export function resolveSessionForDocument(
+  documentId: string,
+  sessions: readonly { sessionId: SessionId; documentId: string }[],
+): SessionId | undefined {
+  if (!isDocumentId(documentId)) return undefined;
+  return sessions.find(entry => entry.documentId === documentId)?.sessionId;
+}
+
+/**
+ * Active-pane routing for shared chrome: editable panes become active on focus;
+ * a same-document read-only pane may be active for Find/Copy but not for mutations.
+ */
+export function commandAllowedOnPane(input: {
+  activePaneId: PaneId;
+  targetPaneId: PaneId;
+  role: PaneRole;
+  mutatesDocument: boolean;
+}): boolean {
+  if (input.activePaneId !== input.targetPaneId) return false;
+  if (input.mutatesDocument && input.role !== 'editable') return false;
+  return true;
+}

@@ -1,6 +1,8 @@
-# ADR: Comparison window and single editing owner (#159)
+# ADR: Split workspace and editing ownership (#159)
 
-Status: **Accepted for implementation** (W1); **W2 read-only companion implemented** (see [W2 implementation notes](#w2-implementation-notes)); **W3 saved-version signals implemented** (see [W3 implementation notes](#w3-implementation-notes)); **W4 single editing owner implemented** (see [W4 implementation notes](#w4-implementation-notes)). Implements in sequential PRs W2–W6 on `main`. Does **not** close #159, #48, #40 or #37.
+Status: **Clarified goal — two document panes in one browser tab** (maintainer, Nov 2026). **W1–W4 foundation preserved** (routing, separate-window read-only companion, saved-version signals, per-document Web Lock + fence). **Cross-window Edit here (old W5/W6) deferred** — PR [#164](https://github.com/vchernoy/typebridge/pull/164) is draft and must not merge for that goal; its branch and review history (including the stale requester/`viewGeneration` finding) stay recorded. Revised sequential plan **S1–S6** below. Does **not** close #159, #48, #40, #37 or #7.
+
+**S1 (this slice):** revised contracts + UX only — no runtime behavior change.
 
 ## Context (audit of current code)
 
@@ -23,24 +25,46 @@ Constraints from #159 and AGENTS.md remain: client-only, no text logging/telemet
 
 ## Decision summary
 
+### Preserved (W1–W4)
+
 1. **Routing:** query params `doc` + `mode=view` (IDs/mode only). Hash left free for #39. Validate before ordinary boot open.
-2. **Companion (W2):** user-triggered `window.open` of a committed document; read-only UI; independent view position; no edit ownership; no document/history writes.
+2. **Separate-window companion (W2):** user-triggered `window.open` of a committed document; read-only UI; independent view position; no edit ownership; no document/history writes. Remains available; it is **not** the primary split UX.
 3. **Signals (W3):** `BroadcastChannel('typebridge.documents.v1')` carries minimal metadata; always reread IDB; reconcile on visibility/focus; poll fallback when channel missing.
-4. **Ownership (W4):** per-document **Web Lock + IndexedDB fence** (separate store; no destructive migration of `documents`). CAS conflict copies remain the backstop for non-cooperating versions.
-5. **Handoff (W5):** explicit **Edit here** only; refuse while dirty / private / IME / in-flight save / conflict; no focus-stealing ownership.
-6. **Private source:** never transmit unsaved text to open a companion; explain and Cancel when no committed copy exists.
+4. **Ownership (W4):** per-document **Web Lock + IndexedDB fence** at the **document session** (page), not per pane. Two same-document panes must not take separate locks or create conflict copies against each other. CAS conflict copies remain the backstop for non-cooperating versions / other tabs.
+5. **Private cross-window source:** never transmit unsaved text to open a separate-window companion; explain and Cancel when no committed copy exists.
+
+### Clarified primary goal (S1–S6)
+
+6. **In-tab split workspace:** **Split editor / Open in other pane** shows a second pane in the **same** browser tab. Desktop: side-by-side with adjustable divider (+ keyboard/non-drag controls and reset). Narrow/mobile: stacked panes, no horizontal page overflow. Single-pane behavior preserved when split is closed.
+7. **Document session vs pane view:** a **session** owns document identity/revision, canonical text/title, history, dirty/save/conflict/error, ownership handle, pending save and recovery. A **pane** owns selection/caret/scroll, editable vs read-only role, focus and command targeting. Pure contracts live in `src/view/session.ts`.
+8. **Different documents:** each pane may bind a different session; both can be editable subject to cross-tab ownership. Independent Undo/Redo, save pipelines and pickers.
+9. **Same document:** exactly one shared session and one history/save stream. Exactly one pane is editable; the companion is selectable/copyable, independently scrollable, and mirrors **current in-memory** text/title (including Autosave-off / private). Label truthfully — never “Saved version” for private edits. This is same-page presentation, not a save or BroadcastChannel of body text.
+10. **Edit in this pane (local):** explicit transfer of the editable role between same-session panes without reload, save, clearing history or discarding text. Scrolling/selecting/copying never steals editing. Guard IME and transitions (`localPaneTransferBlock`). **Not** #164’s cross-window request protocol.
+11. **Active pane:** target for shared toolbar/shortcuts. Editable panes activate on focus; a read-only same-document pane may be active for Find/Copy only (`commandAllowedOnPane`). Async commands capture `CommandGeneration` and revalidate with `commandStillCurrent`.
+12. **Close / switch safety:** closing a pane never silently drops unsaved/private text (`paneCloseDisposition`). Last view uses existing discard protection. Choosing a document already represented reuses its session (`resolveSessionForDocument`).
+13. **Deferred:** cross-window Edit here / handoff (old W5/W6, #164); #7 derived Latin/Cyrillic dual-panel; #39 sharing; backend/collab; diff highlighting.
 
 ## Product states
 
-### Window roles
+### Window / tab roles (cross-window, W2–W4)
 
 | Role | Meaning |
 | --- | --- |
-| **Editor** | Designated editing owner for one document (not “has OS focus”). May write that document when fence matches. |
-| **Viewer** | Read-only companion for a committed document. Never acquires ownership or writes document content/history. |
-| **Ordinary tab** | Today’s default: after W4, also participates in ownership (first acquirer or explicit Edit here). |
+| **Editor** | This browser tab’s document session holds the Web Lock + fence for a document. May write when the fence matches. |
+| **Viewer** | Separate-window `mode=view` companion for a **committed** document. Never acquires ownership or writes document content/history. |
+| **Ordinary tab** | Default boot; participates in ownership (W4). |
 
-Different documents may have different editors at once. Clicking a viewer never steals ownership or triggers saves.
+Different documents may have different editors across tabs. Clicking a separate-window viewer never steals ownership.
+
+### Pane roles (in-tab split, S3–S5)
+
+| Role | Meaning |
+| --- | --- |
+| **Editable pane** | Bound to a session and allowed to mutate that session’s text/title/history (subject to external `editBlock`). At most one editable pane per session. |
+| **Read-only pane** | Bound to a session for presentation; independent selection/scroll; may Find/Copy; never mutates history or triggers saves. Same-document companion mirrors live in-memory content. |
+| **Active pane** | Receives shared toolbar/shortcuts. May be read-only for non-mutating commands. |
+
+Ownership Web Locks remain one per document session for the **page**, shared by all panes of that session.
 
 ### Document view machine (per window, per open document)
 
@@ -198,39 +222,46 @@ Allowed: select, copy, independent scroll/caret for reading, switch among saved 
 
 Visible chrome: title + **Saved version · Read-only** (wording may match UI.md). Status must not imply Autosave is writing from the viewer.
 
-## Edit here / handoff (W5)
+## Edit here / handoff (old W5) — **deferred**
 
-1. Viewer requests transfer (explicit control).
-2. Live owner: prompt; default **Keep editing / Cancel**. Refuse while composing (IME), dirty private/unsaved that cannot be committed safely, save in flight, save failed, or conflict-copy just created—clear guidance, no silent Autosave-on, no discard.
-3. Owner quiesces editing, finishes or cancels pending writes, verifies revision, releases lock + fence.
-4. Requester acquires fence, rereads IDB, then enables editing.
-5. If owner is gone: follow W4 recovery acquire. No force-steal from a live owner.
+Cross-window transfer (BroadcastChannel request/released/refused, promote a `mode=view` window) is **out of current scope**. PR [#164](https://github.com/vchernoy/typebridge/pull/164) remains draft; do not merge it for that goal. Preserve the branch. Outstanding finding to retain on that PR: **stale requester handoff must bind `requestId` + `viewGeneration` and cancel on navigation** (addressed on the paused branch tip; re-verify if the PR is ever revived). Current same-tab need is **Edit in this pane** (decision 10), not cross-window handoff.
 
 ## UX sketches (compact)
 
-### Desktop — Documents menu
+### Desktop — split (primary goal)
 
 ```
-┌ Document title ············· ▾ Documents  Saved  [Latin|Кир]  Focus  Settings
-│ ┌─────────────────────────┐
-│ │ (document list)         │
-│ │ Open in comparison window │  ← current committed doc
-│ │ New document            │
-│ │ Import…                 │
-│ │ Export as TXT / JSON    │
-│ │ Delete…                 │
-│ └─────────────────────────┘
-└ Editor…
+┌ TypeBridge ············· [Latin|Кир]  Focus  Settings
+│ Shared toolbar: Undo Redo Convert Find Copy ⋯
+├─────────────────────┬ │ ┬─────────────────────┐
+│ Pane A (active)     │◄┼►│ Pane B                │
+│ Title · ▾ Docs · ●  │   │ Title · ▾ Docs · RO   │
+│ [textarea editable] │   │ [textarea read-only]  │
+│ Edit in this pane   │   │ (or second editable   │
+│                     │   │  doc when different)  │
+└─────────────────────┴───┴─────────────────────┘
+  Divider: drag + arrow-key controls + Reset split
 ```
 
-### Companion chrome (desktop / phone)
+Documents menu gains **Split editor / Open in other pane** (same-tab). **Open in comparison window** (separate window, W2) remains for committed copies.
+
+### Narrow / phone — stacked panes
+
+```
+┌ Pane A (active, editable) · title · docs · save
+│ [textarea]
+├────────────────────────────
+│ Pane B · title · docs · Read-only / other doc
+│ [textarea]
+└ Keyboard: move divider focus, Reset split; no page overflow at 320/390px
+```
+
+### Separate-window companion (W2, preserved)
 
 ```
 ┌ Title (read-only)  ▾ Documents  Saved version · Read-only  [copy tools…]
 └ Textarea read-only (selectable); Find OK; Replace/Convert/Undo gated off
 ```
-
-Phone: same signals in the existing title row wrap; do not add a second toolbar row solely for this badge.
 
 ### No committed copy
 
@@ -273,14 +304,19 @@ Status: This saved document is no longer available.
 
 | Slice | Deliverable | Tests (minimum) |
 | --- | --- | --- |
-| **W1** (this PR) | ADR + pure `route` / `signals` contracts | Vitest parse/validate |
-| **W2** (implemented) | Open action, `mode=view` boot branch, RO gates, popup/missing/blocked storage | Unit + Playwright multi-page: same/different doc, reload, cloned sessionStorage, privacy no-write, invalid id |
-| **W3** (implemented) | Broadcast + reread + visibility fallback | Stale/out-of-order/missed, delete, dirty editor notice, no channel |
-| **W4** (implemented) | Lock + fence at write boundary; ordinary tabs participate | Simultaneous acquire, crash/release, unsupported locks, stale wake |
-| **W5** | Edit here UX + refusals | Busy/dirty/IME/private/conflict; gone owner acquire |
-| **W6** | Docs, ROADMAP, evidence, small cleanups | Full matrix; mark real-device/AT pending |
+| **W1** (done #160) | Separate-window ADR + `route` / `signals` | Vitest |
+| **W2** (done #161) | `mode=view` companion window | Playwright multi-page |
+| **W3** (done #162) | Saved-version signals | Stale/missed/delete/dirty notice |
+| **W4** (done #163) | Web Lock + fence | Simultaneous acquire, crash, unsupported |
+| **W5/W6** (deferred #164) | Cross-window Edit here | Paused — do not merge for that goal |
+| **S1** (this PR) | Revised split ADR/UX + `session` contracts | Vitest session/pane helpers; runtime unchanged |
+| **S2** | Session/pane separation, single-pane parity | Existing e2e still green; no split UI yet |
+| **S3** | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
+| **S4** | Two different editable documents | Independent sessions, locks, Undo, switch/close |
+| **S5** | Local Edit in this pane + lifecycle | Transfer, IME/transition guards, delayed commands |
+| **S6** | Verification, docs, evidence | Full browser matrix; record real-device/AT limits |
 
-Playwright: Chromium, Firefox, WebKit; multiple pages in one context. Screenshots for visual chrome in W2/W6. Real OS windows, physical iPhone, real IME, VoiceOver/NVDA = manual evidence only.
+Playwright: Chromium, Firefox, WebKit. Multi-page tests remain for W2–W4 cross-window behavior; S3–S5 add in-tab multi-pane coverage. Real devices / IME / AT = manual evidence only.
 
 ## W2 implementation notes
 
@@ -326,11 +362,49 @@ Shipped in `src/editor/edit-ownership.ts` (`acquireEditOwnership`), `src/editor/
 
 ## Non-goals
 
-Live streaming of private keystrokes; focus-based ownership; cross-profile/cross-device sync; #7 dual-panel; #39 URL document sharing; backend; claiming RO is a security boundary.
+Cross-window live streaming of private keystrokes as a product feature; focus-stealing ownership; cross-profile/cross-device sync; #7 derived Latin/Cyrillic dual-panel (this split is **two document views**); #39 URL document sharing; backend/collab; claiming read-only is a security boundary; merging #164’s cross-window handoff as the primary UX.
+
+Same-tab live mirroring of in-memory edits **is** in scope for same-document panes (decision 9) and must not use BroadcastChannel or URLs for body text.
+
+## S1 implementation notes
+
+Shipped in this PR: `src/view/session.ts` (+ tests), this ADR revision, and doc reconciliations. **No `main.ts` / DOM behavior change.**
+
+### Singleton audit (blocks multi-pane until S2+)
+
+| Concern | Location today | Session vs pane |
+| --- | --- | --- |
+| Canonical draft | `main.ts` `active`, `dirty`, `generation` | **Session** |
+| Editor + history | one `Editor` on `#editor` | **Session** owns history; each **pane** needs a view adapter (S2/S3: one Editor per editable surface or a shared model with mirrored views) |
+| Title field | `#draft-title` | Pane chrome bound to session |
+| Ownership | `ownership`, `editBlock`, `acquireFor` | **Session** (one lock per documentId for the page) |
+| Persist / save timer | `persist`, `saving`, `saveTimer` | **Session** — one serialized stream per document |
+| Recovery journal | `journalTab`, `journalEdit` | **Session** / page instance — not per pane |
+| View generation | `viewGeneration` | Evolve into pane + session generations (`CommandGeneration`) |
+| `viewMode` boot | comparison route flag | Separate-window only; in-tab RO is pane **role** |
+| Writing position | `setupWritingPosition` on one field | **Pane** (key by paneId + documentId) |
+| Toolbar / Find / Go to line | global `#undo`, `#find-bar`, … | Route via **active pane** + session token |
+| Documents menu | one `#drafts` select | Per-pane picker (S3/S4) |
+| Status / save indicator | globals | Prefer session-scoped; avoid duplicate AT announcements for two views of one session |
+
+Reuse: `src/view/route.ts`, `signals.ts`, `ownership.ts`; `src/editor/edit-ownership.ts`, `indexeddb.ts`, `recovery.ts`, `editor.ts`, `writing-position.ts`. Extract only what S2 needs (#99) — no whole-app rewrite.
+
+### Layout / reload policy (for S2+)
+
+- Layout preferences (split on/off, divider ratio, stacked vs side-by-side breakpoint behavior) may persist separately from documents.
+- Reload must not silently save private Autosave-off text or bypass recovery rules.
+- Do not promise recovery of private Autosave-off text after reload.
+- E2E hooks: stable `data-pane-id`, `data-session-id`, `data-pane-role`, `data-active-pane` — no duplicate element ids across panes.
+
+### Carry-forwards to retain
+
+W4 lifecycle/BFCache, acquisition-gap, editor list refresh (#48), storage-wording follow-ups remain unless verified fixed. #164’s stale pending-handoff finding stays on that paused PR.
 
 ## Implementation notes for later PRs
 
-- Branch companion routing **before** `initializeDrafts` step that selects hint/most-recent/pending.
-- Central `viewMode: 'edit' | 'view'` (name flexible) gating all mutation paths listed above.
-- Writing position: key by `documentId` + `instanceId` (or `mode=view` namespace) so companions do not clobber editor offsets.
-- Keep recovery Web Lock behavior for editors; viewers should not take recovery ownership that clears others’ journals inappropriately—prefer not writing recovery journals from viewers at all.
+- S2: extract minimal session/controller boundaries; prove single-pane parity before split UI.
+- S3: attach a second pane to the same session; live mirror; divider a11y; unique pane ids.
+- S4: second session + picker; per-document lock/save; safe last-view close.
+- S5: `localPaneTransferBlock` wiring; generation-guarded delayed commands.
+- Keep separate-window companion routing **before** ordinary boot; do not delete W2–W4.
+- Recovery Web Lock stays page-scoped; in-tab read-only panes must not take recovery ownership that clears another tab’s journals.
