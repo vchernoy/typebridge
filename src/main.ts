@@ -1456,10 +1456,13 @@ function wireEditorLifecycle(): void {
   if (editorLifecycleWired) return;
   editorLifecycleWired = true;
   window.addEventListener('pagehide', () => { savePending(); clearTimeout(saveTimer); void persist(); });
+  // Match ordinary editors: warn on any dirty unload (including Autosave off).
   window.addEventListener('beforeunload', event => {
-    if (!dirty || !autosave.checked || viewMode) return;
-    event.preventDefault();
-    event.returnValue = '';
+    if (!dirty || viewMode) return;
+    savePending();
+    clearTimeout(saveTimer);
+    void persist();
+    if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; }
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); }
@@ -1483,7 +1486,8 @@ async function becomeEditorFor(documentId: string): Promise<boolean> {
     let fresh: StoredDraft | undefined;
     try { fresh = db ? await getStoredDraft(db, documentId) : undefined; }
     catch { void access.ownership.release(); return false; }
-    if (!fresh || fresh.revision < 1) {
+    // Viewers need a committed row; dirty ordinary readers may keep unsaved memory if the row exists.
+    if (!fresh || (!dirty && fresh.revision < 1)) {
       void access.ownership.release();
       return false;
     }
@@ -1494,16 +1498,24 @@ async function becomeEditorFor(documentId: string): Promise<boolean> {
       saveIndicator.hidden = false;
       viewerBadge.hidden = true;
       viewerNotice.hidden = true;
+      // applyViewerChrome disabled these; OWNER_ONLY_CONTROLS alone does not restore them.
+      for (const id of ['new-draft', 'import-draft', 'open-comparison']) {
+        document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
+      }
       wireEditorLifecycle();
       syncOrdinaryEditorUrl(fresh.id);
     }
-    writingPosition.save();
-    active = fresh;
-    rememberActive();
-    showDraft();
+    // Follow retryOwnership: never replace unsaved in-memory text/title/history.
+    if (!dirty) {
+      writingPosition.save();
+      active = fresh;
+      rememberActive();
+      showDraft();
+    }
     installOwnership(access);
     access = undefined;
     announceAction('You can edit this document in this window now.', { keepConflict: true });
+    if (dirty && autosave.checked) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { void persist(); }, 300); }
     return true;
   } finally {
     void access?.ownership?.release();
