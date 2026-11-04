@@ -666,15 +666,29 @@ body.focus-mode .bottom {
   flex-basis: 12px;
   cursor: row-resize;
 }
+/* Stacked orientation needs a definite shell height so --split-ratio can size panes. */
+.editor-split[data-split="on"][data-split-orientation="stacked"] {
+  flex-direction: column;
+  height: min(70dvh, 560px);
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] .editor-pane-primary {
+  flex: 0 0 var(--split-ratio);
+  max-width: none;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] .editor-pane-companion {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] #editor,
+.editor-split[data-split="on"][data-split-orientation="stacked"] #editor-b {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
 @media (max-width: 640px) {
-  .editor-split[data-split="on"] {
-    flex-direction: column;
-  }
-  .editor-split[data-split="on"] .editor-pane-primary {
-    flex: 0 0 auto;
-    max-width: none;
-    max-height: var(--split-ratio);
-  }
   .split-divider {
     cursor: row-resize;
   }

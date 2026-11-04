@@ -60,19 +60,46 @@ test('split divider is keyboard-adjustable and reset restores the midpoint', asy
   expect(moved).not.toBe('50');
 });
 
-test('comparison viewers cannot open the in-tab split', async ({ page, context }) => {
+test('comparison viewers cannot open the in-tab split or clear the editor preference', async ({ page, context }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('saved for companion');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === 'saved for companion')).toBe(true);
   const id = (await readStoredDocs(page)).find(row => row.text === 'saved for companion')!.id;
+  await openSplit(page);
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-split', 'on');
+
   const viewer = await context.newPage();
   await viewer.goto(`/?doc=${id}&mode=view`);
   await expect(viewer.locator('#viewer-badge')).toBeVisible();
   await expect(viewer.locator('#toggle-split')).toBeDisabled();
   await expect(viewer.locator('#editor-b')).toBeHidden();
   await expect(viewer.locator('main.workspace')).toHaveAttribute('data-split', 'off');
+  await viewer.close();
+
+  // Viewer must not persist open:false over the editor's remembered split.
+  await page.reload();
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-split', 'on');
+});
+
+test('stacked split divider changes pane heights on a narrow viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await openSplit(page);
+  await expect(page.locator('#editor-split')).toHaveAttribute('data-split-orientation', 'stacked');
+  const before = await page.locator('.editor-pane-primary').boundingBox();
+  expect(before).toBeTruthy();
+  const divider = page.locator('#split-divider');
+  await divider.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  const after = await page.locator('.editor-pane-primary').boundingBox();
+  expect(after).toBeTruthy();
+  expect(after!.height).toBeGreaterThan(before!.height + 4);
 });
 
 test('conflict-copy creation syncs workspace document identity', async ({ page }) => {
@@ -83,6 +110,7 @@ test('conflict-copy creation syncs workspace document identity', async ({ page }
   await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === 'base for conflict')).toBe(true);
   const beforeId = await page.locator('main.workspace').getAttribute('data-document-id');
   expect(beforeId).toBeTruthy();
+  const conflictSourceId = beforeId!;
 
   // Simulate another tab advancing the revision so the next save becomes a conflict copy.
   await page.evaluate(async id => {
@@ -102,7 +130,7 @@ test('conflict-copy creation syncs workspace document identity', async ({ page }
         tx.onerror = () => reject(tx.error);
       };
     });
-  }, beforeId);
+  }, conflictSourceId);
 
   await openSplit(page);
   await page.locator('#editor').fill('local conflict edit');

@@ -72,6 +72,12 @@ export function setupSplitPane(options: {
     options.shell.dataset.splitOrientation = horizontal ? 'stacked' : 'side';
   }
 
+  /** Viewers force the UI closed locally but must not overwrite the editor's preference. */
+  function persistLayout(): void {
+    if (!allowOpen) return;
+    writeLayout({ open, ratio });
+  }
+
   function setOpen(next: boolean): void {
     const resolved = allowOpen && next;
     open = resolved;
@@ -83,7 +89,7 @@ export function setupSplitPane(options: {
       applyRatio();
       syncOrientation();
     }
-    writeLayout({ open: resolved, ratio });
+    persistLayout();
     options.onOpenChange?.(resolved);
     window.dispatchEvent(new Event('resize'));
   }
@@ -91,7 +97,7 @@ export function setupSplitPane(options: {
   function setRatio(percent: number): void {
     ratio = percent;
     applyRatio();
-    writeLayout({ open, ratio });
+    persistLayout();
   }
 
   function reset(): void {
