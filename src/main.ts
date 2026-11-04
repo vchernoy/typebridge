@@ -23,6 +23,7 @@ import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition, VIEWER_POSITION_NAMESPACE } from './editor/writing-position';
 import { comparisonViewerHref, parseComparisonRoute } from './view/route';
+import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
 // Only an absent mode is ordinary boot; invalid mode/doc takes the no-write viewer path.
@@ -371,6 +372,8 @@ let deleting = false;
 let loadingDraft = false;
 /** Companion window shows the missing-document state (nothing to save or restore). */
 let viewMissing = false;
+/** Bumped whenever the displayed document changes so late rereads cannot apply to a newer view. */
+let viewGeneration = 0;
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
@@ -481,6 +484,8 @@ async function refreshDrafts(): Promise<void> {
 }
 function showDraft(): void {
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
+  viewGeneration++;
+  clearVersionNotice();
   clearNotices();
   loadingDraft = true;
   try {
@@ -511,8 +516,11 @@ async function persist(): Promise<PersistResult> {
         const journal = currentJournal && currentJournal.documentId === saved.id && currentJournal.revision === active.revision && currentJournal.text === saved.text && currentJournal.title === saved.title ? currentJournal : undefined;
         const result = await commitOrCreateConflictCopy(db, saved, active.revision, crypto.randomUUID());
         clearPending(saved);
+        const titleOnly = !result.conflict && saved.title !== active.title && saved.text === active.text;
         if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         active = result.draft;
+        clearVersionNotice();
+        postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
         writingPosition.save();
         if (generation !== version && autosave.checked) journalEdit();
         rememberActive();
@@ -628,6 +636,7 @@ autosave.addEventListener('change', async () => {
     if (deleteSaved) {
       try {
         if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed');
+        if (active.revision >= 1) postSignal('deleted', active.id, active.revision);
         active = { ...active, revision: 0 };
         dirty = true;
         clearNotices();
@@ -723,8 +732,10 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
       return;
     }
     deleting = true;
+    const deletedRevision = active.revision;
     if (!db || !await deleteStoredDraft(db, active.id, active.revision)) throw new Error('Draft changed in another tab');
     committed = true;
+    if (deletedRevision >= 1) postSignal('deleted', active.id, deletedRevision);
     clearTimeout(saveTimer);
     writingPosition.save();
     active = { ...newDraft(), revision: 0 };
@@ -820,6 +831,7 @@ async function renderRecovery(): Promise<void> {
         const copy = { id: 'recovery-' + item.token, title: item.title + ' (recovered)', text: item.text, updatedAt: item.timestamp };
         const result = await commitDraft(db, copy, 0);
         if (!result.ok && (!result.current || result.current.title !== copy.title || result.current.text !== copy.text)) throw new Error('Recovery copy already changed');
+        if (result.ok) postSignal('saved', result.draft.id, result.draft.revision);
         clearRecovery(localStorage, item);
         await refreshDrafts();
         announceAction('Recovered a copy in Documents. Your current document was kept.');
@@ -910,6 +922,7 @@ function showViewerStatus(): void {
   else setSaveStatus(viewMissing ? '' : VIEWER_STATUS);
 }
 function showViewerMissing(message: string): void {
+  viewGeneration++;
   viewMissing = true;
   loadingDraft = true;
   try { editor.load(''); draftTitle.value = ''; syncTitleTooltip(); }
@@ -931,6 +944,8 @@ function showViewerDocument(draft: StoredDraft): void {
   viewerNotice.hidden = true;
   viewerNotice.textContent = '';
   viewerBadge.textContent = 'Saved version · Read-only';
+  viewerBadge.dataset.revision = String(draft.revision);
+  viewerBadge.title = `Saved revision ${draft.revision}`;
   for (const id of VIEWER_NEEDS_DOCUMENT) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
   showViewerStatus();
 }
@@ -943,6 +958,7 @@ function syncViewerUrl(id: string): void {
 let viewerLoad = 0;
 async function viewerOpen(id: string): Promise<void> {
   const load = ++viewerLoad;
+  viewGeneration++;
   try {
     if (!db) throw new Error('Storage unavailable');
     const next = await getStoredDraft(db, id);
@@ -981,6 +997,76 @@ async function initializeViewer(): Promise<void> {
     updateStats();
   }
 }
+// Cross-window saved-version signals (#159 W3). Messages carry only ids/revisions; every
+// receiver rereads IndexedDB, and handlers never save, so signals cannot loop.
+const signalChannel: BroadcastChannel | undefined = (() => {
+  try { return typeof BroadcastChannel === 'function' ? new BroadcastChannel(DOCUMENT_SIGNAL_CHANNEL) : undefined; }
+  catch { return undefined; }
+})();
+function postSignal(type: DocumentSignal['type'], documentId: string, revision: number): void {
+  if (viewMode || !signalChannel) return;
+  try { signalChannel.postMessage(createDocumentSignal(type, documentId, revision, Date.now())); }
+  catch { /* Signals are advisory; reconcile on focus covers a missed one. */ }
+}
+const versionNotice = document.querySelector<HTMLElement>('#version-notice')!;
+const NEWER_VERSION_NOTICE = 'A newer saved version of this document exists in another window. Your text here has not been changed.';
+const DELETED_NOTICE = 'This saved document was deleted in another window. Your text here has not been changed.';
+function showVersionNotice(text: string): void {
+  if (versionNotice.textContent !== text) versionNotice.textContent = text;
+  versionNotice.hidden = false;
+}
+function clearVersionNotice(): void {
+  if (versionNotice.hidden && !versionNotice.textContent) return;
+  versionNotice.hidden = true;
+  versionNotice.textContent = '';
+}
+let rereadSeq = 0;
+/** Authoritative reread of the displayed document; signals and focus only decide when to run it. */
+async function rereadDisplayed(): Promise<void> {
+  if (!db || field.disabled || loadingDraft || (viewMode && viewMissing)) return;
+  // A local commit may be mid-flight; wait so the displayed revision is current.
+  while (!viewMode && saving) await saving.catch(() => undefined);
+  const id = active.id;
+  const generationAtStart = viewGeneration;
+  const seq = ++rereadSeq;
+  let stored: StoredDraft | undefined;
+  try { stored = await getStoredDraft(db, id); } catch { return; }
+  if (seq !== rereadSeq || generationAtStart !== viewGeneration || active.id !== id) return;
+  if (!viewMode && saving) { void rereadDisplayed(); return; }
+  const action = decideReread({ role: viewMode ? 'viewer' : 'editor', displayedRevision: active.revision, stored });
+  if (action === 'refresh' && stored) {
+    writingPosition.save();
+    showViewerDocument(stored);
+    setSaveStatus('Updated to the latest saved version. Nothing is saved from this window.');
+    scheduleListRefresh();
+  } else if (action === 'missing') {
+    showViewerMissing(VIEWER_MISSING);
+    scheduleListRefresh();
+  } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
+  else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE);
+}
+let listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleListRefresh(): void {
+  if (!viewMode || !db) return;
+  clearTimeout(listRefreshTimer);
+  listRefreshTimer = setTimeout(() => { void refreshDrafts().catch(() => { /* The list is advisory in a read-only view. */ }); }, 250);
+}
+signalChannel?.addEventListener('message', event => {
+  const signal = parseDocumentSignal(event.data);
+  if (!signal) return;
+  scheduleListRefresh();
+  if (!shouldApplyDocumentSignal(signal, active.id, active.revision)) return;
+  void rereadDisplayed();
+});
+function reconcileSignals(): void {
+  if (document.visibilityState !== 'visible') return;
+  scheduleListRefresh();
+  void rereadDisplayed();
+}
+window.addEventListener('focus', reconcileSignals);
+document.addEventListener('visibilitychange', reconcileSignals);
+// Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
+if (viewMode && !signalChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
 void (viewMode ? initializeViewer() : initializeDrafts());
 
 const openComparison = document.querySelector<HTMLButtonElement>('#open-comparison')!;
@@ -1104,6 +1190,7 @@ importFile.addEventListener('change', async () => {
     // Save even when autosave is off: importing is an explicit save action.
     if (!db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
+    postSignal('saved', result.draft.id, result.draft.revision);
     const switched = await switchDraft(result.draft.id);
     // Always confirm the import; keep a conflict notice that the switch flush created.
     announceAction(
