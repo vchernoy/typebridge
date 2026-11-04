@@ -81,7 +81,7 @@ describe('read-only access guidance', () => {
 
   it('explains each read-only reason and points to copy/export', () => {
     expect(editBlockGuidance('busy', false)).toContain('open for editing in another TypeBridge window');
-    expect(editBlockGuidance('busy', false)).toContain('close the other window');
+    expect(editBlockGuidance('busy', false)).toContain('Edit here');
     expect(editBlockGuidance('lost', false)).toContain('Another TypeBridge window is now editing this document');
     expect(editBlockGuidance('unsupported', false)).toContain('Web Locks');
     expect(editBlockGuidance('unsupported', false)).toContain('copy and export');

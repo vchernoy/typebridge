@@ -13,6 +13,19 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
+import {
+  EDIT_HANDOFF_CHANNEL,
+  HANDOFF_REQUEST_TTL_MS,
+  createHandoffRefused,
+  createHandoffReleased,
+  createHandoffRequest,
+  handoffRefuseGuidance,
+  handoffRequestExpired,
+  mayShowEditHere,
+  ownerHandoffBlock,
+  parseHandoffSignal,
+  type HandoffSignal,
+} from './view/handoff';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
@@ -30,7 +43,8 @@ import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
 // Only an absent mode is ordinary boot; invalid mode/doc takes the no-write viewer path.
 const route = parseComparisonRoute(window.location.search);
-const viewMode = route.kind !== 'ordinary';
+/** Cleared when a comparison viewer successfully uses Edit here (#159 W5). */
+let viewMode = route.kind !== 'ordinary';
 const requestedViewId = route.kind === 'viewer' ? route.documentId : undefined;
 // Minted per page load and never read from sessionStorage, which duplicated tabs can clone.
 const instanceId = crypto.randomUUID();
@@ -46,6 +60,22 @@ let deleting = false;
 let transferFrozen = false;
 /** True for the whole Autosave change handler (including awaits); keeps the checkbox disabled. */
 let autosaveToggleActive = false;
+/** True while Edit here is awaiting acquire or a handoff response (#159 W5). */
+let editHereBusy = false;
+/** In-flight Edit here handoff wait; cleared on response, timeout, or navigation. */
+let pendingHandoff: {
+  requestId: string;
+  requesterId: string;
+  documentId: string;
+  view: number;
+  resolve: (signal: HandoffSignal | undefined) => void;
+} | undefined;
+function cancelPendingHandoff(): void {
+  if (!pendingHandoff) return;
+  const resolve = pendingHandoff.resolve;
+  pendingHandoff = undefined;
+  resolve(undefined);
+}
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
@@ -424,13 +454,24 @@ const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
 let ownershipAvailable = false;
 const ownerReady = new Promise<void>(resolve => {
-  // Viewers write no recovery journals, so they never take recovery ownership.
+  // Viewers write no recovery journals at boot; Edit here claims the lock on promotion (#159 W5).
   if (!navigator.locks || viewMode) { resolve(); return; }
   void navigator.locks.request(OWNER_LOCK + journalTab, async () => {
     ownershipAvailable = true; resolve();
     await new Promise<void>(() => { /* The browser releases this lock with the page. */ });
   }).catch(() => { resolve(); });
 });
+/** Hold the per-page recovery lock after viewer → editor promotion. */
+function ensureRecoveryOwnership(): Promise<void> {
+  if (ownershipAvailable || !navigator.locks) return Promise.resolve();
+  return new Promise<void>(resolve => {
+    void navigator.locks.request(OWNER_LOCK + journalTab, async () => {
+      ownershipAvailable = true;
+      resolve();
+      await new Promise<void>(() => { /* The browser releases this lock with the page. */ });
+    }).catch(() => { resolve(); });
+  });
+}
 let currentJournal: RecoverySnapshot | undefined;
 const journalWarning = document.createElement('p');
 journalWarning.setAttribute('role', 'alert');
@@ -518,6 +559,8 @@ async function refreshDrafts(): Promise<void> {
 function showDraft(): void {
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
   viewGeneration++;
+  // A new view invalidates an in-flight Edit here attempt for a previous selection.
+  cancelPendingHandoff();
   clearVersionNotice();
   clearNotices();
   loadingDraft = true;
@@ -535,11 +578,16 @@ function showDraft(): void {
   updateSaveIndicator();
 }
 const ownershipNotice = document.querySelector<HTMLElement>('#ownership-notice')!;
+const editHereRow = document.querySelector<HTMLElement>('#edit-here-row')!;
+const editHere = document.querySelector<HTMLButtonElement>('#edit-here')!;
 /** Controls that change the displayed document; New, Import and switching stay available. */
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** Reflect ownership + transfer freeze in the editors, controls and guidance (ordinary windows only). */
 function applyEditAccess(): void {
-  if (viewMode) return;
+  if (viewMode) {
+    syncEditHereButton();
+    return;
+  }
   // Must match readOnlyNow: stay frozen for the whole switch/delete interval even if
   // installOwnership runs before the handler finishes (e.g. refreshDrafts after delete).
   const blocked = editBlock !== '' || transferFrozen;
@@ -553,16 +601,28 @@ function applyEditAccess(): void {
   const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, dirty);
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
+  syncEditHereButton();
   syncHistory();
   updateSaveIndicator();
+}
+function syncEditHereButton(): void {
+  const show = mayShowEditHere({
+    viewMode,
+    viewMissing,
+    editBlock,
+    webLocksAvailable: !!webLocks,
+    fieldDisabled: field.disabled,
+  });
+  editHereRow.hidden = !show;
+  editHere.disabled = !show || editHereBusy || transitioning || transferFrozen || deleting;
 }
 /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
 let storageGeneration = 0;
 type EditAccess = { ownership?: EditOwnership; block: EditBlock; generation: number };
 /** Try to own `documentId` without waiting; never steals from a live owner. */
-async function acquireFor(documentId: string): Promise<EditAccess> {
-  // Without storage nothing can be written, so there is nothing to own.
-  if (viewMode || !db) return { block: '', generation: storageGeneration };
+async function acquireFor(documentId: string, options?: { allowViewer?: boolean }): Promise<EditAccess> {
+  // Viewers never acquire on boot/focus; Edit here passes allowViewer to promote (#159 W5).
+  if ((viewMode && !options?.allowViewer) || !db) return { block: '', generation: storageGeneration };
   const generation = storageGeneration;
   // E2E may set a delay to assert mutations are frozen during ownership transfer (#159 W4).
   const delayMs = (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs;
@@ -1120,10 +1180,14 @@ async function renderRecovery(): Promise<void> {
     group.append(button, discard); recoveryPanel.append(group);
   }
 }
-if (!viewMode) {
+let recoveryWatchWired = false;
+function wireRecoveryWatch(): void {
+  if (recoveryWatchWired) return;
+  recoveryWatchWired = true;
   window.addEventListener('storage', event => { if (event.key?.startsWith(RECOVERY_PREFIX)) queueRecovery(); });
   setInterval(queueRecovery, 5000);
 }
+if (!viewMode) wireRecoveryWatch();
 function handleDatabaseUpgrade(): void {
   // Invalidate in-flight acquires, then free any installed Web Lock so an upgraded tab can own.
   storageGeneration++;
@@ -1195,6 +1259,7 @@ async function initializeDrafts(): Promise<void> {
     updateStats();
     applyEditAccess();
     void renderRecovery();
+    syncEditHereButton();
     finishInitialization();
   }
 }
@@ -1225,6 +1290,7 @@ function showViewerStatus(): void {
 }
 function showViewerMissing(message: string): void {
   viewGeneration++;
+  cancelPendingHandoff();
   viewMissing = true;
   loadingDraft = true;
   try { editor.load(''); draftTitle.value = ''; syncTitleTooltip(); }
@@ -1238,6 +1304,7 @@ function showViewerMissing(message: string): void {
   renderDrafts();
   updateStats();
   showViewerStatus();
+  syncEditHereButton();
 }
 function showViewerDocument(draft: StoredDraft): void {
   viewMissing = false;
@@ -1250,6 +1317,7 @@ function showViewerDocument(draft: StoredDraft): void {
   viewerBadge.title = `Saved revision ${draft.revision}`;
   for (const id of VIEWER_NEEDS_DOCUMENT) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
   showViewerStatus();
+  syncEditHereButton();
 }
 function syncViewerUrl(id: string): void {
   const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', id);
@@ -1261,6 +1329,7 @@ let viewerLoad = 0;
 async function viewerOpen(id: string): Promise<void> {
   const load = ++viewerLoad;
   viewGeneration++;
+  cancelPendingHandoff();
   try {
     if (!db) throw new Error('Storage unavailable');
     const next = await getStoredDraft(db, id);
@@ -1300,6 +1369,7 @@ async function initializeViewer(): Promise<void> {
     restoreFocusMode();
     if (!viewMissing) writingPosition.restore(active.id);
     updateStats();
+    syncEditHereButton();
     finishInitialization();
   }
 }
@@ -1405,6 +1475,294 @@ document.addEventListener('visibilitychange', reconcileSignals);
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
 if (viewMode && !signalChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
 void (viewMode ? initializeViewer() : initializeDrafts());
+
+// Explicit Edit here / handoff (#159 W5). Separate channel from saved-version signals.
+const handoffChannel: BroadcastChannel | undefined = (() => {
+  try { return typeof BroadcastChannel === 'function' ? new BroadcastChannel(EDIT_HANDOFF_CHANNEL) : undefined; }
+  catch { return undefined; }
+})();
+let editorLifecycleWired = !viewMode;
+function postHandoff(signal: HandoffSignal): void {
+  if (!handoffChannel) return;
+  try { handoffChannel.postMessage(signal); } catch { /* Advisory; requester times out. */ }
+}
+function handoffTtlMs(): number {
+  const override = (window as Window & { __typebridgeHandoffTtlMs?: number }).__typebridgeHandoffTtlMs;
+  return typeof override === 'number' && override > 0 ? override : HANDOFF_REQUEST_TTL_MS;
+}
+function requestExpired(at: number): boolean {
+  return handoffRequestExpired(at, Date.now(), handoffTtlMs());
+}
+function wireEditorLifecycle(): void {
+  if (editorLifecycleWired) return;
+  editorLifecycleWired = true;
+  window.addEventListener('pagehide', () => { savePending(); clearTimeout(saveTimer); void persist(); });
+  // Match ordinary editors: warn on any dirty unload (including Autosave off).
+  window.addEventListener('beforeunload', event => {
+    if (!dirty || viewMode) return;
+    savePending();
+    clearTimeout(saveTimer);
+    void persist();
+    if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); }
+  });
+}
+function syncOrdinaryEditorUrl(id: string): void {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('mode');
+    url.searchParams.delete('doc');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+  } catch { /* Address bar is optional. */ }
+  try { setActiveDraftId(id); } catch { /* Hint only. */ }
+}
+/**
+ * Promote this window to editor for `documentId` when the lock is free.
+ * `attempt.view` is the viewGeneration captured at the start of the Edit here attempt;
+ * navigation that bumps it aborts without installing ownership or replacing memory.
+ */
+async function becomeEditorFor(documentId: string, attempt: { view: number }): Promise<boolean> {
+  const stillHere = (): boolean =>
+    active.id === documentId && viewGeneration === attempt.view && !transitioning && !deleting;
+  freezeEditorsForTransition();
+  let access: EditAccess | undefined;
+  try {
+    if (!stillHere()) return false;
+    access = await acquireFor(documentId, { allowViewer: true });
+    if (!access.ownership) return false;
+    if (!stillHere()) { void access.ownership.release(); access = undefined; return false; }
+    let fresh: StoredDraft | undefined;
+    try { fresh = db ? await getStoredDraft(db, documentId) : undefined; }
+    catch { void access.ownership.release(); access = undefined; return false; }
+    if (!stillHere()) { void access.ownership.release(); access = undefined; return false; }
+    // Viewers need a committed row; dirty ordinary readers may keep unsaved memory if the row exists.
+    if (!fresh || (!dirty && fresh.revision < 1)) {
+      void access.ownership.release();
+      access = undefined;
+      return false;
+    }
+    if (viewMode) {
+      // Claim before clearing viewMode so the first journalEdit is covered by the lock.
+      await ensureRecoveryOwnership();
+      if (!stillHere()) { void access.ownership.release(); access = undefined; return false; }
+      viewMode = false;
+      document.body.classList.remove('viewer');
+      document.title = 'TypeBridge';
+      saveIndicator.hidden = false;
+      viewerBadge.hidden = true;
+      viewerNotice.hidden = true;
+      // applyViewerChrome disabled these; OWNER_ONLY_CONTROLS alone does not restore them.
+      for (const id of ['new-draft', 'import-draft', 'open-comparison']) {
+        document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
+      }
+      wireEditorLifecycle();
+      wireRecoveryWatch();
+      // Reload must read the ordinary editor key, not the viewer-prefixed one.
+      writingPosition.setNamespace('');
+      syncOrdinaryEditorUrl(fresh.id);
+    }
+    // Follow retryOwnership: never replace unsaved in-memory text/title/history.
+    if (!dirty) {
+      writingPosition.save();
+      active = fresh;
+      rememberActive();
+      // showDraft bumps viewGeneration and would cancel a pending handoff; none is pending here.
+      showDraft();
+    }
+    installOwnership(access);
+    access = undefined;
+    announceAction('You can edit this document in this window now.', { keepConflict: true });
+    if (dirty && autosave.checked) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { void persist(); }, 300); }
+    return true;
+  } finally {
+    void access?.ownership?.release();
+    unfreezeEditorsAfterTransition();
+    syncEditHereButton();
+  }
+}
+async function requestEditHere(): Promise<void> {
+  if (editHereBusy) return;
+  if (!mayShowEditHere({
+    viewMode, viewMissing, editBlock, webLocksAvailable: !!webLocks, fieldDisabled: field.disabled,
+  })) return;
+  const documentId = active.id;
+  if (!documentId || viewMissing) return;
+  const view = viewGeneration;
+  const requestId = crypto.randomUUID();
+  const attemptStillCurrent = (): boolean =>
+    active.id === documentId && viewGeneration === view && !transitioning && !deleting;
+  editHereBusy = true;
+  syncEditHereButton();
+  try {
+    if (await becomeEditorFor(documentId, { view })) return;
+    if (!attemptStillCurrent()) return;
+    // Lock held elsewhere: ask the owner when BroadcastChannel exists.
+    if (!handoffChannel) {
+      await askConfirmChoice({
+        title: 'Cannot edit here yet',
+        message: 'Another window is editing this document, and this browser cannot send a handoff request. Close or finish in that window, then try Edit here again.',
+        cancelLabel: 'OK',
+        returnFocus: editHere,
+      });
+      return;
+    }
+    const requesterId = instanceId;
+    const response = await new Promise<HandoffSignal | undefined>(resolve => {
+      pendingHandoff = { requestId, requesterId, documentId, view, resolve };
+      postHandoff(createHandoffRequest(documentId, requesterId, requestId, Date.now()));
+      window.setTimeout(() => {
+        if (
+          pendingHandoff?.requestId === requestId
+          && pendingHandoff.requesterId === requesterId
+          && pendingHandoff.documentId === documentId
+        ) {
+          pendingHandoff = undefined;
+          resolve(undefined);
+        }
+      }, handoffTtlMs());
+    });
+    if (pendingHandoff?.requestId === requestId) pendingHandoff = undefined;
+    // Navigation cancelled this attempt — do not toast a timeout or install A over B.
+    if (!attemptStillCurrent()) return;
+    if (!response) {
+      await askConfirmChoice({
+        title: 'Cannot edit here yet',
+        message: 'The editing window did not respond. Keep it open, or close it and try Edit here again.',
+        cancelLabel: 'OK',
+        returnFocus: editHere,
+      });
+      return;
+    }
+    if (response.requestId !== requestId) return;
+    if (response.type === 'refused') {
+      await askConfirmChoice({
+        title: 'Cannot edit here yet',
+        message: handoffRefuseGuidance(response.reason),
+        cancelLabel: 'OK',
+        returnFocus: editHere,
+      });
+      return;
+    }
+    if (response.type === 'released') {
+      if (!(await becomeEditorFor(documentId, { view }))) {
+        if (!attemptStillCurrent()) return;
+        await askConfirmChoice({
+          title: 'Cannot edit here yet',
+          message: 'The other window released editing, but this window could not take over. Try Edit here again.',
+          cancelLabel: 'OK',
+          returnFocus: editHere,
+        });
+      }
+    }
+  } finally {
+    if (pendingHandoff?.requestId === requestId) pendingHandoff = undefined;
+    editHereBusy = false;
+    syncEditHereButton();
+  }
+}
+editHere.addEventListener('click', () => { void requestEditHere(); });
+handoffChannel?.addEventListener('message', event => {
+  const signal = parseHandoffSignal(event.data);
+  if (!signal) return;
+  if (signal.type === 'released' || signal.type === 'refused') {
+    if (
+      pendingHandoff
+      && signal.requestId === pendingHandoff.requestId
+      && signal.requesterId === pendingHandoff.requesterId
+      && signal.documentId === pendingHandoff.documentId
+    ) {
+      const resolve = pendingHandoff.resolve;
+      pendingHandoff = undefined;
+      resolve(signal);
+    }
+    return;
+  }
+  if (signal.type !== 'request') return;
+  if (viewMode || ownership?.documentId !== signal.documentId || editBlock) return;
+  void (async () => {
+    if (requestExpired(signal.at)) {
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), 'busy'));
+      return;
+    }
+    const block = ownerHandoffBlock({
+      isOwner: !!ownership && ownership.documentId === signal.documentId && !editBlock,
+      composing: editor.isComposing || titleEditor.isComposing,
+      dirty,
+      autosaveOn: autosave.checked,
+      saving: !!saving,
+      saveFailed,
+      conflictNotice: !!conflictNotice.textContent || statusKind === 'conflict',
+      transitioning,
+      transferFrozen,
+    });
+    if (block) {
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), block));
+      return;
+    }
+    const transfer = await askConfirmChoice({
+      title: 'Transfer editing?',
+      message: 'Another window wants to edit this document. Transfer editing releases it here after saving.',
+      confirmLabel: 'Transfer editing',
+      cancelLabel: 'Keep editing',
+      returnFocus: field,
+    });
+    if (!transfer) {
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), 'declined'));
+      return;
+    }
+    // Requester may have timed out while the dialog was open — keep ownership.
+    if (requestExpired(signal.at)) {
+      announceAction('The Edit here request expired. You still have editing in this window.', { keepConflict: true });
+      return;
+    }
+    const stillBlocked = ownerHandoffBlock({
+      isOwner: !!ownership && ownership.documentId === signal.documentId && !editBlock,
+      composing: editor.isComposing || titleEditor.isComposing,
+      dirty,
+      autosaveOn: autosave.checked,
+      saving: !!saving,
+      saveFailed,
+      conflictNotice: !!conflictNotice.textContent || statusKind === 'conflict',
+      transitioning,
+      transferFrozen,
+    });
+    if (stillBlocked) {
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), stillBlocked));
+      return;
+    }
+    freezeEditorsForTransition();
+    try {
+      if (dirty && autosave.checked) {
+        const result = await persist();
+        if (!result.saved) {
+          postHandoff(createHandoffRefused(
+            signal.documentId, signal.requesterId, signal.requestId, Date.now(),
+            saveFailed ? 'save-failed' : 'busy',
+          ));
+          return;
+        }
+      }
+      if (requestExpired(signal.at)) {
+        announceAction('The Edit here request expired. You still have editing in this window.', { keepConflict: true });
+        return;
+      }
+      if (ownership?.documentId === signal.documentId) {
+        const previous = ownership;
+        ownership = undefined;
+        editBlock = 'lost';
+        applyEditAccess();
+        // Await release so the requester's acquire does not still see a held Web Lock.
+        await previous?.release();
+      }
+      postHandoff(createHandoffReleased(signal.documentId, signal.requesterId, signal.requestId, Date.now()));
+      announceAction('Editing transferred to another window. This window is read-only.', { keepConflict: true });
+    } finally {
+      unfreezeEditorsAfterTransition();
+    }
+  })();
+});
 
 const openComparison = document.querySelector<HTMLButtonElement>('#open-comparison')!;
 async function explainNoComparison(message: string): Promise<void> {

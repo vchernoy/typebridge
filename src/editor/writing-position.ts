@@ -27,6 +27,7 @@ export const VIEWER_POSITION_NAMESPACE = 'view:';
 export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () => string | undefined, namespace = '') {
   let restoring = false;
   let previous = '';
+  let keyNamespace = namespace;
   function save(): void {
     const id = documentId();
     if (!id || restoring) return;
@@ -36,14 +37,14 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     };
     const raw = JSON.stringify(value);
     if (previous === id + raw) return;
-    try { sessionStorage.setItem(POSITION_PREFIX + namespace + id, raw); previous = id + raw; }
+    try { sessionStorage.setItem(POSITION_PREFIX + keyNamespace + id, raw); previous = id + raw; }
     catch { /* Selection is optional, even if storage is blocked or full. */ }
   }
   function restore(id: string): void {
     restoring = true;
     previous = '';
     try {
-      const position = parseWritingPosition(sessionStorage.getItem(POSITION_PREFIX + namespace + id), field.value);
+      const position = parseWritingPosition(sessionStorage.getItem(POSITION_PREFIX + keyNamespace + id), field.value);
       if (!position) return;
       field.setSelectionRange(position.start, position.end, position.direction);
       // Set scroll after selection; the browser clamps it to the current layout.
@@ -52,9 +53,30 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     } catch { /* Fall back to the loaded draft's default view. */ }
     finally { restoring = false; }
   }
+  /**
+   * After Edit here promotes a viewer, switch to the ordinary editor key so reload
+   * restores caret/scroll from the same namespace editors use (#159 W5).
+   */
+  function setNamespace(next: string): void {
+    if (next === keyNamespace) return;
+    const id = documentId();
+    if (id) {
+      const from = POSITION_PREFIX + keyNamespace + id;
+      const to = POSITION_PREFIX + next + id;
+      try {
+        const raw = sessionStorage.getItem(from);
+        if (raw != null) {
+          sessionStorage.setItem(to, raw);
+          sessionStorage.removeItem(from);
+        }
+      } catch { /* Optional migration. */ }
+    }
+    keyNamespace = next;
+    previous = '';
+  }
   for (const type of ['input', 'select', 'keyup', 'click', 'scroll', 'historychange']) field.addEventListener(type, save);
   window.addEventListener('pagehide', save);
   window.addEventListener('beforeunload', save);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
-  return { save, restore };
+  return { save, restore, setNamespace };
 }

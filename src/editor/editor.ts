@@ -81,6 +81,8 @@ export class Editor {
   private viewOnly = false;
   setReadOnly(value: boolean): void { this.viewOnly = value; this.pending = null; this.field.readOnly = value; }
   get readOnly(): boolean { return this.viewOnly; }
+  /** True while an IME composition is active (#159 W5 handoff refusal). */
+  get isComposing(): boolean { return this.composing; }
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
   exportHistory(): EditorHistory {
