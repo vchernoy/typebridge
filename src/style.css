@@ -261,13 +261,22 @@ body {
   background: currentColor;
 }
 .viewer-badge {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   padding: 2px 8px;
   border: 1px solid var(--control-border);
-  border-radius: 999px;
-  white-space: nowrap;
+  border-radius: 8px;
   font-size: 0.8rem;
   font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 400px) {
+  .viewer-badge {
+    font-size: 0.72rem;
+    padding: 2px 6px;
+  }
 }
 .viewer-notice {
   margin: 0 0 8px;

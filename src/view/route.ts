@@ -13,16 +13,20 @@ export type ComparisonRoute =
   | { kind: 'ordinary' }
   | { kind: 'invalid'; reason: 'missing-doc' | 'bad-doc' | 'bad-mode' };
 
-/** True when `value` matches the UUID shape used for TypeBridge document ids. */
+/**
+ * True for ids TypeBridge stores in IndexedDB: a UUID, or a recovery copy
+ * (`recovery-<uuid>` from emergency recovery).
+ */
 export function isDocumentId(value: string): boolean {
-  return UUID_RE.test(value);
+  if (UUID_RE.test(value)) return true;
+  return value.startsWith('recovery-') && UUID_RE.test(value.slice('recovery-'.length));
 }
 
 /**
  * Parse comparison routing from a query string (with or without leading `?`).
  * Unknown params are ignored. `mode=view` without a valid `doc` is invalid.
- * Absence of `mode=view` yields ordinary boot (editor path), even if `doc` is present
- * (W2+ may still honor `doc` for deep-link open; W1 treats non-view as ordinary).
+ * Only an absent/empty `mode` yields ordinary boot. Any other mode value is
+ * invalid and must take the no-write missing/error path (not ordinary editor).
  */
 export function parseComparisonRoute(search: string): ComparisonRoute {
   const normalized = search.startsWith('?') ? search.slice(1) : search;

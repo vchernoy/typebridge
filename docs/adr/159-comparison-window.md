@@ -95,8 +95,8 @@ Same origin and Vite base (`/` today; preserve non-root base if ever set):
 
 | Param | Rules |
 | --- | --- |
-| `doc` | Required for viewer. Canonical UUID string as stored in IndexedDB (`crypto.randomUUID()` shape). Reject empty, wrong type, or non-UUID. |
-| `mode` | `view` = companion. Omit = ordinary editor boot. W2 implementation: an unrecognized `mode` value (parse reason `bad-mode`) also boots the ordinary editor and the app does not invent other modes; `mode=view` with a missing or malformed `doc` shows the viewer **missing** state. |
+| `doc` | Required for viewer. Stored IndexedDB id: UUID or `recovery-<uuid>`. Reject empty or other shapes. |
+| `mode` | `view` = companion. **Only** omit/empty `mode` → ordinary editor boot. Any other mode value is invalid and takes the no-write missing/error path (never `initializeDrafts`). `mode=view` with a missing or malformed `doc` shows the viewer **missing** state. |
 
 Malformed/unknown ID → viewer **missing** UI (clear message, no new empty document, no recovery wipe). Do not trust cloned sessionStorage for window identity: each load mint `instanceId = crypto.randomUUID()` (same pattern as `journalTab`).
 
@@ -106,7 +106,7 @@ Pure helpers live in `src/view/route.ts` (parse/validate only in W1; wiring in W
 
 ### Open action
 
-Documents menu → **Open in comparison window** (current saved document). Uses user-gesture `window.open(url)`. Browser may open a tab (phones commonly do); do not promise an OS window or side-by-side layout. If popup blocked: keep source intact, show guidance to allow popups or open the link manually—**text remains in the source window**.
+Documents menu → **Open in comparison window** (current saved document). User-gesture open must **not** clone the source tab’s `sessionStorage` (Firefox can copy it when an opener relationship exists), so private pending text never arrives in the companion. Implementation: `window.open('about:blank')`, strip `typebridge.*` session keys in the new context, `opener = null`, then `location.replace` the viewer URL (absolute). This preserves accurate popup-blocked detection (`null` means blocked); `noopener` alone is unsuitable because it returns `null` even on success. Browser may open a tab (phones commonly do); do not promise an OS window or side-by-side layout. If popup blocked: keep source intact, show guidance—**text remains in the source window**. Never clear the source tab’s backups to solve this.
 
 Companion may later switch to another **saved** document via the Documents list without gaining write rights (W2).
 

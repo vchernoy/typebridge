@@ -24,13 +24,25 @@ import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition, VIEWER_POSITION_NAMESPACE } from './editor/writing-position';
 import { comparisonViewerHref, parseComparisonRoute } from './view/route';
 import { formatDocumentStats } from './editor/document-stats';
-// Companion routing is parsed before any ordinary open/restore path (#159 W2). An unknown mode
-// value stays an ordinary boot; a view request with a missing or malformed id shows the missing state.
+// Companion routing is parsed before any ordinary open/restore path (#159 W2).
+// Only an absent mode is ordinary boot; invalid mode/doc takes the no-write viewer path.
 const route = parseComparisonRoute(window.location.search);
-const viewMode = route.kind === 'viewer' || (route.kind === 'invalid' && route.reason !== 'bad-mode');
+const viewMode = route.kind !== 'ordinary';
 const requestedViewId = route.kind === 'viewer' ? route.documentId : undefined;
 // Minted per page load and never read from sessionStorage, which duplicated tabs can clone.
 const instanceId = crypto.randomUUID();
+// Defense in depth: drop private session keys if a browser cloned the opener's sessionStorage
+// into this companion (Firefox). Do not touch the source window's storage.
+if (viewMode) {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key === 'typebridge.pendingDraft.v1' || key === 'typebridge.activeDraft.v1') doomed.push(key);
+    }
+    for (const key of doomed) sessionStorage.removeItem(key);
+  } catch { /* Blocked sessionStorage still allows a read-only view of IndexedDB. */ }
+}
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
@@ -988,6 +1000,34 @@ async function explainNoComparison(message: string): Promise<void> {
     returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
   });
 }
+/**
+ * Open a same-origin companion without inheriting the source tab's sessionStorage.
+ * Some browsers (notably Firefox) clone sessionStorage into window.open targets when an
+ * opener relationship exists, which would copy private pending text. Opening about:blank,
+ * stripping TypeBridge session keys, then navigating preserves popup-blocked detection
+ * (unlike noopener, which returns null even on success) without clearing the source.
+ */
+function openComparisonWindow(href: string): Window | null {
+  const opened = window.open('about:blank', '_blank');
+  if (!opened) return null;
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < opened.sessionStorage.length; i++) {
+      const key = opened.sessionStorage.key(i);
+      if (key?.startsWith('typebridge.')) doomed.push(key);
+    }
+    for (const key of doomed) opened.sessionStorage.removeItem(key);
+  } catch { /* Navigation still proceeds if the new context blocks storage. */ }
+  try { opened.opener = null; } catch { /* Optional severance. */ }
+  try {
+    opened.location.replace(new URL(href, window.location.href).href);
+  } catch {
+    try { opened.close(); } catch { /* Ignore. */ }
+    return null;
+  }
+  return opened;
+}
+
 // window.open must run inside this click, so eligibility uses the in-memory IndexedDB revision
 // rather than an async read; the companion verifies the row itself on load. Document text is
 // never part of the URL, postMessage or sessionStorage.
@@ -1001,10 +1041,10 @@ openComparison.addEventListener('click', () => {
   }
   const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', active.id);
   if (!href) {
-    void explainNoComparison('This document cannot be opened in a comparison window yet (for example, a recovered copy). Export it and import it as a regular document first. Your text stays in this window.');
+    void explainNoComparison('This document cannot be opened in a comparison window yet. Export it and import it as a regular document first. Your text stays in this window.');
     return;
   }
-  const opened = window.open(href, '_blank');
+  const opened = openComparisonWindow(href);
   if (!opened) {
     announceAction('The comparison window was blocked. Allow pop-ups for TypeBridge and try again. Your text is still here.', { kind: 'failure' });
     return;

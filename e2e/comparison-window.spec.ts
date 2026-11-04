@@ -44,6 +44,8 @@ async function openCompanion(context: BrowserContext, source: Page): Promise<Pag
     context.waitForEvent('page'),
     documentAction(source, '#open-comparison'),
   ]);
+  // Open goes about:blank first (to strip cloned sessionStorage), then replaces to the viewer URL.
+  await viewer.waitForURL(/[?&]mode=view(?:&|$)/);
   await viewer.waitForLoadState('domcontentloaded');
   return viewer;
 }
@@ -111,20 +113,37 @@ test('a blocked pop-up keeps the text in the source window and explains how to c
 });
 
 test('invalid or missing document links show the missing state and create nothing', async ({ page }) => {
-  for (const search of [`?mode=view&doc=${MISSING_ID}`, '?mode=view', '?mode=view&doc=not-a-uuid', `?doc=${MISSING_ID}&mode=view&x=1`]) {
+  for (const search of [
+    `?mode=view&doc=${MISSING_ID}`,
+    '?mode=view',
+    '?mode=view&doc=not-a-uuid',
+    `?doc=${MISSING_ID}&mode=view&x=1`,
+    `?doc=${MISSING_ID}&mode=typo`,
+  ]) {
     await page.goto('/' + search);
     await expect(page.locator('#editor')).toBeEnabled();
     await expect(page.locator('#viewer-notice')).toBeVisible();
-    await expect(page.locator('#viewer-notice')).toContainText('no longer available');
     await expect(page.locator('#editor')).toHaveValue('');
     await expect(page.locator('#editor')).toHaveJSProperty('readOnly', true);
-    await expect(page.locator('#viewer-badge')).toHaveText('Read-only comparison view');
+    await expect(page.locator('#viewer-badge')).toBeVisible();
     await page.waitForTimeout(500);
     expect(await readDocs(page)).toEqual([]);
     const keys = await storageKeys(page);
     expect(keys.session.filter(key => /activeDraft|pendingDraft/.test(key))).toEqual([]);
     expect(keys.local.filter(key => /recovery/i.test(key))).toEqual([]);
   }
+});
+
+test('an invalid mode never creates or writes a document', async ({ page }) => {
+  await page.goto(`/?doc=${MISSING_ID}&mode=edit`);
+  await expect(page.locator('#editor')).toHaveJSProperty('readOnly', true);
+  await expect(page.locator('#viewer-notice')).toBeVisible();
+  await page.locator('#editor').click();
+  await page.keyboard.type('should-not-persist');
+  await page.waitForTimeout(800);
+  expect(await readDocs(page)).toEqual([]);
+  const keys = await storageKeys(page);
+  expect(keys.session.filter(key => /activeDraft|pendingDraft/.test(key))).toEqual([]);
 });
 
 test('a missing-document viewer can still switch to a saved document without gaining edit rights', async ({ page, context }) => {
@@ -244,7 +263,7 @@ test('the viewer cannot mutate documents through delete, new, import or replace'
   await expect(page.locator('#drafts option')).toHaveCount(2);
 });
 
-test('cloned sessionStorage neither makes the viewer an editor nor writes documents', async ({ page, context }) => {
+test('cloned sessionStorage neither makes the viewer an editor nor keeps private pending keys', async ({ page, context }) => {
   await page.goto('/');
   const first = await saveDocument(page, 'Viewer text 0123456789');
   await documentAction(page, '#new-draft');
@@ -275,8 +294,9 @@ test('cloned sessionStorage neither makes the viewer an editor nor writes docume
   await viewer.reload();
   await expectViewerReady(viewer, 'Viewer text 0123456789');
   const session = await viewer.evaluate(() => ({ ...sessionStorage }));
-  expect(session['typebridge.pendingDraft.v1']).toBe(pending);
-  expect(session['typebridge.activeDraft.v1']).toBe(second.id);
+  expect(session['typebridge.pendingDraft.v1']).toBeUndefined();
+  expect(session['typebridge.activeDraft.v1']).toBeUndefined();
+  expect(JSON.stringify(session)).not.toContain('PRIVATE PENDING TEXT');
   expect(session['typebridge.writingPosition.v1.' + first.id]).toBe(editorPosition);
   expect(Object.keys(session).some(key => key.startsWith('typebridge.writingPosition.v1.view:'))).toBe(true);
   expect(await viewer.evaluate(() => document.documentElement.dataset.instanceId)).not.toBe('cloned-instance');
@@ -284,4 +304,66 @@ test('cloned sessionStorage neither makes the viewer an editor nor writes docume
   await viewer.close();
   expect(await readDocs(page)).toEqual(before);
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).toBe(localBefore);
+});
+
+test('opening a companion does not receive a private pending canary from the source', async ({ page, context }) => {
+  await page.goto('/');
+  const row = await saveDocument(page, 'Committed body');
+  const canary = 'PRIVATE-CANARY-NOT-FOR-COMPANION';
+  await page.evaluate(({ id, title, canary: text }) => {
+    sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify({
+      id, title, text, revision: 1, updatedAt: Date.now(), history: { undo: [], redo: [] },
+    }));
+  }, { id: row.id, title: row.title, canary });
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1') ?? '')).toContain(canary);
+
+  const viewer = await openCompanion(context, page);
+  await expectViewerReady(viewer, 'Committed body');
+  const dump = await viewer.evaluate(() => JSON.stringify({ ...sessionStorage }));
+  expect(dump).not.toContain(canary);
+  expect(dump).not.toContain('typebridge.pendingDraft.v1');
+  await expect(page.locator('#editor')).toHaveValue('Committed body');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1') ?? '')).toContain(canary);
+});
+
+test('selecting a recovery-* document updates the URL so reload keeps it', async ({ page, context }) => {
+  await page.goto('/');
+  const first = await saveDocument(page, 'Ordinary saved');
+  const recoveryId = `recovery-${MISSING_ID}`;
+  await page.evaluate(({ id }) => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', 1);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readwrite');
+      tx.objectStore('documents').put({
+        id, title: 'Recovered copy', text: 'Recovered body', revision: 1, updatedAt: Date.now(),
+      });
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), { id: recoveryId });
+
+  const viewer = await context.newPage();
+  await viewer.goto(`/?doc=${first.id}&mode=view`);
+  await expectViewerReady(viewer, 'Ordinary saved');
+  await selectDocument(viewer, recoveryId);
+  await expectViewerReady(viewer, 'Recovered body');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(recoveryId);
+  await viewer.reload();
+  await expectViewerReady(viewer, 'Recovered body');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(recoveryId);
+});
+
+test('viewer badge fits a narrow enlarged-text layout without horizontal overflow', async ({ page }) => {
+  await page.goto('/');
+  const row = await saveDocument(page, 'Badge layout');
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.addStyleTag({ content: 'html { font-size: 24px; }' });
+  await page.goto(`/?doc=${row.id}&mode=view`);
+  await expectViewerReady(page, 'Badge layout');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  expect(overflow).toBe(false);
+  await expect(page.locator('#viewer-badge')).toBeVisible();
+  await expect(page.locator('#draft-title')).toBeVisible();
 });
