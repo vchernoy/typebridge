@@ -1,6 +1,6 @@
 # ADR: Comparison window and single editing owner (#159)
 
-Status: **Accepted for implementation** (W1); **W2 read-only companion implemented** (see [W2 implementation notes](#w2-implementation-notes)). Implements in sequential PRs W2–W6 on `main`. Does **not** close #159, #48, #40 or #37.
+Status: **Accepted for implementation** (W1); **W2 read-only companion implemented** (see [W2 implementation notes](#w2-implementation-notes)); **W3 saved-version signals implemented** (see [W3 implementation notes](#w3-implementation-notes)). Implements in sequential PRs W2–W6 on `main`. Does **not** close #159, #48, #40 or #37.
 
 ## Context (audit of current code)
 
@@ -275,7 +275,7 @@ Status: This saved document is no longer available.
 | --- | --- | --- |
 | **W1** (this PR) | ADR + pure `route` / `signals` contracts | Vitest parse/validate |
 | **W2** (implemented) | Open action, `mode=view` boot branch, RO gates, popup/missing/blocked storage | Unit + Playwright multi-page: same/different doc, reload, cloned sessionStorage, privacy no-write, invalid id |
-| **W3** | Broadcast + reread + visibility fallback | Stale/out-of-order/missed, delete, dirty editor notice, no channel |
+| **W3** (implemented) | Broadcast + reread + visibility fallback | Stale/out-of-order/missed, delete, dirty editor notice, no channel |
 | **W4** | Lock + fence at write boundary; ordinary tabs participate | Simultaneous acquire, crash/release, unsupported locks, stale wake |
 | **W5** | Edit here UX + refusals | Busy/dirty/IME/private/conflict; gone owner acquire |
 | **W6** | Docs, ROADMAP, evidence, small cleanups | Full matrix; mark real-device/AT pending |
@@ -291,7 +291,19 @@ Shipped in `src/main.ts` (plus `Editor.setReadOnly`, `writing-position`, `confir
 - **Read-only gates (`viewMode`):** text and title `readOnly`; `Editor.setReadOnly(true)` refuses `beforeinput`, paste, cut, drop, undo/redo (buttons, shortcuts and native history), convert, replace, replace-and-select and clear; Undo, Redo, Convert, New, Import, Delete, Clear, Replace and Autosave controls are disabled and their handlers also return early; `scheduleSave`, `persist`, `journalEdit`, `savePending`, `rememberActive`, and the `pagehide`, `beforeunload`, `visibilitychange` and recovery `storage`/interval wiring are skipped or no-ops in viewers.
 - **Chrome:** a **Saved version · Read-only** badge replaces the save indicator (wraps on narrow/enlarged text); the status line says nothing is saved from this window. Switching to another saved document (including `recovery-*` ids) uses `getStoredDraft`, keeps the viewer read-only, and updates the address with `history.replaceState` (hash preserved for #39).
 - **Identity and position:** `instanceId = crypto.randomUUID()` per load, never from sessionStorage (exposed as `data-instance-id` on `<html>` for viewers only, for tests). Writing position uses the `view:` key namespace (`typebridge.writingPosition.v1.view:{id}`), so a viewer never reads or overwrites an editor's offsets.
-- **Not in W2:** no BroadcastChannel (W3, so a viewer stays on its loaded revision until reloaded or re-selected), no ownership acquisition or fence (W4), no Edit here (W5). Ordinary tabs are unchanged and can still race with each other; CAS conflict copies remain the safeguard.
+- **Not in W2:** no BroadcastChannel (added in W3; before it a viewer stayed on its loaded revision), no ownership acquisition or fence (W4), no Edit here (W5). Ordinary tabs are unchanged and can still race with each other; CAS conflict copies remain the safeguard.
+
+## W3 implementation notes
+
+Shipped in `src/main.ts` and `src/view/signals.ts` (`createDocumentSignal`, `decideReread`, `SIGNAL_POLL_INTERVAL_MS`), `index.html` (`#version-notice`), and `e2e/saved-signals.spec.ts`:
+
+- **Emit (editing windows only):** after a successful IndexedDB commit in `persist` (`saved`, or `renamed` when only the title changed and the text did not), after a successful Delete document and after Delete saved copy when Autosave is turned off (`deleted` with the removed revision), and after Import and recovery-copy commits (`saved` for the new id). Viewers never post. Payloads are exactly `{ v, type, documentId, revision, at }`: no text, title, history or instance id. Autosave-off privacy mode never commits, so it never signals. A conflict copy signals `saved` for the copy id only.
+- **Receive:** `parseDocumentSignal` → `shouldApplyDocumentSignal` → `rereadDisplayed()`, which reads the row with `getStoredDraft` and decides with the pure `decideReread`. The signal’s revision is never trusted for content; an inflated revision just causes a reread that finds nothing newer. Results apply only if a monotonic `viewGeneration` (bumped whenever the displayed document changes) and a reread sequence number still match, and `active.id` is unchanged. An editor with a local commit in flight waits for it first so its displayed revision is current.
+- **Viewers:** newer committed revision → `showViewerDocument` (content and title replaced; writing position saved before and restored/clamped after via the existing `view:` namespace); row absent or uncommitted → the missing state. The badge exposes the represented revision as `data-revision` and a tooltip (“Saved revision N”). The viewer’s Documents list is refreshed (debounced 250 ms) on any signal, focus and visibility. Status line: “Updated to the latest saved version. Nothing is saved from this window.”
+- **Editors:** never replaced. A newer committed revision, or deletion of a document that has a committed revision here, shows `#version-notice` (“A newer saved version of this document exists in another window. Your text here has not been changed.” / “This saved document was deleted in another window. …”). It clears on switching documents or after this window’s own next commit (which, if the versions diverged, already surfaces the conflict-copy notice). Ordinary editors with no committed revision (new or privately kept documents) get no notice. Clean editors are also only notified (no auto-refresh), since automatic replacement belongs with ownership (W4/W5).
+- **Reconcile:** `focus` and `visibilitychange` → visible reread the displayed document (viewers and editors). Without `BroadcastChannel` that is the only mechanism, plus a `SIGNAL_POLL_INTERVAL_MS` (15 s) timer for viewers that is a no-op while the page is hidden. There is no polling when the channel exists.
+- **Echo:** a `BroadcastChannel` object never delivers to itself and the receive path only reads, so a signal cannot trigger a save. `instanceId` is not on the wire (extra fields are dropped by the parser).
+- **Remaining #48 scope (not closed by W3):** editor-to-editor behaviour is notice-only (no merge or auto-refresh of clean editors, no ownership; see W4/W5); editors’ Documents lists are not refreshed from signals; no signal for settings or other preferences; no cross-device sync. #48 stays open for these.
 
 ## Non-goals
 

@@ -95,7 +95,9 @@ test('opens a read-only companion for the saved document while the source stays 
   await source.pressSequentially(' 123');
   await expect(source).toHaveValue('Saved original 123');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
-  await expect(field).toHaveValue('Saved original');
+  // W3: the committed edit reaches the read-only viewer; the viewer itself writes nothing.
+  await expect(field).toHaveValue('Saved original 123');
+  await expect(field).toHaveJSProperty('readOnly', true);
   expect(await readDocs(page)).toHaveLength(1);
 });
 

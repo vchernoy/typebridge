@@ -49,3 +49,50 @@ export function shouldApplyDocumentSignal(
   if (signal.type === 'deleted') return true;
   return signal.revision > displayedRevision;
 }
+
+/** Build a metadata-only signal; never accepts text, title or history. */
+export function createDocumentSignal(
+  type: DocumentSignal['type'],
+  documentId: string,
+  revision: number,
+  at: number,
+): DocumentSignal {
+  return { v: 1, type, documentId, revision, at };
+}
+
+/** Slowest allowed fallback reread interval (ms) while a viewer is visible and no channel exists. */
+export const SIGNAL_POLL_INTERVAL_MS = 15_000;
+
+export type RereadAction =
+  /** Nothing newer than what is displayed. */
+  | 'none'
+  /** Viewer: replace content/title with the committed snapshot. */
+  | 'refresh'
+  /** Viewer: the saved document is gone. */
+  | 'missing'
+  /** Editor: show a non-destructive notice that a newer saved version exists. */
+  | 'notice-newer'
+  /** Editor: show a non-destructive notice that the saved document was deleted elsewhere. */
+  | 'notice-deleted';
+
+/**
+ * Decide what an authoritative reread means for the displayed document.
+ * `stored` is the IndexedDB row (or undefined when absent). Revisions below 1 are not committed.
+ * Editors never replace content: they only get notices, and only for a document that has
+ * a committed revision of its own (a never-saved or privately kept document has nothing to compare).
+ */
+export function decideReread(input: {
+  role: 'viewer' | 'editor';
+  displayedRevision: number;
+  stored: { revision: number } | undefined;
+}): RereadAction {
+  const { role, displayedRevision, stored } = input;
+  const committed = stored !== undefined && stored.revision >= 1;
+  if (role === 'viewer') {
+    if (!committed) return 'missing';
+    return stored.revision > displayedRevision ? 'refresh' : 'none';
+  }
+  if (displayedRevision < 1) return 'none';
+  if (!committed) return 'notice-deleted';
+  return stored.revision > displayedRevision ? 'notice-newer' : 'none';
+}
