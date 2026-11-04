@@ -263,7 +263,7 @@ test('the viewer cannot mutate documents through delete, new, import or replace'
   await expect(page.locator('#drafts option')).toHaveCount(2);
 });
 
-test('cloned sessionStorage neither makes the viewer an editor nor keeps private pending keys', async ({ page, context }) => {
+test('cloned sessionStorage neither makes the viewer an editor nor restores private pending text', async ({ page, context }) => {
   await page.goto('/');
   const first = await saveDocument(page, 'Viewer text 0123456789');
   await documentAction(page, '#new-draft');
@@ -293,10 +293,13 @@ test('cloned sessionStorage neither makes the viewer an editor nor keeps private
   await expect(viewer.locator('#editor')).toHaveValue('Viewer text 0123456789');
   await viewer.reload();
   await expectViewerReady(viewer, 'Viewer text 0123456789');
+  // Viewer boot must not restore pending text. It also must not delete pending/activeDraft:
+  // same-tab editor→viewer navigation relies on those keys for reload restore. The Open
+  // action strips cloned keys in openComparisonWindow before navigate instead.
   const session = await viewer.evaluate(() => ({ ...sessionStorage }));
-  expect(session['typebridge.pendingDraft.v1']).toBeUndefined();
-  expect(session['typebridge.activeDraft.v1']).toBeUndefined();
-  expect(JSON.stringify(session)).not.toContain('PRIVATE PENDING TEXT');
+  expect(session['typebridge.pendingDraft.v1']).toBe(pending);
+  expect(session['typebridge.activeDraft.v1']).toBe(second.id);
+  await expect(viewer.locator('#editor')).toHaveValue('Viewer text 0123456789');
   expect(session['typebridge.writingPosition.v1.' + first.id]).toBe(editorPosition);
   expect(Object.keys(session).some(key => key.startsWith('typebridge.writingPosition.v1.view:'))).toBe(true);
   expect(await viewer.evaluate(() => document.documentElement.dataset.instanceId)).not.toBe('cloned-instance');
@@ -304,6 +307,24 @@ test('cloned sessionStorage neither makes the viewer an editor nor keeps private
   await viewer.close();
   expect(await readDocs(page)).toEqual(before);
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).toBe(localBefore);
+});
+
+test('same-tab navigation to a viewer preserves the editor reload backup', async ({ page }) => {
+  await page.goto('/');
+  const row = await saveDocument(page, 'Committed for nav');
+  // Simulate pagehide writing a pending snapshot without committing that text to IndexedDB.
+  await page.evaluate(({ id, title, revision }) => {
+    sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify({
+      id, title, text: 'Committed for nav PLUS DIRTY', revision, updatedAt: Date.now(),
+      history: { undo: [], redo: [] },
+    }));
+  }, { id: row.id, title: row.title, revision: row.revision });
+  await page.goto(`/?doc=${row.id}&mode=view`);
+  await expectViewerReady(page, 'Committed for nav');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1') ?? '')).toContain('PLUS DIRTY');
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(page.locator('#editor')).toHaveValue('Committed for nav PLUS DIRTY');
 });
 
 test('opening a companion does not receive a private pending canary from the source', async ({ page, context }) => {

@@ -31,18 +31,10 @@ const viewMode = route.kind !== 'ordinary';
 const requestedViewId = route.kind === 'viewer' ? route.documentId : undefined;
 // Minted per page load and never read from sessionStorage, which duplicated tabs can clone.
 const instanceId = crypto.randomUUID();
-// Defense in depth: drop private session keys if a browser cloned the opener's sessionStorage
-// into this companion (Firefox). Do not touch the source window's storage.
-if (viewMode) {
-  try {
-    const doomed: string[] = [];
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const key = sessionStorage.key(i);
-      if (key === 'typebridge.pendingDraft.v1' || key === 'typebridge.activeDraft.v1') doomed.push(key);
-    }
-    for (const key of doomed) sessionStorage.removeItem(key);
-  } catch { /* Blocked sessionStorage still allows a read-only view of IndexedDB. */ }
-}
+// Do not delete pendingDraft/activeDraft on viewer boot: same-tab navigation from an editor
+// writes those keys on pagehide for reload restore, and wiping them here would discard that
+// backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
+// navigation; initializeViewer never reads pending/active hints.
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
