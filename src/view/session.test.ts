@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   commandAllowedOnPane,
   commandStillCurrent,
+  contentCommandStillCurrent,
   isPaneId,
   isSessionId,
   localPaneTransferBlock,
+  paneCloseBlock,
   paneCloseDisposition,
   resolveSessionForDocument,
+  sessionPersistStillCurrent,
 } from './session';
 
 const DOC = '11111111-1111-4111-8111-111111111111';
@@ -29,10 +32,37 @@ describe('commandStillCurrent', () => {
     sessionGeneration: 5,
   };
 
-  it('allows completion only for the captured generations', () => {
+  it('allows completion only for the captured routing generations', () => {
     expect(commandStillCurrent(started, started)).toBe(true);
     expect(commandStillCurrent(started, { ...started, paneGeneration: 3 })).toBe(false);
     expect(commandStillCurrent(started, { ...started, sessionId: 'session-2' })).toBe(false);
+  });
+});
+
+describe('contentCommandStillCurrent', () => {
+  const started = {
+    sessionId: 'session-1',
+    paneId: 'pane-a',
+    paneGeneration: 2,
+    sessionGeneration: 5,
+    contentRevision: 9,
+  };
+
+  it('rejects delayed Replace/Convert after intervening edits', () => {
+    expect(contentCommandStillCurrent(started, { ...started })).toBe(true);
+    expect(contentCommandStillCurrent(started, { ...started, contentRevision: 10 })).toBe(false);
+    expect(contentCommandStillCurrent(started, { ...started, paneGeneration: 3 })).toBe(false);
+  });
+});
+
+describe('sessionPersistStillCurrent', () => {
+  it('keeps an in-flight save across active-pane changes', () => {
+    const started = { sessionId: 'session-1', sessionGeneration: 3 };
+    expect(sessionPersistStillCurrent(started, started)).toBe(true);
+    // Pane focus is not part of the persist token — only session identity/role owner.
+    expect(sessionPersistStillCurrent(started, { sessionId: 'session-1', sessionGeneration: 3 })).toBe(true);
+    expect(sessionPersistStillCurrent(started, { sessionId: 'session-1', sessionGeneration: 4 })).toBe(false);
+    expect(sessionPersistStillCurrent(started, { sessionId: 'session-2', sessionGeneration: 3 })).toBe(false);
   });
 });
 
@@ -55,6 +85,14 @@ describe('localPaneTransferBlock', () => {
     expect(localPaneTransferBlock({ ...clear, externallyBlocked: true })).toBe('external');
     expect(localPaneTransferBlock({ ...clear, sameSession: false })).toBe('different-session');
     expect(localPaneTransferBlock({ ...clear, targetAlreadyEditable: true })).toBe('already-editable');
+  });
+});
+
+describe('paneCloseBlock', () => {
+  it('blocks close/transfer while composing or transitioning', () => {
+    expect(paneCloseBlock({ composing: false, transitioning: false })).toBe('');
+    expect(paneCloseBlock({ composing: true, transitioning: false })).toBe('composing');
+    expect(paneCloseBlock({ composing: false, transitioning: true })).toBe('busy');
   });
 });
 

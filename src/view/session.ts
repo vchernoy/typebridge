@@ -18,15 +18,38 @@ export type CommandTarget =
   | { kind: 'pane-only'; paneId: PaneId };
 
 /**
- * Captured when a shared toolbar/shortcut command starts. Async completion must
- * revalidate against the live routing table before mutating a session.
+ * Captured when a shared toolbar/shortcut **UI command** starts (Replace, Convert,
+ * Go to line, confirm dialogs, …). Async completion must revalidate before mutating.
+ *
+ * This is **not** the session persistence token. An in-flight autosave / explicit save
+ * belongs to the session: changing the active pane must not cancel or drop it.
  */
 export type CommandGeneration = {
   sessionId: SessionId;
   paneId: PaneId;
   /** Bumped whenever the pane's bound session or role changes. */
   paneGeneration: number;
-  /** Bumped whenever the session's document identity or canonical content owner changes. */
+  /**
+   * Bumped when the session's document identity or editable-role owner changes
+   * (switch document, attach/detach, local Edit in this pane). Not bumped on every keystroke.
+   */
+  sessionGeneration: number;
+  /**
+   * Monotonic content counter for commands that capture offsets or text snapshots
+   * (Replace, Convert selection, Clear confirm, …). Bump on each committed edit to
+   * the session's canonical text/title so a delayed apply cannot use stale ranges.
+   * Omit / leave undefined for routing-only checks that do not touch offsets.
+   */
+  contentRevision?: number;
+};
+
+/**
+ * Identity token for a session persist loop. Pane focus/activation is irrelevant:
+ * dirty/save/conflict lifecycle stays on the session until it completes or fails.
+ */
+export type SessionPersistGeneration = {
+  sessionId: SessionId;
+  /** Same bump rule as CommandGeneration.sessionGeneration (identity / role owner). */
   sessionGeneration: number;
 };
 
@@ -43,6 +66,8 @@ export type DocumentSessionSnapshot = {
   conflict: boolean;
   editBlock: string;
   sessionGeneration: number;
+  /** Bumped on each committed canonical text/title edit (for content-scoped UI commands). */
+  contentRevision: number;
 };
 
 export type PaneViewSnapshot = {
@@ -64,8 +89,10 @@ export function isSessionId(value: string): boolean {
 }
 
 /**
- * Whether a command captured at `started` may still mutate the live session/pane.
- * Stale dialogs and delayed saves must no-op when the user switched documents or roles.
+ * Routing revalidation for async UI commands: same session, pane, and role-binding
+ * generations. Does **not** look at contentRevision (use `contentCommandStillCurrent`
+ * when the command captured offsets or text). Does **not** apply to session persists —
+ * use `sessionPersistStillCurrent` so an active-pane change cannot drop a required save.
  */
 export function commandStillCurrent(
   started: CommandGeneration,
@@ -80,8 +107,37 @@ export function commandStillCurrent(
 }
 
 /**
+ * For Replace/Convert/other commands that captured offsets or a text snapshot.
+ * Requires routing currency plus an unchanged contentRevision.
+ */
+export function contentCommandStillCurrent(
+  started: CommandGeneration & { contentRevision: number },
+  live: {
+    sessionId: SessionId;
+    paneId: PaneId;
+    paneGeneration: number;
+    sessionGeneration: number;
+    contentRevision: number;
+  },
+): boolean {
+  return commandStillCurrent(started, live) && started.contentRevision === live.contentRevision;
+}
+
+/**
+ * Whether an in-flight session save may still commit. Active-pane changes are ignored.
+ * Invalidate only when the session identity/role owner changed (document switch, release).
+ */
+export function sessionPersistStillCurrent(
+  started: SessionPersistGeneration,
+  live: { sessionId: SessionId; sessionGeneration: number },
+): boolean {
+  return started.sessionId === live.sessionId && started.sessionGeneration === live.sessionGeneration;
+}
+
+/**
  * Same-document local Edit in this pane (S5). Never a cross-window handoff (#164 deferred).
  * Returns '' when the transfer may proceed; otherwise a short refuse token.
+ * Callers must invoke this (or equivalent) before applying `paneCloseDisposition` transfer.
  */
 export function localPaneTransferBlock(input: {
   sameSession: boolean;
@@ -100,8 +156,22 @@ export function localPaneTransferBlock(input: {
 }
 
 /**
+ * Guards that must pass before closing a pane or transferring its editable role.
+ * `paneCloseDisposition` alone does not enforce these — check here first (S5).
+ */
+export function paneCloseBlock(input: {
+  composing: boolean;
+  transitioning: boolean;
+}): '' | 'composing' | 'busy' {
+  if (input.transitioning) return 'busy';
+  if (input.composing) return 'composing';
+  return '';
+}
+
+/**
  * Closing a pane: whether the session must still be retained in memory.
  * Last view of a dirty/private/failed session needs existing discard protection.
+ * Does not encode IME/transition guards — call `paneCloseBlock` first.
  */
 export function paneCloseDisposition(input: {
   remainingPanesForSession: number;
