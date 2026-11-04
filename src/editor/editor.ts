@@ -77,6 +77,10 @@ export class Editor {
   private convert = createTransliterator(effectivePack(loadOverrides()));
   setRules(overrides: Overrides): void { this.convert = createTransliterator(effectivePack(overrides)); this.pending = null; }
   enabled = true;
+  /** View-only editors (comparison viewer, #159) refuse every mutating entry point. */
+  private viewOnly = false;
+  setReadOnly(value: boolean): void { this.viewOnly = value; this.pending = null; this.field.readOnly = value; }
+  get readOnly(): boolean { return this.viewOnly; }
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
   exportHistory(): EditorHistory {
@@ -126,6 +130,7 @@ export class Editor {
     this.field.addEventListener('beforeinput', event => this.beforeInput(event));
     this.field.addEventListener('input', event => this.onInput(event));
     this.field.addEventListener('keydown', event => {
+      if (this.viewOnly) return;
       if (this.composing || event.isComposing) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === SHORTCUTS.undo.key) {
         event.preventDefault(); this.history(event.shiftKey ? 'redo' : 'undo');
@@ -133,8 +138,9 @@ export class Editor {
         event.preventDefault(); this.history('redo');
       }
     });
-    this.field.addEventListener('paste', () => { this.pending = null; });
-    this.field.addEventListener('cut', () => { this.pending = null; });
+    this.field.addEventListener('paste', event => { if (this.viewOnly) event.preventDefault(); this.pending = null; });
+    this.field.addEventListener('cut', event => { if (this.viewOnly) event.preventDefault(); this.pending = null; });
+    this.field.addEventListener('drop', event => { if (this.viewOnly) event.preventDefault(); });
   }
   private capture(): { value: string; selection: Selection } {
     return { value: this.field.value, selection: [this.field.selectionStart ?? 0, this.field.selectionEnd ?? 0, this.field.selectionDirection ?? 'none'] };
@@ -158,6 +164,7 @@ export class Editor {
     this.redoStack = []; this.notifyHistory();
   }
   private history(direction: 'undo' | 'redo'): void {
+    if (this.viewOnly) return;
     this.nativeHistory = false; this.lastEditAt = 0;
     if (this.known.value !== this.field.value) {
       this.undoStack = []; this.redoStack = []; this.known = this.capture(); this.notifyHistory(); return;
@@ -245,6 +252,7 @@ export class Editor {
     this.nativeHistory = false; this.before = null; this.known = current; this.notifyHistory();
   }
   private beforeInput(event: InputEvent): void {
+    if (this.viewOnly) { if (event.cancelable) event.preventDefault(); return; }
     if (this.composing || event.isComposing || event.inputType.includes('Composition')) return;
     if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
       if (event.cancelable) { event.preventDefault(); this.history(event.inputType === 'historyUndo' ? 'undo' : 'redo'); }
@@ -269,6 +277,7 @@ export class Editor {
     } else this.pending = null;
   }
   convertSelection(direction: 'to-cyrillic' | 'to-latin'): boolean {
+    if (this.viewOnly) return false;
     const start = this.field.selectionStart;
     const end = this.field.selectionEnd;
     if (start === end) return false;
@@ -280,6 +289,7 @@ export class Editor {
     return true;
   }
   replaceRange(start: number, end: number, replacement: string): void {
+    if (this.viewOnly) return;
     if (start < 0 || end < start || end > this.field.value.length) return;
     if (this.field.value.slice(start, end) === replacement) return;
     this.pending = null;
@@ -289,6 +299,7 @@ export class Editor {
   }
   /** Replace a range and place the selection, as one undoable edit. */
   replaceAndSelect(start: number, end: number, replacement: string, selectionStart: number, selectionEnd: number): void {
+    if (this.viewOnly) return;
     if (start < 0 || end < start || end > this.field.value.length) return;
     this.pending = null;
     this.before = this.capture();
@@ -304,7 +315,7 @@ export class Editor {
   }
   setEnabled(value: boolean): void { this.enabled = value; this.pending = null; this.lastEditAt = 0; }
   clear(): void {
-    if (!this.field.value) return;
+    if (this.viewOnly || !this.field.value) return;
     this.before = this.capture(); this.field.value = ''; this.pending = null;
     this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }

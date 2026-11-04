@@ -21,8 +21,20 @@ import { setupSettings } from './ui/settings';
 import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
-import { setupWritingPosition } from './editor/writing-position';
+import { setupWritingPosition, VIEWER_POSITION_NAMESPACE } from './editor/writing-position';
+import { comparisonViewerHref, parseComparisonRoute } from './view/route';
 import { formatDocumentStats } from './editor/document-stats';
+// Companion routing is parsed before any ordinary open/restore path (#159 W2).
+// Only an absent mode is ordinary boot; invalid mode/doc takes the no-write viewer path.
+const route = parseComparisonRoute(window.location.search);
+const viewMode = route.kind !== 'ordinary';
+const requestedViewId = route.kind === 'viewer' ? route.documentId : undefined;
+// Minted per page load and never read from sessionStorage, which duplicated tabs can clone.
+const instanceId = crypto.randomUUID();
+// Do not delete pendingDraft/activeDraft on viewer boot: same-tab navigation from an editor
+// writes those keys on pagehide for reload restore, and wiping them here would discard that
+// backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
+// navigation; initializeViewer never reads pending/active hints.
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
@@ -32,6 +44,7 @@ setupDocumentMenu();
 setupMoreMenu();
 setupKeyboardShortcuts();
 const editor = new Editor(field);
+if (viewMode) editor.setReadOnly(true);
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
 const statusSep = document.querySelector<HTMLElement>('#status-sep')!;
@@ -195,7 +208,7 @@ const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
-const syncHistory = () => { undo.disabled = !editor.canUndo; redo.disabled = !editor.canRedo; };
+const syncHistory = () => { undo.disabled = viewMode || !editor.canUndo; redo.disabled = viewMode || !editor.canRedo; };
 field.addEventListener('historychange', syncHistory);
 for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
   button.addEventListener('mousedown', event => event.preventDefault());
@@ -206,6 +219,7 @@ for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-la
   const button = document.querySelector<HTMLButtonElement>('#' + id)!;
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
+    if (viewMode) return;
     if (!editor.convertSelection(direction)) announceAction('Select text to convert');
   });
 }
@@ -213,7 +227,7 @@ field.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
   const key = event.key.toLowerCase();
   if (key !== SHORTCUTS.convertCyrillic.key && key !== SHORTCUTS.convertLatin.key) return;
-  if (field.selectionStart === field.selectionEnd) return;
+  if (viewMode || field.selectionStart === field.selectionEnd) return;
   event.preventDefault();
   editor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
 });
@@ -255,7 +269,7 @@ document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', as
   catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
-  if (field.value && await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
+  if (!viewMode && field.value && await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
 });
 
 
@@ -342,6 +356,7 @@ const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
 // The draft title follows the global transliteration mode and rules (#89).
 const titleEditor = new Editor(draftTitle);
 titleEditor.setEnabled(enabled.checked);
+if (viewMode) titleEditor.setReadOnly(true);
 enabled.addEventListener('change', () => titleEditor.setEnabled(enabled.checked));
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
@@ -354,6 +369,8 @@ let saving: Promise<PersistResult> | undefined;
 let transitioning = false;
 let deleting = false;
 let loadingDraft = false;
+/** Companion window shows the missing-document state (nothing to save or restore). */
+let viewMissing = false;
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
@@ -363,12 +380,18 @@ function updateSaveIndicator(): void {
   if (saveIndicator.textContent !== label) saveIndicator.textContent = label;
   saveIndicator.dataset.state = state;
 }
-const writingPosition = setupWritingPosition(field, () => loadingDraft || field.disabled ? undefined : active.id);
+// Viewers use their own key namespace so they never overwrite an editor's saved offsets.
+const writingPosition = setupWritingPosition(
+  field,
+  () => loadingDraft || field.disabled || viewMissing ? undefined : active.id,
+  viewMode ? VIEWER_POSITION_NAMESPACE : '',
+);
 const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
 let ownershipAvailable = false;
 const ownerReady = new Promise<void>(resolve => {
-  if (!navigator.locks) { resolve(); return; }
+  // Viewers write no recovery journals, so they never take recovery ownership.
+  if (!navigator.locks || viewMode) { resolve(); return; }
   void navigator.locks.request(OWNER_LOCK + journalTab, async () => {
     ownershipAvailable = true; resolve();
     await new Promise<void>(() => { /* The browser releases this lock with the page. */ });
@@ -407,7 +430,7 @@ function snapshot(): StoredDraft {
   return { ...active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
 }
 function journalEdit(): void {
-  if (!autosave.checked) return;
+  if (viewMode || !autosave.checked) return;
   const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
   try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
   catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
@@ -416,7 +439,7 @@ function sameContent(a: StoredDraft, b: StoredDraft): boolean {
   return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
 }
 function savePending(): void {
-  if (!dirty || !autosave.checked || deleting) return;
+  if (viewMode || !dirty || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
   catch {
     // Keep any conflict notice and the current risk; only replace the primary.
@@ -428,9 +451,9 @@ function clearPending(saved: StoredDraft): void {
   try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
   catch { /* A stale backup is safer than removing one we cannot verify. */ }
 }
-function rememberActive(): void { try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
+function rememberActive(): void { if (viewMode) return; try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
 function renderDrafts(): void {
-  const visible = drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
+  const visible = viewMissing || drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
   const displayTitle = draftTitle.value.trim() || UNTITLED_TITLE;
   for (const picker of documentPickers) {
     picker.replaceChildren();
@@ -446,7 +469,7 @@ function renderDrafts(): void {
       });
       picker.append(option);
     }
-    picker.value = active.id;
+    picker.value = viewMissing ? '' : active.id;
   }
   // Shown as a list inside the document menu: at least two rows, at most eight.
   draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
@@ -462,7 +485,7 @@ function showDraft(): void {
   loadingDraft = true;
   try {
     editor.load(active.text);
-    editor.restoreHistory(active.history);
+    if (!viewMode) editor.restoreHistory(active.history);
     draftTitle.value = active.title;
     syncTitleTooltip();
     dirty = false;
@@ -474,6 +497,7 @@ function showDraft(): void {
   updateSaveIndicator();
 }
 async function persist(): Promise<PersistResult> {
+  if (viewMode) return { saved: true, conflict: false };
   clearTimeout(saveTimer);
   if (deleting || !autosave.checked || !dirty) return { saved: !dirty, conflict: false };
   if (saving) return saving;
@@ -548,7 +572,7 @@ async function persist(): Promise<PersistResult> {
   }
 }
 function scheduleSave(fromTitle = false): void {
-  if (loadingDraft) return;
+  if (viewMode || loadingDraft) return;
   const becameDirty = !dirty;
   dirty = true;
   generation++;
@@ -569,6 +593,7 @@ function syncTitleTooltip(): void {
 syncTitleTooltip();
 draftTitle.addEventListener('input', () => { syncTitleTooltip(); scheduleSave(true); });
 autosave.addEventListener('change', async () => {
+  if (viewMode) return;
   autosave.disabled = true;
   try {
   try { setAutosaveEnabled(autosave.checked); preferenceSaved('autosave', true); }
@@ -622,7 +647,7 @@ autosave.addEventListener('change', async () => {
   }
 });
 async function switchDraft(id?: string): Promise<SwitchResult> {
-  if (transitioning) return { opened: false, conflict: false };
+  if (viewMode || transitioning) return { opened: false, conflict: false };
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
   let flushConflict = false;
@@ -672,10 +697,10 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
 for (const picker of documentPickers) {
-  picker.addEventListener('change', () => { void switchDraft(picker.value); });
+  picker.addEventListener('change', () => { void (viewMode ? viewerOpen(picker.value) : switchDraft(picker.value)); });
 }
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
-  if (transitioning) return;
+  if (viewMode || transitioning) return;
   clearTimeout(saveTimer);
   const requestedId = active.id;
   if (!await askConfirmChoice({ title: 'Delete document?', message: 'Permanently delete this saved document?', confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
@@ -812,19 +837,22 @@ async function renderRecovery(): Promise<void> {
     group.append(button, discard); recoveryPanel.append(group);
   }
 }
-window.addEventListener('storage', event => { if (event.key?.startsWith(RECOVERY_PREFIX)) queueRecovery(); });
-setInterval(queueRecovery, 5000);
+if (!viewMode) {
+  window.addEventListener('storage', event => { if (event.key?.startsWith(RECOVERY_PREFIX)) queueRecovery(); });
+  setInterval(queueRecovery, 5000);
+}
+function handleDatabaseUpgrade(): void {
+  db = undefined;
+  storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
+  recoveryNotice.hidden = false;
+  recoveryNotice.textContent = storageProblem;
+  // A later upgrade must not erase an earlier conflict-copy notice (#66).
+  setRiskStatus('', 'failure');
+}
 async function initializeDrafts(): Promise<void> {
   await ownerReady;
   try {
-    db = await openDraftDatabase(() => {
-      db = undefined;
-      storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
-      recoveryNotice.hidden = false;
-      recoveryNotice.textContent = storageProblem;
-      // A later upgrade must not erase an earlier conflict-copy notice (#66).
-      setRiskStatus('', 'failure');
-    });
+    db = await openDraftDatabase(handleDatabaseUpgrade);
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
     try { selected = sessionStorage.getItem('typebridge.activeDraft.v1'); } catch { /* Optional hint. */ }
@@ -855,7 +883,181 @@ async function initializeDrafts(): Promise<void> {
     void renderRecovery();
   }
 }
-void initializeDrafts();
+
+const viewerBadge = document.querySelector<HTMLElement>('#viewer-badge')!;
+const viewerNotice = document.querySelector<HTMLElement>('#viewer-notice')!;
+const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
+const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
+const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
+const VIEWER_DISABLED_CONTROLS = ['new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
+  'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
+/** Controls that only make sense while a saved document is shown. */
+const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];
+function applyViewerChrome(): void {
+  document.body.classList.add('viewer');
+  document.documentElement.dataset.role = 'viewer';
+  document.documentElement.dataset.instanceId = instanceId;
+  document.title = 'Comparison · TypeBridge';
+  saveIndicator.hidden = true;
+  viewerBadge.hidden = false;
+  field.readOnly = true;
+  draftTitle.readOnly = true;
+  autosave.disabled = true;
+  for (const id of VIEWER_DISABLED_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
+}
+function showViewerStatus(): void {
+  if (storageProblem) setSaveStatus(storageProblem, 'failure');
+  else setSaveStatus(viewMissing ? '' : VIEWER_STATUS);
+}
+function showViewerMissing(message: string): void {
+  viewMissing = true;
+  loadingDraft = true;
+  try { editor.load(''); draftTitle.value = ''; syncTitleTooltip(); }
+  finally { loadingDraft = false; }
+  active = { ...newDraft(), revision: 0 };
+  dirty = false;
+  viewerNotice.textContent = message;
+  viewerNotice.hidden = false;
+  viewerBadge.textContent = 'Read-only comparison view';
+  for (const id of VIEWER_NEEDS_DOCUMENT) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
+  renderDrafts();
+  updateStats();
+  showViewerStatus();
+}
+function showViewerDocument(draft: StoredDraft): void {
+  viewMissing = false;
+  active = draft;
+  showDraft();
+  viewerNotice.hidden = true;
+  viewerNotice.textContent = '';
+  viewerBadge.textContent = 'Saved version · Read-only';
+  for (const id of VIEWER_NEEDS_DOCUMENT) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
+  showViewerStatus();
+}
+function syncViewerUrl(id: string): void {
+  const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', id);
+  if (!href) return;
+  // Keep the hash: it is reserved for portable share links (#39).
+  try { history.replaceState(null, '', href + window.location.hash); } catch { /* The address bar is optional. */ }
+}
+let viewerLoad = 0;
+async function viewerOpen(id: string): Promise<void> {
+  const load = ++viewerLoad;
+  try {
+    if (!db) throw new Error('Storage unavailable');
+    const next = await getStoredDraft(db, id);
+    if (load !== viewerLoad) return;
+    if (!next || next.revision < 1) showViewerMissing(VIEWER_MISSING);
+    else {
+      writingPosition.save();
+      showViewerDocument(next);
+      syncViewerUrl(next.id);
+    }
+  } catch {
+    if (load !== viewerLoad) return;
+    renderDrafts();
+    setSaveStatus('Could not open that document. The document shown is unchanged.', 'failure');
+    return;
+  }
+  void refreshDrafts().catch(() => { /* The list is advisory in a read-only view. */ });
+}
+async function initializeViewer(): Promise<void> {
+  applyViewerChrome();
+  try {
+    db = await openDraftDatabase(handleDatabaseUpgrade);
+    // Only the requested id is loaded for display; the list feeds the Documents menu.
+    const requested = requestedViewId ? await getStoredDraft(db, requestedViewId) : undefined;
+    drafts = await listStoredDrafts(db);
+    if (requested && requested.revision >= 1) showViewerDocument(requested);
+    else showViewerMissing(VIEWER_MISSING);
+  } catch (error) {
+    db?.close(); db = undefined;
+    storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
+    showViewerMissing(VIEWER_STORAGE);
+  } finally {
+    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
+    restoreFocusMode();
+    if (!viewMissing) writingPosition.restore(active.id);
+    updateStats();
+  }
+}
+void (viewMode ? initializeViewer() : initializeDrafts());
+
+const openComparison = document.querySelector<HTMLButtonElement>('#open-comparison')!;
+async function explainNoComparison(message: string): Promise<void> {
+  await askConfirmChoice({
+    title: 'Cannot open comparison window',
+    message,
+    cancelLabel: 'Cancel',
+    returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
+  });
+}
+type ComparisonOpenResult =
+  | { ok: true; window: Window }
+  | { ok: false; reason: 'blocked' | 'cleanup' };
+
+/**
+ * Open a same-origin companion without inheriting the source tab's sessionStorage.
+ * Some browsers (notably Firefox) clone sessionStorage into window.open targets when an
+ * opener relationship exists, which would copy private pending text. Opening about:blank,
+ * stripping TypeBridge session keys, then navigating preserves popup-blocked detection
+ * (unlike noopener, which returns null even on success) without clearing the source.
+ * If inherited-session cleanup throws, fail closed: close the blank window and do not
+ * navigate (private keys may still be present).
+ */
+function openComparisonWindow(href: string): ComparisonOpenResult {
+  const opened = window.open('about:blank', '_blank');
+  if (!opened) return { ok: false, reason: 'blocked' };
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < opened.sessionStorage.length; i++) {
+      const key = opened.sessionStorage.key(i);
+      if (key?.startsWith('typebridge.')) doomed.push(key);
+    }
+    for (const key of doomed) opened.sessionStorage.removeItem(key);
+  } catch {
+    try { opened.close(); } catch { /* Ignore. */ }
+    return { ok: false, reason: 'cleanup' };
+  }
+  try { opened.opener = null; } catch { /* Optional severance. */ }
+  try {
+    opened.location.replace(new URL(href, window.location.href).href);
+  } catch {
+    try { opened.close(); } catch { /* Ignore. */ }
+    return { ok: false, reason: 'blocked' };
+  }
+  return { ok: true, window: opened };
+}
+
+// window.open must run inside this click, so eligibility uses the in-memory IndexedDB revision
+// rather than an async read; the companion verifies the row itself on load. Document text is
+// never part of the URL, postMessage or sessionStorage.
+openComparison.addEventListener('click', () => {
+  if (viewMode || field.disabled || transitioning || deleting) return;
+  if (!db || active.revision < 1) {
+    void explainNoComparison(!db
+      ? 'Browser storage is unavailable, so there is no saved copy to open. Copy or export your text instead. Nothing was changed.'
+      : 'There is no saved copy of this document to open. Save or export it first if you want a second window; your text stays in this window. Opening a comparison window never turns on Autosave or saves your text.');
+    return;
+  }
+  const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', active.id);
+  if (!href) {
+    void explainNoComparison('This document cannot be opened in a comparison window yet. Export it and import it as a regular document first. Your text stays in this window.');
+    return;
+  }
+  const opened = openComparisonWindow(href);
+  if (!opened.ok) {
+    if (opened.reason === 'cleanup') {
+      announceAction('Could not open a private comparison window safely. Your text is still only in this window; try again or export a copy.', { kind: 'failure' });
+    } else {
+      announceAction('The comparison window was blocked. Allow pop-ups for TypeBridge and try again. Your text is still here.', { kind: 'failure' });
+    }
+    return;
+  }
+  announceAction(dirty
+    ? 'Opened the last saved version in a comparison window. Unsaved typing was not sent.'
+    : 'Opened the last saved version in a comparison window.');
+});
 
 function downloadText(filename: string, content: string, mime: string): void {
   const url = URL.createObjectURL(new Blob([content], { type: mime }));
@@ -880,8 +1082,9 @@ document.querySelector<HTMLButtonElement>('#export-json')!.addEventListener('cli
   announceAction('Document exported');
 });
 const importFile = document.querySelector<HTMLInputElement>('#import-file')!;
-document.querySelector<HTMLButtonElement>('#import-draft')!.addEventListener('click', () => importFile.click());
+document.querySelector<HTMLButtonElement>('#import-draft')!.addEventListener('click', () => { if (!viewMode) importFile.click(); });
 importFile.addEventListener('change', async () => {
+  if (viewMode) { importFile.value = ''; return; }
   const file = importFile.files?.[0];
   importFile.value = '';
   if (!file) return;
@@ -912,7 +1115,7 @@ importFile.addEventListener('change', async () => {
   }
 });
 
-window.addEventListener('pagehide', () => { savePending(); clearTimeout(saveTimer); void persist(); });
+if (!viewMode) window.addEventListener('pagehide', () => { savePending(); clearTimeout(saveTimer); void persist(); });
 let allowUpdateReload = false;
 let privateReloadChoice: { id: string; generation: number } | undefined;
 async function prepareUpdateReload(): Promise<boolean> {
@@ -944,10 +1147,10 @@ function reloadAfterUpdate(): void {
   allowUpdateReload = true;
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
-window.addEventListener('beforeunload', event => {
+if (!viewMode) window.addEventListener('beforeunload', event => {
   if (dirty) { savePending(); clearTimeout(saveTimer); void persist(); if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; } }
 });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
+if (!viewMode) document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
 updateStats();
 
 setupResetSettings({ actions: [

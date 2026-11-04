@@ -21,7 +21,10 @@ export function parseWritingPosition(raw: string | null, text: string): WritingP
   } catch { /* Corrupt or old optional state must not prevent loading a draft. */ }
 }
 
-export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () => string | undefined) {
+/** Comparison viewers use this namespace so they never overwrite an editor's saved offsets (#159). */
+export const VIEWER_POSITION_NAMESPACE = 'view:';
+
+export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () => string | undefined, namespace = '') {
   let restoring = false;
   let previous = '';
   function save(): void {
@@ -33,14 +36,14 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     };
     const raw = JSON.stringify(value);
     if (previous === id + raw) return;
-    try { sessionStorage.setItem(POSITION_PREFIX + id, raw); previous = id + raw; }
+    try { sessionStorage.setItem(POSITION_PREFIX + namespace + id, raw); previous = id + raw; }
     catch { /* Selection is optional, even if storage is blocked or full. */ }
   }
   function restore(id: string): void {
     restoring = true;
     previous = '';
     try {
-      const position = parseWritingPosition(sessionStorage.getItem(POSITION_PREFIX + id), field.value);
+      const position = parseWritingPosition(sessionStorage.getItem(POSITION_PREFIX + namespace + id), field.value);
       if (!position) return;
       field.setSelectionRange(position.start, position.end, position.direction);
       // Set scroll after selection; the browser clamps it to the current layout.
