@@ -93,6 +93,7 @@ function mirrorCompanion(force = false): void {
   mirrorTextarea(field, companionField);
 }
 
+const resizeGrip = document.querySelector<HTMLButtonElement>('#resize-editor')!;
 const splitControls = setupSplitPane({
   shell: editorSplit,
   divider: splitDivider,
@@ -104,6 +105,9 @@ const splitControls = setupSplitPane({
     workspace.setSplitOpen(open);
     toggleSplit.setAttribute('aria-pressed', open ? 'true' : 'false');
     toggleSplit.textContent = open ? 'Close split' : 'Split editor';
+    // Grip still writes inline width while split forces width:100%; hide it until closed.
+    resizeGrip.hidden = open;
+    resizeGrip.tabIndex = open ? -1 : 0;
     if (open) mirrorCompanion();
   },
 });

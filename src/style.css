@@ -652,6 +652,10 @@ body.focus-mode .bottom {
   width: 100% !important;
   max-width: none !important;
 }
+/* Corner grip is single-pane only; split width is controlled by the divider. */
+.editor-split[data-split="on"] ~ #resize-editor {
+  display: none;
+}
 .pane-chrome {
   display: flex;
   flex-wrap: wrap;

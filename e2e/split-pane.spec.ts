@@ -97,6 +97,9 @@ test('split open keeps the primary editor within its pane despite a saved pixel 
   expect(primary).toBeTruthy();
   expect(editor).toBeTruthy();
   expect(editor!.width).toBeLessThanOrEqual(primary!.width + 1);
+  await expect(page.locator('#resize-editor')).toBeHidden();
+  await documentAction(page, '#toggle-split');
+  await expect(page.locator('#resize-editor')).toBeVisible();
 });
 
 test('switching documents while split is closed restores companion position against the new text', async ({ page }) => {
