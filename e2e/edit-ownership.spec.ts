@@ -246,6 +246,31 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
   expect((await readStoredDocs(other)).map(row => row.id)).not.toContain(id);
 });
 
+test('a database upgrade releases the editing lock so another tab can acquire', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'upgrade me');
+  expect(await heldEditLocks(page)).toEqual([`typebridge-edit-owner:${id}`]);
+
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      IDBObjectStore.prototype.put = put;
+      const db = this.transaction.db;
+      const result = put.apply(this, args);
+      db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 2, newVersion: 3 }));
+      return result;
+    };
+  });
+  await page.locator('#editor').pressSequentially('!');
+  await expect(page.locator('#status')).toContainText('Storage was upgraded in another tab');
+  await expect.poll(() => heldEditLocks(page)).toEqual([]);
+
+  const other = await context.newPage();
+  await openOrdinary(other);
+  await expect(role(other)).toHaveAttribute('data-role', 'editor');
+  expect(await heldEditLocks(other)).toEqual([`typebridge-edit-owner:${id}`]);
+});
+
 test('an editing owner still reconciles a missed newer revision on focus', async ({ page, context }) => {
   await context.addInitScript(() => {
     Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });

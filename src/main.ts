@@ -1058,12 +1058,18 @@ if (!viewMode) {
   setInterval(queueRecovery, 5000);
 }
 function handleDatabaseUpgrade(): void {
+  // Free the Web Lock before dropping the connection so an upgraded tab can acquire.
+  const previous = ownership;
+  ownership = undefined;
+  clearTimeout(saveTimer);
+  void previous?.release();
   db = undefined;
   storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   recoveryNotice.hidden = false;
   recoveryNotice.textContent = storageProblem;
   // A later upgrade must not erase an earlier conflict-copy notice (#66).
   setRiskStatus('', 'failure');
+  applyEditAccess();
 }
 async function initializeDrafts(): Promise<void> {
   await ownerReady;
