@@ -507,6 +507,8 @@ function renderDrafts(): void {
   draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
 }
 async function refreshDrafts(): Promise<void> {
+  const delayMs = (window as Window & { __typebridgeDelayRefreshMs?: number }).__typebridgeDelayRefreshMs;
+  if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   if (db) drafts = await listStoredDrafts(db);
   renderDrafts();
   if (statusMessage.draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
@@ -533,16 +535,19 @@ function showDraft(): void {
 const ownershipNotice = document.querySelector<HTMLElement>('#ownership-notice')!;
 /** Controls that change the displayed document; New, Import and switching stay available. */
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
-/** Reflect `editBlock` in the editors, controls and guidance (ordinary windows only). */
+/** Reflect ownership + transfer freeze in the editors, controls and guidance (ordinary windows only). */
 function applyEditAccess(): void {
   if (viewMode) return;
-  const blocked = editBlock !== '';
+  // Must match readOnlyNow: stay frozen for the whole switch/delete interval even if
+  // installOwnership runs before the handler finishes (e.g. refreshDrafts after delete).
+  const blocked = editBlock !== '' || transferFrozen;
   if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
   if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
   autosave.disabled = blocked;
-  document.documentElement.dataset.role = blocked ? 'reader' : 'editor';
-  const guidance = editBlockGuidance(editBlock, dirty);
+  document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
+  // Temporary transfer freeze must not announce "another window is editing".
+  const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, dirty);
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
   syncHistory();

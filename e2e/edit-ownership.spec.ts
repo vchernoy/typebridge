@@ -220,6 +220,32 @@ test('windows opening the same document at once elect exactly one editor', async
   expect(await heldEditLocks(editor)).toEqual([`typebridge-edit-owner:${id}`]);
 });
 
+test('typing during delayed delete refresh stays frozen then can dirty after completion', async ({ page }) => {
+  await openOrdinary(page);
+  await saveAs(page, 'to delete');
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayRefreshMs?: number }).__typebridgeDelayRefreshMs = 900;
+  });
+  await documentAction(page, '#delete-draft');
+  const dialog = page.getByRole('dialog', { name: 'Delete document?' });
+  await expect(dialog).toBeVisible();
+  const deleteDone = dialog.getByRole('button', { name: 'Delete document' }).click();
+  await expect.poll(async () => page.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.readOnly)).toBe(true);
+  const during = await page.locator('#editor').inputValue();
+  await page.locator('#undo').click({ force: true });
+  await page.locator('#redo').click({ force: true });
+  await page.keyboard.type('should-not-apply');
+  await page.locator('#convert-cyrillic').click({ force: true });
+  await expect(page.locator('#editor')).toHaveValue(during);
+  await expect(page.locator('#ownership-notice')).toBeHidden();
+  await deleteDone;
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#editor')).toHaveJSProperty('readOnly', false);
+  await page.locator('#editor').fill('after delete dirty');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === 'after delete dirty')).toBe(true);
+});
+
 test('Undo/Convert/Replace during ownership transfer do not mutate or leak into the target', async ({ page }) => {
   await openOrdinary(page);
   const first = await saveAs(page, 'alpha beta');
