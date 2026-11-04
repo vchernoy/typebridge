@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canAcquireWithoutWebLock,
   editOwnerLockName,
+  mayAcquireEditOwnership,
   nextOwnershipFence,
   ownershipFenceAllowsWrite,
   ownershipHeartbeatExpired,
@@ -31,16 +31,18 @@ describe('edit ownership helpers', () => {
     expect(nextOwnershipFence(record({ fence: 7 }))).toBe(8);
   });
 
-  it('expires heartbeats only for the unsupported-locks fallback', () => {
+  it('reports heartbeat staleness for diagnostics only', () => {
     expect(ownershipHeartbeatExpired(record({ updatedAt: 1_000 }), 31_001, 30_000)).toBe(true);
     expect(ownershipHeartbeatExpired(record({ updatedAt: 1_000 }), 30_000, 30_000)).toBe(false);
   });
 
-  it('allows acquire without Web Locks when missing, same instance, or expired', () => {
-    expect(canAcquireWithoutWebLock(undefined, 'a', 0)).toBe(true);
-    expect(canAcquireWithoutWebLock(record(), 'owner-1', 1_000)).toBe(true);
-    expect(canAcquireWithoutWebLock(record(), 'other', 1_000)).toBe(false);
-    expect(canAcquireWithoutWebLock(record({ updatedAt: 1 }), 'other', 50_000)).toBe(true);
+  it('keeps clients without Web Locks as viewers (no heartbeat takeover)', () => {
+    expect(mayAcquireEditOwnership(true)).toBe(true);
+    expect(mayAcquireEditOwnership(false)).toBe(false);
+    // A stale heartbeat does not grant acquisition without Web Locks.
+    const stale = record({ updatedAt: 1 });
+    expect(ownershipHeartbeatExpired(stale, 1_000_000)).toBe(true);
+    expect(mayAcquireEditOwnership(false)).toBe(false);
   });
 
   it('allows writes only when instance and fence match', () => {

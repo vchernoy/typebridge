@@ -71,7 +71,10 @@ test('the ▾ document menu opens the list and actions, and closes cleanly (#123
   await expect(field).toHaveValue('Первый');
   await expect(menu).toBeHidden();
   await toggle.click();
-  await field.click();
+  // The menu may cover the middle of the editor; click its lower-left corner (outside the menu).
+  const editorBox = await field.boundingBox();
+  if (!editorBox) throw new Error('Editor not found');
+  await field.click({ position: { x: 12, y: editorBox.height - 12 } });
   await expect(menu).toBeHidden();
 });
 

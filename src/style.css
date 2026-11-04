@@ -260,6 +260,24 @@ body {
 .save-indicator[data-state="saved"]::before {
   background: currentColor;
 }
+.viewer-badge {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.viewer-notice {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+}
+.viewer-notice[hidden] {
+  display: none;
+}
 #doc-menu-open {
   min-width: 44px;
   padding: 0 10px;

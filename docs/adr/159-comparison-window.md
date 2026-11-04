@@ -1,6 +1,6 @@
 # ADR: Comparison window and single editing owner (#159)
 
-Status: **Accepted for implementation** (W1). Implements in sequential PRs W2–W6 on `main`. Does **not** close #159, #48, #40 or #37.
+Status: **Accepted for implementation** (W1); **W2 read-only companion implemented** (see [W2 implementation notes](#w2-implementation-notes)). Implements in sequential PRs W2–W6 on `main`. Does **not** close #159, #48, #40 or #37.
 
 ## Context (audit of current code)
 
@@ -96,7 +96,7 @@ Same origin and Vite base (`/` today; preserve non-root base if ever set):
 | Param | Rules |
 | --- | --- |
 | `doc` | Required for viewer. Canonical UUID string as stored in IndexedDB (`crypto.randomUUID()` shape). Reject empty, wrong type, or non-UUID. |
-| `mode` | `view` = companion. Omit or other values = ordinary editor boot (W2 does not invent other modes). |
+| `mode` | `view` = companion. Omit = ordinary editor boot. W2 implementation: an unrecognized `mode` value (parse reason `bad-mode`) also boots the ordinary editor and the app does not invent other modes; `mode=view` with a missing or malformed `doc` shows the viewer **missing** state. |
 
 Malformed/unknown ID → viewer **missing** UI (clear message, no new empty document, no recovery wipe). Do not trust cloned sessionStorage for window identity: each load mint `instanceId = crypto.randomUUID()` (same pattern as `journalTab`).
 
@@ -158,8 +158,20 @@ Why not Web Lock alone: an in-flight async write could complete after release. W
 | Capability | Behavior |
 | --- | --- |
 | Locks + IDB OK | Normal acquire / release / fence |
-| No `navigator.locks` | IndexedDB fence with heartbeat (`updatedAt`); acquire allowed if missing or heartbeat expired (bounded, documented, e.g. 30s) **and** no conflicting live cooperators can be proven; UI explains weaker guarantee; prefer read-only + copy/export when contested |
+| No `navigator.locks` | **Viewer only.** The client never acquires editing ownership and never takes over a record by heartbeat expiry (see mixed-ownership rule below). UI explains that editing needs a browser with Web Locks; read, copy and export stay available |
 | IDB unavailable | No ownership claims; fail closed to read-only / copy guidance; existing storage warnings |
+
+### Mixed ownership: Web Locks and fallback clients (maintainer P2 from #160)
+
+A client with `navigator.locks` and one without can both be open on the same document. The fence record's `updatedAt` heartbeat can lapse while a lock-backed owner is throttled or suspended even though its Web Lock is still held. If a no-Web-Locks client treated that stale heartbeat as permission to acquire, it would take over a live owner, which breaks the single-owner guarantee.
+
+Decision (safest initial option): **clients without Web Locks remain viewers.**
+
+- Only a client with `navigator.locks` may acquire; `mayAcquireEditOwnership(webLocksAvailable)` in `src/view/ownership.ts` encodes this. W4 must call it with the capability, not with a stored record.
+- `ownershipHeartbeatExpired` and `EDIT_OWNER_HEARTBEAT_MS` are **diagnostic only** (for example, explaining a possibly stale record). They are not an acquisition rule, and `canAcquireWithoutWebLock` was removed so it cannot be misused.
+- Lock-backed owners may still write the optional heartbeat for diagnostics; fallback clients never rely on it to claim ownership.
+- A future cooperative fallback (for example, one that proves exclusion some other way) needs a new ADR; it is out of scope for W4.
+- W2 viewers never acquire ownership regardless of capability.
 
 ### Crash / suspend / lost owner
 
@@ -262,13 +274,24 @@ Status: This saved document is no longer available.
 | Slice | Deliverable | Tests (minimum) |
 | --- | --- | --- |
 | **W1** (this PR) | ADR + pure `route` / `signals` contracts | Vitest parse/validate |
-| **W2** | Open action, `mode=view` boot branch, RO gates, popup/missing/blocked storage | Unit + Playwright multi-page: same/different doc, reload, cloned sessionStorage, privacy no-write, invalid id |
+| **W2** (implemented) | Open action, `mode=view` boot branch, RO gates, popup/missing/blocked storage | Unit + Playwright multi-page: same/different doc, reload, cloned sessionStorage, privacy no-write, invalid id |
 | **W3** | Broadcast + reread + visibility fallback | Stale/out-of-order/missed, delete, dirty editor notice, no channel |
 | **W4** | Lock + fence at write boundary; ordinary tabs participate | Simultaneous acquire, crash/release, unsupported locks, stale wake |
 | **W5** | Edit here UX + refusals | Busy/dirty/IME/private/conflict; gone owner acquire |
 | **W6** | Docs, ROADMAP, evidence, small cleanups | Full matrix; mark real-device/AT pending |
 
 Playwright: Chromium, Firefox, WebKit; multiple pages in one context. Screenshots for visual chrome in W2/W6. Real OS windows, physical iPhone, real IME, VoiceOver/NVDA = manual evidence only.
+
+## W2 implementation notes
+
+Shipped in `src/main.ts` (plus `Editor.setReadOnly`, `writing-position`, `confirm-dialog`, `index.html`):
+
+- **Boot order:** the query string is parsed before anything else. A viewer route runs `initializeViewer()` instead of `initializeDrafts()`: it opens IndexedDB, reads **only** the requested id with `getStoredDraft` (plus the list for the Documents menu), and shows it. It never reads the active-document hint or pending reload snapshot, never restores, never takes the recovery Web Lock, never calls `renderRecovery`, and never creates a document. Missing, malformed or storage-failed routes show the missing state and keep the list available.
+- **Open action:** Documents → **Open in comparison window** calls `window.open(comparisonViewerHref(import.meta.env.BASE_URL || '/', id), '_blank')` synchronously in the click. Eligibility is the in-memory IndexedDB revision (`>= 1`) because an `await` could lose the user gesture; the companion re-verifies the row itself. Only the id and `mode=view` are in the URL. A blocked pop-up (null return) announces guidance and leaves the text in place. With no committed copy (or no storage, or a non-UUID id such as a recovered copy) an information dialog with **Cancel** only explains; Autosave is never enabled and nothing is saved.
+- **Read-only gates (`viewMode`):** text and title `readOnly`; `Editor.setReadOnly(true)` refuses `beforeinput`, paste, cut, drop, undo/redo (buttons, shortcuts and native history), convert, replace, replace-and-select and clear; Undo, Redo, Convert, New, Import, Delete, Clear, Replace and Autosave controls are disabled and their handlers also return early; `scheduleSave`, `persist`, `journalEdit`, `savePending`, `rememberActive`, and the `pagehide`, `beforeunload`, `visibilitychange` and recovery `storage`/interval wiring are skipped or no-ops in viewers.
+- **Chrome:** a **Saved version · Read-only** badge replaces the save indicator; the status line says nothing is saved from this window. Switching to another saved document uses `getStoredDraft`, keeps the viewer read-only, and updates the address with `history.replaceState` (hash preserved for #39), so a reload stays on the document being viewed.
+- **Identity and position:** `instanceId = crypto.randomUUID()` per load, never from sessionStorage (exposed as `data-instance-id` on `<html>` for viewers only, for tests). Writing position uses the `view:` key namespace (`typebridge.writingPosition.v1.view:{id}`), so a viewer never reads or overwrites an editor's offsets.
+- **Not in W2:** no BroadcastChannel (W3, so a viewer stays on its loaded revision until reloaded or re-selected), no ownership acquisition or fence (W4), no Edit here (W5). Ordinary tabs are unchanged and can still race with each other; CAS conflict copies remain the safeguard.
 
 ## Non-goals
 

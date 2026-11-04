@@ -2,8 +2,8 @@ export type ConfirmChoiceOptions = {
   title: string;
   /** Plain text, or structured content (e.g. a shortcuts `<dl>`). */
   message: string | Node;
-  /** Label for the affirmative action (e.g. Delete saved copy). */
-  confirmLabel: string;
+  /** Label for the affirmative action (e.g. Delete saved copy). Omit for an information-only dialog with Cancel alone. */
+  confirmLabel?: string;
   /** Label for the safe/cancel action (e.g. Keep saved copy). Escape chooses this. */
   cancelLabel: string;
   /**
@@ -74,9 +74,10 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
 
     const confirm = document.createElement('button');
     confirm.type = 'button';
-    confirm.textContent = options.confirmLabel;
+    confirm.textContent = options.confirmLabel ?? '';
 
-    actions.append(cancel, confirm);
+    if (options.confirmLabel === undefined) actions.append(cancel);
+    else actions.append(cancel, confirm);
     dialog.append(title, message, actions);
     backdrop.append(dialog);
     // Native confirm blocked the whole page. Preserve that interaction boundary
@@ -89,7 +90,7 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     // Long sheets (e.g. Keyboard shortcuts) make the message scrollable; include
     // it in the tab order only then so short confirms keep Cancel↔Confirm wrap.
     const focusables = (): HTMLElement[] =>
-      message.tabIndex >= 0 ? [message, cancel, confirm] : [cancel, confirm];
+      [...(message.tabIndex >= 0 ? [message] : []), cancel, ...(options.confirmLabel === undefined ? [] : [confirm])];
 
     const close = (accepted: boolean): void => {
       document.removeEventListener('keydown', onKeyDown, true);
