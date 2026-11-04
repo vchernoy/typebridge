@@ -39,9 +39,15 @@ document.documentElement.dataset.instanceId = instanceId;
 // document's Web Lock and IndexedDB fence. Viewers never acquire.
 let editBlock: EditBlock = '';
 let ownership: EditOwnership | undefined;
+/** Declared early so readOnlyNow() can gate Undo/Convert listeners registered before draft state. */
+let transitioning = false;
+let deleting = false;
+/** True only during the post-flush ownership acquire/reread window (not while flushing). */
+let transferFrozen = false;
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
-const readOnlyNow = (): boolean => viewMode || editBlock !== '';
+/** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
+const readOnlyNow = (): boolean => viewMode || editBlock !== '' || transferFrozen;
 // Do not delete pendingDraft/activeDraft on viewer boot: same-tab navigation from an editor
 // writes those keys on pagehide for reload restore, and wiping them here would discard that
 // backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
@@ -233,7 +239,11 @@ const syncHistory = () => { undo.disabled = readOnlyNow() || !editor.canUndo; re
 field.addEventListener('historychange', syncHistory);
 for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
   button.addEventListener('mousedown', event => event.preventDefault());
-  button.addEventListener('click', () => { action(); field.focus({ preventScroll: true }); });
+  button.addEventListener('click', () => {
+    if (readOnlyNow()) return;
+    action();
+    field.focus({ preventScroll: true });
+  });
 }
 syncHistory();
 for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-latin', 'to-latin']] as const) {
@@ -387,8 +397,6 @@ let dirty = false;
 let generation = 0;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let saving: Promise<PersistResult> | undefined;
-let transitioning = false;
-let deleting = false;
 let loadingDraft = false;
 /** Companion window shows the missing-document state (nothing to save or restore). */
 let viewMissing = false;
@@ -545,6 +553,9 @@ type EditAccess = { ownership?: EditOwnership; block: EditBlock };
 async function acquireFor(documentId: string): Promise<EditAccess> {
   // Without storage nothing can be written, so there is nothing to own.
   if (viewMode || !db) return { block: '' };
+  // E2E may set a delay to assert mutations are frozen during ownership transfer (#159 W4).
+  const delayMs = (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs;
+  if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   let held: EditOwnership | undefined;
   try {
     const result = await acquireEditOwnership({
@@ -555,6 +566,22 @@ async function acquireFor(documentId: string): Promise<EditAccess> {
     held = result.ownership;
     return { ownership: held, block: '' };
   } catch { return { block: 'error' }; }
+}
+
+/** Freeze Editor + title gates and mutation controls for the ownership-transfer window. */
+function freezeEditorsForTransition(): void {
+  transferFrozen = true;
+  editor.setReadOnly(true);
+  titleEditor.setReadOnly(true);
+  for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
+  undo.disabled = true;
+  redo.disabled = true;
+  autosave.disabled = true;
+}
+
+function unfreezeEditorsAfterTransition(): void {
+  transferFrozen = false;
+  applyEditAccess();
 }
 /** Make `access` current and release whatever this window owned before. */
 function installOwnership(access: EditAccess): void {
@@ -807,9 +834,8 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
       if (id && !next) throw new Error('Draft no longer exists');
       if (generation === version) break;
     }
-    // Freeze the current text while ownership moves: an edit now could not be flushed.
-    field.readOnly = true;
-    draftTitle.readOnly = true;
+    // Freeze Editor mutation gates (not only DOM readOnly) for the whole acquire/reread window.
+    freezeEditorsForTransition();
     let target = next ?? { ...newDraft(), revision: 0 };
     const access = await acquireFor(target.id);
     acquired = access.ownership;
@@ -840,9 +866,8 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
     return { opened: false, conflict: flushConflict };
   }
   finally {
-    field.readOnly = editor.readOnly;
-    draftTitle.readOnly = titleEditor.readOnly;
     transitioning = false;
+    unfreezeEditorsAfterTransition();
     renderDrafts();
   }
 }
@@ -859,8 +884,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     return;
   }
   transitioning = true;
-  field.readOnly = true;
-  draftTitle.readOnly = true;
+  freezeEditorsForTransition();
   let committed = false;
   let savedBeforeDelete = false;
   try {
@@ -904,7 +928,9 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
       announceAction('Could not delete document — your changes are unsaved; autosave is off', { kind: 'progress', omitRisk: true });
     } else announceAction(savedBeforeDelete ? 'Could not delete document — Saved locally; your text is kept.' : 'Could not delete document — your text is kept.');
   } finally {
-    field.readOnly = editor.readOnly; draftTitle.readOnly = titleEditor.readOnly; transitioning = false; deleting = false;
+    transitioning = false;
+    deleting = false;
+    unfreezeEditorsAfterTransition();
     if (!committed && dirty && autosave.checked && !editBlock) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => { void persist(); }, 300);

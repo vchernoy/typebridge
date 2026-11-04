@@ -219,3 +219,45 @@ test('windows opening the same document at once elect exactly one editor', async
   expect((await readOwnership(editor, id))?.ownerInstanceId).toBe(await instanceOf(editor));
   expect(await heldEditLocks(editor)).toEqual([`typebridge-edit-owner:${id}`]);
 });
+
+test('Undo/Convert/Replace during ownership transfer do not mutate or leak into the target', async ({ page }) => {
+  await openOrdinary(page);
+  const first = await saveAs(page, 'alpha beta');
+  await documentAction(page, '#new-draft');
+  await expect(page.locator('#editor')).toHaveValue('');
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+  const second = await saveAs(page, 'second document');
+
+  await selectDocument(page, first);
+  await expect(page.locator('#editor')).toHaveValue('alpha beta');
+  await page.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.focus();
+    el.setSelectionRange(0, 5);
+  });
+  await page.locator('#convert-cyrillic').click();
+  await expect(page.locator('#editor')).not.toHaveValue('alpha beta');
+  const afterConvert = await page.locator('#editor').inputValue();
+
+  // Delay acquire so mutations attempted mid-transfer hit the frozen Editor gates.
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800;
+  });
+  const switchPromise = selectDocument(page, second);
+  await expect.poll(async () => page.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.readOnly)).toBe(true);
+  await page.locator('#undo').click({ force: true });
+  await page.locator('#redo').click({ force: true });
+  await page.locator('#convert-latin').click({ force: true });
+  await page.locator('#find-open').click();
+  await page.locator('#find-text').fill('second');
+  await page.locator('#replace-text').fill('leaked');
+  await page.locator('#replace-one').click({ force: true });
+  await page.locator('#replace-all').click({ force: true });
+  await page.keyboard.press('ControlOrMeta+z');
+  await switchPromise;
+
+  await expect(page.locator('#editor')).toHaveValue('second document');
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+  await selectDocument(page, first);
+  await expect(page.locator('#editor')).toHaveValue(afterConvert);
+  expect(await page.locator('#editor').inputValue()).not.toContain('leaked');
+});
