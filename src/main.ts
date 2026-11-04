@@ -14,9 +14,11 @@ import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commi
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
 import { createSinglePaneWorkspace } from './view/workspace';
+import { mirrorTextarea } from './view/mirror';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
+import { setupSplitPane } from './ui/split-pane';
 import { setupSearch } from './ui/search';
 import { setupRules } from './ui/rules';
 import { setupTransliteration } from './ui/transliteration';
@@ -56,8 +58,19 @@ const readOnlyNow = (): boolean => viewMode || editBlock !== '' || transferFroze
 // backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
 // navigation; initializeViewer never reads pending/active hints.
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const companionField = document.querySelector<HTMLTextAreaElement>('#editor-b')!;
 const workspaceRoot = document.querySelector<HTMLElement>('main.workspace')!;
-const workspace = createSinglePaneWorkspace({ root: workspaceRoot, paneSurface: field });
+const editorSplit = document.querySelector<HTMLElement>('#editor-split')!;
+const splitDivider = document.querySelector<HTMLElement>('#split-divider')!;
+const companionPane = document.querySelector<HTMLElement>('.editor-pane-companion')!;
+const primaryPane = document.querySelector<HTMLElement>('.editor-pane-primary')!;
+const splitReset = document.querySelector<HTMLButtonElement>('#split-reset')!;
+const toggleSplit = document.querySelector<HTMLButtonElement>('#toggle-split')!;
+const workspace = createSinglePaneWorkspace({
+  root: workspaceRoot,
+  paneSurface: field,
+  companionSurface: companionField,
+});
 
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
@@ -67,9 +80,39 @@ setupDocumentMenu();
 setupMoreMenu();
 setupKeyboardShortcuts();
 const editor = new Editor(field);
+const companionEditor = new Editor(companionField);
+companionEditor.setReadOnly(true);
 if (viewMode) {
   editor.setReadOnly(true);
   workspace.setPaneRole('readonly');
+}
+
+function mirrorCompanion(): void {
+  if (!workspace.splitOpen()) return;
+  mirrorTextarea(field, companionField);
+}
+
+const splitControls = setupSplitPane({
+  shell: editorSplit,
+  divider: splitDivider,
+  primaryPane,
+  companionPane,
+  resetButton: splitReset,
+  allowOpen: !viewMode,
+  onOpenChange: open => {
+    workspace.setSplitOpen(open);
+    toggleSplit.setAttribute('aria-pressed', open ? 'true' : 'false');
+    toggleSplit.textContent = open ? 'Close split' : 'Split editor';
+    if (open) mirrorCompanion();
+  },
+});
+if (viewMode) {
+  toggleSplit.disabled = true;
+  splitControls.setOpen(false);
+} else {
+  toggleSplit.addEventListener('click', () => {
+    splitControls.setOpen(!splitControls.isOpen());
+  });
 }
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
@@ -424,6 +467,12 @@ const writingPosition = setupWritingPosition(
   () => loadingDraft || field.disabled || viewMissing ? undefined : active.id,
   viewMode ? VIEWER_POSITION_NAMESPACE : '',
 );
+// Companion pane keeps an independent scroll/selection namespace (#159 S3).
+const companionWritingPosition = setupWritingPosition(
+  companionField,
+  () => loadingDraft || viewMissing || !workspace.splitOpen() ? undefined : active.id,
+  viewMode ? VIEWER_POSITION_NAMESPACE + 'pane-b:' : 'pane:pane-b:',
+);
 const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
 let ownershipAvailable = false;
@@ -533,8 +582,10 @@ function showDraft(): void {
     syncTitleTooltip();
     workspace.setDirty(false);
     saveFailed = false; // The editor no longer holds the unsaved text.
+    mirrorCompanion();
   } finally { loadingDraft = false; }
   writingPosition.restore(active.id);
+  companionWritingPosition.restore(active.id);
   renderDrafts();
   updateStats();
   updateSaveIndicator();
@@ -725,6 +776,9 @@ async function persist(): Promise<PersistResult> {
         workspace.setDirty(workspace.contentRevision() !== version);
         updateSaveIndicator();
         if (result.conflict) {
+          // Conflict copy is a new document id; keep the workspace identity in sync
+          // without bumping sessionGeneration mid-persist (same in-flight save stream).
+          workspace.setDocumentId(result.draft.id);
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || UNTITLED_TITLE) === saved.title) {
             draftTitle.value = active.title;
@@ -795,8 +849,8 @@ function scheduleSave(fromTitle = false): void {
   if (autosave.checked) { showSaving(); saveTimer = setTimeout(() => { void persist(); }, 300); }
   else showSaveState();
 }
-field.addEventListener('input', () => scheduleSave());
-field.addEventListener('historychange', () => scheduleSave());
+field.addEventListener('input', () => { scheduleSave(); mirrorCompanion(); });
+field.addEventListener('historychange', () => { scheduleSave(); mirrorCompanion(); });
 function syncTitleTooltip(): void {
   // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
   draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
@@ -1211,7 +1265,7 @@ const viewerNotice = document.querySelector<HTMLElement>('#viewer-notice')!;
 const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
 const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
 const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
-const VIEWER_DISABLED_CONTROLS = ['new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
+const VIEWER_DISABLED_CONTROLS = ['new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'toggle-split', 'undo', 'redo',
   'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** Controls that only make sense while a saved document is shown. */
 const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];

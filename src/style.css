@@ -559,7 +559,9 @@ body.focus-mode .goto-bar,
 body.focus-mode .rules-panel,
 body.focus-mode .shortcut-panel,
 body.focus-mode .hint,
-body.focus-mode label[for="editor"] {
+body.focus-mode label[for="editor"],
+body.focus-mode label[for="editor-b"],
+body.focus-mode .pane-chrome {
   display: none;
 }
 body.focus-mode section {
@@ -584,7 +586,7 @@ body.focus-mode .top-actions {
   width: auto;
   margin-left: auto;
 }
-body.focus-mode textarea {
+body.focus-mode #editor {
   width: 100%;
   max-width: 900px;
   min-width: 0;
@@ -593,23 +595,110 @@ body.focus-mode textarea {
   resize: vertical;
   margin: 0 auto;
 }
+body.focus-mode .editor-split[data-split="on"] #editor {
+  max-width: none;
+  height: calc(100dvh - 200px);
+}
+body.focus-mode .editor-split[data-split="on"] #editor-b {
+  width: 100%;
+  min-width: 0;
+  height: calc(100dvh - 200px);
+  min-height: 12rem;
+  resize: none;
+}
 body.focus-mode .bottom {
   max-width: 900px;
   margin-inline: auto;
 }
 
+/* In-tab split workspace (#159 S3): optional same-document live companion. */
+.editor-split {
+  --split-ratio: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  margin-bottom: 18px;
+}
+.editor-split[data-split="on"] {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+}
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.editor-split[data-split="on"] .editor-pane-primary {
+  flex: 0 0 var(--split-ratio);
+  max-width: var(--split-ratio);
+}
+.editor-split[data-split="on"] .editor-pane-companion {
+  flex: 1 1 0;
+}
+.pane-chrome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.pane-chrome .viewer-badge {
+  position: static;
+}
+.split-divider {
+  flex: 0 0 12px;
+  align-self: stretch;
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--border);
+  cursor: col-resize;
+  touch-action: none;
+}
+.split-divider:focus-visible {
+  outline: 2px solid var(--focus-ring, Highlight);
+  outline-offset: 2px;
+}
+.editor-split[data-split-orientation="stacked"] .split-divider {
+  flex-basis: 12px;
+  cursor: row-resize;
+}
+@media (max-width: 640px) {
+  .editor-split[data-split="on"] {
+    flex-direction: column;
+  }
+  .editor-split[data-split="on"] .editor-pane-primary {
+    flex: 0 0 auto;
+    max-width: none;
+    max-height: var(--split-ratio);
+  }
+  .split-divider {
+    cursor: row-resize;
+  }
+}
+@media (pointer: coarse) {
+  .split-divider {
+    flex-basis: 44px;
+  }
+}
+
 /* The same minimums for the main editor in Normal and Focus mode (#70). The bottom
    margin keeps the text below clear of the grip's touch target, which extends
    --grip-outset-y below the editor. */
-#editor {
+#editor,
+#editor-b {
   min-width: min(100%, 160px);
   min-height: 96px;
-  margin-bottom: 18px;
 }
 /* The drawn grip replaces the native one on the main editor in every mode, so
    there is exactly one, and it works on iOS Safari too. */
-#editor {
+#editor,
+#editor-b {
   resize: none;
+  width: 100%;
 }
 /* Drawn corner grip (#70): iOS Safari never shows the native textarea grip.
    The touch target reaches outside the editor so that, inside it, it covers

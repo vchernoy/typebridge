@@ -59,6 +59,14 @@
               <select id="drafts" size="2" aria-label="Documents"></select>
               <div class="doc-actions">
                 <button
+                  id="toggle-split"
+                  type="button"
+                  aria-pressed="false"
+                  title="Show a second pane of this document in this tab. Edits stay local; nothing is sent."
+                >
+                  Split editor
+                </button>
+                <button
                   id="open-comparison"
                   type="button"
                   title="Opens the last saved version in a read-only window. Unsaved typing in this window is not sent."
@@ -328,9 +336,34 @@
         <p id="viewer-notice" class="viewer-notice" role="status" hidden></p>
         <p id="version-notice" class="viewer-notice" role="status" hidden></p>
         <p id="ownership-notice" class="viewer-notice" role="status" hidden></p>
-        <label for="editor">Your text</label
-        ><textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea
-        ><button
+        <div id="editor-split" class="editor-split" data-split="off" data-split-orientation="side">
+          <div class="editor-pane editor-pane-primary" data-pane-slot="primary">
+            <label for="editor">Your text</label>
+            <textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea>
+          </div>
+          <div
+            id="split-divider"
+            class="split-divider"
+            role="separator"
+            aria-orientation="vertical"
+            aria-controls="editor editor-b"
+            aria-valuemin="20"
+            aria-valuemax="80"
+            aria-valuenow="50"
+            aria-label="Resize split panes"
+            tabindex="0"
+            hidden
+          ></div>
+          <div class="editor-pane editor-pane-companion" data-pane-slot="companion" hidden>
+            <div class="pane-chrome">
+              <span id="companion-badge" class="viewer-badge">Live view · Read-only</span>
+              <button id="split-reset" type="button" hidden>Reset split</button>
+            </div>
+            <label for="editor-b">Live companion</label>
+            <textarea id="editor-b" spellcheck="false" readonly tabindex="0"></textarea>
+          </div>
+        </div>
+        <button
           id="resize-editor"
           class="resize-grip"
           type="button"

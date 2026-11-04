@@ -310,8 +310,8 @@ Status: This saved document is no longer available.
 | **W4** (done #163) | Web Lock + fence | Simultaneous acquire, crash, unsupported |
 | **W5/W6** (deferred #164) | Cross-window Edit here | Paused — do not merge for that goal |
 | **S1** (done #165) | Revised split ADR/UX + `session` contracts | Vitest session/pane helpers; runtime unchanged |
-| **S2** (this PR) | Session/pane separation, single-pane parity | Vitest workspace; existing e2e still green; no split UI yet |
-| **S3** | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
+| **S2** (done #166) | Session/pane separation, single-pane parity | Vitest workspace; existing e2e still green; no split UI yet |
+| **S3** (this PR) | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
 | **S4** | Two different editable documents | Independent sessions, locks, Undo, switch/close |
 | **S5** | Local Edit in this pane + lifecycle | Transfer, IME/transition guards, delayed commands |
 | **S6** | Verification, docs, evidence | Full browser matrix; record real-device/AT limits |
@@ -409,9 +409,18 @@ Shipped in this PR: `src/view/workspace.ts` (+ tests) and wiring in `src/main.ts
 - **Parity:** schedule/save/switch/reread/ownership retry still use the same bump rules; counters live on the workspace instead of free locals. `SessionPersistGeneration` / `CommandGeneration` helpers are exercised from the workspace unit tests; toolbar commands do not yet capture them (S5).
 - **Not in S2:** second pane, live mirror, dual sessions, local Edit in this pane, moving persist/ownership out of `main.ts`.
 
+## S3 implementation notes
+
+Shipped in this PR: optional same-document live companion pane in one tab.
+
+- **UI:** Documents → **Split editor** / **Close split**. Companion `#editor-b` is read-only (`Editor.setReadOnly`), badge **Live view · Read-only** (never “Saved version”). Divider: drag, arrow keys, Home/End, **Reset split**. Narrow viewports stack panes.
+- **Mirror:** `mirrorTextarea` copies primary → companion on `input` / `historychange` / `showDraft` / split open. Preserves companion selection and scroll. No BroadcastChannel or URL body text.
+- **One pipeline:** persist, ownership, history and recovery stay on the primary session in `main.ts`. Companion never schedules saves. Workspace `documentId` syncs on `showDraft` and on conflict-copy creation (no mid-persist `sessionGeneration` bump).
+- **Hooks:** `data-split`, `data-document-id`, pane ids/roles. Layout preference `typebridge.split.v1` stores open/ratio only. Viewers force split off.
+- **Not in S3:** second document session, Edit in this pane, dual pickers, toolbar `CommandGeneration` capture.
+
 ## Implementation notes for later PRs
 
-- S3: attach a second pane to the same session; live mirror; divider a11y; unique pane ids.
 - S4: second session + picker; per-document lock/save; safe last-view close.
 - S5: `localPaneTransferBlock` wiring; generation-guarded delayed commands.
 - Keep separate-window companion routing **before** ordinary boot; do not delete W2–W4.
