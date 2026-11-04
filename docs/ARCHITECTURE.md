@@ -17,6 +17,10 @@ Current code lives in `src/core/` (transliteration rules; `custom-rules.ts` also
 
 Input processing for live editing needs bounded context around the caret to recognize digraphs, avoid rewriting unrelated text, and reset at boundaries and mode changes. Paste behavior, ambiguous sequences, capitalization, deletion and undo are first-class test cases. Batch conversion is a separate pure operation; reverse transliteration is potentially ambiguous and lossy.
 
+## Comparison window and editing ownership
+
+[#159](https://github.com/vchernoy/typebridge/issues/159) adds an optional second browser window/tab for comparing the latest **committed** IndexedDB document (not a live stream of private keystrokes). Contracts for routing (`?doc=&mode=view`), metadata-only `BroadcastChannel` signals, and per-document edit ownership (Web Lock + IndexedDB fence, distinct from recovery locks) are in [ADR 159](adr/159-comparison-window.md). Pure validators live under `src/view/`. Implementation ships in sequential slices W2–W6; conflict-copy CAS remains the safeguard for non-cooperating app versions. This is not #7 dual-panel transliteration, #39 URL sharing or cross-device sync.
+
 ## Quality and deployment
 Unit tests cover rules, conflicting mappings, case, Unicode, boundaries, storage validation and transactional concurrency. Browser tests cover typing, selection, IME where automation permits, clipboard fallback, resize, mobile layout, persistence and keyboard navigation. Manual testing remains necessary for real IMEs, screen readers and mobile devices. CI runs quality checks and a Chromium/Firefox/WebKit matrix on pull requests. Pages deploys from main; for how main revisions are checked before deployment ([#75](https://github.com/vchernoy/typebridge/issues/75)), consult the workflow YAML and [deployment notes](PREVIEW.md). Successful Actions runs and real-device/production verification are separate evidence.
 
