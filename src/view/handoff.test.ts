@@ -11,25 +11,27 @@ import {
 
 const DOC = '11111111-1111-4111-8111-111111111111';
 const REQ = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const ATTEMPT = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 describe('parseHandoffSignal', () => {
   it('accepts request, released and refused payloads', () => {
-    expect(parseHandoffSignal(createHandoffRequest(DOC, REQ, 1))).toEqual({
-      v: 1, type: 'request', documentId: DOC, requesterId: REQ, at: 1,
+    expect(parseHandoffSignal(createHandoffRequest(DOC, REQ, ATTEMPT, 1))).toEqual({
+      v: 1, type: 'request', documentId: DOC, requesterId: REQ, requestId: ATTEMPT, at: 1,
     });
-    expect(parseHandoffSignal(createHandoffReleased(DOC, REQ, 2))).toEqual({
-      v: 1, type: 'released', documentId: DOC, requesterId: REQ, at: 2,
+    expect(parseHandoffSignal(createHandoffReleased(DOC, REQ, ATTEMPT, 2))).toEqual({
+      v: 1, type: 'released', documentId: DOC, requesterId: REQ, requestId: ATTEMPT, at: 2,
     });
-    expect(parseHandoffSignal(createHandoffRefused(DOC, REQ, 3, 'private'))).toEqual({
-      v: 1, type: 'refused', documentId: DOC, requesterId: REQ, at: 3, reason: 'private',
+    expect(parseHandoffSignal(createHandoffRefused(DOC, REQ, ATTEMPT, 3, 'private'))).toEqual({
+      v: 1, type: 'refused', documentId: DOC, requesterId: REQ, requestId: ATTEMPT, at: 3, reason: 'private',
     });
   });
 
   it('drops unknown versions, types, ids and refuse reasons', () => {
-    expect(parseHandoffSignal({ v: 2, type: 'request', documentId: DOC, requesterId: REQ, at: 1 })).toBeUndefined();
-    expect(parseHandoffSignal({ v: 1, type: 'saved', documentId: DOC, requesterId: REQ, at: 1 })).toBeUndefined();
-    expect(parseHandoffSignal({ v: 1, type: 'request', documentId: 'nope', requesterId: REQ, at: 1 })).toBeUndefined();
-    expect(parseHandoffSignal({ v: 1, type: 'refused', documentId: DOC, requesterId: REQ, at: 1, reason: 'nope' })).toBeUndefined();
+    expect(parseHandoffSignal({ v: 2, type: 'request', documentId: DOC, requesterId: REQ, requestId: ATTEMPT, at: 1 })).toBeUndefined();
+    expect(parseHandoffSignal({ v: 1, type: 'saved', documentId: DOC, requesterId: REQ, requestId: ATTEMPT, at: 1 })).toBeUndefined();
+    expect(parseHandoffSignal({ v: 1, type: 'request', documentId: 'nope', requesterId: REQ, requestId: ATTEMPT, at: 1 })).toBeUndefined();
+    expect(parseHandoffSignal({ v: 1, type: 'request', documentId: DOC, requesterId: REQ, at: 1 })).toBeUndefined();
+    expect(parseHandoffSignal({ v: 1, type: 'refused', documentId: DOC, requesterId: REQ, requestId: ATTEMPT, at: 1, reason: 'nope' })).toBeUndefined();
     expect(parseHandoffSignal({ text: 'secret' })).toBeUndefined();
   });
 });

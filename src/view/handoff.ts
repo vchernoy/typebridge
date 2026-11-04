@@ -27,9 +27,9 @@ export type HandoffRefuseReason =
   | 'busy';
 
 export type HandoffSignal =
-  | { v: 1; type: 'request'; documentId: string; requesterId: string; at: number }
-  | { v: 1; type: 'released'; documentId: string; requesterId: string; at: number }
-  | { v: 1; type: 'refused'; documentId: string; requesterId: string; at: number; reason: HandoffRefuseReason };
+  | { v: 1; type: 'request'; documentId: string; requesterId: string; requestId: string; at: number }
+  | { v: 1; type: 'released'; documentId: string; requesterId: string; requestId: string; at: number }
+  | { v: 1; type: 'refused'; documentId: string; requesterId: string; requestId: string; at: number; reason: HandoffRefuseReason };
 
 const HANDOFF_TYPES = new Set(['request', 'released', 'refused']);
 const REFUSE_REASONS = new Set<HandoffRefuseReason>([
@@ -48,6 +48,7 @@ export function parseHandoffSignal(value: unknown): HandoffSignal | undefined {
   if (typeof record.type !== 'string' || !HANDOFF_TYPES.has(record.type)) return undefined;
   if (typeof record.documentId !== 'string' || !isDocumentId(record.documentId)) return undefined;
   if (typeof record.requesterId !== 'string' || !record.requesterId) return undefined;
+  if (typeof record.requestId !== 'string' || !record.requestId) return undefined;
   if (!isFiniteNumber(record.at)) return undefined;
   if (record.type === 'refused') {
     if (typeof record.reason !== 'string' || !REFUSE_REASONS.has(record.reason as HandoffRefuseReason)) {
@@ -58,6 +59,7 @@ export function parseHandoffSignal(value: unknown): HandoffSignal | undefined {
       type: 'refused',
       documentId: record.documentId,
       requesterId: record.requesterId,
+      requestId: record.requestId,
       at: record.at,
       reason: record.reason as HandoffRefuseReason,
     };
@@ -67,25 +69,31 @@ export function parseHandoffSignal(value: unknown): HandoffSignal | undefined {
     type: record.type as 'request' | 'released',
     documentId: record.documentId,
     requesterId: record.requesterId,
+    requestId: record.requestId,
     at: record.at,
   };
 }
 
-export function createHandoffRequest(documentId: string, requesterId: string, at: number): HandoffSignal {
-  return { v: 1, type: 'request', documentId, requesterId, at };
+export function createHandoffRequest(
+  documentId: string, requesterId: string, requestId: string, at: number,
+): HandoffSignal {
+  return { v: 1, type: 'request', documentId, requesterId, requestId, at };
 }
 
-export function createHandoffReleased(documentId: string, requesterId: string, at: number): HandoffSignal {
-  return { v: 1, type: 'released', documentId, requesterId, at };
+export function createHandoffReleased(
+  documentId: string, requesterId: string, requestId: string, at: number,
+): HandoffSignal {
+  return { v: 1, type: 'released', documentId, requesterId, requestId, at };
 }
 
 export function createHandoffRefused(
   documentId: string,
   requesterId: string,
+  requestId: string,
   at: number,
   reason: HandoffRefuseReason,
 ): HandoffSignal {
-  return { v: 1, type: 'refused', documentId, requesterId, at, reason };
+  return { v: 1, type: 'refused', documentId, requesterId, requestId, at, reason };
 }
 
 /** Owner-side gate: which refusal applies, or '' when a transfer prompt may be shown. */

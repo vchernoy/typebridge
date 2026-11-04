@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { setAutosave } from './settings-helpers';
+import { documentAction, selectDocument, setAutosave } from './settings-helpers';
 import { claimFenceElsewhere, readOwnership, readStoredDocs } from './storage-helpers';
 
 const role = (page: Page) => page.locator('html');
@@ -144,6 +144,81 @@ test('promoting a viewer re-enables New document and Open in comparison window',
   await expect(viewer.locator('#new-draft')).toBeEnabled();
   await expect(viewer.locator('#import-draft')).toBeEnabled();
   await expect(viewer.locator('#open-comparison')).toBeEnabled();
+});
+
+test('navigating away cancels a pending handoff so a late release cannot promote', async ({ page, context }) => {
+  await openOrdinary(page);
+  const idA = await saveAs(page, 'Document A for handoff');
+  await documentAction(page, '#new-draft');
+  const idB = await saveAs(page, 'Document B stays put');
+  await selectDocument(page, idA);
+
+  const viewer = await context.newPage();
+  await viewer.goto(`/?doc=${idA}&mode=view`);
+  await expect(viewer.locator('#edit-here')).toBeVisible();
+  await viewer.locator('#edit-here').click();
+  const dialog = page.getByRole('dialog', { name: 'Transfer editing?' });
+  await expect(dialog).toBeVisible();
+
+  await selectDocument(viewer, idB);
+  await expect(viewer.locator('#editor')).toHaveValue('Document B stays put');
+  await expect(role(viewer)).toHaveAttribute('data-role', 'viewer');
+
+  await dialog.getByRole('button', { name: 'Transfer editing' }).click();
+  await expect(role(page)).toHaveAttribute('data-role', 'reader');
+  // Late release must not yank the viewer onto A or steal B's view.
+  await expect(role(viewer)).toHaveAttribute('data-role', 'viewer');
+  await expect(viewer.locator('#editor')).toHaveValue('Document B stays put');
+  await expect(viewer.locator('#viewer-badge')).toBeVisible();
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(idB);
+});
+
+test('an ordinary reader that switches documents keeps dirty text after a late transfer', async ({ page, context }) => {
+  await openOrdinary(page);
+  const idA = await saveAs(page, 'Owned document A');
+  const other = await context.newPage();
+  await openOrdinary(other);
+  await expect(role(other)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#edit-here')).toBeVisible();
+  await other.locator('#edit-here').click();
+  const dialog = page.getByRole('dialog', { name: 'Transfer editing?' });
+  await expect(dialog).toBeVisible();
+
+  await documentAction(other, '#new-draft');
+  await expect(role(other)).toHaveAttribute('data-role', 'editor');
+  await other.locator('#editor').fill('Private draft B');
+  await expect(other.locator('#status')).toContainText('Saved');
+
+  await dialog.getByRole('button', { name: 'Transfer editing' }).click();
+  await expect(role(page)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#editor')).toHaveValue('Private draft B');
+  await expect(role(other)).toHaveAttribute('data-role', 'editor');
+  const otherId = (await readStoredDocs(other)).find(row => row.text === 'Private draft B')?.id;
+  expect(otherId).toBeTruthy();
+  expect(otherId).not.toBe(idA);
+  expect((await readOwnership(other, otherId!))?.ownerInstanceId).toBe(await instanceOf(other));
+});
+
+test('navigating during a delayed acquire does not install stale ownership', async ({ page, context }) => {
+  await openOrdinary(page);
+  const idA = await saveAs(page, 'Acquire then leave');
+  await documentAction(page, '#new-draft');
+  const idB = await saveAs(page, 'Stay on B');
+  await page.close();
+
+  const viewer = await context.newPage();
+  await viewer.goto(`/?doc=${idA}&mode=view`);
+  await viewer.evaluate(() => {
+    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1500;
+  });
+  await viewer.locator('#edit-here').click();
+  await selectDocument(viewer, idB);
+  await expect(viewer.locator('#editor')).toHaveValue('Stay on B');
+  await expect(role(viewer)).toHaveAttribute('data-role', 'viewer');
+  await viewer.waitForTimeout(2000);
+  await expect(role(viewer)).toHaveAttribute('data-role', 'viewer');
+  await expect(viewer.locator('#editor')).toHaveValue('Stay on B');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(idB);
 });
 
 test('a promoted viewer holds recovery ownership while it is still open', async ({ page, context }) => {

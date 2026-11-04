@@ -60,6 +60,20 @@ let transferFrozen = false;
 let autosaveToggleActive = false;
 /** True while Edit here is awaiting acquire or a handoff response (#159 W5). */
 let editHereBusy = false;
+/** In-flight Edit here handoff wait; cleared on response, timeout, or navigation. */
+let pendingHandoff: {
+  requestId: string;
+  requesterId: string;
+  documentId: string;
+  view: number;
+  resolve: (signal: HandoffSignal | undefined) => void;
+} | undefined;
+function cancelPendingHandoff(): void {
+  if (!pendingHandoff) return;
+  const resolve = pendingHandoff.resolve;
+  pendingHandoff = undefined;
+  resolve(undefined);
+}
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
@@ -543,6 +557,8 @@ async function refreshDrafts(): Promise<void> {
 function showDraft(): void {
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
   viewGeneration++;
+  // A new view invalidates an in-flight Edit here attempt for a previous selection.
+  cancelPendingHandoff();
   clearVersionNotice();
   clearNotices();
   loadingDraft = true;
@@ -1272,6 +1288,7 @@ function showViewerStatus(): void {
 }
 function showViewerMissing(message: string): void {
   viewGeneration++;
+  cancelPendingHandoff();
   viewMissing = true;
   loadingDraft = true;
   try { editor.load(''); draftTitle.value = ''; syncTitleTooltip(); }
@@ -1310,6 +1327,7 @@ let viewerLoad = 0;
 async function viewerOpen(id: string): Promise<void> {
   const load = ++viewerLoad;
   viewGeneration++;
+  cancelPendingHandoff();
   try {
     if (!db) throw new Error('Storage unavailable');
     const next = await getStoredDraft(db, id);
@@ -1461,7 +1479,6 @@ const handoffChannel: BroadcastChannel | undefined = (() => {
   try { return typeof BroadcastChannel === 'function' ? new BroadcastChannel(EDIT_HANDOFF_CHANNEL) : undefined; }
   catch { return undefined; }
 })();
-let pendingHandoff: { requesterId: string; documentId: string; resolve: (signal: HandoffSignal) => void } | undefined;
 let editorLifecycleWired = !viewMode;
 function postHandoff(signal: HandoffSignal): void {
   if (!handoffChannel) return;
@@ -1492,23 +1509,35 @@ function syncOrdinaryEditorUrl(id: string): void {
   } catch { /* Address bar is optional. */ }
   try { setActiveDraftId(id); } catch { /* Hint only. */ }
 }
-async function becomeEditorFor(documentId: string): Promise<boolean> {
+/**
+ * Promote this window to editor for `documentId` when the lock is free.
+ * `attempt.view` is the viewGeneration captured at the start of the Edit here attempt;
+ * navigation that bumps it aborts without installing ownership or replacing memory.
+ */
+async function becomeEditorFor(documentId: string, attempt: { view: number }): Promise<boolean> {
+  const stillHere = (): boolean =>
+    active.id === documentId && viewGeneration === attempt.view && !transitioning && !deleting;
   freezeEditorsForTransition();
   let access: EditAccess | undefined;
   try {
+    if (!stillHere()) return false;
     access = await acquireFor(documentId, { allowViewer: true });
     if (!access.ownership) return false;
+    if (!stillHere()) { void access.ownership.release(); access = undefined; return false; }
     let fresh: StoredDraft | undefined;
     try { fresh = db ? await getStoredDraft(db, documentId) : undefined; }
-    catch { void access.ownership.release(); return false; }
+    catch { void access.ownership.release(); access = undefined; return false; }
+    if (!stillHere()) { void access.ownership.release(); access = undefined; return false; }
     // Viewers need a committed row; dirty ordinary readers may keep unsaved memory if the row exists.
     if (!fresh || (!dirty && fresh.revision < 1)) {
       void access.ownership.release();
+      access = undefined;
       return false;
     }
     if (viewMode) {
       // Claim before clearing viewMode so the first journalEdit is covered by the lock.
       await ensureRecoveryOwnership();
+      if (!stillHere()) { void access.ownership.release(); access = undefined; return false; }
       viewMode = false;
       document.body.classList.remove('viewer');
       document.title = 'TypeBridge';
@@ -1528,6 +1557,7 @@ async function becomeEditorFor(documentId: string): Promise<boolean> {
       writingPosition.save();
       active = fresh;
       rememberActive();
+      // showDraft bumps viewGeneration and would cancel a pending handoff; none is pending here.
       showDraft();
     }
     installOwnership(access);
@@ -1548,10 +1578,15 @@ async function requestEditHere(): Promise<void> {
   })) return;
   const documentId = active.id;
   if (!documentId || viewMissing) return;
+  const view = viewGeneration;
+  const requestId = crypto.randomUUID();
+  const attemptStillCurrent = (): boolean =>
+    active.id === documentId && viewGeneration === view && !transitioning && !deleting;
   editHereBusy = true;
   syncEditHereButton();
   try {
-    if (await becomeEditorFor(documentId)) return;
+    if (await becomeEditorFor(documentId, { view })) return;
+    if (!attemptStillCurrent()) return;
     // Lock held elsewhere: ask the owner when BroadcastChannel exists.
     if (!handoffChannel) {
       await askConfirmChoice({
@@ -1564,16 +1599,22 @@ async function requestEditHere(): Promise<void> {
     }
     const requesterId = instanceId;
     const response = await new Promise<HandoffSignal | undefined>(resolve => {
-      pendingHandoff = { requesterId, documentId, resolve: signal => resolve(signal) };
-      postHandoff(createHandoffRequest(documentId, requesterId, Date.now()));
+      pendingHandoff = { requestId, requesterId, documentId, view, resolve };
+      postHandoff(createHandoffRequest(documentId, requesterId, requestId, Date.now()));
       window.setTimeout(() => {
-        if (pendingHandoff?.requesterId === requesterId && pendingHandoff.documentId === documentId) {
+        if (
+          pendingHandoff?.requestId === requestId
+          && pendingHandoff.requesterId === requesterId
+          && pendingHandoff.documentId === documentId
+        ) {
           pendingHandoff = undefined;
           resolve(undefined);
         }
       }, 15_000);
     });
-    pendingHandoff = undefined;
+    if (pendingHandoff?.requestId === requestId) pendingHandoff = undefined;
+    // Navigation cancelled this attempt — do not toast a timeout or install A over B.
+    if (!attemptStillCurrent()) return;
     if (!response) {
       await askConfirmChoice({
         title: 'Cannot edit here yet',
@@ -1583,6 +1624,7 @@ async function requestEditHere(): Promise<void> {
       });
       return;
     }
+    if (response.requestId !== requestId) return;
     if (response.type === 'refused') {
       await askConfirmChoice({
         title: 'Cannot edit here yet',
@@ -1593,7 +1635,8 @@ async function requestEditHere(): Promise<void> {
       return;
     }
     if (response.type === 'released') {
-      if (!(await becomeEditorFor(documentId))) {
+      if (!(await becomeEditorFor(documentId, { view }))) {
+        if (!attemptStillCurrent()) return;
         await askConfirmChoice({
           title: 'Cannot edit here yet',
           message: 'The other window released editing, but this window could not take over. Try Edit here again.',
@@ -1603,6 +1646,7 @@ async function requestEditHere(): Promise<void> {
       }
     }
   } finally {
+    if (pendingHandoff?.requestId === requestId) pendingHandoff = undefined;
     editHereBusy = false;
     syncEditHereButton();
   }
@@ -1612,7 +1656,12 @@ handoffChannel?.addEventListener('message', event => {
   const signal = parseHandoffSignal(event.data);
   if (!signal) return;
   if (signal.type === 'released' || signal.type === 'refused') {
-    if (pendingHandoff && signal.requesterId === pendingHandoff.requesterId && signal.documentId === pendingHandoff.documentId) {
+    if (
+      pendingHandoff
+      && signal.requestId === pendingHandoff.requestId
+      && signal.requesterId === pendingHandoff.requesterId
+      && signal.documentId === pendingHandoff.documentId
+    ) {
       const resolve = pendingHandoff.resolve;
       pendingHandoff = undefined;
       resolve(signal);
@@ -1634,7 +1683,7 @@ handoffChannel?.addEventListener('message', event => {
       transferFrozen,
     });
     if (block) {
-      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, Date.now(), block));
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), block));
       return;
     }
     const transfer = await askConfirmChoice({
@@ -1645,7 +1694,7 @@ handoffChannel?.addEventListener('message', event => {
       returnFocus: field,
     });
     if (!transfer) {
-      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, Date.now(), 'declined'));
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), 'declined'));
       return;
     }
     const stillBlocked = ownerHandoffBlock({
@@ -1660,7 +1709,7 @@ handoffChannel?.addEventListener('message', event => {
       transferFrozen,
     });
     if (stillBlocked) {
-      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, Date.now(), stillBlocked));
+      postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, signal.requestId, Date.now(), stillBlocked));
       return;
     }
     freezeEditorsForTransition();
@@ -1668,7 +1717,10 @@ handoffChannel?.addEventListener('message', event => {
       if (dirty && autosave.checked) {
         const result = await persist();
         if (!result.saved) {
-          postHandoff(createHandoffRefused(signal.documentId, signal.requesterId, Date.now(), saveFailed ? 'save-failed' : 'busy'));
+          postHandoff(createHandoffRefused(
+            signal.documentId, signal.requesterId, signal.requestId, Date.now(),
+            saveFailed ? 'save-failed' : 'busy',
+          ));
           return;
         }
       }
@@ -1680,7 +1732,7 @@ handoffChannel?.addEventListener('message', event => {
         // Await release so the requester's acquire does not still see a held Web Lock.
         await previous?.release();
       }
-      postHandoff(createHandoffReleased(signal.documentId, signal.requesterId, Date.now()));
+      postHandoff(createHandoffReleased(signal.documentId, signal.requesterId, signal.requestId, Date.now()));
       announceAction('Editing transferred to another window. This window is read-only.', { keepConflict: true });
     } finally {
       unfreezeEditorsAfterTransition();
