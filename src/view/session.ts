@@ -30,8 +30,10 @@ export type CommandGeneration = {
   /** Bumped whenever the pane's bound session or role changes. */
   paneGeneration: number;
   /**
-   * Bumped when the session's document identity or editable-role owner changes
-   * (switch document, attach/detach, local Edit in this pane). Not bumped on every keystroke.
+   * Bumped when the session's document identity changes (switch/open different id,
+   * attach a new session, release/destroy). Not bumped on every keystroke, and
+   * **not** bumped on local Edit in this pane (editable-role moves between panes
+   * of the same session — that updates paneGeneration / roleEditablePaneId only).
    */
   sessionGeneration: number;
   /**
@@ -44,12 +46,16 @@ export type CommandGeneration = {
 };
 
 /**
- * Identity token for a session persist loop. Pane focus/activation is irrelevant:
- * dirty/save/conflict lifecycle stays on the session until it completes or fails.
+ * Identity token for a session persist loop. Pane focus/activation and local
+ * Edit-in-this-pane transfers are irrelevant: dirty/save/conflict lifecycle stays
+ * on the session until it completes or fails (retain/retry; never drop text).
  */
 export type SessionPersistGeneration = {
   sessionId: SessionId;
-  /** Same bump rule as CommandGeneration.sessionGeneration (identity / role owner). */
+  /**
+   * Same bump rule as CommandGeneration.sessionGeneration (document identity only).
+   * Do not advance this solely because the editable pane binding changed.
+   */
   sessionGeneration: number;
 };
 
@@ -124,8 +130,11 @@ export function contentCommandStillCurrent(
 }
 
 /**
- * Whether an in-flight session save may still commit. Active-pane changes are ignored.
- * Invalidate only when the session identity/role owner changed (document switch, release).
+ * Whether an in-flight session save may still commit. Ignored: active-pane changes
+ * and local editable-role transfers within the same session. Invalidate only when
+ * the session's document identity epoch changed (document switch, session release).
+ * S5 must test: transfer Edit in this pane during an in-flight save — no dropped
+ * text, no duplicate commits.
  */
 export function sessionPersistStillCurrent(
   started: SessionPersistGeneration,

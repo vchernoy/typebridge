@@ -56,10 +56,10 @@ describe('contentCommandStillCurrent', () => {
 });
 
 describe('sessionPersistStillCurrent', () => {
-  it('keeps an in-flight save across active-pane changes', () => {
+  it('keeps an in-flight save across pane focus and local editable-role transfer', () => {
     const started = { sessionId: 'session-1', sessionGeneration: 3 };
     expect(sessionPersistStillCurrent(started, started)).toBe(true);
-    // Pane focus is not part of the persist token — only session identity/role owner.
+    // Local Edit in this pane must not bump sessionGeneration — persist stays current.
     expect(sessionPersistStillCurrent(started, { sessionId: 'session-1', sessionGeneration: 3 })).toBe(true);
     expect(sessionPersistStillCurrent(started, { sessionId: 'session-1', sessionGeneration: 4 })).toBe(false);
     expect(sessionPersistStillCurrent(started, { sessionId: 'session-2', sessionGeneration: 3 })).toBe(false);
