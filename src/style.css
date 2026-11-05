@@ -1232,8 +1232,7 @@ body.host-page {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--tb-bg, #e8eaef) 70%, transparent), transparent 40%),
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tb-bg, #e8eaef) 70%, transparent), transparent 40%),
     var(--tb-bg, #e8eaef);
 }
 .host-window {
@@ -1303,14 +1302,62 @@ body.host-page {
   position: absolute;
   z-index: 2;
 }
-.host-window-resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
-.host-window-resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
-.host-window-resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
-.host-window-resize-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
-.host-window-resize-ne { top: -4px; right: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
-.host-window-resize-nw { top: -4px; left: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
-.host-window-resize-se { bottom: -4px; right: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
-.host-window-resize-sw { bottom: -4px; left: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
+.host-window-resize-n {
+  top: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.host-window-resize-s {
+  bottom: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.host-window-resize-e {
+  right: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.host-window-resize-w {
+  left: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.host-window-resize-ne {
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+.host-window-resize-nw {
+  top: -4px;
+  left: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+.host-window-resize-se {
+  bottom: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+.host-window-resize-sw {
+  bottom: -4px;
+  left: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
 body.host-page .update-notice {
   position: relative;
 }
