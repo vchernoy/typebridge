@@ -81,6 +81,8 @@ export type WindowManager = {
   layoutMode: () => EffectiveLayoutMode;
   refreshLayoutMode: () => void;
   setHostFocusMode: (enabled: boolean, sourceWindowId?: string) => void;
+  /** #175 step 11: F6 — activate the next window and focus its editor (or title). */
+  cycleFocus: () => void;
   dispose: () => void;
 };
 
@@ -241,16 +243,107 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     persist();
   };
 
-  const setActive = (id: string): void => {
+  /** Sync is-active / aria-current without raising z-order or persisting. */
+  const markActiveChrome = (id: string): void => {
     activeId = id;
-    if (mode === 'free' && !hostFocus) layouts = bringToFront(layouts, id);
-    for (const win of layouts) applyShellGeometry(win);
     for (const [wid, shell] of shells) {
       shell.classList.toggle('is-active', wid === id);
-      shell.setAttribute('aria-selected', wid === id ? 'true' : 'false');
+      // Regions do not support aria-selected; mark the active shell with aria-current.
+      if (wid === id) shell.setAttribute('aria-current', 'true');
+      else shell.removeAttribute('aria-current');
     }
-    if (hostFocus) applyModeChrome();
+  };
+
+  const setActive = (id: string): void => {
+    markActiveChrome(id);
+    if (mode === 'free' && !hostFocus) layouts = bringToFront(layouts, id);
+    for (const win of layouts) applyShellGeometry(win);
+    if (hostFocus) {
+      applyModeChrome();
+      syncEmbeddedFocusChrome(true);
+    }
     persist();
+  };
+
+  /** Focus the editor field, falling back to the host title when the iframe is mid-boot. */
+  const focusWindowSurface = (id: string): void => {
+    const frame = frames.get(id);
+    const shell = shells.get(id);
+    const title = shell?.querySelector<HTMLInputElement>('.host-window-title');
+    try {
+      const editor = frame?.contentDocument?.querySelector<HTMLElement>('#editor');
+      if (editor && !(editor as HTMLTextAreaElement).disabled) {
+        editor.focus();
+        return;
+      }
+    } catch { /* Mid-navigation — fall through to title. */ }
+    title?.focus();
+  };
+
+  /** True when a confirm modal is open on the host or any embedded window. */
+  const confirmModalOpen = (): boolean => {
+    if (document.querySelector('.confirm-backdrop, [aria-modal="true"]')) return true;
+    for (const frame of frames.values()) {
+      try {
+        if (frame.contentDocument?.querySelector('.confirm-backdrop, [aria-modal="true"]')) {
+          return true;
+        }
+      } catch { /* Mid-navigation. */ }
+    }
+    return false;
+  };
+
+  /**
+   * Maximize the active window to the host viewport without rewriting preFocusLayouts.
+   * Non-active windows are restored from preFocusLayouts so a later Focus exit/close
+   * does not reveal stale full-viewport geometry left by earlier F6 cycles.
+   */
+  const maximizeActiveForFocus = (): void => {
+    if (!hostFocus || !activeId) return;
+    const view = viewportOf(deps.root);
+    const byPrior = preFocusLayouts
+      ? new Map(preFocusLayouts.map(win => [win.id, win]))
+      : undefined;
+    layouts = layouts.map(win => {
+      if (win.id === activeId) {
+        return { ...win, x: 0, y: 0, w: view.width, h: view.height };
+      }
+      const prior = byPrior?.get(win.id);
+      return prior
+        ? { ...win, x: prior.x, y: prior.y, w: prior.w, h: prior.h, z: prior.z }
+        : win;
+    });
+    applyAllGeometry();
+  };
+
+  /** Restore free/stacked geometry from preFocusLayouts (Focus exit / Focus-close). */
+  const restorePreFocusGeometry = (): void => {
+    if (!preFocusLayouts?.length) return;
+    const byId = new Map(preFocusLayouts.map(win => [win.id, win]));
+    layouts = layouts.map(win => {
+      const prior = byId.get(win.id);
+      return prior ? { ...win, x: prior.x, y: prior.y, w: prior.w, h: prior.h, z: prior.z } : win;
+    });
+  };
+
+  /**
+   * Cycle to the next host window (DOM/layout order). Raises z-order in free mode.
+   * `fromId` is the cycle origin when focus is in a window that is not yet active
+   * (host title pointerdown stops shell activation).
+   */
+  const cycleFocus = (fromId?: string): void => {
+    if (layouts.length === 0) return;
+    // Keep modal focus traps intact (discard / Edit here / private reload).
+    if (confirmModalOpen()) return;
+    const origin = (fromId && layouts.some(win => win.id === fromId)) ? fromId : activeId;
+    const index = layouts.findIndex(win => win.id === origin);
+    const next = layouts[(index < 0 ? 0 : index + 1) % layouts.length]!;
+    setActive(next.id);
+    // In host Focus, setActive only swaps visibility — apply full-viewport geometry
+    // so the newly active window matches setHostFocusMode(true) maximize behavior.
+    if (hostFocus) maximizeActiveForFocus();
+    // After Focus maximize swaps the visible shell, focus on the next frame.
+    window.requestAnimationFrame(() => { focusWindowSurface(next.id); });
   };
 
   const updateLayout = (id: string, rect: WindowRect): void => {
@@ -263,7 +356,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     const shell = document.createElement('section');
     shell.className = 'host-window';
     shell.dataset.windowId = win.id;
-    shell.setAttribute('role', 'group');
+    // #175 step 11: named region for AT — aria-label tracks the document title.
+    shell.setAttribute('role', 'region');
     shell.setAttribute('aria-label', `Editor window ${win.id}`);
 
     const titleBar = document.createElement('header');
@@ -393,6 +487,16 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     });
     title.addEventListener('keydown', event => {
       // Keep arrow-key window move on the handle; let the input own typing keys.
+      // F6 must cycle windows even while renaming — handle before stopPropagation so
+      // the document-level host listener is not required for the title field.
+      if (event.key === 'F6' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+        && !event.isComposing && !event.repeat) {
+        event.preventDefault();
+        event.stopPropagation();
+        // Title clicks do not activate the shell — cycle from this window, not stale activeId.
+        cycleFocus(win.id);
+        return;
+      }
       event.stopPropagation();
       if (event.isComposing) return;
       try {
@@ -540,12 +644,27 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     // content so clicking or focusing the editor still raises the window.
     const activateFromIframe = (): void => { setActive(win.id); };
     applyChromeTitle(title.value);
+    const onFrameCycleKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.isComposing || event.repeat || event.defaultPrevented) return;
+      event.preventDefault();
+      cycleFocus();
+    };
+
+    // load + readyState=complete can both call wireFrame for the same document —
+    // bind activation/F6 once per Document so F6 does not skip a window.
+    let wiredDoc: Document | null = null;
     const wireFrame = (): void => {
       try {
         const doc = frame.contentDocument;
         if (!doc) return;
-        doc.addEventListener('pointerdown', activateFromIframe);
-        doc.addEventListener('focusin', activateFromIframe);
+        if (wiredDoc !== doc) {
+          wiredDoc = doc;
+          doc.addEventListener('pointerdown', activateFromIframe);
+          doc.addEventListener('focusin', activateFromIframe);
+          // F6 inside the iframe does not bubble to the host — listen here too.
+          doc.addEventListener('keydown', onFrameCycleKey);
+        }
         // Hooks register at the end of the editor boot — retry briefly after load.
         // Keep refreshing title editability after hooks appear: draft init may still
         // hold the iframe title read-only for a few frames (ownership acquire).
@@ -888,10 +1007,23 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         preFocusLayouts = preFocusLayouts.filter(win => win.id !== id);
       }
       if (hostFocus && activeId === id) {
+        // Closing the Focus window exits Focus — restore remaining windows first so
+        // earlier F6 maximize cycles do not leave full-viewport leftovers (Codex P1).
+        restorePreFocusGeometry();
         hostFocus = false;
         preFocusLayouts = undefined;
+        syncEmbeddedFocusChrome(false);
       }
-      if (activeId === id) activeId = layouts[0]?.id ?? 'main';
+      if (activeId === id) {
+        // Prefer the frontmost remaining window (not layouts[0]) so free-layout
+        // stacking and the next F6 origin stay aligned with what the user sees.
+        const topmost = layouts.reduce<HostWindowLayout | undefined>(
+          (best, win) => (!best || win.z > best.z ? win : best),
+          undefined,
+        );
+        if (topmost) markActiveChrome(topmost.id);
+        else activeId = 'main';
+      }
       // Drop scoped session keys after the iframe is gone. prepareClose only returns
       // true for a clean close or an explicit discard, so pendingDraft is safe to
       // remove here — and doing it *after* unload beats a pagehide that recreates it.
@@ -909,6 +1041,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         sessionStorage.removeItem(`typebridge.pendingDraft.paneB.v1${marker}`);
       } catch { /* Blocked sessionStorage — layout still closes. */ }
       if (mode === 'stacked' && !hostFocus) enterStacked();
+      else applyAllGeometry();
       applyModeChrome();
       persist();
       return true;
@@ -927,6 +1060,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     },
     layoutMode: () => mode,
     refreshLayoutMode: () => { refreshMode(); },
+    cycleFocus: () => { cycleFocus(); },
     setHostFocusMode: (enabled, sourceWindowId) => {
       if (enabled) {
         if (sourceWindowId && layouts.some(win => win.id === sourceWindowId)) {
@@ -980,12 +1114,25 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       window.removeEventListener('typebridge-layout-mode', onLayoutModeEvent as EventListener);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onHostHidden);
+      document.removeEventListener('keydown', onHostCycleKey);
       for (const mq of mediaQueries) mq.removeEventListener('change', onCapabilityChange);
       rootObserver?.disconnect();
       for (const shell of shells.values()) shell.remove();
       shells.clear();
       frames.clear();
     },
+  };
+
+  /** Host-chrome F6 (iframe keydowns are handled per-frame in createShell). */
+  const onHostCycleKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.isComposing || event.repeat || event.defaultPrevented) return;
+    event.preventDefault();
+    // Move/close controls activate only on pointer — Tab into them leaves activeId stale.
+    const focused = document.activeElement;
+    const shell = focused instanceof Element ? focused.closest('.host-window') : null;
+    const fromId = shell instanceof HTMLElement ? shell.dataset.windowId : undefined;
+    cycleFocus(fromId);
   };
 
   deps.toolbar.querySelector('[data-host-action="new-window"]')
@@ -1069,6 +1216,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   window.addEventListener('typebridge-layout-mode', onLayoutModeEvent as EventListener);
   window.addEventListener('storage', onStorage);
   document.addEventListener('visibilitychange', onHostHidden);
+  document.addEventListener('keydown', onHostCycleKey);
   for (const mq of mediaQueries) mq.addEventListener('change', onCapabilityChange);
   // Update notice / toolbar reflow change host-root without a window resize.
   const rootObserver = typeof ResizeObserver !== 'undefined'
@@ -1078,6 +1226,18 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   boot();
   refreshMode();
+  // Mark the initial active shell without bringToFront/persist — restoring a free-layout
+  // session must keep the saved z-order (Codex P1: activating `main` hid a front `w2`).
+  {
+    const topmost = layouts.reduce<HostWindowLayout | undefined>(
+      (best, win) => (!best || win.z > best.z ? win : best),
+      undefined,
+    );
+    const bootActive = (pendingFocusId && layouts.some(win => win.id === pendingFocusId))
+      ? pendingFocusId
+      : (topmost?.id ?? layouts[0]?.id);
+    if (bootActive) markActiveChrome(bootActive);
+  }
   if (pendingFocusId && layouts.some(win => win.id === pendingFocusId)) {
     api.setHostFocusMode(true, pendingFocusId);
   }
