@@ -24,7 +24,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 10. **Shared across windows (page-level).** Settings, keyboard shortcuts, transliteration rules, appearance, Latin/Кириллица mode. One Settings panel on the host page; changes apply to every window immediately.
 11. **Per window.** Selected document, title, caret/selection/scroll, window size/position, Find/Replace UI (Replace only when that window is editing). Ctrl/⌘+F opens Find in the focused window, pre-filled with the last search text (**shared**). “Search all documents” is later/out of scope.
 12. **sessionStorage is shared by iframes in one tab.** Tab-scoped keys (`activeDraft`, pending backups, Replace text, writing position, update-notice dismissal, recovery journal tab id, …) are keyed by a **window id** (e.g. `?window=<id>`) so instances do not clobber each other. **Find query** is the exception: it stays on the unscoped `typebridge.find.query.v1` key so every window shares the last search (step 9).
-13. **Remove the in-page split (later step).** Delete pane B, live mirror, `PENDING_KEY_B`, split preferences, and related `main.ts` code. Fold “Open in comparison window” into opening a read-only window. Keep W1–W4. Clean old split prefs without touching documents.
+13. **Remove the in-page split (step 10, this slice).** Delete pane B, live mirror, `PENDING_KEY_B`, split preferences, and related `main.ts` code. Fold “Open in comparison window” into **Open in another window** (still the W2 `mode=view` popup on standalone). Keep W1–W4. Clean old split prefs without touching documents.
 14. **Modules.** Do not grow `src/main.ts` further. New behavior goes in focused modules (host page, window manager, handoff). Step 10 should shrink `main.ts` (see #99).
 
 ## Product states
@@ -64,7 +64,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | **7** | Shared settings live across windows | Yes (this slice: one Settings panel on `/host.html`; live apply via prefs-sync + iframe hooks; mode chrome stays per window) |
 | **8** | Title/picker redesign | Yes (this slice: host title-bar rename; picker search/preview/time/open-elsewhere; numbered Untitled defaults) |
 | **9** | Find/Replace per window | Yes (this slice: shared Find query across windows; Replace text + UI per window; Replace disabled when read-only; host Ctrl/⌘+F from title) |
-| **10** | Remove in-page split | Yes |
+| **10** | Remove in-page split | Yes (this slice: delete pane B / live mirror / split prefs; keep W1–W4 `mode=view` comparison popup; GC `typebridge.split.v1` + pane-B pending keys without touching documents) |
 | **11** | Verification, screenshots, honest device/AT limits | Docs + tests |
 
 ## Merge / PR notes
