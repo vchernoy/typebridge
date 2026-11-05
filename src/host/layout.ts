@@ -1,0 +1,212 @@
+/**
+ * Pure layout helpers for #175 step 5 free windows.
+ * Positions/sizes/document ids only — never document text.
+ */
+
+export const HOST_WINDOWS_KEY = 'typebridge.host.windows.v1';
+export const MAX_HOST_WINDOWS = 4;
+export const MIN_WINDOW_WIDTH = 280;
+export const MIN_WINDOW_HEIGHT = 200;
+/** Snap threshold in CSS pixels from a viewport edge or center line. */
+export const SNAP_THRESHOLD_PX = 24;
+export const KEYBOARD_MOVE_STEP_PX = 16;
+
+export type WindowRect = { x: number; y: number; w: number; h: number };
+
+export type HostWindowLayout = {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  /** Last known document id for this window (never text). */
+  documentId?: string;
+};
+
+export type HostLayoutState = {
+  version: 1;
+  windows: HostWindowLayout[];
+};
+
+export type ViewportSize = { width: number; height: number };
+
+export function isHostWindowId(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,63}$/i.test(value);
+}
+
+export function defaultRectForIndex(index: number, viewport: ViewportSize): WindowRect {
+  const inset = 16 + index * 28;
+  const w = Math.max(MIN_WINDOW_WIDTH, Math.min(640, viewport.width - inset * 2));
+  const h = Math.max(MIN_WINDOW_HEIGHT, Math.min(480, viewport.height - inset * 2));
+  return {
+    x: Math.min(inset, Math.max(0, viewport.width - w)),
+    y: Math.min(inset, Math.max(0, viewport.height - h)),
+    w,
+    h,
+  };
+}
+
+export function clampRect(rect: WindowRect, viewport: ViewportSize): WindowRect {
+  const w = Math.max(MIN_WINDOW_WIDTH, Math.min(rect.w, viewport.width));
+  const h = Math.max(MIN_WINDOW_HEIGHT, Math.min(rect.h, viewport.height));
+  const maxX = Math.max(0, viewport.width - w);
+  const maxY = Math.max(0, viewport.height - h);
+  return {
+    x: Math.max(0, Math.min(rect.x, maxX)),
+    y: Math.max(0, Math.min(rect.y, maxY)),
+    w,
+    h,
+  };
+}
+
+export function bringToFront(windows: HostWindowLayout[], id: string): HostWindowLayout[] {
+  const maxZ = windows.reduce((m, win) => Math.max(m, win.z), 0);
+  return windows.map(win => (win.id === id ? { ...win, z: maxZ + 1 } : win));
+}
+
+export function tileSideBySide(windows: HostWindowLayout[], viewport: ViewportSize): HostWindowLayout[] {
+  if (windows.length === 0) return [];
+  const count = windows.length;
+  const w = Math.max(MIN_WINDOW_WIDTH, Math.floor(viewport.width / count));
+  return windows.map((_, index) => clampRect({
+    x: index * w,
+    y: 0,
+    w: index === count - 1 ? viewport.width - index * w : w,
+    h: viewport.height,
+  }, viewport)).map((rect, index) => ({ ...windows[index], ...rect }));
+}
+
+export function tileStacked(windows: HostWindowLayout[], viewport: ViewportSize): HostWindowLayout[] {
+  if (windows.length === 0) return [];
+  const count = windows.length;
+  const h = Math.max(MIN_WINDOW_HEIGHT, Math.floor(viewport.height / count));
+  return windows.map((_, index) => clampRect({
+    x: 0,
+    y: index * h,
+    w: viewport.width,
+    h: index === count - 1 ? viewport.height - index * h : h,
+  }, viewport)).map((rect, index) => ({ ...windows[index], ...rect }));
+}
+
+/**
+ * Snap a free-moving window to halves/quarters when close to edges or center.
+ * Returns the same rect when no snap applies.
+ */
+export function snapRect(rect: WindowRect, viewport: ViewportSize, threshold = SNAP_THRESHOLD_PX): WindowRect {
+  const halfW = viewport.width / 2;
+  const halfH = viewport.height / 2;
+  let { x, y, w, h } = rect;
+
+  const nearLeft = Math.abs(x) <= threshold;
+  const nearRight = Math.abs(x + w - viewport.width) <= threshold;
+  const nearTop = Math.abs(y) <= threshold;
+  const nearBottom = Math.abs(y + h - viewport.height) <= threshold;
+  const nearCenterX = Math.abs(x + w / 2 - halfW) <= threshold;
+  const nearCenterY = Math.abs(y + h / 2 - halfH) <= threshold;
+
+  // Full viewport when all edges are near.
+  if (nearLeft && nearRight && nearTop && nearBottom) {
+    return clampRect({ x: 0, y: 0, w: viewport.width, h: viewport.height }, viewport);
+  }
+  // Halves
+  if (nearLeft && nearTop && nearBottom && w >= halfW - threshold) {
+    return clampRect({ x: 0, y: 0, w: halfW, h: viewport.height }, viewport);
+  }
+  if (nearRight && nearTop && nearBottom && w >= halfW - threshold) {
+    return clampRect({ x: halfW, y: 0, w: halfW, h: viewport.height }, viewport);
+  }
+  if (nearTop && nearLeft && nearRight && h >= halfH - threshold) {
+    return clampRect({ x: 0, y: 0, w: viewport.width, h: halfH }, viewport);
+  }
+  if (nearBottom && nearLeft && nearRight && h >= halfH - threshold) {
+    return clampRect({ x: 0, y: halfH, w: viewport.width, h: halfH }, viewport);
+  }
+  // Quarters
+  if (nearLeft && nearTop) {
+    return clampRect({ x: 0, y: 0, w: halfW, h: halfH }, viewport);
+  }
+  if (nearRight && nearTop) {
+    return clampRect({ x: halfW, y: 0, w: halfW, h: halfH }, viewport);
+  }
+  if (nearLeft && nearBottom) {
+    return clampRect({ x: 0, y: halfH, w: halfW, h: halfH }, viewport);
+  }
+  if (nearRight && nearBottom) {
+    return clampRect({ x: halfW, y: halfH, w: halfW, h: halfH }, viewport);
+  }
+  // Soft center snap for free placement.
+  if (nearCenterX) x = halfW - w / 2;
+  if (nearCenterY) y = halfH - h / 2;
+  return clampRect({ x, y, w, h }, viewport);
+}
+
+export function parseHostLayout(raw: unknown): HostLayoutState | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as { version?: unknown; windows?: unknown };
+  if (record.version !== 1 || !Array.isArray(record.windows)) return undefined;
+  const windows: HostWindowLayout[] = [];
+  for (const entry of record.windows) {
+    if (!entry || typeof entry !== 'object') continue;
+    const win = entry as Record<string, unknown>;
+    if (typeof win.id !== 'string' || !isHostWindowId(win.id)) continue;
+    if (![win.x, win.y, win.w, win.h, win.z].every(n => typeof n === 'number' && Number.isFinite(n))) {
+      continue;
+    }
+    const documentId = typeof win.documentId === 'string' && win.documentId ? win.documentId : undefined;
+    windows.push({
+      id: win.id,
+      x: win.x as number,
+      y: win.y as number,
+      w: win.w as number,
+      h: win.h as number,
+      z: win.z as number,
+      documentId,
+    });
+    if (windows.length >= MAX_HOST_WINDOWS) break;
+  }
+  if (windows.length === 0) return undefined;
+  return { version: 1, windows };
+}
+
+export function readHostLayout(storage: Storage | undefined = localStorage): HostLayoutState | undefined {
+  if (!storage) return undefined;
+  try {
+    return parseHostLayout(JSON.parse(storage.getItem(HOST_WINDOWS_KEY) ?? 'null'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist layout. Never writes document text. Returns false when storage rejects the write. */
+export function writeHostLayout(state: HostLayoutState, storage: Storage | undefined = localStorage): boolean {
+  if (!storage) return false;
+  try {
+    const payload: HostLayoutState = {
+      version: 1,
+      windows: state.windows.slice(0, MAX_HOST_WINDOWS).map(win => ({
+        id: win.id,
+        x: win.x,
+        y: win.y,
+        w: win.w,
+        h: win.h,
+        z: win.z,
+        ...(win.documentId ? { documentId: win.documentId } : {}),
+      })),
+    };
+    storage.setItem(HOST_WINDOWS_KEY, JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function mintWindowId(existing: Iterable<string>): string {
+  const taken = new Set(existing);
+  if (!taken.has('main')) return 'main';
+  for (let i = 2; i <= MAX_HOST_WINDOWS + 8; i++) {
+    const id = `w${i}`;
+    if (!taken.has(id)) return id;
+  }
+  return `w${Date.now().toString(36)}`;
+}

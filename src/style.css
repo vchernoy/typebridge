@@ -1188,7 +1188,7 @@ body.focus-mode .bottom {
   font: inherit;
 }
 
-/* #175 step 3 host shell: notice + editor share the viewport without clipping. */
+/* #175 step 5 host shell: notice + toolbar + free-layout windows. */
 html:has(body.host-page),
 body.host-page {
   height: 100%;
@@ -1198,23 +1198,119 @@ body.host-page {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--tb-bg, #f4f5f7);
 }
 .host-notice {
   position: relative;
   z-index: 50;
   flex: 0 0 auto;
 }
+.host-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--tb-border, #c5c9d3) 80%, transparent);
+  background: color-mix(in srgb, var(--tb-surface, #fff) 92%, transparent);
+  flex: 0 0 auto;
+}
+.host-toolbar button {
+  font: inherit;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--tb-border, #c5c9d3);
+  border-radius: 4px;
+  background: var(--tb-surface, #fff);
+  color: inherit;
+  cursor: pointer;
+}
+.host-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .host-root {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tb-bg, #e8eaef) 70%, transparent), transparent 40%),
+    var(--tb-bg, #e8eaef);
 }
-.host-editor {
-  display: block;
-  width: 100%;
-  height: 100%;
+.host-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 280px;
+  min-height: 200px;
+  border: 1px solid var(--tb-border, #9aa1b0);
+  border-radius: 6px;
+  background: var(--tb-surface, #fff);
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 12%, transparent);
+  overflow: hidden;
+}
+.host-window.is-active {
+  border-color: var(--tb-accent, #3153e9);
+  box-shadow: 0 4px 18px color-mix(in srgb, #000 18%, transparent);
+}
+.host-window-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.35rem 0.25rem 0.65rem;
+  cursor: grab;
+  user-select: none;
+  background: color-mix(in srgb, var(--tb-bg, #eef0f4) 85%, var(--tb-accent, #3153e9) 8%);
+  border-bottom: 1px solid var(--tb-border, #c5c9d3);
+  flex: 0 0 auto;
+}
+.host-window.is-active .host-window-titlebar {
+  background: color-mix(in srgb, var(--tb-accent, #3153e9) 16%, var(--tb-bg, #eef0f4));
+}
+.host-window-titlebar:active {
+  cursor: grabbing;
+}
+.host-window-title {
+  flex: 1 1 auto;
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-window-close {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
   border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
 }
+.host-window-close:hover {
+  background: color-mix(in srgb, #000 8%, transparent);
+}
+.host-window .host-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--tb-surface, #fff);
+}
+.host-window-resize {
+  position: absolute;
+  z-index: 2;
+}
+.host-window-resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.host-window-resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.host-window-resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.host-window-resize-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.host-window-resize-ne { top: -4px; right: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
+.host-window-resize-nw { top: -4px; left: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
+.host-window-resize-se { bottom: -4px; right: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
+.host-window-resize-sw { bottom: -4px; left: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
 body.host-page .update-notice {
   position: relative;
 }

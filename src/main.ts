@@ -3392,13 +3392,19 @@ function updateReloadReturnFocus(): HTMLElement {
   } catch { /* Cross-origin parent. */ }
   return field;
 }
-async function prepareUpdateReload(): Promise<boolean> {
+async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
   if (transitioning || deleting || field.disabled) return false;
   privateReloadChoice = undefined;
   privateReloadChoiceB = undefined;
   const secondaryDirty = !!secondary?.dirty;
   if ((workspace.dirty() || secondaryDirty) && !autosave.checked) {
-    const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: updateReloadReturnFocus() });
+    const discard = await askConfirmChoice({
+      title: kind === 'close' ? 'Close without saving?' : 'Reload without saving?',
+      message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
+      confirmLabel: kind === 'close' ? 'Discard changes and close' : 'Discard changes and reload',
+      cancelLabel: 'Keep editing',
+      returnFocus: updateReloadReturnFocus(),
+    });
     if (discard) {
       privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
       if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
@@ -3417,6 +3423,12 @@ async function prepareUpdateReload(): Promise<boolean> {
   const primaryOk = !workspace.dirty() || (!!pending && sameContent(pending, snapshot()));
   const secondaryOk = !secondary?.dirty || (!!pendingB && secondary && sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)));
   return primaryOk && secondaryOk;
+}
+async function prepareUpdateReload(): Promise<boolean> {
+  return prepareLeaveWithUnsaved('reload');
+}
+async function prepareWindowClose(): Promise<boolean> {
+  return prepareLeaveWithUnsaved('close');
 }
 /** Validate and arm reload; throws to abort. Does not navigate (host reloads the top page). */
 function assertSafeToReloadAfterUpdate(): void {
@@ -3487,8 +3499,11 @@ if (embedded) {
     __typebridgePrepareUpdateReload?: () => Promise<boolean>;
     __typebridgeAssertSafeUpdateReload?: () => void;
     __typebridgeCancelUpdateReload?: () => void;
+    /** Host window manager asks before removing this iframe (#175 step 5). */
+    __typebridgePrepareWindowClose?: () => Promise<boolean>;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
   hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; };
+  hooks.__typebridgePrepareWindowClose = prepareWindowClose;
 }

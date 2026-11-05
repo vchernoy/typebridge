@@ -1,11 +1,11 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { moreAction, setAutosave } from './settings-helpers';
 
-/** #175 step 3: host page embeds one editor window; update notice lives on the host. */
+/** #175 step 5: host free-layout windows; update notice on the host. */
 
 async function openHost(page: Page): Promise<FrameLocator> {
   await page.goto('/host.html');
-  const frame = page.frameLocator('#editor-window');
+  const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await expect(frame.locator('html')).toHaveAttribute('data-embed', '1');
   await expect(frame.locator('html')).toHaveAttribute('data-window-id', 'main');
@@ -29,7 +29,6 @@ test('host keeps Settings in the iframe so delayed lookups still work', async ({
   await editor.locator('#settings-close').click();
   await expect(editor.locator('#settings-panel')).toBeHidden();
 
-  // Keyboard shortcuts reads #tab-indent at click time — must stay in the iframe document.
   await moreAction(editor as unknown as Page, '#keyboard-shortcuts');
   await expect(editor.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true })).toBeVisible();
 });
@@ -53,7 +52,7 @@ test('offline host refresh stays on the host shell', async ({ page, context }) =
   await context.setOffline(true);
   await page.reload();
   await expect(page).toHaveURL(/host\.html/);
-  const frame = page.frameLocator('#editor-window');
+  const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await expect(frame.locator('html')).toHaveAttribute('data-embed', '1');
   await expect(frame.locator('#editor')).toHaveValue('Offline host draft');
@@ -67,7 +66,7 @@ test('host does not reload when private edits change after update consent', asyn
   await expect(editor.locator('#save-indicator')).toHaveText('Not saved');
 
   const prepare = page.evaluate(async () => {
-    const frame = document.querySelector<HTMLIFrameElement>('#editor-window')!;
+    const frame = document.querySelector<HTMLIFrameElement>('iframe.host-editor')!;
     const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
     return hooks.__typebridgePrepareUpdateReload?.() ?? false;
   });
@@ -76,13 +75,12 @@ test('host does not reload when private edits change after update consent', asyn
   await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
   expect(await prepare).toBe(true);
 
-  // Type after consent — generation changes; reload must refuse (host must not navigate).
   await editor.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
     el.value = `${el.value}!`;
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
   const outcome = await page.evaluate(() => {
-    const frame = document.querySelector<HTMLIFrameElement>('#editor-window')!;
+    const frame = document.querySelector<HTMLIFrameElement>('iframe.host-editor')!;
     const hooks = frame.contentWindow as Window & { __typebridgeAssertSafeUpdateReload?: () => void };
     try {
       hooks.__typebridgeAssertSafeUpdateReload?.();
@@ -94,4 +92,57 @@ test('host does not reload when private edits change after update consent', asyn
   expect(outcome).toContain('Private edits changed');
   await expect(page).toHaveURL(/host\.html/);
   await expect(editor.locator('#editor')).toHaveValue('Keep this private text!');
+});
+
+test('New window tiles and persists two free windows', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(second.locator('html')).toHaveAttribute('data-window-id', 'w2');
+
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+  const geometry = await page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; x: number; w: number }> };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  expect(geometry).toHaveLength(2);
+  expect(geometry[0].x).toBe(0);
+  expect(geometry[1].x).toBeGreaterThan(0);
+
+  await second.locator('#editor').fill('Second window text');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+
+  await page.reload();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  const restored = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(restored.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(restored.locator('#editor')).toHaveValue('Second window text');
+});
+
+test('closing a dirty Autosave-off window asks before removing it', async ({ page }) => {
+  test.setTimeout(90_000);
+  const editor = await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  const secondShell = page.locator('.host-window[data-window-id="w2"]');
+  const second = secondShell.frameLocator('iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await setAutosave(second as unknown as Page, false);
+  await second.locator('#editor').fill('Private in second');
+  await expect(second.locator('#save-indicator')).toHaveText('Not saved');
+
+  await secondShell.locator('.host-window-close').click();
+  const dialog = second.getByRole('dialog', { name: 'Close without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+
+  await secondShell.locator('.host-window-close').click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(1);
+  await expect(editor.locator('#editor')).toBeEnabled();
 });

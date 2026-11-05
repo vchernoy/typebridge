@@ -24,16 +24,14 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   </head>
   <body class="host-page">
-    <!-- #175 step 3: host owns the update notice; Settings stay in the iframe until step 7. -->
+    <!-- #175 step 5: host owns update notice + free-layout window chrome. -->
     <div id="host-notice" class="host-notice"></div>
-    <div id="host-root" class="host-root">
-      <iframe
-        id="editor-window"
-        class="host-editor"
-        title="TypeBridge editor"
-        allow="clipboard-read; clipboard-write"
-      ></iframe>
+    <div id="host-toolbar" class="host-toolbar" role="toolbar" aria-label="Window layout">
+      <button type="button" data-host-action="new-window">New window</button>
+      <button type="button" data-host-action="tile-side">Tile side by side</button>
+      <button type="button" data-host-action="tile-stack">Tile stacked</button>
     </div>
+    <div id="host-root" class="host-root"></div>
     <script type="module" src="/src/host/main.ts"></script>
   </body>
 </html>
