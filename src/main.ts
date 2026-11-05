@@ -1035,6 +1035,11 @@ async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }
           if ((draftTitleB.value.trim() || UNTITLED_TITLE) === saved.title) {
             draftTitleB.value = session.draft.title;
           }
+          setConflict(CONFLICT_COPY, true);
+          updateStatus({
+            primary: session.dirty && !storageProblem ? 'Saving…' : '',
+            risk: riskText(),
+          }, 'conflict');
           const access = await acquireFor(result.draft.id);
           clearOwnershipLost(session.ownership);
           if (session.ownership) void session.ownership.release();
@@ -1043,6 +1048,12 @@ async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }
           bindOwnershipLost(access.ownership, () => {
             if (access.ownership) loseSecondaryOwnership(access.ownership);
           });
+          if (access.block) {
+            companionEditor.setReadOnly(true);
+            titleEditorB.setReadOnly(true);
+          }
+          renderPaneBDrafts();
+          syncMutationControls();
         }
       }
       try { await refreshDrafts(); } catch { /* List is advisory. */ }
@@ -1154,7 +1165,14 @@ async function openCompanionDocument(id: string): Promise<void> {
     }
     let target = next;
     if (access.ownership && db) {
-      const fresh = await getStoredDraft(db, next.id);
+      let fresh: StoredDraft | undefined;
+      try {
+        fresh = await getStoredDraft(db, next.id);
+      } catch {
+        void access.ownership.release();
+        announceAction('Could not open that document in the other pane.');
+        return;
+      }
       if (generation !== companionOpenGeneration || !workspace.splitOpen() || active.id === id) {
         void access.ownership.release();
         if (active.id === id && generation === companionOpenGeneration && workspace.splitOpen()) {
@@ -1606,8 +1624,19 @@ companionField.addEventListener('input', () => {
 companionField.addEventListener('historychange', () => {
   if (dualDocumentSplit()) { scheduleSaveSecondary(); syncHistory(); }
 });
+draftTitleB.addEventListener('focus', () => {
+  if (!dualDocumentSplit()) return;
+  workspace.setActivePane(SECOND_PANE_ID);
+  syncMutationControls();
+  updateStats();
+});
 draftTitleB.addEventListener('input', () => {
   if (dualDocumentSplit()) scheduleSaveSecondary(true);
+});
+draftTitle.addEventListener('focus', () => {
+  workspace.setActivePane(PRIMARY_PANE_ID);
+  syncMutationControls();
+  updateStats();
 });
 function syncTitleTooltip(): void {
   // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
