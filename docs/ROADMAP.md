@@ -21,7 +21,7 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Plain-text preference merged (#42); Reading View remains open |
 | [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
 | [#48](https://github.com/vchernoy/typebridge/issues/48) | Cross-tab saved-version notifications | Saved/renamed/deleted signals for viewers and notice-only editors landed via [#159](https://github.com/vchernoy/typebridge/issues/159) W3; remaining scope (clean-editor refresh, editor list refresh, other preference signals) stays on #48, do not close it automatically |
-| [#159](https://github.com/vchernoy/typebridge/issues/159) | In-tab split workspace + editing ownership | Clarified: two panes in one tab (S1–S6). W1–W4 foundation kept; S1–S3 (contracts, workspace shell, same-doc live split). Cross-window Edit here (#164) deferred. See [ADR](adr/159-comparison-window.md) |
+| [#159](https://github.com/vchernoy/typebridge/issues/159) | In-tab split workspace + editing ownership | S1–S5b on main (ADR, workspace, same-doc live split, dual docs, Edit in this pane, lifecycle guards). S6 evidence: [docs/evidence/159/](evidence/159/). Remaining: S2 extraction partial, New/Import→pane B, real-device/AT, #164 deferred. See [ADR](adr/159-comparison-window.md) |
 
 ## Audit and current reliability follow-ups
 
