@@ -338,6 +338,10 @@
         <p id="ownership-notice" class="viewer-notice" role="status" hidden></p>
         <div id="editor-split" class="editor-split" data-split="off" data-split-orientation="side">
           <div class="editor-pane editor-pane-primary" data-pane-slot="primary">
+            <div class="pane-chrome pane-chrome-primary" hidden>
+              <span id="primary-live-badge" class="viewer-badge" hidden>Live view · Read-only</span>
+              <button id="edit-in-pane-a" type="button" hidden>Edit in this pane</button>
+            </div>
             <label for="editor">Your text</label>
             <textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea>
           </div>
@@ -357,6 +361,7 @@
           <div class="editor-pane editor-pane-companion" data-pane-slot="companion" hidden>
             <div class="pane-chrome">
               <span id="companion-badge" class="viewer-badge">Live view · Read-only</span>
+              <button id="edit-in-pane-b" type="button" hidden>Edit in this pane</button>
               <input id="draft-title-b" type="text" aria-label="Document title in other pane" hidden />
               <label class="pane-doc-picker" for="pane-b-drafts">
                 <span class="visually-hidden">Document in other pane</span>

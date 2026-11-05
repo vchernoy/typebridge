@@ -118,6 +118,44 @@ describe('createSinglePaneWorkspace', () => {
     expect(workspace.activePaneId()).toBe(PRIMARY_PANE_ID);
   });
 
+  it('moves the editable role between same-session panes without bumping sessionGeneration', () => {
+    const primary = fakeElement();
+    const companion = fakeElement();
+    const workspace = createSinglePaneWorkspace({
+      root: fakeElement(),
+      paneSurface: primary,
+      companionSurface: companion,
+    });
+    workspace.setSplitOpen(true);
+    const persist = workspace.capturePersistGeneration();
+    const beforePane = workspace.paneGeneration();
+    workspace.setEditablePaneId(SECOND_PANE_ID);
+    expect(workspace.editablePaneId()).toBe(SECOND_PANE_ID);
+    expect(primary.dataset.paneRole).toBe('readonly');
+    expect(companion.dataset.paneRole).toBe('editable');
+    expect(workspace.paneGeneration()).toBe(beforePane + 1);
+    expect(workspace.sessionGeneration()).toBe(0);
+    expect(sessionPersistStillCurrent(persist, {
+      sessionId: workspace.sessionId,
+      sessionGeneration: workspace.sessionGeneration(),
+    })).toBe(true);
+    expect(workspace.snapshotSession({
+      autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
+    }).roleEditablePaneId).toBe(SECOND_PANE_ID);
+    workspace.setPaneRole('readonly');
+    expect(primary.dataset.paneRole).toBe('readonly');
+    expect(companion.dataset.paneRole).toBe('readonly');
+    expect(workspace.snapshotSession({
+      autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
+    }).roleEditablePaneId).toBeUndefined();
+    workspace.setPaneRole('editable');
+    expect(companion.dataset.paneRole).toBe('editable');
+    expect(primary.dataset.paneRole).toBe('readonly');
+    workspace.setSplitOpen(false);
+    expect(workspace.editablePaneId()).toBe(PRIMARY_PANE_ID);
+    expect(primary.dataset.paneRole).toBe('editable');
+  });
+
   it('syncs documentId into the root dataset without bumping sessionGeneration', () => {
     const root = fakeElement();
     const workspace = createSinglePaneWorkspace({ root, paneSurface: fakeElement() });

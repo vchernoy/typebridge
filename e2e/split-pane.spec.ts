@@ -220,6 +220,123 @@ test('companion focus refuses Convert/Replace on the primary selection', async (
   await expect(page.locator('#convert-cyrillic')).toBeEnabled();
 });
 
+test('Edit in this pane moves editing to the companion without clearing history', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  // Default typing mode is Cyrillic; stay on Latin so ASCII assertions stay stable.
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  const field = page.locator('#editor');
+  await field.fill('first');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await field.pressSequentially(' draft');
+  await expect(page.locator('#undo')).toBeEnabled();
+  await openSplit(page);
+  await expect(page.locator('#edit-in-pane-b')).toBeVisible();
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.focus();
+    node.setSelectionRange(0, 5);
+    node.scrollTop = 0;
+  });
+  await page.locator('#edit-in-pane-b').click();
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'editable');
+  await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'readonly');
+  await expect(page.locator('#editor-b')).toBeFocused();
+  await expect(page.locator('#companion-badge')).toBeHidden();
+  await expect(page.locator('#primary-live-badge')).toBeVisible();
+  await expect(page.locator('#edit-in-pane-a')).toBeVisible();
+  const companionSel = await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    return { start: node.selectionStart, end: node.selectionEnd };
+  });
+  expect(companionSel).toEqual({ start: 0, end: 5 });
+  // Transfer preserves the prior companion selection; move to end before appending.
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    const end = node.value.length;
+    node.setSelectionRange(end, end);
+  });
+  await page.locator('#editor-b').pressSequentially('!');
+  await expect(page.locator('#editor-b')).toHaveValue('first draft!');
+  await expect(page.locator('#editor')).toHaveValue('first draft!');
+  await page.locator('#undo').click();
+  await expect(page.locator('#editor-b')).toHaveValue('first draft');
+  await expect(page.locator('#editor')).toHaveValue('first draft');
+  await page.locator('#edit-in-pane-a').click();
+  await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'editable');
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'readonly');
+  await expect(page.locator('#companion-badge')).toHaveText('Live view · Read-only');
+});
+
+test('Edit in this pane refuses while composing', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('compose guard');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#editor').evaluate(el => {
+    el.dispatchEvent(new CompositionEvent('compositionstart', { data: 'あ' }));
+  });
+  await page.locator('#edit-in-pane-b').click();
+  await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'editable');
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'readonly');
+  await expect(page.locator('#status')).toContainText('Finish composing');
+  await page.locator('#editor').evaluate(el => {
+    el.dispatchEvent(new CompositionEvent('compositionend', { data: 'あ' }));
+  });
+  await page.locator('#edit-in-pane-b').click();
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'editable');
+});
+
+test('closing split after Edit in this pane keeps text and history on the primary', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await setAutosave(page, false);
+  await page.locator('#editor').fill('keep me');
+  await openSplit(page);
+  await page.locator('#edit-in-pane-b').click();
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'editable');
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    const end = node.value.length;
+    node.setSelectionRange(end, end);
+  });
+  await page.locator('#editor-b').pressSequentially(' safe');
+  await documentAction(page, '#toggle-split');
+  await expect(page.locator('#editor-b')).toBeHidden();
+  await expect(page.locator('#editor')).toHaveValue('keep me safe');
+  await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'editable');
+  await page.locator('#undo').click();
+  await expect(page.locator('#editor')).toHaveValue('keep me');
+});
+
+test('transfer during an in-flight save keeps dirty text without a second commit race', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('persist transfer');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs = 800;
+  });
+  await page.locator('#editor').pressSequentially('!');
+  await expect(page.locator('#save-indicator')).toHaveText('Saving…');
+  await page.locator('#edit-in-pane-b').click();
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'editable');
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    const end = node.value.length;
+    node.setSelectionRange(end, end);
+  });
+  await page.locator('#editor-b').pressSequentially('?');
+  await expect(page.locator('#editor-b')).toHaveValue('persist transfer!?');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved', { timeout: 5000 });
+  const docs = await readStoredDocs(page);
+  expect(docs).toHaveLength(1);
+  expect(docs[0]?.text).toBe('persist transfer!?');
+});
+
 test('split open keeps the primary editor within its pane despite a saved pixel width', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

@@ -68,7 +68,7 @@ export class Editor {
   private undoStack: Delta[] = [];
   private redoStack: Delta[] = [];
   private pending: { start: number; end: number; raw: string } | null = null;
-  private composing = false;
+  private imeComposing = false;
   private compositionStart: { value: string; selection: Selection } | null = null;
   private before: { value: string; selection: Selection } | null = null;
   private nativeHistory = false;
@@ -81,6 +81,8 @@ export class Editor {
   private viewOnly = false;
   setReadOnly(value: boolean): void { this.viewOnly = value; this.pending = null; this.field.readOnly = value; }
   get readOnly(): boolean { return this.viewOnly; }
+  /** True during IME composition; local Edit-in-this-pane must refuse while composing (#159 S5). */
+  get composing(): boolean { return this.imeComposing; }
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
   exportHistory(): EditorHistory {
@@ -119,10 +121,10 @@ export class Editor {
     this.field = field as HTMLTextAreaElement;
     this.known = this.capture();
     this.field.addEventListener('compositionstart', () => {
-      this.composing = true; this.pending = null; this.compositionStart = this.capture();
+      this.imeComposing = true; this.pending = null; this.compositionStart = this.capture();
     });
     this.field.addEventListener('compositionend', () => {
-      this.composing = false; this.pending = null;
+      this.imeComposing = false; this.pending = null;
       if (this.compositionStart && this.compositionStart.value !== this.field.value)
         this.record(this.compositionStart, this.capture(), false);
       this.compositionStart = null; this.before = null; this.known = this.capture();
@@ -131,7 +133,7 @@ export class Editor {
     this.field.addEventListener('input', event => this.onInput(event));
     this.field.addEventListener('keydown', event => {
       if (this.viewOnly) return;
-      if (this.composing || event.isComposing) return;
+      if (this.imeComposing || event.isComposing) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === SHORTCUTS.undo.key) {
         event.preventDefault(); this.history(event.shiftKey ? 'redo' : 'undo');
       } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === SHORTCUTS.redoAlternate.key) {
@@ -238,7 +240,7 @@ export class Editor {
     }
   }
   private onInput(event: Event): void {
-    if (this.composing || (event instanceof InputEvent && event.isComposing)) return;
+    if (this.imeComposing || (event instanceof InputEvent && event.isComposing)) return;
     const current = this.capture();
     if (this.nativeHistory) { this.undoStack = []; this.redoStack = []; this.pending = null; }
     else if (current.value !== this.known.value) {
@@ -253,7 +255,7 @@ export class Editor {
   }
   private beforeInput(event: InputEvent): void {
     if (this.viewOnly) { if (event.cancelable) event.preventDefault(); return; }
-    if (this.composing || event.isComposing || event.inputType.includes('Composition')) return;
+    if (this.imeComposing || event.isComposing || event.inputType.includes('Composition')) return;
     if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
       if (event.cancelable) { event.preventDefault(); this.history(event.inputType === 'historyUndo' ? 'undo' : 'redo'); }
       else { this.nativeHistory = true; this.before = null; }

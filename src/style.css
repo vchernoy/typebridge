@@ -673,8 +673,18 @@ body.focus-mode .bottom {
   gap: 8px;
   margin-bottom: 6px;
 }
+.pane-chrome-primary:not([hidden]) {
+  display: flex;
+}
 .pane-chrome .viewer-badge {
   position: static;
+}
+.pane-chrome #edit-in-pane-a,
+.pane-chrome #edit-in-pane-b {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  min-height: 32px;
 }
 .pane-chrome .pane-doc-picker {
   display: inline-flex;
