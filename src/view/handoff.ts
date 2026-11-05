@@ -205,25 +205,18 @@ export type BufferedInsert =
   | { kind: 'type'; text: string }
   | { kind: 'paste'; text: string }
   | { kind: 'break'; text: string }
-  | { kind: 'delete'; direction: 'backward' | 'forward'; start: number; end: number };
+  | { kind: 'delete'; direction: 'backward' | 'forward' };
 
-export function bufferInsertFromKeyboard(
-  event: KeyboardEvent,
-  field?: Pick<HTMLTextAreaElement, 'selectionStart' | 'selectionEnd'>,
-): BufferedInsert | undefined {
+export function bufferInsertFromKeyboard(event: KeyboardEvent): BufferedInsert | undefined {
   if (event.isComposing || event.key === 'Process') return undefined;
   if (event.ctrlKey || event.metaKey || event.altKey) return undefined;
   // Never trap Tab/Shift+Tab — focus must leave a read-only editor.
   if (event.key === 'Tab') return undefined;
   if (event.key === 'Enter') return { kind: 'break', text: '\n' };
   if (event.key === 'Backspace' || event.key === 'Delete') {
-    const start = field?.selectionStart ?? 0;
-    const end = field?.selectionEnd ?? start;
     return {
       kind: 'delete',
       direction: event.key === 'Backspace' ? 'backward' : 'forward',
-      start,
-      end,
     };
   }
   if (event.key.length === 1) return { kind: 'type', text: event.key };
@@ -233,8 +226,9 @@ export function bufferInsertFromKeyboard(
 /** Replay one buffered insert through the field so typing hits Editor.beforeInput. */
 export function replayBufferedInsert(field: HTMLTextAreaElement, item: BufferedInsert): void {
   if (item.kind === 'delete') {
-    let start = item.start;
-    let end = item.end;
+    // Use the live caret after prior replayed ops — never stale absolute offsets.
+    let start = field.selectionStart;
+    let end = field.selectionEnd;
     if (start === end) {
       if (item.direction === 'backward') {
         if (start <= 0) return;
@@ -244,8 +238,6 @@ export function replayBufferedInsert(field: HTMLTextAreaElement, item: BufferedI
         end += 1;
       }
     }
-    start = Math.max(0, Math.min(start, field.value.length));
-    end = Math.max(start, Math.min(end, field.value.length));
     field.setSelectionRange(start, end);
     const before = new InputEvent('beforeinput', {
       bubbles: true,

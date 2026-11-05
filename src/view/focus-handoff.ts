@@ -470,7 +470,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   const onKeyDown = (event: KeyboardEvent): void => {
     // Tab must move focus out of a read-only editor — never start handoff or buffer it.
     if (event.key === 'Tab') return;
-    const insert = bufferInsertFromKeyboard(event, deps.field);
+    const insert = bufferInsertFromKeyboard(event);
     if (!insert) return;
     if (pending) {
       event.preventDefault();
