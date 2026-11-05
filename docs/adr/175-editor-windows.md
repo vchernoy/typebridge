@@ -20,11 +20,12 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
    - **Across tabs:** unsaved/private text is **never** sent. The other window shows **Edit here** with a warning instead of taking over silently. This replaces #164’s cross-window request protocol for the new product goal.
 7. **Layout — computer.** Free windows: drag title bar, resize edges/corner, z-order, snap halves/quarters, tile side-by-side or stacked, keyboard move/resize. Cap **4** windows. Persist layout (positions, sizes, document ids — **never text**) in localStorage.
 8. **Layout — phone.** Stacked full-width; each keeps the existing corner height grip. Detect with capabilities (viewport width + `(any-pointer: fine)` / `(hover: hover)`), not user-agent. **Settings → Layout: Auto / Free windows / Stacked** overrides misdetection.
-9. **Shared across windows (page-level).** Settings, keyboard shortcuts, transliteration rules, appearance, Latin/Кириллица mode. One Settings panel on the host page; changes apply to every window immediately.
-10. **Per window.** Selected document, title, caret/selection/scroll, window size/position, Find/Replace UI (Replace only when that window is editing). Ctrl/⌘+F opens Find in the focused window, pre-filled with the last search text (**shared**). “Search all documents” is later/out of scope.
-11. **sessionStorage is shared by iframes in one tab.** Today’s tab-scoped keys (`activeDraft`, pending backups, Find text, writing position, update-notice dismissal, recovery journal tab id, …) must be keyed by a **window id** (e.g. `?window=<id>`) so instances do not clobber each other.
-12. **Remove the in-page split (later step).** Delete pane B, live mirror, `PENDING_KEY_B`, split preferences, and related `main.ts` code. Fold “Open in comparison window” into opening a read-only window. Keep W1–W4. Clean old split prefs without touching documents.
-13. **Modules.** Do not grow `src/main.ts` further. New behavior goes in focused modules (host page, window manager, handoff). Step 10 should shrink `main.ts` (see #99).
+9. **Focus mode.** Maximizes the **active** window (step 6); other windows stay in the layout but are not the Focus surface. Existing single-editor Focus behavior becomes per-active-window once the host exists.
+10. **Shared across windows (page-level).** Settings, keyboard shortcuts, transliteration rules, appearance, Latin/Кириллица mode. One Settings panel on the host page; changes apply to every window immediately.
+11. **Per window.** Selected document, title, caret/selection/scroll, window size/position, Find/Replace UI (Replace only when that window is editing). Ctrl/⌘+F opens Find in the focused window, pre-filled with the last search text (**shared**). “Search all documents” is later/out of scope.
+12. **sessionStorage is shared by iframes in one tab.** Today’s tab-scoped keys (`activeDraft`, pending backups, Find text, writing position, update-notice dismissal, recovery journal tab id, …) must be keyed by a **window id** (e.g. `?window=<id>`) so instances do not clobber each other.
+13. **Remove the in-page split (later step).** Delete pane B, live mirror, `PENDING_KEY_B`, split preferences, and related `main.ts` code. Fold “Open in comparison window” into opening a read-only window. Keep W1–W4. Clean old split prefs without touching documents.
+14. **Modules.** Do not grow `src/main.ts` further. New behavior goes in focused modules (host page, window manager, handoff). Step 10 should shrink `main.ts` (see #99).
 
 ## Product states
 
@@ -37,6 +38,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | Autosave off / failed save, same tab | In-memory handoff allowed; nothing written for the transfer itself |
 | Suspended / lost owner | Existing lost/read-only guidance; fence rejects late writes; steal only where #175 step 4 specifies |
 | Close window | Same unsaved/private prompts as closing a tab |
+| Focus mode | Active window maximized; exit restores prior free/stacked layout |
 | Reload | Restore layout + document ids; never restore private Autosave-off text from layout prefs |
 
 ## Non-goals
@@ -68,7 +70,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 ## Merge / PR notes
 
 - PRs use `Refs #175`. Avoid GitHub closing keywords next to issue numbers in descriptions.
-- Merging follows CONTRIBUTING: maintainer merges, or an agent the maintainer explicitly asked to merge **that** PR. There is **no** standing merge authorization on #175 unless the maintainer adds one on the issue.
+- **Merge authorization** for this plan lives on the [#175 issue body](https://github.com/vchernoy/typebridge/issues/175) (standing conditions as of 2026-11-05: linked PR, final-head CI green on quality + Chromium/Firefox/WebKit, independent review with no open P0/P1, remaining P2/P3 recorded on #175 or a linked issue). Do not restate a conflicting rule here — if the issue and this ADR disagree, **the issue wins**.
 
 ## Relation to ADR 159
 
