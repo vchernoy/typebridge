@@ -55,6 +55,13 @@ test('embedded Settings button opens the host panel', async ({ page }) => {
   await expect(page.locator('#settings-panel')).toBeVisible();
 });
 
+test('embedded host windows hide Split editor and comparison controls', async ({ page }) => {
+  const main = await openHost(page);
+  await expect(main.locator('#toggle-split')).toBeHidden();
+  await expect(main.locator('#open-comparison')).toBeHidden();
+  await expect(main.locator('#editor-split')).toHaveAttribute('data-split', 'off');
+});
+
 test('host Autosave on persists unsaved text in every window', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));

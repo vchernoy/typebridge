@@ -1193,9 +1193,12 @@ body:not(.host-page) .settings-host-only {
   display: none;
 }
 
-/* #175 step 7: Settings panel lives on the host; keep embed chrome clean. */
+/* #175 step 7: Settings panel lives on the host; keep embed chrome clean.
+   In-page split / comparison are redundant with host windows (removed in step 10). */
 html[data-embed="1"] #settings-open,
-html[data-embed="1"] #settings-panel {
+html[data-embed="1"] #settings-panel,
+html[data-embed="1"] #toggle-split,
+html[data-embed="1"] #open-comparison {
   display: none !important;
 }
 

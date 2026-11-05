@@ -208,7 +208,8 @@ const splitControls = setupSplitPane({
   primaryPane,
   companionPane,
   resetButton: splitReset,
-  allowOpen: !viewMode,
+  // #175 step 7: host windows replace the in-page split; step 10 deletes it.
+  allowOpen: !viewMode && !embedded,
   onOpenChange: open => {
     // Do not tear down pane B while promotion is flushing/confirming the primary.
     if (!open && transitioning) {
@@ -276,8 +277,9 @@ const splitControls = setupSplitPane({
     })();
   },
 });
-if (viewMode) {
+if (viewMode || embedded) {
   toggleSplit.disabled = true;
+  toggleSplit.hidden = true;
   splitControls.setOpen(false);
 } else {
   toggleSplit.addEventListener('click', () => {
@@ -3439,8 +3441,12 @@ function openComparisonWindow(href: string): ComparisonOpenResult {
 // window.open must run inside this click, so eligibility uses the in-memory IndexedDB revision
 // rather than an async read; the companion verifies the row itself on load. Document text is
 // never part of the URL, postMessage or sessionStorage.
+if (embedded) {
+  openComparison.hidden = true;
+  openComparison.disabled = true;
+}
 openComparison.addEventListener('click', () => {
-  if (viewMode || field.disabled || transitioning || deleting) return;
+  if (viewMode || embedded || field.disabled || transitioning || deleting) return;
   if (!db || active.revision < 1) {
     void explainNoComparison(!db
       ? 'Browser storage is unavailable, so there is no saved copy to open. Copy or export your text instead. Nothing was changed.'
