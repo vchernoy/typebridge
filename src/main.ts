@@ -2883,7 +2883,11 @@ async function initializeDrafts(): Promise<void> {
       ? pending!
       : listed
         ?? (openFresh
-          ? { ...newDraft(), ...(selected && isDocumentId(selected) ? { id: selected } : {}), revision: 0 }
+          ? (() => {
+              // Distinct Untitled defaults across host windows (#175 step 8).
+              const fresh = allocateNewDraft();
+              return selected && isDocumentId(selected) ? { ...fresh, id: selected } : fresh;
+            })()
           : drafts[0])
         ?? active;
     // First acquirer among cooperating windows edits; the others open this document read-only.
@@ -3809,8 +3813,12 @@ if (embedded) {
       start: number;
       end: number;
     }) => { value: string; start: number; end: number } | null;
-    /** Host title IME compositionend — records one undoable edit in the title Editor. */
-    __typebridgeTitleCommit?: (value: string) => { value: string; start: number; end: number } | null;
+    /** Host title IME/delete commit — records one undoable edit in the title Editor. */
+    __typebridgeTitleCommit?: (
+      value: string,
+      start?: number,
+      end?: number,
+    ) => { value: string; start: number; end: number } | null;
     __typebridgeToggleTransliteration?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
@@ -3844,22 +3852,20 @@ if (embedded) {
     enabled.checked = !enabled.checked;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));
   };
-  hooks.__typebridgeTitleCommit = value => {
+  hooks.__typebridgeTitleCommit = (value, start, end) => {
     if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
     const next = value.slice(0, 150);
     if (draftTitle.value !== next) {
       draftTitle.value = next;
-      // Dispatch input so titleEditor records a single undoable composition.
+      // Dispatch input so titleEditor records a single undoable edit.
       draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
     }
+    const caret = Math.max(0, Math.min(start ?? next.length, next.length));
+    const caretEnd = Math.max(caret, Math.min(end ?? caret, next.length));
     syncTitleTooltip();
     rememberActive();
     scheduleSave(true);
-    return {
-      value: draftTitle.value,
-      start: draftTitle.selectionStart ?? draftTitle.value.length,
-      end: draftTitle.selectionEnd ?? draftTitle.value.length,
-    };
+    return { value: draftTitle.value, start: caret, end: caretEnd };
   };
   hooks.__typebridgeTitleEdit = payload => {
     if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
@@ -3881,7 +3887,10 @@ if (embedded) {
         const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
         draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
         draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
-      } else if (payload.inputType === 'insertFromPaste' && payload.data) {
+      } else if (
+        (payload.inputType === 'insertFromPaste' || payload.inputType === 'insertFromDrop')
+        && payload.data
+      ) {
         const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
         draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
         draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));

@@ -348,7 +348,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     type TitleHooks = Window & {
       __typebridgeGetTitle?: () => string;
       __typebridgeSetTitle?: (value: string) => void;
-      __typebridgeTitleCommit?: (value: string) => { value: string; start: number; end: number } | null;
+      __typebridgeTitleCommit?: (
+        value: string,
+        start?: number,
+        end?: number,
+      ) => { value: string; start: number; end: number } | null;
       __typebridgeTitleEdit?: (payload: {
         inputType: string;
         data: string | null;
@@ -375,7 +379,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       hostTitleComposing = false;
       if (title.readOnly) return;
       try {
-        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(title.value);
+        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(
+          title.value,
+          title.selectionStart ?? title.value.length,
+          title.selectionEnd ?? title.value.length,
+        );
         if (result) applyHostTitleResult(result);
         else applyChromeMeta(title.value);
       } catch { applyChromeMeta(title.value); }
@@ -459,11 +467,17 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         applyChromeMeta(title.value);
         return;
       }
-      // Deletes, fill(), and other non-intercepted edits: write through as a whole string.
+      // Deletes, fill(), and other non-intercepted edits: commit through the title
+      // Editor so undo history stays in sync (setTitle alone skips Editor deltas).
       if (title.value.length > 150) title.value = title.value.slice(0, 150);
       applyChromeMeta(title.value);
       try {
-        (frame.contentWindow as TitleHooks | null)?.__typebridgeSetTitle?.(title.value);
+        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(
+          title.value,
+          title.selectionStart ?? title.value.length,
+          title.selectionEnd ?? title.value.length,
+        );
+        if (result) applyHostTitleResult(result);
       } catch { /* Frame mid-navigation. */ }
     });
     title.addEventListener('blur', () => {
