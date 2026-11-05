@@ -1404,12 +1404,14 @@ body.host-stacked .host-window-resize-nw {
 }
 body.host-stacked .host-window-resize-s {
   bottom: 0;
-  height: 14px;
+  height: 24px;
   touch-action: none;
 }
 body.host-stacked .host-window-resize-se,
 body.host-stacked .host-window-resize-sw {
   bottom: 0;
+  width: 24px;
+  height: 24px;
   cursor: ns-resize;
   touch-action: none;
 }

@@ -53,6 +53,8 @@ test('Settings Layout Stacked forces a scrollable full-width phone stack', async
   await root.evaluate(el => { el.scrollTop = 0; });
   const handle = page.locator('.host-window[data-window-id="main"] .host-window-resize-s');
   await handle.scrollIntoViewIfNeeded();
+  expect(await handle.evaluate(el => getComputedStyle(el).touchAction)).toBe('none');
+  expect(await handle.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(24);
   const box = await handle.boundingBox();
   expect(box).toBeTruthy();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
