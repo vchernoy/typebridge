@@ -1173,9 +1173,25 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   boot();
   refreshMode();
-  // Mark the initial active shell (is-active + aria-current) before Focus restore.
-  if (layouts.some(win => win.id === activeId)) setActive(activeId);
-  else if (layouts[0]) setActive(layouts[0].id);
+  // Mark the initial active shell without bringToFront/persist — restoring a free-layout
+  // session must keep the saved z-order (Codex P1: activating `main` hid a front `w2`).
+  {
+    const topmost = layouts.reduce<HostWindowLayout | undefined>(
+      (best, win) => (!best || win.z > best.z ? win : best),
+      undefined,
+    );
+    const bootActive = (pendingFocusId && layouts.some(win => win.id === pendingFocusId))
+      ? pendingFocusId
+      : (topmost?.id ?? layouts[0]?.id);
+    if (bootActive) {
+      activeId = bootActive;
+      for (const [wid, shell] of shells) {
+        shell.classList.toggle('is-active', wid === bootActive);
+        if (wid === bootActive) shell.setAttribute('aria-current', 'true');
+        else shell.removeAttribute('aria-current');
+      }
+    }
+  }
   if (pendingFocusId && layouts.some(win => win.id === pendingFocusId)) {
     api.setHostFocusMode(true, pendingFocusId);
   }

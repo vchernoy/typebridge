@@ -125,6 +125,42 @@ test('F6 in host Focus maximizes the next window', async ({ page }) => {
   expect(focused!.h).toBeGreaterThan(500);
 });
 
+test('reload keeps the front window active without rewriting z-order', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 1);
+  // Overlap so z-order matters (tile would leave both visible regardless of z).
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await second.locator('#editor').click();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
+
+  const before = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; z: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  const zMainBefore = before.find(win => win.id === 'main')?.z ?? 0;
+  const zW2Before = before.find(win => win.id === 'w2')?.z ?? 0;
+  expect(zW2Before).toBeGreaterThan(zMainBefore);
+
+  await page.reload();
+  await expect(page.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor'))
+    .toBeEnabled({ timeout: 30_000 });
+
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveAttribute('aria-current', 'true');
+  await expect(page.locator('.host-window[data-window-id="main"]')).not.toHaveAttribute('aria-current');
+
+  const after = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; z: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  expect(after.find(win => win.id === 'w2')?.z).toBe(zW2Before);
+  expect(after.find(win => win.id === 'main')?.z).toBe(zMainBefore);
+});
+
 test('host window shells are named regions with the document title', async ({ page }) => {
   const frame = await openHost(page, 'free');
   const shell = page.locator('.host-window[data-window-id="main"]');
