@@ -3,7 +3,10 @@ import { SHORTCUTS } from '../editor/keyboard-shortcuts';
  * Editor layout: resize control with separately saved Normal and Focus sizes, and Focus mode
  * with its Escape and Cmd/Ctrl+Shift+Enter keys (#67, #83).
  */
-export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
+export function setupLayout(
+  field: HTMLTextAreaElement,
+  options?: { getFocusTarget?: () => HTMLTextAreaElement },
+): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
   const FOCUS_KEY = 'typebridge.focusMode.v1';
   const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
   const editorSizeWarning = document.createElement('span');
@@ -143,7 +146,8 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     document.body.classList.toggle('focus-mode', enabled);
     focusButton.setAttribute('aria-pressed', String(enabled));
     exitFocusButton.hidden = !enabled;
-    field.focus({ preventScroll: true });
+    // Prefer the active pane surface so Focus entry/exit does not silently retarget commands.
+    (options?.getFocusTarget?.() ?? field).focus({ preventScroll: true });
   }
   function setFocusMode(enabled: boolean): void {
     applyFocusMode(enabled);

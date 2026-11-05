@@ -75,7 +75,9 @@ const workspace = createSinglePaneWorkspace({
 
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
-const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field);
+const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field, {
+  getFocusTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionField : field,
+});
 setupSettings();
 setupDocumentMenu();
 setupMoreMenu();
@@ -342,18 +344,21 @@ field.addEventListener('keydown', event => {
   event.preventDefault();
   editor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
 });
+function updateCaretPosition(): void {
+  const surface = workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
+  const { line, column } = lineColumnAtOffset(surface.value, surface.selectionStart);
+  caretPosition.textContent = `Ln ${line}, Col ${column}`;
+}
 field.addEventListener('focus', () => {
   workspace.setActivePane(PRIMARY_PANE_ID);
   syncMutationControls();
+  updateCaretPosition();
 });
 companionField.addEventListener('focus', () => {
   workspace.setActivePane(SECOND_PANE_ID);
   syncMutationControls();
+  updateCaretPosition();
 });
-function updateCaretPosition(): void {
-  const { line, column } = lineColumnAtOffset(field.value, field.selectionStart);
-  caretPosition.textContent = `Ln ${line}, Col ${column}`;
-}
 // Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
 // "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
 // outdent moves focus as usual.
@@ -382,6 +387,9 @@ field.addEventListener('historychange', updateStats);
 field.addEventListener('keyup', updateCaretPosition);
 field.addEventListener('click', updateCaretPosition);
 field.addEventListener('select', updateCaretPosition);
+companionField.addEventListener('keyup', updateCaretPosition);
+companionField.addEventListener('click', updateCaretPosition);
+companionField.addEventListener('select', updateCaretPosition);
 const typingSettings = setupTransliteration(enabled, editor, { syncSearchEditors: () => syncSearchEditors(), preferenceSaved });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); announceAction('Copied'); }
@@ -464,7 +472,7 @@ function goToLine(): void {
   surface.focus({ preventScroll: true });
   surface.setSelectionRange(target.offset, target.offset);
   surfaceEditor.revealSelection();
-  if (surface === field) updateCaretPosition();
+  updateCaretPosition();
   gotoStatus.textContent = target.line === parsed.line && (parsed.column === undefined || target.column === parsed.column)
     ? `Line ${target.line}, column ${target.column}`
     : `Clamped to line ${target.line}, column ${target.column}`;

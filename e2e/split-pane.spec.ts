@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, setAutosave } from './settings-helpers';
+import { documentAction, openGoto, setAutosave } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 
 async function openSplit(page: Page): Promise<void> {
@@ -133,6 +133,50 @@ test('opening Find from Focus mode keeps the companion as the active pane', asyn
   await expect(page.locator('#editor-b')).toBeFocused();
   await expect(page.locator('#editor-b')).toHaveJSProperty('selectionStart', 11);
   await expect(page.locator('#editor-b')).toHaveJSProperty('selectionEnd', 17);
+});
+
+test('entering Focus mode from the companion keeps pane B active', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('line one\nline two');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await expect(page.locator('#convert-cyrillic')).toBeDisabled();
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await expect(page.locator('#editor-b')).toBeFocused();
+  await expect(page.locator('#convert-cyrillic')).toBeDisabled();
+});
+
+test('Go to line and caret status follow the companion pane', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('alpha\nbeta\ngamma');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#editor').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.focus();
+    node.setSelectionRange(0, 0);
+  });
+  await expect(page.locator('#caret-position')).toHaveText('Ln 1, Col 1');
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    node.focus();
+    node.setSelectionRange(6, 6);
+  });
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await expect(page.locator('#caret-position')).toHaveText('Ln 2, Col 1');
+  await openGoto(page);
+  await page.locator('#goto-line').fill('3:2');
+  await page.getByRole('button', { name: 'Go', exact: true }).click();
+  await expect(page.locator('#editor-b')).toBeFocused();
+  await expect(page.locator('#editor-b')).toHaveJSProperty('selectionStart', 12);
+  await expect(page.locator('#caret-position')).toHaveText('Ln 3, Col 2');
+  await expect(page.locator('#editor')).toHaveJSProperty('selectionStart', 0);
 });
 
 test('companion focus refuses Convert/Replace on the primary selection', async ({ page }) => {
