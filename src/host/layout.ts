@@ -220,6 +220,51 @@ export function tileStacked(windows: HostWindowLayout[], viewport: ViewportSize)
 }
 
 /**
+ * Phone stack: full-width columns. When `heights` is provided (same length), use them
+ * (clamped) and give leftover space to the last window; otherwise split equally.
+ */
+export function stackPhoneWindows(
+  windows: HostWindowLayout[],
+  viewport: ViewportSize,
+  heights?: number[],
+): HostWindowLayout[] {
+  if (windows.length === 0) return [];
+  const count = windows.length;
+  if (count * MIN_WINDOW_HEIGHT > viewport.height) return tileGrid(windows, viewport);
+
+  let nextHeights: number[];
+  if (heights && heights.length === count) {
+    nextHeights = heights.map(h => Math.max(MIN_WINDOW_HEIGHT, Math.floor(h)));
+    const used = nextHeights.reduce((sum, h) => sum + h, 0);
+    if (used > viewport.height) {
+      // Shrink from the bottom until we fit, never below the minimum.
+      let overflow = used - viewport.height;
+      for (let i = count - 1; i >= 0 && overflow > 0; i--) {
+        const reducible = nextHeights[i] - MIN_WINDOW_HEIGHT;
+        const take = Math.min(reducible, overflow);
+        nextHeights[i] -= take;
+        overflow -= take;
+      }
+    } else if (used < viewport.height) {
+      nextHeights[count - 1] += viewport.height - used;
+    }
+  } else {
+    const h = Math.max(MIN_WINDOW_HEIGHT, Math.floor(viewport.height / count));
+    nextHeights = windows.map((_, index) => (
+      index === count - 1 ? viewport.height - h * (count - 1) : h
+    ));
+  }
+
+  let y = 0;
+  return windows.map((win, index) => {
+    const h = nextHeights[index];
+    const rect = clampRect({ x: 0, y, w: viewport.width, h }, viewport);
+    y += rect.h;
+    return { ...win, ...rect };
+  });
+}
+
+/**
  * Snap a free-moving window to halves/quarters when close to edges or center.
  * Returns the same rect when no snap applies.
  */

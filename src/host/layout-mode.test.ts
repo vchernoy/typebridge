@@ -1,0 +1,63 @@
+import { describe, expect, it } from 'vitest';
+import {
+  detectLayoutCapabilities,
+  effectiveLayoutMode,
+  layoutModePreference,
+  prefersStackedCapabilities,
+  readLayoutModePreference,
+  writeLayoutModePreference,
+  HOST_LAYOUT_MODE_KEY,
+} from './layout-mode';
+
+describe('layout mode preference', () => {
+  it('defaults unknown values to auto', () => {
+    expect(layoutModePreference(null)).toBe('auto');
+    expect(layoutModePreference('weird')).toBe('auto');
+    expect(layoutModePreference('stacked')).toBe('stacked');
+  });
+
+  it('reads and writes preference without storing auto', () => {
+    const storage = new Map<string, string>() as unknown as Storage;
+    Object.assign(storage, {
+      getItem: (key: string) => (storage as unknown as Map<string, string>).get(key) ?? null,
+      setItem: (key: string, value: string) => { (storage as unknown as Map<string, string>).set(key, value); },
+      removeItem: (key: string) => { (storage as unknown as Map<string, string>).delete(key); },
+    });
+    expect(readLayoutModePreference(storage)).toBe('auto');
+    expect(writeLayoutModePreference('free', storage)).toBe(true);
+    expect(storage.getItem(HOST_LAYOUT_MODE_KEY)).toBe('free');
+    expect(writeLayoutModePreference('auto', storage)).toBe(true);
+    expect(storage.getItem(HOST_LAYOUT_MODE_KEY)).toBeNull();
+  });
+});
+
+describe('effective layout mode', () => {
+  it('honours explicit free and stacked', () => {
+    const phone = { narrowViewport: true, finePointer: false, hover: false };
+    const desktop = { narrowViewport: false, finePointer: true, hover: true };
+    expect(effectiveLayoutMode('free', phone)).toBe('free');
+    expect(effectiveLayoutMode('stacked', desktop)).toBe('stacked');
+  });
+
+  it('Auto stacks on narrow or coarse/no-hover pointers', () => {
+    expect(prefersStackedCapabilities({ narrowViewport: true, finePointer: true, hover: true })).toBe(true);
+    expect(prefersStackedCapabilities({ narrowViewport: false, finePointer: false, hover: true })).toBe(true);
+    expect(prefersStackedCapabilities({ narrowViewport: false, finePointer: true, hover: false })).toBe(true);
+    expect(prefersStackedCapabilities({ narrowViewport: false, finePointer: true, hover: true })).toBe(false);
+    expect(effectiveLayoutMode('auto', { narrowViewport: false, finePointer: true, hover: true })).toBe('free');
+    expect(effectiveLayoutMode('auto', { narrowViewport: true, finePointer: true, hover: true })).toBe('stacked');
+  });
+
+  it('detectLayoutCapabilities uses matchMedia queries', () => {
+    const seen: string[] = [];
+    const caps = detectLayoutCapabilities(query => {
+      seen.push(query);
+      return { matches: query.includes('max-width') };
+    });
+    expect(caps.narrowViewport).toBe(true);
+    expect(caps.finePointer).toBe(false);
+    expect(caps.hover).toBe(false);
+    expect(seen.some(q => q.includes('any-pointer'))).toBe(true);
+    expect(seen.some(q => q.includes('hover'))).toBe(true);
+  });
+});

@@ -11,6 +11,7 @@ import {
   readHostLayout,
   restoreForMove,
   snapRect,
+  stackPhoneWindows,
   tileSideBySide,
   tileStacked,
   windowsOverlap,
@@ -108,6 +109,17 @@ describe('host layout helpers', () => {
     const centred = restoreForMove(full, viewport, { x: 400, y: 300 });
     expect(centred.x + centred.w / 2).toBeCloseTo(400, 0);
     expect(centred.y + centred.h / 2).toBeCloseTo(300, 0);
+  });
+
+  it('stacks phone windows full-width and preserves requested heights when they fit', () => {
+    const windows = [
+      { id: 'main', x: 10, y: 10, w: 100, h: 100, z: 1 },
+      { id: 'w2', x: 20, y: 20, w: 100, h: 100, z: 2 },
+    ];
+    const stacked = stackPhoneWindows(windows, viewport, [300, 500]);
+    expect(stacked[0]).toMatchObject({ x: 0, y: 0, w: 1000, h: 300 });
+    expect(stacked[1]).toMatchObject({ x: 0, y: 300, w: 1000, h: 500 });
+    expect(windowsOverlap(stacked)).toBe(false);
   });
 
   it('brings a window to the front and mints ids up to the cap', () => {

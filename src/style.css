@@ -1370,6 +1370,32 @@ body.host-page {
   height: 12px;
   cursor: nesw-resize;
 }
+/* #175 step 6: phone stack — height grip only; Focus maximizes the active window. */
+body.host-stacked .host-window-move {
+  cursor: default;
+}
+body.host-stacked .host-window-resize-n,
+body.host-stacked .host-window-resize-e,
+body.host-stacked .host-window-resize-w,
+body.host-stacked .host-window-resize-ne,
+body.host-stacked .host-window-resize-nw {
+  display: none;
+}
+body.host-stacked .host-window-resize-se,
+body.host-stacked .host-window-resize-sw {
+  cursor: ns-resize;
+}
+body.host-focus-mode .host-toolbar [data-host-action="tile-side"],
+body.host-focus-mode .host-toolbar [data-host-action="tile-stack"],
+body.host-focus-mode .host-toolbar [data-host-action="new-window"] {
+  display: none;
+}
+body.host-focus-mode .host-window-resize {
+  display: none;
+}
+body.host-focus-mode .host-window.is-host-focused {
+  border-color: var(--accent);
+}
 body.host-page .update-notice {
   position: relative;
 }

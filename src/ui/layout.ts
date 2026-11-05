@@ -9,6 +9,8 @@ export function setupLayout(
     getFocusTarget?: () => HTMLTextAreaElement;
     /** Surfaces where Escape enters Focus from Normal mode (defaults to the primary field). */
     focusToggleSurfaces?: () => Iterable<HTMLTextAreaElement>;
+    /** #175 step 6: host maximizes the active window when Focus mode toggles in an embed. */
+    onFocusModeChange?: (enabled: boolean) => void;
   },
 ): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
   const FOCUS_KEY = 'typebridge.focusMode.v1';
@@ -150,6 +152,7 @@ export function setupLayout(
     document.body.classList.toggle('focus-mode', enabled);
     focusButton.setAttribute('aria-pressed', String(enabled));
     exitFocusButton.hidden = !enabled;
+    options?.onFocusModeChange?.(enabled);
     // Prefer the active pane surface so Focus entry/exit does not silently retarget commands.
     (options?.getFocusTarget?.() ?? field).focus({ preventScroll: true });
   }
