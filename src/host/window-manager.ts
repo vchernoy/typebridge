@@ -300,11 +300,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const onPointerUp = (): void => {
     if (!drag) return;
     const id = drag.id;
+    const wasMove = drag.type === 'move';
     const current = layouts.find(w => w.id === id);
     drag = undefined;
     if (!current) return;
-    const snapped = snapRect(current, viewportOf(deps.root));
-    updateLayout(id, snapped);
+    // Snap only after move — resizing a full-bleed window must keep the dragged size,
+    // not jump to a half/quarter because edges still touch the viewport.
+    if (wasMove) updateLayout(id, snapRect(current, viewportOf(deps.root)));
     persist();
   };
 

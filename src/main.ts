@@ -1016,8 +1016,10 @@ function journalEditSecondary(): void {
 function sameContent(a: StoredDraft, b: StoredDraft): boolean {
   return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
 }
+/** Set when the user confirms discarding this window so unload must not recreate backups. */
+let suppressPendingBackup = false;
 function savePending(): void {
-  if (viewMode || !workspace.dirty() || !autosave.checked || deleting) return;
+  if (suppressPendingBackup || viewMode || !workspace.dirty() || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
   catch {
     // Keep any conflict notice and the current risk; only replace the primary.
@@ -1026,7 +1028,7 @@ function savePending(): void {
   }
 }
 function savePendingSecondary(): void {
-  if (viewMode || !secondary?.dirty || !autosave.checked) return;
+  if (suppressPendingBackup || viewMode || !secondary?.dirty || !autosave.checked) return;
   try { sessionStorage.setItem(PENDING_KEY_B, JSON.stringify(snapshotBoundSession(secondary, UNTITLED_TITLE))); }
   catch {
     setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure');
@@ -3373,6 +3375,7 @@ importFile.addEventListener('change', async () => {
 });
 
 if (!viewMode) window.addEventListener('pagehide', () => {
+  if (suppressPendingBackup) return;
   savePending();
   flushSecondaryOnUnload();
   clearTimeout(saveTimer);
@@ -3393,6 +3396,7 @@ function updateReloadReturnFocus(): HTMLElement {
   return field;
 }
 function clearPendingBackups(): void {
+  suppressPendingBackup = true;
   try { sessionStorage.removeItem(PENDING_KEY); } catch { /* Optional backup. */ }
   try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
 }
@@ -3479,6 +3483,7 @@ function reloadAfterUpdate(): void {
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
 if (!viewMode) window.addEventListener('beforeunload', event => {
+  if (suppressPendingBackup) return;
   if (workspace.dirty() || secondary?.dirty) {
     savePending();
     flushSecondaryOnUnload();
@@ -3488,6 +3493,7 @@ if (!viewMode) window.addEventListener('beforeunload', event => {
   }
 });
 if (!viewMode) document.addEventListener('visibilitychange', () => {
+  if (suppressPendingBackup) return;
   if (document.visibilityState === 'hidden') {
     clearTimeout(saveTimer);
     void persist();
