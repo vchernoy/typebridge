@@ -532,6 +532,9 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
     matchSurfaces: [field, companionField],
   },
 );
+// Find totals follow getFindTarget; refresh when the active pane changes.
+field.addEventListener('focus', showMatchCount);
+companionField.addEventListener('focus', showMatchCount);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
 // Find and Go to line open on demand (#123): from their toolbar buttons or with
@@ -1192,6 +1195,7 @@ async function openCompanionDocument(id: string): Promise<void> {
       } catch {
         void access.ownership?.release();
         announceAction('Could not open that document in the other pane.');
+        renderPaneBDrafts();
         return;
       }
       if (generation !== companionOpenGeneration || !workspace.splitOpen() || active.id === id) {
@@ -1206,6 +1210,7 @@ async function openCompanionDocument(id: string): Promise<void> {
       if (!fresh) {
         void access.ownership?.release();
         announceAction('Could not open that document in the other pane.');
+        renderPaneBDrafts();
         return;
       }
       target = fresh;
@@ -1650,6 +1655,7 @@ draftTitleB.addEventListener('focus', () => {
   workspace.setActivePane(SECOND_PANE_ID);
   syncMutationControls();
   updateStats();
+  showMatchCount();
 });
 draftTitleB.addEventListener('input', () => {
   if (dualDocumentSplit()) scheduleSaveSecondary(true);
@@ -1658,6 +1664,7 @@ draftTitle.addEventListener('focus', () => {
   workspace.setActivePane(PRIMARY_PANE_ID);
   syncMutationControls();
   updateStats();
+  showMatchCount();
 });
 function syncTitleTooltip(): void {
   // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
@@ -1706,7 +1713,10 @@ autosave.addEventListener('change', async () => {
   }
   else {
     clearTimeout(saveTimer);
-    if (secondary) clearTimeout(secondary.saveTimer);
+    if (secondary) {
+      clearTimeout(secondary.saveTimer);
+      updateSaveIndicatorB();
+    }
     // Bind deletion to this document before any await — defense if a switch somehow races the gate.
     const startedId = active.id;
     const startedOwnership = ownership;
@@ -1719,6 +1729,7 @@ autosave.addEventListener('change', async () => {
     const conflictCopy = !!(inFlight?.conflict && ownership && ownership !== startedOwnership && active.id !== startedId);
     // Navigated away during the wait: do not offer to delete a different document's saved copy.
     if (!stayed && !conflictCopy) {
+      updateSaveIndicatorB();
       announce(AUTOSAVE_OFF);
       return;
     }
@@ -1755,11 +1766,13 @@ autosave.addEventListener('change', async () => {
         return;
       }
     }
+    updateSaveIndicatorB();
     announce(AUTOSAVE_OFF);
   }
   } finally {
     endAutosaveToggleGate();
     autosaveToggleActive = false;
+    updateSaveIndicatorB();
     // Match applyEditAccess / readOnlyNow — a concurrent switch may have set transferFrozen.
     autosave.disabled = editBlock !== '' || transferFrozen;
     // Re-focus after re-enabling: the dialog cannot restore while this control
