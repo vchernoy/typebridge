@@ -169,6 +169,16 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   /** Text the selection offsets were measured against (reader view before install). */
   let pendingReaderText = '';
   let buffer: BufferedInsert[] = [];
+  /**
+   * Keys typed before an Edit here offer must survive `clearPending` so a later
+   * steal takeover can replay them.
+   */
+  let heldForEditHere: {
+    documentId: string;
+    buffer: BufferedInsert[];
+    selection: { start: number; end: number };
+    readerText: string;
+  } | undefined;
   let yieldTimer: ReturnType<typeof setTimeout> | undefined;
   /** Owner-side parked yield awaiting requester confirmation. */
   let parkedRequestId = '';
@@ -187,6 +197,19 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     buffer = [];
     clearTimeout(yieldTimer);
     yieldTimer = undefined;
+  };
+
+  const offerEditHere = (reason: HandoffRefuseReason): void => {
+    if (pendingDocumentId) {
+      heldForEditHere = {
+        documentId: pendingDocumentId,
+        buffer: buffer.slice(),
+        selection: { start: pendingSelection.start, end: pendingSelection.end },
+        readerText: pendingReaderText,
+      };
+    }
+    clearPending();
+    deps.showEditHere(reason);
   };
 
   const clearParked = (): void => {
@@ -314,12 +337,23 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     }
 
     const documentId = deps.getDocumentId();
+    const stashed = heldForEditHere;
+    heldForEditHere = undefined;
     pending = true;
     pendingDocumentId = documentId;
     pendingSelection = readHandoffSelection(deps.field);
     pendingReaderText = deps.field.value;
     pendingRequestId = crypto.randomUUID();
-    buffer = options.initialBuffer ? options.initialBuffer.slice() : [];
+    // Carry keys from a prior Edit here offer; steal restores that selection too.
+    if (stashed && stashed.documentId === documentId) {
+      buffer = stashed.buffer.concat(options.initialBuffer ?? []);
+      if (options.steal) {
+        pendingSelection = stashed.selection;
+        pendingReaderText = stashed.readerText;
+      }
+    } else {
+      buffer = options.initialBuffer ? options.initialBuffer.slice() : [];
+    }
     deps.hideEditHere?.();
 
     const request = {
@@ -345,10 +379,10 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       return;
     }
     if (local?.status === 'refused') {
-      clearPending();
       if (local.reason === 'cross-tab-private' || local.reason === 'private') {
-        deps.showEditHere(local.reason);
+        offerEditHere(local.reason);
       } else {
+        clearPending();
         deps.announce(handoffRefuseGuidance(local.reason));
       }
       return;
@@ -371,9 +405,8 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
         clearPending();
         return;
       }
-      clearPending();
       // Never auto-steal — ask the user; unsaved text in an old/suspended tab must not vanish silently.
-      deps.showEditHere('unresponsive');
+      offerEditHere('unresponsive');
     }, HANDOFF_YIELD_TIMEOUT_MS);
   };
 
@@ -487,14 +520,14 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       return;
     }
     if (message.type === 'handoff-refused' && message.toInstanceId === deps.instanceId) {
-      clearPending();
       if (
         message.reason === 'cross-tab-private'
         || message.reason === 'private'
         || message.reason === 'unresponsive'
       ) {
-        deps.showEditHere(message.reason);
+        offerEditHere(message.reason);
       } else {
+        clearPending();
         deps.announce(handoffRefuseGuidance(message.reason));
       }
     }
@@ -582,6 +615,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     pending: () => pending,
     requestHandoff: (options) => { void startRequest(options); },
     cancel: () => {
+      heldForEditHere = undefined;
       // Requester: abort in-flight takeover and tell a parked peer to recover.
       if (pending) {
         const requestId = pendingRequestId;
@@ -606,6 +640,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     },
     dispose: () => {
       disposed = true;
+      heldForEditHere = undefined;
       clearPending();
       if (parkedRequestId) {
         const documentId = parkedDocumentId;
