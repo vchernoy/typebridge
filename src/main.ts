@@ -87,14 +87,13 @@ try {
         remove = true;
       } else {
         const draft = value as Partial<StoredDraft>;
-        // Match the old parsePendingDraft rules: empty text is still a valid
-        // unsaved snapshot (cleared body, title-only edit, undo history).
         const usable = typeof draft.id === 'string' && !!draft.id
           && typeof draft.title === 'string'
           && typeof draft.text === 'string'
           && typeof draft.updatedAt === 'number' && Number.isFinite(draft.updatedAt)
           && Number.isSafeInteger(draft.revision) && (draft.revision ?? -1) >= 0;
-        if (!usable) {
+        if (!usable || draft.text!.length === 0) {
+          // Empty or unparseable leftovers are safe to drop.
           remove = true;
         } else {
           writeRecovery(localStorage, {
