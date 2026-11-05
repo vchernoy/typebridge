@@ -313,7 +313,8 @@ Status: This saved document is no longer available.
 | **S2** (partial #166) | Session/pane separation, single-pane parity | Vitest workspace; existing e2e still green; no split UI yet. Per-document persist/recovery extraction remains incomplete — S4 extends the boundary carefully rather than claiming S2 done. |
 | **S3** (done #167) | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
 | **S4** (done #169) | Two different editable documents | Independent sessions, locks, Undo, switch/close; dual unload/pending/reconcile |
-| **S5** (this PR; in progress) | Local Edit in this pane + lifecycle | Transfer, IME/transition guards, delayed commands |
+| **S5a** (done #170) | Local Edit in this pane | Transfer, IME/transition/open-busy guards, close parking |
+| **S5b** (this PR; in progress) | Lifecycle / delayed-command hardening | Generation-guarded delayed commands; versionchange B parity |
 | **S6** | Verification, docs, evidence | Full browser matrix; record real-device/AT limits |
 
 Playwright: Chromium, Firefox, WebKit. Multi-page tests remain for W2–W4 cross-window behavior; S3–S5 add in-tab multi-pane coverage. Real devices / IME / AT = manual evidence only.
@@ -431,15 +432,23 @@ Shipped in #169: companion document picker can open a **different** saved docume
 - **Stacked layout:** narrow End clamps to 65% primary share so companion chrome + textarea stay usable (≥40px field, 44px touch reset).
 - **Not finished in S4:** full extraction of primary persist out of `main.ts`, Edit in this pane (S5), CommandGeneration on every delayed toolbar command, New/Import targeting pane B. P2 pane-B versionchange in-memory fallback remains tracked on #159.
 
-## S5 implementation notes
+## S5a implementation notes
 
-In progress in this PR: same-document **Edit in this pane** moves the editable role between local panes sharing one session.
+Shipped in #170: same-document **Edit in this pane** moves the editable role between local panes sharing one session.
 
-- **Transfer:** `#edit-in-pane-a` / `#edit-in-pane-b` call `localPaneTransferBlock` then move Editor history (`exportHistory` → `restoreHistory`), flip `setReadOnly`, update `workspace.setEditablePaneId` (bumps `paneGeneration` only — persist stays current), and reverse live mirror direction. Selections and scroll are preserved on both surfaces.
+- **Transfer:** `#edit-in-pane-a` / `#edit-in-pane-b` call `localPaneTransferBlock` then move Editor history (`exportHistory` → `restoreHistory`), flip `setReadOnly`, update `workspace.setEditablePaneId` (bumps `paneGeneration` only — persist stays current), and reverse live mirror direction. Selections and scroll are preserved on both surfaces. History restore uses `suppressEditTracking` so a clean transfer does not dirty/save.
 - **Chrome:** RO pane shows **Live view · Read-only** (`#companion-badge` or `#primary-live-badge`); dual-document mode hides transfer controls.
-- **Guards:** IME (`Editor.composing`), `transitioning`, external ownership, and already-editable refuse with status text. Closing the split while B is editable runs `paneCloseBlock` then transfers history back to A before teardown.
-- **Delayed commands:** Clear captures `CommandGeneration` + content revision and revalidates after confirm. Transfer during in-flight `persist` does not bump `sessionGeneration`; snapshot follows the editable surface.
-- **Not finished in S5:** full primary DocumentSession extraction; CommandGeneration on every remaining delayed toolbar path; New/Import targeting pane B.
+- **Guards:** IME (`Editor.composing`), `transitioning` / `companionOpenBusy`, external ownership, and already-editable refuse with status text. Closing the split while B is editable runs `paneCloseBlock` then `parkHistory` transfer back to A (allowed even after ownership loss). Failed parking aborts close / companion open.
+- **Delayed Clear:** captures `CommandGeneration` + content revision and revalidates after confirm.
+- **Not claimed complete in #170:** full primary DocumentSession extraction; remaining delayed-command coverage; New/Import targeting pane B; production evidence (S6).
+
+## S5b implementation notes
+
+In progress in this PR: finish lifecycle hardening called out after S5a.
+
+- **Versionchange parity:** pane B releases ownership like primary but stays editable in memory for copy/export (S4 P2).
+- **Switch discard:** revalidates `sessionPersistStillCurrent` + content revision after the discard dialog so a mid-dialog document-identity change cannot silently drop the wrong session.
+- **Still deferred:** full primary DocumentSession extraction; New/Import targeting pane B; S6 device/AT evidence.
 
 ## Implementation notes for later PRs
 

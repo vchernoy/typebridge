@@ -20,6 +20,7 @@ import {
   localPaneTransferBlock,
   paneCloseBlock,
   resolveSessionForDocument,
+  sessionPersistStillCurrent,
   type CommandGeneration,
 } from './view/session';
 import {
@@ -2183,11 +2184,25 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
         }
       }
       // Text this window cannot save (Autosave off, or another window owns the document) needs consent to drop.
-      if (workspace.dirty() && (!autosave.checked || editBlock) && !await askConfirmChoice({ title: 'Discard unsaved changes?', message: editBlock
-        ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them.'
-        : 'Copy or export unsaved changes first to keep them.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
-        announceAbortedFlushConflict();
-        return { opened: false, conflict: flushConflict };
+      if (workspace.dirty() && (!autosave.checked || editBlock)) {
+        const persistToken = workspace.capturePersistGeneration();
+        const contentAtPrompt = workspace.contentRevision();
+        if (!await askConfirmChoice({ title: 'Discard unsaved changes?', message: editBlock
+          ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them.'
+          : 'Copy or export unsaved changes first to keep them.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
+          announceAbortedFlushConflict();
+          return { opened: false, conflict: flushConflict };
+        }
+        // Edit-in-this-pane must not cancel discard (persist token ignores paneGeneration),
+        // but a document-identity change during the dialog must.
+        if (!sessionPersistStillCurrent(persistToken, {
+          sessionId: workspace.sessionId,
+          sessionGeneration: workspace.sessionGeneration(),
+        }) || workspace.contentRevision() !== contentAtPrompt) {
+          announceAction('Discard cancelled — the document changed while the dialog was open.');
+          announceAbortedFlushConflict();
+          return { opened: false, conflict: flushConflict };
+        }
       }
       const version = workspace.contentRevision();
       next = id && db ? await getStoredDraft(db, id) : undefined;
@@ -2404,11 +2419,13 @@ function handleDatabaseUpgrade(): void {
     clearTimeout(secondary.saveTimer);
     const secondaryOwnership = secondary.ownership;
     secondary.ownership = undefined;
-    secondary.editBlock = 'error';
+    // Match primary: release ownership but keep the surface editable in memory so the
+    // user can still copy/export unsaved pane-B text after storage dies (#159 S4 P2).
+    secondary.editBlock = '';
     void secondaryOwnership?.release();
-    companionEditor.setReadOnly(true);
-    titleEditorB.setReadOnly(true);
-    updateSaveIndicatorB();
+    // applyEditAccess skips dual-doc companion setReadOnly; clear a prior busy/lost gate.
+    companionEditor.setReadOnly(false);
+    titleEditorB.setReadOnly(false);
   }
   db = undefined;
   storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
@@ -2416,6 +2433,8 @@ function handleDatabaseUpgrade(): void {
   recoveryNotice.textContent = storageProblem;
   // A later upgrade must not erase an earlier conflict-copy notice (#66).
   setRiskStatus('', 'failure');
+  // Refresh B after storageProblem/db are installed so a cancelled timer cannot leave “Saving…”.
+  if (secondary) updateSaveIndicatorB();
   applyEditAccess();
   syncMutationControls();
 }
