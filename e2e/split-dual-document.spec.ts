@@ -282,6 +282,11 @@ test('Find match totals refresh when editing the active companion', async ({ pag
   await page.locator('#editor-b').press('End');
   await page.locator('#editor-b').pressSequentially(' alpha');
   await expect(page.locator('#find-status')).toHaveText('3 matches');
+  // Switching panes refreshes totals for the newly active document.
+  await page.locator('#editor').focus();
+  await expect(page.locator('#find-status')).toHaveText('No matches');
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('#find-status')).toHaveText('3 matches');
 });
 
 test('Copy uses the active pane document', async ({ page }) => {
