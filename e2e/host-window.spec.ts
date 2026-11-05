@@ -71,11 +71,13 @@ test('dragging the title bar moves a full-bleed window', async ({ page }) => {
 
   const box = await handle.boundingBox();
   expect(box).toBeTruthy();
+  // Grip is on the left of the title bar; drag far enough that restore-on-move
+  // centres away from the clamped origin (pointer - halfWidth would otherwise stay ≤ 0).
   const startX = box!.x + box!.width / 2;
   const startY = box!.y + box!.height / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + 50, startY + 40);
+  await page.mouse.move(startX + 360, startY + 120, { steps: 8 });
   await page.mouse.up();
 
   const after = await page.evaluate(() => {

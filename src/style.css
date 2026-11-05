@@ -1299,13 +1299,19 @@ body.host-page {
   background: color-mix(in srgb, var(--accent) 16%, var(--background));
 }
 .host-window-move {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 0 1.5rem;
+  align-self: stretch;
   display: flex;
   align-items: center;
-  padding: 0.15rem 0.35rem;
+  justify-content: center;
   cursor: grab;
   border-radius: 4px;
+  /* Drag grip: three short bars, not a second title string. */
+  background:
+    linear-gradient(currentColor, currentColor) center 35% / 0.7rem 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center 50% / 0.7rem 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center 65% / 0.7rem 2px no-repeat;
+  opacity: 0.55;
 }
 .host-window-move:active {
   cursor: grabbing;
@@ -1313,11 +1319,11 @@ body.host-page {
 .host-window-move:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+  opacity: 1;
 }
 .host-window-title {
   flex: 1 1 auto;
   min-width: 0;
-  width: 100%;
   margin: 0;
   padding: 0.15rem 0.25rem;
   border: 1px solid transparent;

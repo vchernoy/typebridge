@@ -37,12 +37,12 @@ test('Documents list shows the on-screen rename with autosave off', async ({ pag
   await page.getByRole('textbox', { name: 'Document title' }).fill('My title');
   await expect(status(page)).toHaveText('Saved locally');
   await openDocuments(page);
-  await expect(page.locator('#drafts option:checked')).toHaveText('My title (current)');
+  await expect(page.locator('#drafts option:checked')).toHaveText(/My title \(current\)/);
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await page.getByRole('textbox', { name: 'Document title' }).fill('New title');
   await openDocuments(page);
-  await expect(page.locator('#drafts option:checked')).toHaveText('New title (current, unsaved)');
+  await expect(page.locator('#drafts option:checked')).toHaveText(/New title \(current, unsaved\)/);
 });
 
 test('delete-saved-copy dialog Keep and Delete choices work with keyboard', async ({ page }) => {

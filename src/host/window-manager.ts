@@ -178,11 +178,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (move) {
         // Keep the title handle focusable in stacked mode for keyboard height resize.
         move.tabIndex = hostFocus ? -1 : 0;
+        const titleInput = shell.querySelector<HTMLInputElement>('.host-window-title');
+        const label = (titleInput?.value.trim() || titleInput?.title || 'Untitled document');
         move.setAttribute(
           'aria-label',
           mode === 'stacked'
-            ? `Window ${wid} (Ctrl/⌘+Shift+Up/Down to resize height)`
-            : `Move window ${wid} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+            ? `Move window ${wid}: ${label} (Ctrl/⌘+Shift+Up/Down to resize height)`
+            : `Move window ${wid}: ${label} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
         );
       }
     }
@@ -275,13 +277,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     );
 
     // #175 step 8: document title lives on the host chrome; rename write-through to the iframe.
+    // Keep the title input a sibling of the move handle (not inside the button).
     const title = document.createElement('input');
     title.type = 'text';
     title.className = 'host-window-title';
     title.value = 'Untitled document';
     title.setAttribute('aria-label', 'Document title');
     title.spellcheck = false;
-    moveHandle.append(title);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -290,7 +292,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     closeBtn.setAttribute('aria-label', `Close window ${win.id}`);
     closeBtn.textContent = '×';
 
-    titleBar.append(moveHandle, closeBtn);
+    titleBar.append(moveHandle, title, closeBtn);
 
     const frame = document.createElement('iframe');
     frame.className = 'host-editor';
@@ -298,17 +300,31 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     frame.title = 'TypeBridge editor';
     frame.allow = 'clipboard-read; clipboard-write';
 
-    const applyChromeTitle = (next: string): void => {
-      const label = next.trim() || 'Untitled document';
-      if (title.value !== label) title.value = label;
+    const displayTitle = (raw: string): string => raw.trim() || 'Untitled document';
+
+    const applyMoveAria = (label: string): void => {
+      moveHandle.setAttribute(
+        'aria-label',
+        mode === 'stacked'
+          ? `Move window ${win.id}: ${label} (Ctrl/⌘+Shift+Up/Down to resize height)`
+          : `Move window ${win.id}: ${label} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+      );
+    };
+
+    /** Update chrome metadata without rewriting the input while the user is typing. */
+    const applyChromeMeta = (raw: string): void => {
+      const label = displayTitle(raw);
       title.title = label;
       shell.setAttribute('aria-label', label);
       frame.title = label;
-      moveHandle.setAttribute(
-        'aria-label',
-        `${label} (arrow keys move; Ctrl/⌘+Shift+arrows resize)`,
-      );
+      applyMoveAria(label);
       closeBtn.setAttribute('aria-label', `Close ${label}`);
+    };
+
+    const applyChromeTitle = (next: string): void => {
+      const label = displayTitle(next);
+      if (document.activeElement !== title && title.value !== label) title.value = label;
+      applyChromeMeta(title.value);
     };
 
     title.addEventListener('pointerdown', event => { event.stopPropagation(); });
@@ -317,12 +333,24 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       event.stopPropagation();
     });
     title.addEventListener('input', () => {
-      const next = title.value.slice(0, 150);
-      applyChromeTitle(next);
+      // Preserve raw spaces/empty while editing; trim only for chrome metadata + save path.
+      if (title.value.length > 150) title.value = title.value.slice(0, 150);
+      applyChromeMeta(title.value);
       try {
         const hooks = frame.contentWindow as (Window & { __typebridgeSetTitle?: (value: string) => void }) | null;
-        hooks?.__typebridgeSetTitle?.(next);
+        hooks?.__typebridgeSetTitle?.(title.value);
       } catch { /* Frame mid-navigation. */ }
+    });
+    title.addEventListener('blur', () => {
+      const label = displayTitle(title.value);
+      if (title.value !== label) {
+        title.value = label;
+        try {
+          const hooks = frame.contentWindow as (Window & { __typebridgeSetTitle?: (value: string) => void }) | null;
+          hooks?.__typebridgeSetTitle?.(label);
+        } catch { /* Frame mid-navigation. */ }
+      }
+      applyChromeMeta(label);
     });
 
     const handles: Array<[string, string]> = [
@@ -819,12 +847,17 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         const label = data.title.trim() || 'Untitled document';
         if (document.activeElement !== titleInput) {
           titleInput.value = label;
-          titleInput.title = label;
         }
+        titleInput.title = label;
         shell.setAttribute('aria-label', label);
         frame.title = label;
         const move = shell.querySelector<HTMLElement>('.host-window-move');
-        move?.setAttribute('aria-label', `${label} (arrow keys move; Ctrl/⌘+Shift+arrows resize)`);
+        move?.setAttribute(
+          'aria-label',
+          mode === 'stacked'
+            ? `Move window ${data.windowId}: ${label} (Ctrl/⌘+Shift+Up/Down to resize height)`
+            : `Move window ${data.windowId}: ${label} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+        );
         shell.querySelector('.host-window-close')?.setAttribute('aria-label', `Close ${label}`);
       }
     }

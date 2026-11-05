@@ -1104,11 +1104,13 @@ function rememberActive(): void {
   // Tell the #175 host so layout persistence can record this window's document id / title.
   if (embedded && window.parent !== window) {
     try {
+      // Post the raw field value (may be empty while renaming). The host applies
+      // the Untitled fallback for chrome metadata without clobbering in-progress edits.
       window.parent.postMessage({
         type: 'typebridge-active-draft',
         windowId,
         documentId: active.id,
-        title: draftTitle.value.trim() || UNTITLED_TITLE,
+        title: draftTitle.value,
       }, window.location.origin);
     } catch { /* Cross-origin parent — host will probe on unload. */ }
   }
@@ -3824,5 +3826,7 @@ if (embedded) {
   try { applyTabIndentFromStorage(); } catch { /* optional */ }
   try { appearanceSettings.applyFromStorage(); } catch { /* optional */ }
   try { typingSettings.applyFromStorage(); } catch { /* optional */ }
-  rememberActive();
+  // Do not rememberActive() here: initializeDrafts() still needs the prior
+  // session/?doc= selection. Publishing the temporary blank id early would
+  // overwrite it and leave secondary host windows blank after reload (#175 s8).
 }

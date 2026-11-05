@@ -67,7 +67,8 @@ test('names, descriptions, modal ownership and focus return remain usable (#137 
   await expect(page.locator('#save-indicator')).not.toHaveAttribute('aria-live');
   await expect(page.locator('#save-indicator')).not.toHaveAttribute('role', 'status');
   await openDocuments(page);
-  await expect(page.getByRole('dialog', { name: 'Documents', exact: true }).getByRole('listbox', { name: 'Documents', exact: true })).toBeFocused();
+  // #175 step 8: Documents opens on the search box; ArrowDown/Enter move into the list.
+  await expect(page.getByRole('dialog', { name: 'Documents', exact: true }).getByRole('searchbox', { name: 'Search documents' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Documents', exact: true })).toBeFocused();
   const settings = page.getByRole('button', { name: 'Settings', exact: true });

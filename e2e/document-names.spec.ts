@@ -97,4 +97,12 @@ test('host title bar renames the document in place (#175 step 8)', async ({ page
   await hostTitle.fill('Host renamed');
   await expect.poll(async () => frame.locator('#draft-title').inputValue()).toBe('Host renamed');
   await expect(page.locator('.host-window[data-window-id="main"]')).toHaveAttribute('aria-label', 'Host renamed');
+  // Spaces while typing must stay; empty blur falls back to Untitled document.
+  await hostTitle.fill('');
+  await hostTitle.pressSequentially('My notes');
+  await expect(hostTitle).toHaveValue('My notes');
+  await expect.poll(async () => frame.locator('#draft-title').inputValue()).toBe('My notes');
+  await hostTitle.fill('');
+  await hostTitle.blur();
+  await expect(hostTitle).toHaveValue('Untitled document');
 });
