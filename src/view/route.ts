@@ -50,11 +50,18 @@ export function parseComparisonRoute(search: string): ComparisonRoute {
 /**
  * Build a same-origin comparison URL path+query for `window.open`.
  * `base` is Vite's base (e.g. `/`); trailing slashes are normalized.
+ * Optional `windowId` keeps #175 per-window sessionStorage identity across
+ * viewer document switches / reloads (same-tab iframe host).
  */
-export function comparisonViewerHref(base: string, documentId: string): string | undefined {
+export function comparisonViewerHref(
+  base: string,
+  documentId: string,
+  windowId?: string,
+): string | undefined {
   if (!isDocumentId(documentId)) return undefined;
   const root = base.endsWith('/') ? base : `${base}/`;
   const path = root === '/' ? '/' : root;
   const query = new URLSearchParams({ doc: documentId, mode: 'view' });
+  if (windowId) query.set('window', windowId);
   return `${path}?${query.toString()}`;
 }
