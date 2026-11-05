@@ -37,6 +37,12 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Official image with browsers and system dependencies preinstalled (#168): avoids the
+    # per-run `playwright install --with-deps` apt downloads that exhausted the job budget.
+    # The tag must match the locked @playwright/test version; the next step enforces it.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
     strategy:
       fail-fast: false
       matrix:
@@ -50,19 +56,53 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps ${{ matrix.browser }}
-      - run: npx playwright test --project=${{ matrix.browser }}
+      - name: Check Playwright matches the container image
+        run: |
+          installed=$(node -p "require('@playwright/test/package.json').version")
+          if [ "$installed" != "1.64.1" ]; then
+            echo "::error::@playwright/test is $installed but the CI image is v1.64.1. Update the image tag in .github/workflows/ci.yml together with the dependency."
+            exit 1
+          fi
+      - name: Run Playwright tests
+        timeout-minutes: 12
+        run: npx playwright test --project=${{ matrix.browser }}
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces-${{ matrix.browser }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+  visual-evidence:
+    # Opt-in before/after screenshots for UI PRs. Kept outside the container because the
+    # capture script uses `git worktree` to build the base revision.
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # capture-ui.mjs builds the base worktree itself but serves the "after" pages from ./dist.
+      - name: Build head revision
+        run: npm run build
       - name: Capture before and after UI
-        if: matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
         env:
           VISUAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           VISUAL_EXPECT_IDENTICAL: ${{ contains(github.event.pull_request.body, '<!-- visual-identical -->') }}
         run: node scripts/capture-ui.mjs
       - name: Compare before and after pixels
-        if: matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-identical -->')
+        if: contains(github.event.pull_request.body, '<!-- visual-identical -->')
         run: npx playwright test --config=playwright.visual.config.ts
       - name: Upload UI evidence
-        if: always() && matrix.browser == 'chromium' && contains(github.event.pull_request.body, '<!-- visual-evidence -->')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ui-before-after-${{ github.event.pull_request.number }}
