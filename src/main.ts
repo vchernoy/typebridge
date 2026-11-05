@@ -956,6 +956,9 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   secondary.ownership = undefined;
   secondary = undefined;
   sessionRegistry.setSecondary(undefined);
+  currentJournalSecondary = undefined;
+  // Retire pane-B reload backup so a later restore cannot resurrect pre-promotion text.
+  try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
   // Handle was acquired for pane B; after promote, loss must freeze the primary session.
   clearOwnershipLost(promotedOwnership);
   if (ownership) void ownership.release();
@@ -986,6 +989,7 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   showSaveState();
   if (workspace.dirty() && autosave.checked && !editBlock) {
     journalEdit();
+    savePending();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { void persist(); }, 300);
     showSaving();
@@ -1163,18 +1167,20 @@ async function openCompanionDocument(id: string): Promise<void> {
       }
       return;
     }
+    // Reread after release/acquire even for busy/read-only opens: the pre-prompt
+    // snapshot may be stale if another tab saved while the discard dialog was up.
     let target = next;
-    if (access.ownership && db) {
+    if (db) {
       let fresh: StoredDraft | undefined;
       try {
         fresh = await getStoredDraft(db, next.id);
       } catch {
-        void access.ownership.release();
+        void access.ownership?.release();
         announceAction('Could not open that document in the other pane.');
         return;
       }
       if (generation !== companionOpenGeneration || !workspace.splitOpen() || active.id === id) {
-        void access.ownership.release();
+        void access.ownership?.release();
         if (active.id === id && generation === companionOpenGeneration && workspace.splitOpen()) {
           mirrorCompanion(true);
           companionWritingPosition.restore(active.id);
@@ -1183,7 +1189,7 @@ async function openCompanionDocument(id: string): Promise<void> {
         return;
       }
       if (!fresh) {
-        void access.ownership.release();
+        void access.ownership?.release();
         announceAction('Could not open that document in the other pane.');
         return;
       }
