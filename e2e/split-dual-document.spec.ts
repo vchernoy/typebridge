@@ -316,6 +316,15 @@ test('Copy uses the active pane document', async ({ page }) => {
   await page.locator('#copy').click();
   await expect(page.locator('#status')).toContainText('Copied');
   expect(await page.evaluate(() => (window as Window & { __typebridgeCopied?: string[] }).__typebridgeCopied?.at(-1))).toBe('Kilo only in A');
+  // Dirty companion keeps the shared Autosave-off risk on actions routed to pane B.
+  await setAutosave(page, false, 'keep');
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').focus();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially('!');
+  await page.locator('#copy').click();
+  await expect(page.locator('#status')).toContainText('Copied');
+  await expect(page.locator('#status')).toContainText('Autosave off');
 });
 
 test('Export downloads the active companion document', async ({ page }) => {

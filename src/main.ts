@@ -166,6 +166,8 @@ const splitControls = setupSplitPane({
     const closeGeneration = ++splitCloseGeneration;
     const stillClosing = (): boolean => closeGeneration === splitCloseGeneration && !workspace.splitOpen();
     void (async () => {
+      // Initial closed restore runs before titleEditorB / draft locals exist.
+      if (!draftsInitialized) return;
       const released = await releaseSecondarySession(stillClosing);
       if (released === 'cancelled') {
         // Keep the split open when the user cancels discarding pane B.
@@ -297,13 +299,16 @@ function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'prog
 }
 /** The warning that must stay visible while text or storage is at risk. */
 function riskText(): string {
+  const secondaryDirty = dualDocumentSplit() && !!secondary?.dirty;
+  const secondaryFailed = dualDocumentSplit() && !!secondary?.saveFailed;
+  const secondaryBlockedDirty = dualDocumentSplit() && !!secondary?.editBlock && !!secondary?.dirty;
   if (storageProblem) {
-    if (!workspace.dirty()) return storageProblem;
+    if (!workspace.dirty() && !secondaryDirty) return storageProblem;
     return storageProblem === STORAGE_UNAVAILABLE ? SAVE_FAILED_NO_STORAGE : 'Changes are unsaved. ' + storageProblem;
   }
-  if (editBlock && workspace.dirty()) return NOT_OWNER_UNSAVED;
-  if (saveFailed && autosave.checked) return SAVE_FAILED;
-  if (workspace.dirty() && !autosave.checked) return AUTOSAVE_OFF;
+  if ((editBlock && workspace.dirty()) || secondaryBlockedDirty) return NOT_OWNER_UNSAVED;
+  if ((saveFailed || secondaryFailed) && autosave.checked) return SAVE_FAILED;
+  if ((workspace.dirty() || secondaryDirty) && !autosave.checked) return AUTOSAVE_OFF;
   return '';
 }
 function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): void {
@@ -394,7 +399,8 @@ function canMutatePrimary(): boolean {
 }
 /** Autosave follows the active editable session (pane B may own a different document). */
 function autosaveControlBlocked(): boolean {
-  if (transferFrozen) return true;
+  // Viewers never own the preference; keep the change handler gated too.
+  if (viewMode || transferFrozen) return true;
   if (workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit() && secondary) {
     return secondary.editBlock !== '';
   }
