@@ -1012,8 +1012,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         syncEmbeddedFocusChrome(false);
       }
       if (activeId === id) {
-        const nextId = layouts[0]?.id;
-        if (nextId) markActiveChrome(nextId);
+        // Prefer the frontmost remaining window (not layouts[0]) so free-layout
+        // stacking and the next F6 origin stay aligned with what the user sees.
+        const topmost = layouts.reduce<HostWindowLayout | undefined>(
+          (best, win) => (!best || win.z > best.z ? win : best),
+          undefined,
+        );
+        if (topmost) markActiveChrome(topmost.id);
         else activeId = 'main';
       }
       // Drop scoped session keys after the iframe is gone. prepareClose only returns

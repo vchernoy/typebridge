@@ -181,6 +181,33 @@ test('closing the active window marks the remaining window current', async ({ pa
   await expect(page.locator('.host-window[data-window-id="main"]')).toHaveAttribute('aria-current', 'true');
 });
 
+test('closing the front window activates the highest-z remaining window', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 2);
+  // Overlap so z-order matters — raise w2 above main, then w3 above both.
+  await page.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor').click();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
+  await page.frameLocator('.host-window[data-window-id="w3"] iframe').locator('#editor').click();
+  await expect(page.locator('.host-window[data-window-id="w3"]')).toHaveClass(/is-active/);
+
+  const before = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; z: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  const zW2 = before.find(win => win.id === 'w2')?.z ?? 0;
+  const zMain = before.find(win => win.id === 'main')?.z ?? 0;
+  expect(zW2).toBeGreaterThan(zMain);
+
+  await page.locator('.host-window[data-window-id="w3"] .host-window-close').click();
+  await expect(page.locator('.host-window')).toHaveCount(2, { timeout: 15_000 });
+  // w2 stayed in front — do not fall back to layouts[0] (main).
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveAttribute('aria-current', 'true');
+  await expect(page.locator('.host-window[data-window-id="main"]')).not.toHaveAttribute('aria-current');
+});
+
 test('closing the Focus window after F6 restores remaining tiled geometry', async ({ page }) => {
   await openHost(page, 'free');
   await addWindows(page, 2);

@@ -21,11 +21,11 @@ npx playwright test \
   --project=chromium --project=firefox --project=webkit
 ```
 
-Step-11 must-ship a11y (F6 cycle, named regions, Escape Settings-over-Find, Focus F6 maximize/close restore, title/chrome cycle origin, reload z-order, close marks remaining current) lives in `e2e/host-a11y-windows.spec.ts` (**11** tests). Prefer Chromium for local iteration; CI still runs the three-engine matrix on PRs.
+Step-11 must-ship a11y (F6 cycle, named regions, Escape Settings-over-Find, Focus F6 maximize/close restore, title/chrome cycle origin, reload z-order, close marks remaining current) lives in `e2e/host-a11y-windows.spec.ts` (**12** tests). Prefer Chromium for local iteration; CI still runs the three-engine matrix on PRs.
 
 | Date (UTC) | Host | Result |
 | --- | --- | --- |
-| 2026-11-05 | Cursor cloud agent VM | **33 passed** Chromium on head with 11 `host-a11y-windows` + `host-window` (17) + `host-layout-mode` (5). Full three-engine matrix is CI’s job on the PR. |
+| 2026-11-05 | Cursor cloud agent VM | **34 passed** Chromium on head with 12 `host-a11y-windows` + `host-window` (17) + `host-layout-mode` (5). Full three-engine matrix is CI’s job on the PR. |
 
 ## Acceptance 1–10 mapped to suites
 
