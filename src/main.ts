@@ -64,7 +64,11 @@ if (windowId) document.documentElement.dataset.windowId = windowId;
 const embedded = parseEmbedMode(window.location.search);
 if (embedded) document.documentElement.dataset.embed = '1';
 
-/** #175 step 10: drop obsolete in-page split prefs; never touch IndexedDB documents. */
+/**
+ * #175 step 10: drop obsolete split prefs; migrate pane-B text backups to the
+ * recovery journal before removing them so an update reload cannot destroy the
+ * only copy of unsaved pane-B text. Never touch IndexedDB documents.
+ */
 try { localStorage.removeItem('typebridge.split.v1'); } catch { /* Optional. */ }
 try {
   const doomed: string[] = [];
@@ -74,7 +78,42 @@ try {
       doomed.push(key);
     }
   }
-  for (const key of doomed) sessionStorage.removeItem(key);
+  for (const key of doomed) {
+    let remove = false;
+    try {
+      const raw = sessionStorage.getItem(key);
+      const value: unknown = JSON.parse(raw ?? 'null');
+      if (!value || typeof value !== 'object') {
+        remove = true;
+      } else {
+        const draft = value as Partial<StoredDraft>;
+        const usable = typeof draft.id === 'string' && !!draft.id
+          && typeof draft.title === 'string'
+          && typeof draft.text === 'string'
+          && typeof draft.updatedAt === 'number' && Number.isFinite(draft.updatedAt)
+          && Number.isSafeInteger(draft.revision) && (draft.revision ?? -1) >= 0;
+        if (!usable || draft.text!.length === 0) {
+          // Empty or unparseable leftovers are safe to drop.
+          remove = true;
+        } else {
+          writeRecovery(localStorage, {
+            token: crypto.randomUUID(),
+            tab: `split-pane-b-migrate.${crypto.randomUUID()}`,
+            documentId: draft.id!,
+            revision: draft.revision!,
+            timestamp: draft.updatedAt!,
+            title: draft.title!.trim() || UNTITLED_TITLE,
+            text: draft.text!,
+          });
+          remove = true;
+        }
+      }
+    } catch {
+      // Migration failed — keep the sessionStorage key so text is not lost.
+      remove = false;
+    }
+    if (remove) sessionStorage.removeItem(key);
+  }
 } catch { /* Optional. */ }
 configureActiveDraftKey(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, windowId));
 // #175 step 9: Find query is shared across windows; Replace text stays per-window.
@@ -813,7 +852,7 @@ function showDraft(): void {
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
   workspace.bumpSessionGeneration();
   workspace.setDocumentId(active.id);
-  clearVersionNotice('primary');
+  clearVersionNotice();
   clearNotices();
   loadingDraft = true;
   try {
@@ -1188,7 +1227,7 @@ async function persist(): Promise<PersistResult> {
         const titleOnly = !result.conflict && saved.title !== active.title && saved.text === active.text;
         if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         active = result.draft;
-        clearVersionNotice('primary');
+        clearVersionNotice();
         postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
         writingPosition.save();
         if (workspace.contentRevision() !== version && autosave.checked) journalEdit();
@@ -1955,11 +1994,11 @@ function syncVersionNoticeDisplay(): void {
   if (versionNotice.textContent !== text) versionNotice.textContent = text;
   versionNotice.hidden = false;
 }
-function showVersionNotice(text: string, _target: 'primary' | 'secondary' = 'primary'): void {
+function showVersionNotice(text: string): void {
   primaryVersionNotice = text;
   syncVersionNoticeDisplay();
 }
-function clearVersionNotice(_target?: 'primary' | 'secondary'): void {
+function clearVersionNotice(): void {
   primaryVersionNotice = '';
   syncVersionNoticeDisplay();
 }
