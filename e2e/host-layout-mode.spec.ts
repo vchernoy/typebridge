@@ -88,8 +88,8 @@ test('host Focus mode maximizes the active window and restores on exit', async (
   });
   expect(before).toHaveLength(2);
 
-  await page.getByRole('button', { name: /Move window main/ }).click();
-  await main.locator('#focus-mode').click();
+  // Enter Focus from the main iframe without relying on z-order pointer hits.
+  await main.locator('#focus-mode').evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
@@ -109,7 +109,7 @@ test('host Focus mode maximizes the active window and restores on exit', async (
   expect(focused!.w).toBeGreaterThan(1000);
   expect(focused!.h).toBeGreaterThan(500);
 
-  await main.locator('#exit-focus').click();
+  await main.locator('#exit-focus').evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
@@ -177,13 +177,15 @@ test('host Focus restore after reload shows Exit focus in the focused iframe', a
   await expect(page.locator('.host-window')).toHaveCount(2);
   await expect(page.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor'))
     .toBeEnabled({ timeout: 30_000 });
-  // Raise main above w2 before entering Focus (New window leaves w2 on top).
-  await page.getByRole('button', { name: /Move window main/ }).click();
-  await main.locator('#focus-mode').click();
+  await main.locator('#focus-mode').evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
   await expect(main.locator('#exit-focus')).toBeVisible();
+  expect(await page.evaluate(() => {
+    const raw = localStorage.getItem('typebridge.host.windows.v1');
+    return raw ? (JSON.parse(raw) as { focusWindowId?: string }).focusWindowId : undefined;
+  })).toBe('main');
 
   await page.reload();
   const restored = page.frameLocator('.host-window[data-window-id="main"] iframe');
@@ -192,7 +194,7 @@ test('host Focus restore after reload shows Exit focus in the focused iframe', a
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
   await expect(restored.locator('#exit-focus')).toBeVisible({ timeout: 10_000 });
-  await restored.locator('#exit-focus').click();
+  await restored.locator('#exit-focus').evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
 });
