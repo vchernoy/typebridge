@@ -60,6 +60,51 @@ export function clampRect(rect: WindowRect, viewport: ViewportSize): WindowRect 
   };
 }
 
+/**
+ * Clamp a resize against the space available from the anchored opposite edge(s).
+ * Avoids clampRect moving x/y to 0 when an east/south resize hits the viewport.
+ */
+export function clampResizeRect(
+  rect: WindowRect,
+  viewport: ViewportSize,
+  edges: { left?: boolean; right?: boolean; top?: boolean; bottom?: boolean },
+  start: WindowRect,
+): WindowRect {
+  let { x, y, w, h } = rect;
+  const rightEdge = start.x + start.w;
+  const bottomEdge = start.y + start.h;
+
+  if (edges.right && !edges.left) {
+    x = start.x;
+    w = Math.max(MIN_WINDOW_WIDTH, Math.min(w, viewport.width - start.x));
+  } else if (edges.left && !edges.right) {
+    x = Math.max(0, Math.min(x, rightEdge - MIN_WINDOW_WIDTH));
+    w = rightEdge - x;
+  } else if (edges.left && edges.right) {
+    x = Math.max(0, x);
+    w = Math.max(MIN_WINDOW_WIDTH, Math.min(w, viewport.width - x));
+  } else {
+    w = Math.max(MIN_WINDOW_WIDTH, Math.min(w, viewport.width));
+    x = Math.max(0, Math.min(x, viewport.width - w));
+  }
+
+  if (edges.bottom && !edges.top) {
+    y = start.y;
+    h = Math.max(MIN_WINDOW_HEIGHT, Math.min(h, viewport.height - start.y));
+  } else if (edges.top && !edges.bottom) {
+    y = Math.max(0, Math.min(y, bottomEdge - MIN_WINDOW_HEIGHT));
+    h = bottomEdge - y;
+  } else if (edges.top && edges.bottom) {
+    y = Math.max(0, y);
+    h = Math.max(MIN_WINDOW_HEIGHT, Math.min(h, viewport.height - y));
+  } else {
+    h = Math.max(MIN_WINDOW_HEIGHT, Math.min(h, viewport.height));
+    y = Math.max(0, Math.min(y, viewport.height - h));
+  }
+
+  return { x, y, w, h };
+}
+
 /** Pointer must travel this far before a full-bleed window restores on drag. */
 export const MOVE_RESTORE_THRESHOLD_PX = 4;
 

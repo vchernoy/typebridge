@@ -9,6 +9,7 @@ import {
   MIN_WINDOW_WIDTH,
   bringToFront,
   clampRect,
+  clampResizeRect,
   defaultRectForIndex,
   MOVE_RESTORE_THRESHOLD_PX,
   isFullscreenRect,
@@ -339,7 +340,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       h = drag.start.h + (drag.start.y - y);
     }
     if (drag.edges.bottom) h = drag.start.h + dy;
-    updateLayout(drag.id, clampRect({ x, y, w, h }, view));
+    updateLayout(drag.id, clampResizeRect({ x, y, w, h }, view, drag.edges, drag.start));
   };
 
   const onPointerUp = (): void => {
@@ -474,6 +475,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('pagehide', onPersistDocumentIds);
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onHostHidden);
       rootObserver?.disconnect();
       for (const shell of shells.values()) shell.remove();
       shells.clear();
@@ -488,10 +492,23 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   deps.toolbar.querySelector('[data-host-action="tile-stack"]')
     ?.addEventListener('click', () => { api.tileStacked(); });
 
+  const onPersistDocumentIds = (): void => { persist(); };
+  const onHostHidden = (): void => {
+    if (document.visibilityState === 'hidden') onPersistDocumentIds();
+  };
+  const onStorage = (event: StorageEvent): void => {
+    if (event.storageArea !== sessionStorage) return;
+    if (!event.key?.includes('activeDraft')) return;
+    persist();
+  };
+
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('resize', onResize);
+  window.addEventListener('pagehide', onPersistDocumentIds);
+  window.addEventListener('storage', onStorage);
+  document.addEventListener('visibilitychange', onHostHidden);
   // Update notice / toolbar reflow change host-root without a window resize.
   const rootObserver = typeof ResizeObserver !== 'undefined'
     ? new ResizeObserver(() => { onResize(); })

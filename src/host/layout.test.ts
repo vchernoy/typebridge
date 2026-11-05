@@ -5,6 +5,7 @@ import {
   MIN_WINDOW_WIDTH,
   bringToFront,
   clampRect,
+  clampResizeRect,
   mintWindowId,
   parseHostLayout,
   readHostLayout,
@@ -26,6 +27,18 @@ describe('host layout helpers', () => {
       w: MIN_WINDOW_WIDTH,
       h: MIN_WINDOW_HEIGHT,
     });
+  });
+
+  it('keeps the anchored edge when an east resize hits the viewport', () => {
+    const start = { x: 200, y: 100, w: 300, h: 220 };
+    const resized = clampResizeRect(
+      { x: 200, y: 100, w: 2000, h: 220 },
+      viewport,
+      { right: true },
+      start,
+    );
+    expect(resized.x).toBe(200);
+    expect(resized.w).toBe(viewport.width - 200);
   });
 
   it('tiles side by side and stacked', () => {
