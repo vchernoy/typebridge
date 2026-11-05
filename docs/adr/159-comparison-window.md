@@ -448,13 +448,6 @@ Shipped in #171: **narrow** lifecycle hardening after S5a — not full S5 comple
 - **Versionchange parity:** pane B releases ownership like primary but stays editable in memory for copy/export (S4 P2).
 - **B save indicator / blocked-B clear:** interrupted autosave and storage-upgrade paths from #171.
 - **Switch discard:** revalidates `sessionPersistStillCurrent` + content revision after the discard dialog so a mid-dialog document-identity change cannot silently drop the wrong session.
-## S5b implementation notes
-
-Shipped in #171: **narrow** lifecycle hardening after S5a — not full S5 completion.
-
-- **Versionchange parity:** pane B releases ownership like primary but stays editable in memory for copy/export (S4 P2).
-- **B save indicator / blocked-B clear:** interrupted autosave and storage-upgrade paths from #171.
-- **Switch discard:** revalidates `sessionPersistStillCurrent` + content revision after the discard dialog so a mid-dialog document-identity change cannot silently drop the wrong session.
 - **Not claimed in #171:** generation guards on every remaining delayed toolbar/document path (Clear already guarded in S5a; broader Convert/Replace/Import/Delete/etc. revalidation remains open).
 - **Still deferred after S5b:** full primary DocumentSession extraction (S2); New/Import targeting pane B; real-device/IME/AT (S6). S5c covers a subset of the delayed-command gap.
 
