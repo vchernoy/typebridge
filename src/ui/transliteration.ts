@@ -77,7 +77,7 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
     if (usesCommand ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
     if (event.code !== transliterationBinding(shortcut, usesCommand)?.key) return;
     if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
-    if (!['editor', 'editor-b', 'find-text', 'replace-text', 'draft-title', 'draft-title-b'].includes(event.target.id)) return;
+    if (!['editor', 'find-text', 'replace-text', 'draft-title'].includes(event.target.id)) return;
     event.preventDefault();
     enabled.checked = !enabled.checked;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));

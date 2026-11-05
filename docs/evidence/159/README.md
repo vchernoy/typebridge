@@ -4,7 +4,7 @@ Historical matrix for the in-tab split slices that landed under #159 (S1–S5b o
 
 ## Automated Playwright matrix (agent VM)
 
-Command (after `npm run build`):
+Historical command (after `npm run build`). The split suites were **deleted in #175 step 10**; keep the matrix below as the pre-removal record:
 
 ```bash
 npx playwright test e2e/split-pane.spec.ts e2e/split-dual-document.spec.ts \
@@ -15,7 +15,7 @@ npx playwright test e2e/split-pane.spec.ts e2e/split-dual-document.spec.ts \
 | --- | --- | --- |
 | 2026-11-05 | Cursor cloud agent VM | **147 passed** (~2.7 m): 49 split tests × Chromium + Firefox + WebKit |
 
-Coverage relative to #159 acceptance items 1–8 (split/close, Autosave-off privacy, dual documents, local Edit-in-this-pane, dirty/ownership close, delayed-command guards, cross-tab ownership notices, keyboard divider / responsive hooks) is exercised by those suites plus earlier W2–W4 specs (`e2e/comparison-window.spec.ts`, `e2e/saved-signals.spec.ts`, `e2e/edit-ownership.spec.ts`). Reload / pending / recovery / storage-error paths remain covered by existing `e2e/recovery.spec.ts`, `e2e/offline.spec.ts`, `e2e/persistence-regressions.spec.ts` and related suites — re-run on the PR’s final head in CI, not only locally.
+Coverage relative to #159 acceptance items 1–8 (split/close, Autosave-off privacy, dual documents, local Edit-in-this-pane, dirty/ownership close, delayed-command guards, cross-tab ownership notices, keyboard divider / responsive hooks) was exercised by those suites plus earlier W2–W4 specs (`e2e/comparison-window.spec.ts`, `e2e/saved-signals.spec.ts`, `e2e/edit-ownership.spec.ts`). After #175 step 10, re-run W2–W4 and host window specs; do not expect the deleted split suites.
 
 ## Layout screenshots (synthetic viewports)
 

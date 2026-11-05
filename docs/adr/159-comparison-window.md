@@ -1,6 +1,6 @@
 # ADR: Split workspace and editing ownership (#159)
 
-Status: **Superseded for the in-tab split goal** by [#175](https://github.com/vchernoy/typebridge/issues/175) / [ADR 175](175-editor-windows.md) (maintainer, Nov 2026). Issue #159 is closed as not planned for further S-slices. **W1–W4 remain the foundation** (routing, separate-window comparison companion, metadata-only saved-version signals, per-document Web Lock + IndexedDB fence). **S1–S5b code on `main` is historical** until #175 step 10 removes the split. PR [#174](https://github.com/vchernoy/typebridge/pull/174) and [#164](https://github.com/vchernoy/typebridge/pull/164) stay draft/paused. This document keeps the W1–W4 and S1–S5b record; new window work follows ADR 175.
+Status: **Superseded for the in-tab split goal** by [#175](https://github.com/vchernoy/typebridge/issues/175) / [ADR 175](175-editor-windows.md) (maintainer, Nov 2026). Issue #159 is closed as not planned for further S-slices. **W1–W4 remain the foundation** (routing, separate-window comparison companion, metadata-only saved-version signals, per-document Web Lock + IndexedDB fence). **S1–S5b in-page split was removed** in #175 step 10; this ADR remains the W1–W4 and historical S-slice record. PR [#174](https://github.com/vchernoy/typebridge/pull/174) and [#164](https://github.com/vchernoy/typebridge/pull/164) stay draft/paused. This document keeps the W1–W4 and S1–S5b record; new window work follows ADR 175.
 
 ## Context (audit of current code — post W1–W4)
 

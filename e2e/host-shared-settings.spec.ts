@@ -98,11 +98,11 @@ test('Escape in an embedded editor closes host Settings without entering Focus',
   await expect(main.locator('body')).not.toHaveClass(/focus-mode/);
 });
 
-test('embedded host windows hide Split editor and comparison controls', async ({ page }) => {
+test('embedded host windows hide comparison / another-window control', async ({ page }) => {
   const main = await openHost(page);
-  await expect(main.locator('#toggle-split')).toBeHidden();
+  await expect(main.locator('#toggle-split')).toHaveCount(0);
+  await expect(main.locator('#editor-b')).toHaveCount(0);
   await expect(main.locator('#open-comparison')).toBeHidden();
-  await expect(main.locator('#editor-split')).toHaveAttribute('data-split', 'off');
 });
 
 test('host Autosave on persists unsaved text in every window', async ({ page }) => {

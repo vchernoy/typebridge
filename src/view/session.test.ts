@@ -5,9 +5,6 @@ import {
   contentCommandStillCurrent,
   isPaneId,
   isSessionId,
-  localPaneTransferBlock,
-  paneCloseBlock,
-  paneCloseDisposition,
   resolveSessionForDocument,
   sessionPersistStillCurrent,
 } from './session';
@@ -56,63 +53,12 @@ describe('contentCommandStillCurrent', () => {
 });
 
 describe('sessionPersistStillCurrent', () => {
-  it('keeps an in-flight save across pane focus and local editable-role transfer', () => {
+  it('keeps an in-flight save across focus changes within the same session', () => {
     const started = { sessionId: 'session-1', sessionGeneration: 3 };
     expect(sessionPersistStillCurrent(started, started)).toBe(true);
-    // Local Edit in this pane must not bump sessionGeneration — persist stays current.
     expect(sessionPersistStillCurrent(started, { sessionId: 'session-1', sessionGeneration: 3 })).toBe(true);
     expect(sessionPersistStillCurrent(started, { sessionId: 'session-1', sessionGeneration: 4 })).toBe(false);
     expect(sessionPersistStillCurrent(started, { sessionId: 'session-2', sessionGeneration: 3 })).toBe(false);
-  });
-});
-
-describe('localPaneTransferBlock', () => {
-  const clear = {
-    sameSession: true,
-    targetAlreadyEditable: false,
-    composing: false,
-    transitioning: false,
-    externallyBlocked: false,
-  };
-
-  it('allows a same-session transfer when idle', () => {
-    expect(localPaneTransferBlock(clear)).toBe('');
-  });
-
-  it('refuses composition, busy, external lock and wrong session', () => {
-    expect(localPaneTransferBlock({ ...clear, composing: true })).toBe('composing');
-    expect(localPaneTransferBlock({ ...clear, transitioning: true })).toBe('busy');
-    expect(localPaneTransferBlock({ ...clear, externallyBlocked: true })).toBe('external');
-    expect(localPaneTransferBlock({ ...clear, sameSession: false })).toBe('different-session');
-    expect(localPaneTransferBlock({ ...clear, targetAlreadyEditable: true })).toBe('already-editable');
-  });
-});
-
-describe('paneCloseBlock', () => {
-  it('blocks close/transfer while composing or transitioning', () => {
-    expect(paneCloseBlock({ composing: false, transitioning: false })).toBe('');
-    expect(paneCloseBlock({ composing: true, transitioning: false })).toBe('composing');
-    expect(paneCloseBlock({ composing: false, transitioning: true })).toBe('busy');
-  });
-});
-
-describe('paneCloseDisposition', () => {
-  it('transfers editable role when another pane still shows the session', () => {
-    expect(paneCloseDisposition({
-      remainingPanesForSession: 1, dirty: true, autosaveOn: true, saveFailed: false, wasEditable: true,
-    })).toBe('transfer-editable');
-    expect(paneCloseDisposition({
-      remainingPanesForSession: 1, dirty: false, autosaveOn: true, saveFailed: false, wasEditable: false,
-    })).toBe('detach-only');
-  });
-
-  it('asks before releasing the last dirty or private view', () => {
-    expect(paneCloseDisposition({
-      remainingPanesForSession: 0, dirty: true, autosaveOn: false, saveFailed: false, wasEditable: true,
-    })).toBe('ask-discard');
-    expect(paneCloseDisposition({
-      remainingPanesForSession: 0, dirty: false, autosaveOn: true, saveFailed: false, wasEditable: true,
-    })).toBe('release-clean');
   });
 });
 

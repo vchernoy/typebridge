@@ -6,7 +6,6 @@ import {
   bumpSessionContent,
   bumpSessionIdentity,
   createBoundSession,
-  createSessionRegistry,
   snapshotBoundSession,
 } from './bound-session';
 import { resolveSessionForDocument } from './session';
@@ -44,8 +43,8 @@ describe('bound-session', () => {
     expect(snap.id).toBe(DOC_A);
   });
 
-  it('registry reuses a session for an already-represented document', () => {
-    const primary = createBoundSession({
+  it('bumps identity and content counters independently', () => {
+    const session = createBoundSession({
       sessionId: 'session-1',
       editablePaneId: 'pane-a',
       draft: { ...newDraft(), id: DOC_A, revision: 1 } as StoredDraft,
@@ -53,25 +52,13 @@ describe('bound-session', () => {
       field: fakeField(),
       title: fakeTitle(),
     });
-    const registry = createSessionRegistry(primary);
-    const secondary = createBoundSession({
-      sessionId: 'session-2',
-      editablePaneId: 'pane-b',
-      draft: { ...newDraft(), id: DOC_B, revision: 1 } as StoredDraft,
-      editor: fakeEditor(),
-      field: fakeField(),
-      title: fakeTitle(),
-    });
-    registry.setSecondary(secondary);
-    expect(registry.byDocumentId(DOC_A)?.sessionId).toBe('session-1');
-    expect(registry.byDocumentId(DOC_B)?.sessionId).toBe('session-2');
-    expect(resolveSessionForDocument(DOC_B, registry.all().map(s => ({
-      sessionId: s.sessionId,
-      documentId: s.draft.id,
-    })))).toBe('session-2');
-    bumpSessionIdentity(primary);
-    bumpSessionContent(secondary);
-    expect(primary.sessionGeneration).toBe(1);
-    expect(secondary.contentRevision).toBe(1);
+    bumpSessionIdentity(session);
+    bumpSessionContent(session);
+    expect(session.sessionGeneration).toBe(1);
+    expect(session.contentRevision).toBe(1);
+    expect(resolveSessionForDocument(DOC_A, [
+      { sessionId: session.sessionId, documentId: session.draft.id },
+      { sessionId: 'session-2', documentId: DOC_B },
+    ])).toBe('session-1');
   });
 });
