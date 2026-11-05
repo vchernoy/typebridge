@@ -1194,8 +1194,8 @@ body:not(.host-page) .settings-host-only {
 }
 
 /* #175 step 7: Settings panel lives on the host; keep embed chrome clean. */
-html[data-embed='1'] #settings-open,
-html[data-embed='1'] #settings-panel {
+html[data-embed="1"] #settings-open,
+html[data-embed="1"] #settings-panel {
   display: none !important;
 }
 

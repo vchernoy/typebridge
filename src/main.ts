@@ -2472,13 +2472,22 @@ async function applyAutosaveChange(
 function syncAutosaveCheckboxFromStorage(): void {
   try {
     const next = autosaveEnabled();
-    if (autosave.checked === next) return;
+    const changed = autosave.checked !== next;
     autosave.checked = next;
     if (!next) {
       clearTimeout(saveTimer);
       if (secondary) clearTimeout(secondary.saveTimer);
+      if (changed) showSaveState();
+      return;
     }
-    showSaveState();
+    // Autosave turned on while we were read-only: flush dirty text now that we can edit.
+    if (changed && workspace.dirty() && !autosaveControlBlocked()) {
+      showSaving();
+      journalEdit();
+      void persist();
+    } else if (changed) {
+      showSaveState();
+    }
   } catch { /* Keep the current control state. */ }
 }
 
