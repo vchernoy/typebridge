@@ -42,6 +42,7 @@ describe('installFocusHandoff', () => {
       dirty: true,
       revision: 1,
     };
+    const DOC = 'a1b2c3d4-e5f6-4789-a012-3456789abcde';
     const parkOwnership = vi.fn(async () => undefined);
     const discardParkedText = vi.fn(async () => undefined);
     const recoverParkedOwnership = vi.fn(async () => undefined);
@@ -50,7 +51,7 @@ describe('installFocusHandoff', () => {
       windowId: 'alpha',
       instanceId: 'owner-1',
       channel: null,
-      getDocumentId: () => 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      getDocumentId: () => DOC,
       isViewMode: () => false,
       isOwner: () => true,
       editBlock: () => '',
@@ -71,7 +72,7 @@ describe('installFocusHandoff', () => {
     });
 
     const result = await controller.hooks.__typebridgeYieldForHandoff!({
-      documentId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      documentId: DOC,
       fromInstanceId: 'reader-1',
       requestId: 'req-1',
     });
@@ -81,13 +82,14 @@ describe('installFocusHandoff', () => {
 
     controller.hooks.__typebridgeHandoffComplete?.('req-1', true);
     await Promise.resolve();
-    expect(discardParkedText).toHaveBeenCalledTimes(1);
+    expect(discardParkedText).toHaveBeenCalledWith(DOC);
     expect(recoverParkedOwnership).not.toHaveBeenCalled();
     controller.dispose();
   });
 
   it('recovers parked text when takeover confirmation fails', async () => {
     const field = makeField();
+    const DOC = 'a1b2c3d4-e5f6-4789-a012-3456789abcde';
     const recoverParkedOwnership = vi.fn(async () => undefined);
     const discardParkedText = vi.fn(async () => undefined);
     const controller = installFocusHandoff({
@@ -95,7 +97,7 @@ describe('installFocusHandoff', () => {
       windowId: 'alpha',
       instanceId: 'owner-1',
       channel: null,
-      getDocumentId: () => 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      getDocumentId: () => DOC,
       isViewMode: () => false,
       isOwner: () => true,
       editBlock: () => '',
@@ -116,28 +118,27 @@ describe('installFocusHandoff', () => {
     });
 
     await controller.hooks.__typebridgeYieldForHandoff!({
-      documentId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      documentId: DOC,
       fromInstanceId: 'reader-1',
       requestId: 'req-fail',
     });
     controller.hooks.__typebridgeHandoffComplete?.('req-fail', false);
     await Promise.resolve();
-    expect(recoverParkedOwnership).toHaveBeenCalledTimes(1);
+    expect(recoverParkedOwnership).toHaveBeenCalledWith(DOC);
     expect(discardParkedText).not.toHaveBeenCalled();
     controller.dispose();
   });
 
-  it('refuses BroadcastChannel-style private yield (allowPrivateTransfer false via BC path)', async () => {
-    // Same-origin hook always allows private transfer; cross-tab refusal is tested via ownerYieldBlock.
-    // Here we only assert the frame-call path still parks for dirty same-tab.
+  it('parks for dirty same-tab frame-call yield', async () => {
     const field = makeField();
+    const DOC = 'a1b2c3d4-e5f6-4789-a012-3456789abcde';
     let dirty = true;
     const controller = installFocusHandoff({
       field,
       windowId: 'alpha',
       instanceId: 'owner-1',
       channel: null,
-      getDocumentId: () => 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      getDocumentId: () => DOC,
       isViewMode: () => false,
       isOwner: () => true,
       editBlock: () => '',
@@ -158,7 +159,7 @@ describe('installFocusHandoff', () => {
     });
 
     await expect(controller.hooks.__typebridgeYieldForHandoff!({
-      documentId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      documentId: DOC,
       fromInstanceId: 'reader-1',
       requestId: 'req-1',
     })).resolves.toMatchObject({ status: 'released' });

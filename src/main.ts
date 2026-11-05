@@ -1782,10 +1782,11 @@ async function parkOwnershipForHandoff(): Promise<void> {
   showSaveState();
 }
 /** Confirmed takeover: show last saved text when this window had transferred private edits. */
-async function discardParkedHandoffText(): Promise<void> {
-  if (viewMode || !workspace.dirty() || !db) return;
+async function discardParkedHandoffText(documentId: string): Promise<void> {
+  // Must still be viewing the yielded document — never wipe a different draft after a switch.
+  if (viewMode || active.id !== documentId || !workspace.dirty() || !db) return;
   try {
-    const fresh = await getStoredDraft(db, active.id);
+    const fresh = await getStoredDraft(db, documentId);
     if (fresh) {
       writingPosition.save();
       active = fresh;
@@ -1797,9 +1798,9 @@ async function discardParkedHandoffText(): Promise<void> {
   showSaveState();
 }
 /** Failed/timed-out takeover: try to re-acquire while keeping parked text intact. */
-async function recoverParkedHandoffOwnership(): Promise<void> {
-  if (viewMode || ownership) return;
-  const access = await acquireFor(active.id);
+async function recoverParkedHandoffOwnership(documentId: string): Promise<void> {
+  if (viewMode || ownership || active.id !== documentId) return;
+  const access = await acquireFor(documentId);
   if (access.ownership) {
     installOwnership(access);
     announceAction('Editing stayed in this window — the other window could not take over.', { keepConflict: true });
@@ -1823,13 +1824,16 @@ function captureHandoffSnapshot(): HandoffSnapshot {
   };
 }
 let editHereReason: HandoffRefuseReason | undefined;
+let editHereDocumentId: string | undefined;
 function hideEditHereBar(): void {
   editHereBar.hidden = true;
   editHereWarning.textContent = '';
   editHereReason = undefined;
+  editHereDocumentId = undefined;
 }
 function showEditHereBar(reason: HandoffRefuseReason): void {
   editHereReason = reason;
+  editHereDocumentId = active.id;
   editHereWarning.textContent = handoffRefuseGuidance(reason);
   editHereBar.hidden = false;
 }
@@ -3150,6 +3154,10 @@ if (!viewMode) {
     hideEditHere: hideEditHereBar,
   });
   editHereButton.addEventListener('click', () => {
+    if (editHereDocumentId && active.id !== editHereDocumentId) {
+      hideEditHereBar();
+      return;
+    }
     const steal = editHereReason === 'unresponsive';
     hideEditHereBar();
     // Explicit Edit here: retry cooperative yield, or steal only after an unresponsive timeout.

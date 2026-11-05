@@ -49,10 +49,10 @@ export type FocusHandoffDeps = {
    * Text is discarded only after a successful takeover confirmation.
    */
   parkOwnership: () => Promise<void>;
-  /** After confirmed takeover: replace parked dirty text with last saved from IndexedDB. */
-  discardParkedText: () => Promise<void>;
-  /** After failed/timed-out takeover: try to re-acquire while keeping parked text. */
-  recoverParkedOwnership: () => Promise<void>;
+  /** After confirmed takeover: replace parked dirty text with last saved (only if still on `documentId`). */
+  discardParkedText: (documentId: string) => Promise<void>;
+  /** After failed/timed-out takeover: try to re-acquire for `documentId` while keeping parked text. */
+  recoverParkedOwnership: (documentId: string) => Promise<void>;
   /**
    * Become owner after a cooperative release. `snapshot` is set only for same-tab
    * unsaved/private transfer; otherwise reread IndexedDB under the new fence.
@@ -184,10 +184,11 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
 
   const confirmParked = (requestId: string, ok: boolean): void => {
     if (!parkedRequestId || parkedRequestId !== requestId) return;
+    const documentId = parkedDocumentId;
     clearParked();
     void (async () => {
-      if (ok) await deps.discardParkedText();
-      else await deps.recoverParkedOwnership();
+      if (ok) await deps.discardParkedText(documentId);
+      else await deps.recoverParkedOwnership(documentId);
     })();
   };
 
@@ -331,8 +332,9 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     parkedDocumentId = documentId;
     confirmTimer = setTimeout(() => {
       if (parkedRequestId !== requestId) return;
+      const documentId = parkedDocumentId;
       clearParked();
-      void deps.recoverParkedOwnership();
+      void deps.recoverParkedOwnership(documentId);
     }, HANDOFF_CONFIRM_TIMEOUT_MS);
   };
 
@@ -514,28 +516,35 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     pending: () => pending,
     requestHandoff: (options) => { void startRequest(options); },
     cancel: () => {
-      if (!pending) return;
-      const requestId = pendingRequestId;
-      const documentId = pendingDocumentId;
-      clearPending();
-      if (requestId && documentId) {
-        notifyPeersComplete(requestId, false);
-        postMeta({
-          v: 1,
-          type: 'handoff-complete',
-          documentId,
-          requestId,
-          ok: false,
-          at: Date.now(),
-        });
+      // Requester: abort in-flight takeover and tell a parked peer to recover.
+      if (pending) {
+        const requestId = pendingRequestId;
+        const documentId = pendingDocumentId;
+        clearPending();
+        if (requestId && documentId) {
+          notifyPeersComplete(requestId, false);
+          postMeta({
+            v: 1,
+            type: 'handoff-complete',
+            documentId,
+            requestId,
+            ok: false,
+            at: Date.now(),
+          });
+        }
       }
+      // Owner: abandon park without discard/recover — caller is navigating away;
+      // dirty handling belongs to the document switch/delete path.
+      clearParked();
+      deps.hideEditHere?.();
     },
     dispose: () => {
       disposed = true;
       clearPending();
       if (parkedRequestId) {
+        const documentId = parkedDocumentId;
         clearParked();
-        void deps.recoverParkedOwnership();
+        void deps.recoverParkedOwnership(documentId);
       }
       deps.field.removeEventListener('pointerdown', onPointerDown);
       deps.field.removeEventListener('click', onClick);
