@@ -8,7 +8,8 @@ export type SearchTarget = { field: HTMLTextAreaElement; editor: Editor };
 /**
  * Find & Replace: query/replacement persistence, Match case/Regex options, transliterating
  * Find/Replace inputs, navigation (including zero-width matches) and Replace/Replace all.
- * Find navigation follows `getFindTarget` (active pane); Replace always mutates `primary`.
+ * Find follows `getFindTarget` (any visible active pane). Replace uses the same
+ * target after `canMutate` so read-only companions stay protected.
  */
 export function setupSearch(
   primary: SearchTarget,
@@ -16,6 +17,8 @@ export function setupSearch(
   options: {
     canMutate?: () => boolean;
     getFindTarget?: () => SearchTarget;
+    /** Editor surfaces whose edits refresh the open Find match total (active pane may change). */
+    matchSurfaces?: HTMLTextAreaElement[];
   } = {},
 ): {
   findInput: HTMLInputElement;
@@ -26,9 +29,9 @@ export function setupSearch(
   resetOptions: () => boolean;
 } {
   const field = primary.field;
-  const editor = primary.editor;
   const canMutate = options.canMutate ?? (() => true);
   const getFindTarget = options.getFindTarget ?? (() => primary);
+  const matchSurfaces = options.matchSurfaces ?? [field];
   const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
   const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
   const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
@@ -98,7 +101,7 @@ export function setupSearch(
   } | undefined;
   function resetSearchPosition(): void { lastZeroWidthMatch = undefined; }
   // Caret moves and edits are caught by the position and text checks in findNext.
-  field.addEventListener('input', resetSearchPosition);
+  for (const surface of matchSurfaces) surface.addEventListener('input', resetSearchPosition);
   function findNext(backwards = false): void {
     const target = getFindTarget();
     const found = matches(target.field.value);
@@ -138,36 +141,39 @@ export function setupSearch(
     findStatus.textContent = !findInput.value ? '' : found.length
       ? `${found.length} match${found.length === 1 ? '' : 'es'}` : 'No matches';
   }
-  for (const input of [findInput, field]) input.addEventListener('input', showMatchCount);
+  findInput.addEventListener('input', showMatchCount);
+  for (const surface of matchSurfaces) surface.addEventListener('input', showMatchCount);
   for (const input of [matchCase, regexMode]) input.addEventListener('change', showMatchCount);
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
   document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
     if (!canMutate()) return;
-    const found = matches(field.value);
+    const target = getFindTarget();
+    const found = matches(target.field.value);
     if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = 'No matches'; return; }
-    const match = found.find(([start, end]) => start === field.selectionStart && end === field.selectionEnd)
-      ?? found.find(([start]) => start >= field.selectionEnd) ?? found[0];
+    const match = found.find(([start, end]) => start === target.field.selectionStart && end === target.field.selectionEnd)
+      ?? found.find(([start]) => start >= target.field.selectionEnd) ?? found[0];
     const result = regexMode.checked
-      ? replaceMatchAt(searchPattern()!, field.value, match[0], replaceInput.value)
+      ? replaceMatchAt(searchPattern()!, target.field.value, match[0], replaceInput.value)
       : { end: match[1], text: replaceInput.value };
     if (!result || result.end !== match[1]) return;
-    editor.replaceRange(match[0], match[1], result.text);
+    target.editor.replaceRange(match[0], match[1], result.text);
     findStatus.textContent = 'Replaced 1 match';
-    field.focus({ preventScroll: true });
+    target.field.focus({ preventScroll: true });
   });
   document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('click', () => {
     if (!canMutate()) return;
+    const target = getFindTarget();
     const pattern = searchPattern();
     if (!pattern) return;
-    const original = field.value;
+    const original = target.field.value;
     const count = Array.from(original.matchAll(pattern)).length;
     if (!count) { findStatus.textContent = 'No matches'; return; }
     // Native substitution in regex mode; literal mode inserts the replacement text as is.
     const result = regexMode.checked ? original.replace(pattern, replaceInput.value) : original.replace(pattern, () => replaceInput.value);
-    editor.replaceRange(0, original.length, result);
+    target.editor.replaceRange(0, original.length, result);
     findStatus.textContent = `Replaced ${count} matches`;
-    field.focus({ preventScroll: true });
+    target.field.focus({ preventScroll: true });
   });
   findInput.addEventListener('keydown', event => {
     if (event.key === SHORTCUTS.nextMatch.key && !event.metaKey && !event.ctrlKey) { event.preventDefault(); findNext(event.shiftKey); }

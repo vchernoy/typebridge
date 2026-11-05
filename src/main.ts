@@ -14,7 +14,13 @@ import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commi
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
-import { commandAllowedOnPane } from './view/session';
+import { commandAllowedOnPane, resolveSessionForDocument } from './view/session';
+import {
+  createBoundSession,
+  createSessionRegistry,
+  snapshotBoundSession,
+  type BoundSession,
+} from './view/bound-session';
 import { mirrorTextarea } from './view/mirror';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
@@ -86,20 +92,50 @@ setupKeyboardShortcuts();
 const editor = new Editor(field);
 const companionEditor = new Editor(companionField);
 companionEditor.setReadOnly(true);
+const draftTitleB = document.querySelector<HTMLInputElement>('#draft-title-b')!;
+const paneBDrafts = document.querySelector<HTMLSelectElement>('#pane-b-drafts')!;
+const saveIndicatorB = document.querySelector<HTMLElement>('#save-indicator-b')!;
+const companionBadge = document.querySelector<HTMLElement>('#companion-badge')!;
+/** Declared early: syncMutationControls runs during module init before draft locals. */
+const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 if (viewMode) {
   editor.setReadOnly(true);
   workspace.setPaneRole('readonly');
 }
 
+/** Second independent document session when pane B shows a different document (#159 S4). */
+let secondary: BoundSession | undefined;
+/** Guard: setupSplitPane may reopen before draft locals exist. */
+let draftsInitialized = false;
+
+function dualDocumentSplit(): boolean {
+  return !!secondary && secondary.draft.id !== active.id && workspace.splitOpen();
+}
+
 /** Keep the companion text current even while hidden so position restore uses the right length. */
 function mirrorCompanion(force = false): void {
   if (!force && !workspace.splitOpen()) return;
+  if (dualDocumentSplit()) return;
   mirrorTextarea(field, companionField);
+}
+
+function syncCompanionChrome(): void {
+  const dual = dualDocumentSplit();
+  companionBadge.hidden = dual;
+  draftTitleB.hidden = !dual;
+  saveIndicatorB.hidden = !dual;
+  paneBDrafts.hidden = !workspace.splitOpen() || viewMode;
+  if (!dual) {
+    companionBadge.textContent = 'Live view · Read-only';
+    draftTitleB.value = '';
+  }
 }
 
 const resizeGrip = document.querySelector<HTMLButtonElement>('#resize-editor')!;
 /** Filled after mutation chrome exists; split open/close runs before those listeners are wired. */
 const paneChrome = { syncMutations: (): void => {} };
+/** Bumped on open/close so a detached close cannot tear down a reopened secondary. */
+let splitCloseGeneration = 0;
 const splitControls = setupSplitPane({
   shell: editorSplit,
   divider: splitDivider,
@@ -108,15 +144,49 @@ const splitControls = setupSplitPane({
   resetButton: splitReset,
   allowOpen: !viewMode,
   onOpenChange: open => {
+    // Do not tear down pane B while promotion is flushing/confirming the primary.
+    if (!open && transitioning) {
+      splitControls.setOpen(true);
+      return;
+    }
     workspace.setSplitOpen(open);
     toggleSplit.setAttribute('aria-pressed', open ? 'true' : 'false');
     toggleSplit.textContent = open ? 'Close split' : 'Split editor';
     // Grip still writes inline width while split forces width:100%; hide it until closed.
     resizeGrip.hidden = open;
     resizeGrip.tabIndex = open ? -1 : 0;
-    if (open) mirrorCompanion();
-    else workspace.setActivePane(PRIMARY_PANE_ID);
+    if (open) {
+      splitCloseGeneration++;
+      mirrorCompanion();
+      syncCompanionChrome();
+      if (draftsInitialized) renderPaneBDrafts();
+      paneChrome.syncMutations();
+      return;
+    }
+    const closeGeneration = ++splitCloseGeneration;
+    const stillClosing = (): boolean => closeGeneration === splitCloseGeneration && !workspace.splitOpen();
+    // Retarget shared commands off the companion before awaiting teardown; otherwise
+    // Replace/Copy can still target the hidden pane-B field while dualDocumentSplit is false.
+    const previousPane = workspace.activePaneId();
+    workspace.setActivePane(PRIMARY_PANE_ID);
     paneChrome.syncMutations();
+    void (async () => {
+      // Initial closed restore runs before titleEditorB / draft locals exist.
+      if (!draftsInitialized) return;
+      const released = await releaseSecondarySession(stillClosing);
+      if (released === 'cancelled') {
+        // Keep the split open when the user cancels discarding pane B.
+        splitControls.setOpen(true);
+        if (secondary && previousPane === SECOND_PANE_ID) {
+          workspace.setActivePane(SECOND_PANE_ID);
+          paneChrome.syncMutations();
+        }
+        return;
+      }
+      if (released === 'aborted' || !stillClosing()) return;
+      syncCompanionChrome();
+      paneChrome.syncMutations();
+    })();
   },
 });
 if (viewMode) {
@@ -237,13 +307,16 @@ function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'prog
 }
 /** The warning that must stay visible while text or storage is at risk. */
 function riskText(): string {
+  const secondaryDirty = dualDocumentSplit() && !!secondary?.dirty;
+  const secondaryFailed = dualDocumentSplit() && !!secondary?.saveFailed;
+  const secondaryBlockedDirty = dualDocumentSplit() && !!secondary?.editBlock && !!secondary?.dirty;
   if (storageProblem) {
-    if (!workspace.dirty()) return storageProblem;
+    if (!workspace.dirty() && !secondaryDirty) return storageProblem;
     return storageProblem === STORAGE_UNAVAILABLE ? SAVE_FAILED_NO_STORAGE : 'Changes are unsaved. ' + storageProblem;
   }
-  if (editBlock && workspace.dirty()) return NOT_OWNER_UNSAVED;
-  if (saveFailed && autosave.checked) return SAVE_FAILED;
-  if (workspace.dirty() && !autosave.checked) return AUTOSAVE_OFF;
+  if ((editBlock && workspace.dirty()) || secondaryBlockedDirty) return NOT_OWNER_UNSAVED;
+  if ((saveFailed || secondaryFailed) && autosave.checked) return SAVE_FAILED;
+  if ((workspace.dirty() || secondaryDirty) && !autosave.checked) return AUTOSAVE_OFF;
   return '';
 }
 function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): void {
@@ -300,35 +373,75 @@ const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
-/** Shared chrome mutates only the primary editable pane; refuse while the companion is active. */
+/** Active editable session for shared chrome (#159 S3/S4). */
+function activeEditableSession(): { paneId: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID; role: 'editable' | 'readonly'; editor: Editor; field: HTMLTextAreaElement; canUndo: boolean; canRedo: boolean } {
+  if (workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit() && secondary) {
+    const blocked = viewMode || secondary.editBlock !== '';
+    return {
+      paneId: SECOND_PANE_ID,
+      role: blocked ? 'readonly' : 'editable',
+      editor: secondary.editor,
+      field: secondary.field,
+      canUndo: secondary.editor.canUndo,
+      canRedo: secondary.editor.canRedo,
+    };
+  }
+  return {
+    paneId: PRIMARY_PANE_ID,
+    role: readOnlyNow() ? 'readonly' : 'editable',
+    editor,
+    field,
+    canUndo: editor.canUndo,
+    canRedo: editor.canRedo,
+  };
+}
+/** Shared chrome mutates the active editable pane; refuse while a same-doc companion is active. */
 function canMutatePrimary(): boolean {
+  const target = activeEditableSession();
   return commandAllowedOnPane({
     activePaneId: workspace.activePaneId(),
-    targetPaneId: PRIMARY_PANE_ID,
-    role: readOnlyNow() ? 'readonly' : 'editable',
+    targetPaneId: target.paneId,
+    role: target.role,
     mutatesDocument: true,
   });
+}
+/** Autosave follows the active editable session (pane B may own a different document). */
+function autosaveControlBlocked(): boolean {
+  // Viewers never own the preference; keep the change handler gated too.
+  if (viewMode || transferFrozen) return true;
+  if (workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit() && secondary) {
+    return secondary.editBlock !== '';
+  }
+  return editBlock !== '';
+}
+function syncAutosaveControl(): void {
+  if (viewMode || autosaveToggleActive) return;
+  autosave.disabled = autosaveControlBlocked();
 }
 function syncMutationControls(): void {
   // Comparison viewers own these attributes via applyViewerChrome; do not fight tests that
   // temporarily re-enable controls to prove handlers still refuse mutations.
   if (viewMode) return;
   const blocked = !canMutatePrimary();
-  undo.disabled = blocked || !editor.canUndo;
-  redo.disabled = blocked || !editor.canRedo;
+  const target = activeEditableSession();
+  undo.disabled = blocked || !target.canUndo;
+  redo.disabled = blocked || !target.canRedo;
   for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
     document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
   }
+  syncAutosaveControl();
 }
 const syncHistory = () => { syncMutationControls(); };
 paneChrome.syncMutations = syncMutationControls;
 field.addEventListener('historychange', syncHistory);
-for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
+for (const [button, kind] of [[undo, 'undo'], [redo, 'redo']] as const) {
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
     if (!canMutatePrimary()) return;
-    action();
-    field.focus({ preventScroll: true });
+    const target = activeEditableSession();
+    if (kind === 'undo') target.editor.undo();
+    else target.editor.redo();
+    target.field.focus({ preventScroll: true });
   });
 }
 syncHistory();
@@ -337,7 +450,8 @@ for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-la
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
     if (!canMutatePrimary()) return;
-    if (!editor.convertSelection(direction)) announceAction('Select text to convert');
+    const target = activeEditableSession();
+    if (!target.editor.convertSelection(direction)) announceAction('Select text to convert');
   });
 }
 field.addEventListener('keydown', event => {
@@ -348,21 +462,34 @@ field.addEventListener('keydown', event => {
   event.preventDefault();
   editor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
 });
+companionField.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+  if (!dualDocumentSplit()) return;
+  const key = event.key.toLowerCase();
+  if (key !== SHORTCUTS.convertCyrillic.key && key !== SHORTCUTS.convertLatin.key) return;
+  if (!canMutatePrimary() || companionField.selectionStart === companionField.selectionEnd) return;
+  event.preventDefault();
+  companionEditor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
+});
 function updateCaretPosition(): void {
   const surface = workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
   const { line, column } = lineColumnAtOffset(surface.value, surface.selectionStart);
   caretPosition.textContent = `Ln ${line}, Col ${column}`;
 }
-field.addEventListener('focus', () => {
-  workspace.setActivePane(PRIMARY_PANE_ID);
+/** Switch the active pane; refresh Find totals only when the target pane changes. */
+function activatePane(paneId: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID): void {
+  const previous = workspace.activePaneId();
+  workspace.setActivePane(paneId);
   syncMutationControls();
-  updateCaretPosition();
-});
-companionField.addEventListener('focus', () => {
-  workspace.setActivePane(SECOND_PANE_ID);
-  syncMutationControls();
-  updateCaretPosition();
-});
+  updateStats();
+  // Same-pane refocus (e.g. Replace all returning to the editor) must keep "Replaced N".
+  if (previous !== paneId) {
+    showMatchCount();
+    syncVersionNoticeDisplay();
+  }
+}
+field.addEventListener('focus', () => { activatePane(PRIMARY_PANE_ID); });
+companionField.addEventListener('focus', () => { activatePane(SECOND_PANE_ID); });
 // Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
 // "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
 // outdent moves focus as usual.
@@ -373,35 +500,62 @@ function saveTabIndent(): boolean {
   try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); return true; } catch { return false; }
 }
 tabIndent.addEventListener('change', saveTabIndent);
-field.addEventListener('keydown', event => {
-  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly || !canMutatePrimary()) return;
-  const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
+function handleTabIndent(event: KeyboardEvent, surface: HTMLTextAreaElement, surfaceEditor: Editor): void {
+  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || surface.readOnly || !canMutatePrimary()) return;
+  const change = indentEdit(surface.value, surface.selectionStart, surface.selectionEnd, event.shiftKey);
   // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
   if (!change && event.shiftKey) return;
   event.preventDefault();
   if (!change) return;
-  editor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
+  surfaceEditor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
+}
+field.addEventListener('keydown', event => { handleTabIndent(event, field, editor); });
+companionField.addEventListener('keydown', event => {
+  if (!dualDocumentSplit()) return;
+  handleTabIndent(event, companionField, companionEditor);
 });
 function updateStats(): void {
-  count.textContent = formatDocumentStats(field.value);
+  const surface = workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit()
+    ? companionField
+    : field;
+  count.textContent = formatDocumentStats(surface.value);
   updateCaretPosition();
 }
 field.addEventListener('input', updateStats);
 field.addEventListener('historychange', updateStats);
+companionField.addEventListener('input', updateStats);
+companionField.addEventListener('historychange', updateStats);
 field.addEventListener('keyup', updateCaretPosition);
 field.addEventListener('click', updateCaretPosition);
 field.addEventListener('select', updateCaretPosition);
 companionField.addEventListener('keyup', updateCaretPosition);
 companionField.addEventListener('click', updateCaretPosition);
 companionField.addEventListener('select', updateCaretPosition);
-const typingSettings = setupTransliteration(enabled, editor, { syncSearchEditors: () => syncSearchEditors(), preferenceSaved });
+const typingSettings = setupTransliteration(enabled, editor, {
+  syncSearchEditors: () => syncSearchEditors(),
+  preferenceSaved,
+  extraEditors: () => [companionEditor],
+});
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(field.value); announceAction('Copied'); }
-  catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
+  // Capture before the await so a focus change cannot redirect fallback selection.
+  const target = workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
+  const text = target.value;
+  try { await navigator.clipboard.writeText(text); announceAction('Copied'); }
+  catch {
+    target.focus();
+    target.select();
+    announceAction('Copy unavailable. Text selected; use your device’s copy command.');
+  }
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
-  if (!canMutatePrimary() || !field.value) return;
-  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
+  if (!canMutatePrimary()) return;
+  const target = activeEditableSession();
+  if (!target.field.value) return;
+  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? target.field : document.querySelector<HTMLButtonElement>('#more-open')! })) {
+    target.editor.clear();
+    target.field.focus();
+    announceAction('Cleared');
+  }
 });
 
 
@@ -412,7 +566,12 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
   enabled,
   {
     canMutate: canMutatePrimary,
-    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionSearch : primarySearch,
+    // Find is read-only: follow any visible active companion (same-doc mirror or dual-doc).
+    // Mutations stay gated by canMutate; split close retargets activePane to primary first.
+    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID && workspace.splitOpen()
+      ? companionSearch
+      : primarySearch,
+    matchSurfaces: [field, companionField],
   },
 );
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
@@ -501,7 +660,7 @@ document.addEventListener('keydown', event => {
 });
 
 
-const resetRules = setupRules(() => [editor, findEditor, replaceEditor, titleEditor]);
+const resetRules = setupRules(() => [editor, companionEditor, findEditor, replaceEditor, titleEditor, titleEditorB]);
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 // One document list, in the ▾ menu; Focus mode shows the same title bar (#104).
@@ -511,10 +670,23 @@ const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
 const titleEditor = new Editor(draftTitle);
 titleEditor.setEnabled(enabled.checked);
 if (viewMode) titleEditor.setReadOnly(true);
-enabled.addEventListener('change', () => titleEditor.setEnabled(enabled.checked));
-const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
+enabled.addEventListener('change', () => {
+  titleEditor.setEnabled(enabled.checked);
+  titleEditorB.setEnabled(enabled.checked);
+});
+const titleEditorB = new Editor(draftTitleB);
+titleEditorB.setEnabled(enabled.checked);
+titleEditorB.setReadOnly(true);
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
+const sessionRegistry = createSessionRegistry(createBoundSession({
+  sessionId: 'session-1',
+  editablePaneId: PRIMARY_PANE_ID,
+  draft: active,
+  editor,
+  field,
+  title: draftTitle,
+}));
 let drafts: StoredDraft[] = [];
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let saving: Promise<PersistResult> | undefined;
@@ -541,7 +713,9 @@ const writingPosition = setupWritingPosition(
 // Companion pane keeps an independent scroll/selection namespace (#159 S3).
 const companionWritingPosition = setupWritingPosition(
   companionField,
-  () => loadingDraft || viewMissing || !workspace.splitOpen() ? undefined : active.id,
+  () => loadingDraft || viewMissing || !workspace.splitOpen()
+    ? undefined
+    : (secondary?.draft.id ?? active.id),
   viewMode ? VIEWER_POSITION_NAMESPACE + 'pane-b:' : 'pane:pane-b:',
 );
 const journalTab = crypto.randomUUID();
@@ -573,9 +747,10 @@ try { autosave.checked = autosaveEnabled(); } catch { /* Keep editing available 
 // A tab-scoped emergency snapshot is not the committed draft. It only bridges
 // navigation/reload when the browser aborts an IndexedDB transaction on unload.
 const PENDING_KEY = 'typebridge.pendingDraft.v1';
-function readPending(): StoredDraft | undefined {
+const PENDING_KEY_B = 'typebridge.pendingDraft.paneB.v1';
+function parsePendingDraft(raw: string | null): StoredDraft | undefined {
   try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? 'null');
+    const value: unknown = JSON.parse(raw ?? 'null');
     if (!value || typeof value !== 'object') return undefined;
     const draft = value as Partial<StoredDraft>;
     if (typeof draft.id !== 'string' || !draft.id || typeof draft.title !== 'string' ||
@@ -584,13 +759,36 @@ function readPending(): StoredDraft | undefined {
     return draft as StoredDraft;
   } catch { return undefined; }
 }
+function readPending(): StoredDraft | undefined {
+  try { return parsePendingDraft(sessionStorage.getItem(PENDING_KEY)); }
+  catch { return undefined; }
+}
+function readPendingB(): StoredDraft | undefined {
+  try { return parsePendingDraft(sessionStorage.getItem(PENDING_KEY_B)); }
+  catch { return undefined; }
+}
 function snapshot(): StoredDraft {
   return { ...active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
 }
+let currentJournalSecondary: RecoverySnapshot | undefined;
 function journalEdit(): void {
   if (viewMode || !autosave.checked) return;
   const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
   try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
+  catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
+}
+function journalEditSecondary(): void {
+  if (viewMode || !autosave.checked || !secondary) return;
+  const entry: RecoverySnapshot = {
+    token: crypto.randomUUID(),
+    tab: journalTab,
+    documentId: secondary.draft.id,
+    revision: secondary.draft.revision,
+    timestamp: Date.now(),
+    title: draftTitleB.value.trim() || UNTITLED_TITLE,
+    text: companionField.value,
+  };
+  try { writeRecovery(localStorage, entry); currentJournalSecondary = entry; journalWarning.hidden = true; }
   catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
 }
 function sameContent(a: StoredDraft, b: StoredDraft): boolean {
@@ -605,9 +803,30 @@ function savePending(): void {
     setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure');
   }
 }
+function savePendingSecondary(): void {
+  if (viewMode || !secondary?.dirty || !autosave.checked) return;
+  try { sessionStorage.setItem(PENDING_KEY_B, JSON.stringify(snapshotBoundSession(secondary, UNTITLED_TITLE))); }
+  catch {
+    setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure');
+  }
+}
 function clearPending(saved: StoredDraft): void {
   try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
   catch { /* A stale backup is safer than removing one we cannot verify. */ }
+}
+function clearPendingSecondary(saved: StoredDraft): void {
+  try {
+    const pending = readPendingB();
+    if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) {
+      sessionStorage.removeItem(PENDING_KEY_B);
+    }
+  } catch { /* A stale backup is safer than removing one we cannot verify. */ }
+}
+function flushSecondaryOnUnload(): void {
+  if (!secondary) return;
+  savePendingSecondary();
+  clearTimeout(secondary.saveTimer);
+  void persistSecondary();
 }
 function rememberActive(): void { if (viewMode) return; try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
 function renderDrafts(): void {
@@ -631,6 +850,495 @@ function renderDrafts(): void {
   }
   // Shown as a list inside the document menu: at least two rows, at most eight.
   draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
+  renderPaneBDrafts();
+}
+function renderPaneBDrafts(): void {
+  if (viewMode || !draftsInitialized) return;
+  const selectedId = dualDocumentSplit() && secondary ? secondary.draft.id : active.id;
+  const displayTitle = dualDocumentSplit() && secondary
+    ? (secondary.title.value.trim() || UNTITLED_TITLE)
+    : (draftTitle.value.trim() || UNTITLED_TITLE);
+  // Always surface the in-memory primary (and secondary) when they are not yet in drafts,
+  // so an unsaved New document remains selectable to return to live-mirror mode.
+  const extras: StoredDraft[] = [];
+  if (!drafts.some(d => d.id === active.id)) extras.push(active);
+  const companion = dualDocumentSplit() ? secondary : undefined;
+  if (companion && !drafts.some(d => d.id === companion.draft.id)
+    && !extras.some(d => d.id === companion.draft.id)) {
+    extras.push(companion.draft);
+  }
+  const visible = extras.length ? [...extras, ...drafts] : drafts;
+  paneBDrafts.replaceChildren();
+  for (const draft of visible) {
+    const option = document.createElement('option');
+    option.value = draft.id;
+    const isCurrent = draft.id === selectedId;
+    option.textContent = draftOptionLabel({
+      savedTitle: draft.title,
+      displayTitle,
+      isCurrent,
+      unsaved: isCurrent && (dualDocumentSplit() && secondary ? secondary.dirty : workspace.dirty()),
+    });
+    paneBDrafts.append(option);
+  }
+  paneBDrafts.value = selectedId;
+  syncCompanionChrome();
+}
+function updateSaveIndicatorB(): void {
+  if (!secondary) return;
+  const state = storageProblem || secondary.saveFailed ? 'failed'
+    : secondary.editBlock ? (secondary.dirty ? 'unsaved' : 'readonly')
+    : !autosave.checked || !db ? 'unsaved' : secondary.dirty ? 'saving' : 'saved';
+  const label = { failed: 'Save failed', readonly: 'Read-only', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[state];
+  if (saveIndicatorB.textContent !== label) saveIndicatorB.textContent = label;
+  saveIndicatorB.dataset.state = state;
+}
+/**
+ * Flush or confirm-discard the secondary session.
+ * `stillWanted` abort checks let a reopen win over a detached close.
+ */
+async function releaseSecondarySession(
+  stillWanted: () => boolean = () => true,
+): Promise<'released' | 'cancelled' | 'aborted'> {
+  if (!secondary) {
+    companionEditor.setReadOnly(true);
+    titleEditorB.setReadOnly(true);
+    syncCompanionChrome();
+    return 'released';
+  }
+  clearTimeout(secondary.saveTimer);
+  if (secondary.saving) await secondary.saving;
+  if (!stillWanted()) return 'aborted';
+  if (!secondary) return 'released';
+  while (secondary.dirty && autosave.checked && !secondary.editBlock) {
+    const result = await persistSecondary();
+    if (!result.saved && secondary.saveFailed) break;
+    if (!stillWanted()) return 'aborted';
+  }
+  if (secondary.dirty && (!autosave.checked || secondary.editBlock || secondary.saveFailed)) {
+    if (!await askConfirmChoice({
+      title: 'Discard unsaved changes in the other pane?',
+      message: secondary.editBlock
+        ? 'Another window is editing that document, so this pane cannot save these changes. Copy or export them first to keep them.'
+        : 'Copy or export unsaved changes in the other pane first to keep them.',
+      confirmLabel: 'Discard changes',
+      cancelLabel: 'Keep editing',
+      returnFocus: companionField,
+    })) {
+      renderPaneBDrafts();
+      return 'cancelled';
+    }
+  }
+  if (!stillWanted()) return 'aborted';
+  if (!secondary) return 'released';
+  const previous = secondary;
+  const discardedJournal = currentJournalSecondary;
+  secondary = undefined;
+  sessionRegistry.setSecondary(undefined);
+  currentJournalSecondary = undefined;
+  try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
+  // Confirmed discard / teardown must forget the localStorage recovery entry so a
+  // reload does not resurface text the user already discarded.
+  if (discardedJournal) {
+    try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
+  }
+  clearOwnershipLost(previous.ownership);
+  // E2E may delay release so a reopen can race the close generation check.
+  const delayReleaseMs = (window as Window & { __typebridgeDelaySecondaryReleaseMs?: number }).__typebridgeDelaySecondaryReleaseMs;
+  if (typeof delayReleaseMs === 'number' && delayReleaseMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, delayReleaseMs));
+  }
+  // Await fence/Web Lock cleanup so a quick re-open of the same document does not
+  // observe ifAvailable:true as busy while this tab still holds the lock.
+  if (previous.ownership) await previous.ownership.release();
+  // Split may have reopened during the await. Finish live-mirror read-only cleanup
+  // unless a new secondary session was installed meanwhile.
+  if (secondary) return stillWanted() ? 'released' : 'aborted';
+  clearVersionNotice('secondary');
+  companionEditor.setReadOnly(true);
+  titleEditorB.setReadOnly(true);
+  companionField.value = field.value;
+  draftTitleB.value = '';
+  syncCompanionChrome();
+  mirrorCompanion(true);
+  syncMutationControls();
+  return stillWanted() ? 'released' : 'aborted';
+}
+/**
+ * When the primary opens the document already editable in pane B, promote B's
+ * in-memory session (text/title/history/ownership) instead of re-acquiring and mirroring.
+ */
+function rescheduleSecondaryAutosave(): void {
+  if (!secondary || viewMode || !secondary.dirty || !autosave.checked || secondary.editBlock) return;
+  clearTimeout(secondary.saveTimer);
+  updateSaveIndicatorB();
+  secondary.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
+}
+async function promoteSecondaryToPrimary(): Promise<boolean> {
+  if (!secondary) return true;
+  const promoting = secondary;
+  clearTimeout(secondary.saveTimer);
+  const restoreSecondaryTimer = secondary.dirty && autosave.checked && !secondary.editBlock;
+  const abortPromote = (): false => {
+    if (restoreSecondaryTimer && secondary === promoting) rescheduleSecondaryAutosave();
+    return false;
+  };
+  if (secondary.saving) await secondary.saving;
+  // Companion may have been released/replaced while awaiting (close split / picker).
+  if (secondary !== promoting) return abortPromote();
+  // Flush the document being left in the primary pane first.
+  while (workspace.dirty() && autosave.checked && !editBlock) {
+    const result = await persist();
+    if (secondary !== promoting) return abortPromote();
+    if (!result.saved && saveFailed) {
+      if (!await askConfirmChoice({
+        title: 'Discard unsaved changes?',
+        message: 'Copy or export unsaved changes first to keep them.',
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing',
+        returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
+      })) return abortPromote();
+      if (secondary !== promoting) return abortPromote();
+      break;
+    }
+  }
+  if (workspace.dirty() && (!autosave.checked || editBlock)) {
+    if (!await askConfirmChoice({
+      title: 'Discard unsaved changes?',
+      message: editBlock
+        ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them.'
+        : 'Copy or export unsaved changes first to keep them.',
+      confirmLabel: 'Discard changes',
+      cancelLabel: 'Keep editing',
+      returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
+    })) return abortPromote();
+    if (secondary !== promoting) return abortPromote();
+  }
+  if (secondary !== promoting) return abortPromote();
+  writingPosition.save();
+  companionWritingPosition.save();
+  const promoted = snapshotBoundSession(promoting, UNTITLED_TITLE);
+  const promotedDirty = promoting.dirty;
+  const promotedOwnership = promoting.ownership;
+  const promotedBlock = promoting.editBlock;
+  promoting.ownership = undefined;
+  secondary = undefined;
+  sessionRegistry.setSecondary(undefined);
+  const promotedJournal = currentJournalSecondary;
+  currentJournalSecondary = undefined;
+  if (promotedJournal) {
+    try { clearRecovery(localStorage, promotedJournal); } catch { /* Optional backup. */ }
+  }
+  // Retire both reload backups: the discarded primary snapshot must not resurrect on
+  // the next boot, and pane-B's key must not reopen pre-promotion text.
+  try {
+    sessionStorage.removeItem(PENDING_KEY);
+    sessionStorage.removeItem(PENDING_KEY_B);
+  } catch { /* Optional backup. */ }
+  // Handle was acquired for pane B; after promote, loss must freeze the primary session.
+  clearOwnershipLost(promotedOwnership);
+  const displaced = ownership;
+  ownership = promotedOwnership;
+  // Await displaced primary lock cleanup so a quick reopen of that document in pane B
+  // does not observe ifAvailable:true as busy while this tab still holds it.
+  if (displaced) await displaced.release();
+  editBlock = promotedBlock;
+  active = promoted;
+  workspace.setDocumentId(promoted.id);
+  workspace.bumpSessionGeneration();
+  workspace.setDirty(promotedDirty);
+  loadingDraft = true;
+  try {
+    editor.load(promoted.text);
+    if (promoted.history) editor.restoreHistory(promoted.history);
+    draftTitle.value = promoted.title;
+    syncTitleTooltip();
+  } finally {
+    loadingDraft = false;
+  }
+  rememberActive();
+  companionEditor.setReadOnly(true);
+  titleEditorB.setReadOnly(true);
+  draftTitleB.value = '';
+  syncCompanionChrome();
+  mirrorCompanion(true);
+  companionWritingPosition.restore(promoted.id);
+  writingPosition.restore(promoted.id);
+  // Discarded primary failure/notices must not stick to the promoted session.
+  saveFailed = false;
+  clearNotices();
+  clearVersionNotice();
+  applyEditAccess();
+  showSaveState();
+  if (workspace.dirty() && autosave.checked && !editBlock) {
+    journalEdit();
+    savePending();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { void persist(); }, 300);
+    showSaving();
+  }
+  renderDrafts();
+  syncMutationControls();
+  return true;
+}
+async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }> {
+  if (!secondary || viewMode) return { saved: true, conflict: false };
+  clearTimeout(secondary.saveTimer);
+  if (!autosave.checked || !secondary.dirty) return { saved: !secondary.dirty, conflict: false };
+  if (secondary.editBlock) return { saved: false, conflict: false };
+  if (secondary.saving) return secondary.saving;
+  const session = secondary;
+  session.saving = (async () => {
+    const delayMs = (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs;
+    if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    let createdConflict = false;
+    try {
+      if (!db) throw new Error('Storage unavailable');
+      while (session.dirty && autosave.checked && !session.editBlock) {
+        const version = session.contentRevision;
+        const saved = snapshotBoundSession(session, UNTITLED_TITLE);
+        if (session.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
+        const owner = await session.ownership.writeFence();
+        const journal = currentJournalSecondary
+          && currentJournalSecondary.documentId === saved.id
+          && currentJournalSecondary.revision === session.draft.revision
+          && currentJournalSecondary.text === saved.text
+          && currentJournalSecondary.title === saved.title
+          ? currentJournalSecondary
+          : undefined;
+        const result = await commitOrCreateConflictCopy(db, saved, session.draft.revision, crypto.randomUUID(), owner);
+        clearPendingSecondary(saved);
+        const titleOnly = !result.conflict && saved.title !== session.draft.title && saved.text === session.draft.text;
+        if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
+        session.draft = result.draft;
+        clearVersionNotice('secondary');
+        postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
+        if (session.contentRevision !== version && autosave.checked) journalEditSecondary();
+        session.saveFailed = false;
+        session.dirty = session.contentRevision !== version;
+        updateSaveIndicatorB();
+        if (result.conflict) {
+          createdConflict = true;
+          // Retain a title typed while the conflict-copy commit was in flight.
+          if ((draftTitleB.value.trim() || UNTITLED_TITLE) === saved.title) {
+            draftTitleB.value = session.draft.title;
+          }
+          setConflict(CONFLICT_COPY, true);
+          updateStatus({
+            primary: session.dirty && !storageProblem ? 'Saving…' : '',
+            risk: riskText(),
+          }, 'conflict');
+          const access = await acquireFor(result.draft.id);
+          clearOwnershipLost(session.ownership);
+          if (session.ownership) void session.ownership.release();
+          session.ownership = access.ownership;
+          session.editBlock = access.block;
+          bindOwnershipLost(access.ownership, () => {
+            if (access.ownership) loseSecondaryOwnership(access.ownership);
+          });
+          if (access.block) {
+            companionEditor.setReadOnly(true);
+            titleEditorB.setReadOnly(true);
+          }
+          renderPaneBDrafts();
+          syncMutationControls();
+        }
+      }
+      try { await refreshDrafts(); } catch { /* List is advisory. */ }
+      return { saved: !session.dirty, conflict: createdConflict };
+    } catch (error) {
+      if (error instanceof EditOwnershipLostError) {
+        const lost = session.ownership;
+        session.ownership = undefined;
+        session.editBlock = 'lost';
+        clearOwnershipLost(lost);
+        void lost?.release();
+        companionEditor.setReadOnly(true);
+        titleEditorB.setReadOnly(true);
+        updateSaveIndicatorB();
+        syncMutationControls();
+        return { saved: false, conflict: createdConflict };
+      }
+      session.saveFailed = true;
+      updateSaveIndicatorB();
+      return { saved: false, conflict: createdConflict };
+    }
+  })();
+  try { return await session.saving; }
+  finally {
+    session.saving = undefined;
+    if (session.dirty && autosave.checked && !session.saveFailed && !session.editBlock) {
+      clearTimeout(session.saveTimer);
+      session.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
+    }
+  }
+}
+function scheduleSaveSecondary(fromTitle = false): void {
+  if (!secondary || viewMode || secondary.editBlock) return;
+  const becameDirty = !secondary.dirty;
+  secondary.dirty = true;
+  secondary.contentRevision += 1;
+  clearTimeout(secondary.saveTimer);
+  if (autosave.checked) {
+    journalEditSecondary();
+    updateSaveIndicatorB();
+    secondary.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
+  } else {
+    updateSaveIndicatorB();
+    if (becameDirty || fromTitle) renderPaneBDrafts();
+  }
+}
+/** Serializes pane-B document opens so overlapping picks cannot orphan locks. */
+let companionOpenGeneration = 0;
+let companionOpenInFlight: Promise<void> | undefined;
+/** True while boot is restoring pane-B pending; keeps the picker disabled. */
+let bootRestoringSecondary = false;
+async function openCompanionDocument(id: string): Promise<void> {
+  if (viewMode || !workspace.splitOpen() || !db || transitioning) return;
+  const generation = ++companionOpenGeneration;
+  paneBDrafts.disabled = true;
+  const run = (async () => {
+    if (companionOpenInFlight) await companionOpenInFlight.catch(() => undefined);
+    if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    if (id === active.id) {
+      if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
+      if (generation !== companionOpenGeneration) return;
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
+      return;
+    }
+    const represented = resolveSessionForDocument(id, [
+      { sessionId: 'session-1', documentId: active.id },
+      ...(secondary ? [{ sessionId: secondary.sessionId, documentId: secondary.draft.id }] : []),
+    ]);
+    if (represented === 'session-1') {
+      if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
+      return;
+    }
+    if (secondary?.draft.id === id) return;
+    let next: StoredDraft | undefined;
+    try {
+      next = await getStoredDraft(db!, id);
+    } catch {
+      announceAction('Could not open that document in the other pane.');
+      renderPaneBDrafts();
+      return;
+    }
+    if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    // Primary may have switched to this document while we awaited storage.
+    if (active.id === id) {
+      if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
+      if (generation !== companionOpenGeneration) return;
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
+      return;
+    }
+    if (!next || next.revision < 1) {
+      announceAction('Could not open that document in the other pane.');
+      renderPaneBDrafts();
+      return;
+    }
+    if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
+    if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    if (active.id === id) {
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
+      return;
+    }
+    const access = await acquireFor(next.id);
+    if (generation !== companionOpenGeneration || !workspace.splitOpen() || active.id === id) {
+      void access.ownership?.release();
+      if (active.id === id && generation === companionOpenGeneration && workspace.splitOpen()) {
+        mirrorCompanion(true);
+        companionWritingPosition.restore(active.id);
+        renderPaneBDrafts();
+      }
+      return;
+    }
+    // Reread after release/acquire even for busy/read-only opens: the pre-prompt
+    // snapshot may be stale if another tab saved while the discard dialog was up.
+    let target = next;
+    if (db) {
+      let fresh: StoredDraft | undefined;
+      try {
+        fresh = await getStoredDraft(db, next.id);
+      } catch {
+        void access.ownership?.release();
+        announceAction('Could not open that document in the other pane.');
+        renderPaneBDrafts();
+        return;
+      }
+      if (generation !== companionOpenGeneration || !workspace.splitOpen() || active.id === id) {
+        void access.ownership?.release();
+        if (active.id === id && generation === companionOpenGeneration && workspace.splitOpen()) {
+          mirrorCompanion(true);
+          companionWritingPosition.restore(active.id);
+          renderPaneBDrafts();
+        }
+        return;
+      }
+      if (!fresh) {
+        void access.ownership?.release();
+        announceAction('Could not open that document in the other pane.');
+        renderPaneBDrafts();
+        return;
+      }
+      target = fresh;
+    }
+    if (active.id === target.id) {
+      void access.ownership?.release();
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
+      return;
+    }
+    companionWritingPosition.save();
+    loadingDraft = true;
+    try {
+      companionEditor.setReadOnly(false);
+      titleEditorB.setReadOnly(false);
+      companionEditor.load(target.text);
+      if (target.history) companionEditor.restoreHistory(target.history);
+      draftTitleB.value = target.title;
+      draftTitleB.hidden = false;
+    } finally {
+      loadingDraft = false;
+    }
+    secondary = createBoundSession({
+      sessionId: 'session-2',
+      editablePaneId: SECOND_PANE_ID,
+      draft: target,
+      editor: companionEditor,
+      field: companionField,
+      title: draftTitleB,
+    });
+    secondary.ownership = access.ownership;
+    secondary.editBlock = access.block;
+    bindOwnershipLost(access.ownership, () => {
+      if (access.ownership) loseSecondaryOwnership(access.ownership);
+    });
+    if (access.block) {
+      companionEditor.setReadOnly(true);
+      titleEditorB.setReadOnly(true);
+    }
+    sessionRegistry.setSecondary(secondary);
+    companionWritingPosition.restore(target.id);
+    updateSaveIndicatorB();
+    syncCompanionChrome();
+    renderPaneBDrafts();
+    syncMutationControls();
+    workspace.setActivePane(SECOND_PANE_ID);
+    companionField.focus({ preventScroll: true });
+  })();
+  companionOpenInFlight = run;
+  try { await run; }
+  finally {
+    if (companionOpenInFlight === run) companionOpenInFlight = undefined;
+    if (generation === companionOpenGeneration && !bootRestoringSecondary) paneBDrafts.disabled = false;
+  }
 }
 async function refreshDrafts(): Promise<void> {
   const delayMs = (window as Window & { __typebridgeDelayRefreshMs?: number }).__typebridgeDelayRefreshMs;
@@ -643,7 +1351,7 @@ function showDraft(): void {
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
   workspace.bumpSessionGeneration();
   workspace.setDocumentId(active.id);
-  clearVersionNotice();
+  clearVersionNotice('primary');
   clearNotices();
   loadingDraft = true;
   try {
@@ -655,7 +1363,10 @@ function showDraft(): void {
     saveFailed = false; // The editor no longer holds the unsaved text.
     // Mirror before restoring companion offsets (including when split is closed).
     mirrorCompanion(true);
-    companionWritingPosition.restore(active.id);
+    // Dual-document B keeps its own position key; do not apply the primary's offsets.
+    companionWritingPosition.restore(
+      dualDocumentSplit() && secondary ? secondary.draft.id : active.id,
+    );
   } finally { loadingDraft = false; }
   writingPosition.restore(active.id);
   renderDrafts();
@@ -675,8 +1386,6 @@ function applyEditAccess(): void {
   if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
   if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
-  // installOwnership during an in-flight Autosave-off save must not re-enable the checkbox.
-  autosave.disabled = blocked || autosaveToggleActive;
   document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
   // Temporary transfer freeze must not announce "another window is editing".
   const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, workspace.dirty());
@@ -689,6 +1398,34 @@ function applyEditAccess(): void {
 /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
 let storageGeneration = 0;
 type EditAccess = { ownership?: EditOwnership; block: EditBlock; generation: number };
+/**
+ * Loss callbacks are rebound when a handle moves between sessions (promote B→A).
+ * Without this, a secondary-acquired handle would keep ignoring primary loss after promote.
+ */
+const ownershipLostHandlers = new WeakMap<EditOwnership, () => void>();
+function bindOwnershipLost(held: EditOwnership | undefined, handler: () => void): void {
+  if (held) ownershipLostHandlers.set(held, handler);
+}
+function clearOwnershipLost(held: EditOwnership | undefined): void {
+  if (held) ownershipLostHandlers.delete(held);
+}
+function handleHeldOwnershipLost(held: EditOwnership): void {
+  const handler = ownershipLostHandlers.get(held);
+  if (handler) { handler(); return; }
+  if (ownership === held) loseOwnership();
+}
+function loseSecondaryOwnership(held: EditOwnership): void {
+  if (!secondary || secondary.ownership !== held) return;
+  secondary.ownership = undefined;
+  secondary.editBlock = 'lost';
+  clearTimeout(secondary.saveTimer);
+  clearOwnershipLost(held);
+  void held.release();
+  companionEditor.setReadOnly(true);
+  titleEditorB.setReadOnly(true);
+  updateSaveIndicatorB();
+  syncMutationControls();
+}
 /** Try to own `documentId` without waiting; never steals from a live owner. */
 async function acquireFor(documentId: string): Promise<EditAccess> {
   // Without storage nothing can be written, so there is nothing to own.
@@ -702,7 +1439,7 @@ async function acquireFor(documentId: string): Promise<EditAccess> {
   try {
     const result = await acquireEditOwnership({
       db, locks: webLocks, documentId, instanceId,
-      onLost: () => { if (held && ownership === held) loseOwnership(); },
+      onLost: () => { if (held) handleHeldOwnershipLost(held); },
     });
     // E2E: hold the lock briefly before returning so a mid-flight versionchange can be asserted.
     const afterMs = (window as Window & { __typebridgeDelayAfterAcquireMs?: number }).__typebridgeDelayAfterAcquireMs;
@@ -769,6 +1506,8 @@ function loseOwnership(): void {
 let ownershipRetry: Promise<void> | undefined;
 /** A BroadcastChannel reread arrived while ownershipRetry held the transition; run after it finishes. */
 let rereadAfterOwnershipRetry = false;
+let secondaryOwnershipRetry: Promise<void> | undefined;
+let rereadAfterSecondaryOwnershipRetry = false;
 /**
  * A read-only ordinary window tries again when shown or focused; it becomes editor only if the lock is free.
  * Always rereads first (single-flight with the acquire): a concurrent refresh must not bump sessionGeneration
@@ -816,6 +1555,62 @@ function retryOwnership(): void {
     void rereadDisplayed();
   });
 }
+/** Read-only pane B retries ownership when focused or the tab becomes visible again. */
+function retrySecondaryOwnership(): void {
+  const store = db;
+  const session = secondary;
+  if (viewMode || !store || !session || !dualDocumentSplit() || !mayRetryEditOwnership(session.editBlock)
+    || secondaryOwnershipRetry || companionOpenInFlight || field.disabled) return;
+  secondaryOwnershipRetry = (async () => {
+    await rereadSecondary();
+    if (!secondary || secondary !== session || !mayRetryEditOwnership(session.editBlock) || !dualDocumentSplit()) return;
+    const id = session.draft.id;
+    const view = session.sessionGeneration;
+    const stillHere = (): boolean => !!secondary && secondary === session && secondary.draft.id === id
+      && secondary.sessionGeneration === view && mayRetryEditOwnership(secondary.editBlock) && dualDocumentSplit();
+    if (!stillHere()) return;
+    const access = await acquireFor(id);
+    if (!access.ownership) return;
+    let fresh: StoredDraft | undefined | null = null;
+    try { if (stillHere() && !session.dirty) fresh = await getStoredDraft(store, id); }
+    catch { void access.ownership.release(); return; }
+    if (!stillHere()) { void access.ownership.release(); return; }
+    if (fresh === undefined) {
+      void access.ownership.release();
+      if (session.draft.revision >= 1) showVersionNotice(DELETED_NOTICE, 'secondary');
+      return;
+    }
+    if (fresh) {
+      companionWritingPosition.save();
+      loadingDraft = true;
+      try {
+        session.draft = fresh;
+        companionEditor.load(fresh.text);
+        if (fresh.history) companionEditor.restoreHistory(fresh.history);
+        draftTitleB.value = fresh.title;
+      } finally { loadingDraft = false; }
+      companionWritingPosition.restore(fresh.id);
+      clearVersionNotice('secondary');
+    }
+    session.ownership = access.ownership;
+    session.editBlock = access.block;
+    bindOwnershipLost(access.ownership, () => loseSecondaryOwnership(access.ownership!));
+    companionEditor.setReadOnly(!!access.block);
+    titleEditorB.setReadOnly(!!access.block);
+    updateSaveIndicatorB();
+    syncMutationControls();
+    announceAction('You can edit this document in the other pane now.', { keepConflict: true });
+    if (session.dirty && autosave.checked) {
+      clearTimeout(session.saveTimer);
+      session.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
+    }
+  })().finally(() => {
+    secondaryOwnershipRetry = undefined;
+    if (!rereadAfterSecondaryOwnershipRetry) return;
+    rereadAfterSecondaryOwnershipRetry = false;
+    void rereadSecondary();
+  });
+}
 async function persist(): Promise<PersistResult> {
   if (viewMode) return { saved: true, conflict: false };
   clearTimeout(saveTimer);
@@ -840,7 +1635,7 @@ async function persist(): Promise<PersistResult> {
         const titleOnly = !result.conflict && saved.title !== active.title && saved.text === active.text;
         if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         active = result.draft;
-        clearVersionNotice();
+        clearVersionNotice('primary');
         postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
         writingPosition.save();
         if (workspace.contentRevision() !== version && autosave.checked) journalEdit();
@@ -924,6 +1719,22 @@ function scheduleSave(fromTitle = false): void {
 }
 field.addEventListener('input', () => { scheduleSave(); mirrorCompanion(); });
 field.addEventListener('historychange', () => { scheduleSave(); mirrorCompanion(); });
+companionField.addEventListener('input', () => {
+  if (dualDocumentSplit()) scheduleSaveSecondary();
+});
+companionField.addEventListener('historychange', () => {
+  if (dualDocumentSplit()) { scheduleSaveSecondary(); syncHistory(); }
+});
+draftTitleB.addEventListener('focus', () => {
+  if (!dualDocumentSplit()) return;
+  activatePane(SECOND_PANE_ID);
+});
+draftTitleB.addEventListener('input', () => {
+  if (dualDocumentSplit()) scheduleSaveSecondary(true);
+});
+draftTitle.addEventListener('focus', () => {
+  activatePane(PRIMARY_PANE_ID);
+});
 function syncTitleTooltip(): void {
   // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
   draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
@@ -947,7 +1758,7 @@ function endAutosaveToggleGate(): void {
   releaseAutosaveToggleGate?.();
 }
 autosave.addEventListener('change', async () => {
-  if (readOnlyNow() || autosaveToggleActive) return;
+  if (autosaveControlBlocked() || autosaveToggleActive) return;
   autosaveToggleActive = true;
   autosave.disabled = true;
   beginAutosaveToggleGate();
@@ -964,9 +1775,75 @@ autosave.addEventListener('change', async () => {
     clearNotices();
     if (workspace.dirty()) showSaving(); else announce('Autosave on');
     if (workspace.dirty()) { journalEdit(); void persist(); }
+    if (secondary?.dirty && !secondary.editBlock) {
+      updateSaveIndicatorB();
+      void persistSecondary();
+    }
   }
   else {
     clearTimeout(saveTimer);
+    if (secondary) {
+      clearTimeout(secondary.saveTimer);
+      updateSaveIndicatorB();
+    }
+    const companionActive = workspace.activePaneId() === SECOND_PANE_ID
+      && dualDocumentSplit() && !!secondary && secondary.editBlock === '';
+    if (companionActive && secondary) {
+      // Bind deletion to the companion document before any await.
+      const startedSession = secondary;
+      const startedId = secondary.draft.id;
+      const startedOwnership = secondary.ownership;
+      const inFlight = secondary.saving ? await secondary.saving : undefined;
+      if (!inFlight?.conflict) clearNotices();
+      const stayed = secondary === startedSession && secondary.draft.id === startedId
+        && secondary.ownership === startedOwnership;
+      // Conflict copies update draft/ownership in place on the same session object.
+      const conflictCopy = !!(inFlight?.conflict && secondary && secondary.ownership
+        && secondary.ownership !== startedOwnership && secondary.draft.id !== startedId);
+      if (!stayed && !conflictCopy) {
+        updateSaveIndicatorB();
+        announce(AUTOSAVE_OFF);
+        return;
+      }
+      const targetId = secondary.draft.id;
+      const targetRevision = secondary.draft.revision;
+      const targetOwnership = secondary.ownership!;
+      const deleteSaved = await askConfirmChoice({
+        title: 'Delete the saved copy?',
+        message: 'Delete the saved copy of this document? Keep saved copy leaves it in your Documents list.',
+        confirmLabel: 'Delete saved copy',
+        cancelLabel: 'Keep saved copy',
+        returnFocus: autosave,
+      });
+      if (deleteSaved) {
+        try {
+          if (!db || !secondary || targetOwnership.documentId !== targetId) throw new Error('Storage unavailable');
+          if (secondary.draft.id !== targetId || secondary.ownership !== targetOwnership
+            || secondary.editBlock || transferFrozen || transitioning) {
+            throw new Error('Document changed');
+          }
+          if (!await deleteStoredDraft(db, targetId, targetRevision, await targetOwnership.writeFence())) {
+            throw new Error('Draft changed');
+          }
+          if (targetRevision >= 1) postSignal('deleted', targetId, targetRevision);
+          if (secondary && secondary.draft.id === targetId) {
+            secondary.draft = { ...secondary.draft, revision: 0 };
+            secondary.dirty = true;
+          }
+          clearNotices();
+          await refreshDrafts();
+        } catch (error) {
+          if (error instanceof EditOwnershipLostError && secondary?.ownership) {
+            loseSecondaryOwnership(secondary.ownership);
+          }
+          announceAction('Could not delete saved document; current text is kept', { keepConflict: true });
+          return;
+        }
+      }
+      updateSaveIndicatorB();
+      announce(AUTOSAVE_OFF);
+      return;
+    }
     // Bind deletion to this document before any await — defense if a switch somehow races the gate.
     const startedId = active.id;
     const startedOwnership = ownership;
@@ -979,6 +1856,7 @@ autosave.addEventListener('change', async () => {
     const conflictCopy = !!(inFlight?.conflict && ownership && ownership !== startedOwnership && active.id !== startedId);
     // Navigated away during the wait: do not offer to delete a different document's saved copy.
     if (!stayed && !conflictCopy) {
+      updateSaveIndicatorB();
       announce(AUTOSAVE_OFF);
       return;
     }
@@ -1015,13 +1893,15 @@ autosave.addEventListener('change', async () => {
         return;
       }
     }
+    updateSaveIndicatorB();
     announce(AUTOSAVE_OFF);
   }
   } finally {
     endAutosaveToggleGate();
     autosaveToggleActive = false;
-    // Match applyEditAccess / readOnlyNow — a concurrent switch may have set transferFrozen.
-    autosave.disabled = editBlock !== '' || transferFrozen;
+    updateSaveIndicatorB();
+    // Match syncAutosaveControl — companion-active sessions can toggle while A is blocked.
+    autosave.disabled = autosaveControlBlocked();
     // Re-focus after re-enabling: the dialog cannot restore while this control
     // is disabled, and a delete may await before this finally runs (#114 review).
     autosave.focus({ preventScroll: true });
@@ -1031,6 +1911,17 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
+  if (id && secondary && id === secondary.draft.id) {
+    transitioning = true;
+    try {
+      if (!(await promoteSecondaryToPrimary())) return { opened: false, conflict: false };
+      return { opened: true, conflict: false };
+    } finally {
+      transitioning = false;
+      unfreezeEditorsAfterTransition();
+      renderDrafts();
+    }
+  }
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
   let flushConflict = false;
@@ -1104,6 +1995,10 @@ document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click
 for (const picker of documentPickers) {
   picker.addEventListener('change', () => { void (viewMode ? viewerOpen(picker.value) : switchDraft(picker.value)); });
 }
+paneBDrafts.addEventListener('change', () => {
+  if (transitioning) { renderPaneBDrafts(); return; }
+  void openCompanionDocument(paneBDrafts.value);
+});
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (readOnlyNow() || transitioning) return;
   clearTimeout(saveTimer);
@@ -1265,6 +2160,16 @@ function handleDatabaseUpgrade(): void {
   ownership = undefined;
   clearTimeout(saveTimer);
   void previous?.release();
+  if (secondary) {
+    clearTimeout(secondary.saveTimer);
+    const secondaryOwnership = secondary.ownership;
+    secondary.ownership = undefined;
+    secondary.editBlock = 'error';
+    void secondaryOwnership?.release();
+    companionEditor.setReadOnly(true);
+    titleEditorB.setReadOnly(true);
+    updateSaveIndicatorB();
+  }
   db = undefined;
   storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   recoveryNotice.hidden = false;
@@ -1272,6 +2177,7 @@ function handleDatabaseUpgrade(): void {
   // A later upgrade must not erase an earlier conflict-copy notice (#66).
   setRiskStatus('', 'failure');
   applyEditAccess();
+  syncMutationControls();
 }
 async function initializeDrafts(): Promise<void> {
   await ownerReady;
@@ -1323,13 +2229,169 @@ async function initializeDrafts(): Promise<void> {
     setSaveStatus(storageProblem, 'failure');
     renderDrafts();
   } finally {
-    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
+    draftsInitialized = true;
+    updateStats();
+    // Keep primary+companion disabled until pending-B restore finishes so it cannot
+    // overwrite edits the user makes in a ready UI.
+    paneBDrafts.disabled = true;
+  }
+  try {
+    await restorePendingSecondary();
+  } finally {
+    field.disabled = false;
+    draftSelect.disabled = false;
+    draftTitle.disabled = false;
+    paneBDrafts.disabled = false;
+    applyEditAccess();
+    // Focus mode must restore after the textarea is enabled — focus() is a no-op while disabled.
     restoreFocusMode();
     writingPosition.restore(active.id);
-    updateStats();
-    applyEditAccess();
+    renderPaneBDrafts();
     void renderRecovery();
     finishInitialization();
+  }
+}
+
+/**
+ * Install a recovery-only pane-B session from a pending snapshot (no ownership / optional no DB).
+ * Keeps the unsaved text reachable for copy/export even when storage is unavailable.
+ */
+function installRecoveryOnlySecondary(pending: StoredDraft, access?: EditAccess): boolean {
+  if (viewMode || pending.id === active.id) return false;
+  if (!workspace.splitOpen()) splitControls.setOpen(true);
+  if (pending.id === active.id || !workspace.splitOpen()) {
+    void access?.ownership?.release();
+    return false;
+  }
+  companionWritingPosition.save();
+  loadingDraft = true;
+  try {
+    companionEditor.setReadOnly(false);
+    titleEditorB.setReadOnly(false);
+    companionEditor.load(pending.text);
+    if (pending.history) companionEditor.restoreHistory(pending.history);
+    draftTitleB.value = pending.title;
+    draftTitleB.hidden = false;
+  } finally {
+    loadingDraft = false;
+  }
+  secondary = createBoundSession({
+    sessionId: 'session-2',
+    editablePaneId: SECOND_PANE_ID,
+    draft: { ...pending },
+    editor: companionEditor,
+    field: companionField,
+    title: draftTitleB,
+  });
+  secondary.ownership = access?.ownership;
+  secondary.editBlock = access?.block ?? '';
+  secondary.dirty = true;
+  secondary.contentRevision = 1;
+  if (access?.ownership) {
+    bindOwnershipLost(access.ownership, () => {
+      if (access.ownership) loseSecondaryOwnership(access.ownership);
+    });
+  }
+  if (access?.block) {
+    companionEditor.setReadOnly(true);
+    titleEditorB.setReadOnly(true);
+  }
+  sessionRegistry.setSecondary(secondary);
+  companionWritingPosition.restore(pending.id);
+  updateSaveIndicatorB();
+  syncCompanionChrome();
+  renderPaneBDrafts();
+  syncMutationControls();
+  return true;
+}
+
+/**
+ * Install a pane-B session from a pending snapshot when its IndexedDB row is gone.
+ * Keeps the unsaved text reachable for copy/export/recovery even without a backing document.
+ */
+async function installOrphanPendingSecondary(pending: StoredDraft): Promise<boolean> {
+  if (viewMode || !db || pending.id === active.id) return false;
+  if ((await releaseSecondarySession()) === 'cancelled') return false;
+  if (pending.id === active.id || !workspace.splitOpen()) return false;
+  const access = await acquireFor(pending.id);
+  return installRecoveryOnlySecondary(pending, access);
+}
+
+/** Restore a pane-B reload snapshot after the primary session is live. */
+async function restorePendingSecondary(): Promise<void> {
+  if (viewMode) return;
+  const pending = readPendingB();
+  if (!pending) return;
+  // Same document as primary cannot be a second editable session; keep recovery journal only.
+  if (pending.id === active.id) return;
+  bootRestoringSecondary = true;
+  paneBDrafts.disabled = true;
+  try {
+    if (!db) {
+      if (installRecoveryOnlySecondary(pending)) {
+        setSaveStatus(
+          'Recovered unsaved text in the other pane; browser storage is unavailable. Copy or export it.',
+          'failure',
+        );
+      }
+      return;
+    }
+    // E2E may delay the IDB read so a concurrent open can race the restore.
+    const delayMs = (window as Window & { __typebridgeDelayPendingSecondaryMs?: number }).__typebridgeDelayPendingSecondaryMs;
+    if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    let committed: StoredDraft | undefined;
+    try { committed = await getStoredDraft(db, pending.id); }
+    catch { committed = undefined; }
+    if (committed && sameContent(pending, committed)) {
+      clearPendingSecondary(pending);
+      return;
+    }
+    if (!workspace.splitOpen()) splitControls.setOpen(true);
+    const generationBeforeOpen = companionOpenGeneration;
+    let openedExisting = false;
+    if (committed && committed.revision >= 1) {
+      await openCompanionDocument(pending.id);
+      // A newer user pick (generation advanced past this open) wins over boot restore.
+      if (companionOpenGeneration !== generationBeforeOpen + 1) return;
+      openedExisting = !!secondary && secondary.draft.id === pending.id;
+    }
+    if (!openedExisting) {
+      if (!(await installOrphanPendingSecondary(pending))) return;
+    } else {
+      // Never clobber a session the user already dirtied while restore awaited.
+      if (!secondary || secondary.dirty || secondary.contentRevision !== 0) return;
+      const sessionId = secondary.sessionId;
+      const contentAtOpen = secondary.contentRevision;
+      companionWritingPosition.save();
+      loadingDraft = true;
+      try {
+        if (!secondary || secondary.sessionId !== sessionId || secondary.draft.id !== pending.id) return;
+        if (secondary.dirty || secondary.contentRevision !== contentAtOpen) return;
+        companionEditor.load(pending.text);
+        if (pending.history) companionEditor.restoreHistory(pending.history);
+        draftTitleB.value = pending.title;
+        secondary.draft = { ...pending };
+        secondary.dirty = true;
+        secondary.contentRevision += 1;
+      } finally {
+        loadingDraft = false;
+      }
+      if (!secondary || secondary.sessionId !== sessionId) return;
+      companionWritingPosition.restore(pending.id);
+      updateSaveIndicatorB();
+      syncMutationControls();
+    }
+    if (!secondary) return;
+    if (secondary.editBlock) {
+      setSaveStatus('Recovered unsaved text in the other pane, but another window is editing that document, so it was not saved. Copy or export it.', 'failure');
+    } else if (autosave.checked) {
+      setSaveStatus('Recovered unsaved text in the other pane; saving…');
+      await persistSecondary();
+    } else {
+      setSaveStatus('Recovered unsaved text in the other pane; autosave is off');
+    }
+  } finally {
+    bootRestoringSecondary = false;
   }
 }
 
@@ -1452,14 +2514,36 @@ function postSignal(type: DocumentSignal['type'], documentId: string, revision: 
 const versionNotice = document.querySelector<HTMLElement>('#version-notice')!;
 const NEWER_VERSION_NOTICE = 'A newer saved version of this document exists in another window. Your text here has not been changed.';
 const DELETED_NOTICE = 'This saved document was deleted in another window. Your text here has not been changed.';
-function showVersionNotice(text: string): void {
+/** Per-session version warnings so a primary save/switch does not erase pane-B feedback. */
+let primaryVersionNotice = '';
+let secondaryVersionNotice = '';
+function syncVersionNoticeDisplay(): void {
+  const preferSecondary = workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit();
+  const text = preferSecondary
+    ? (secondaryVersionNotice || primaryVersionNotice)
+    : (primaryVersionNotice || secondaryVersionNotice);
+  if (!text) {
+    if (versionNotice.hidden && !versionNotice.textContent) return;
+    versionNotice.hidden = true;
+    versionNotice.textContent = '';
+    return;
+  }
   if (versionNotice.textContent !== text) versionNotice.textContent = text;
   versionNotice.hidden = false;
 }
-function clearVersionNotice(): void {
-  if (versionNotice.hidden && !versionNotice.textContent) return;
-  versionNotice.hidden = true;
-  versionNotice.textContent = '';
+function showVersionNotice(text: string, target: 'primary' | 'secondary' = 'primary'): void {
+  if (target === 'secondary') secondaryVersionNotice = text;
+  else primaryVersionNotice = text;
+  syncVersionNoticeDisplay();
+}
+function clearVersionNotice(target?: 'primary' | 'secondary'): void {
+  if (target === 'secondary') secondaryVersionNotice = '';
+  else if (target === 'primary') primaryVersionNotice = '';
+  else {
+    primaryVersionNotice = '';
+    secondaryVersionNotice = '';
+  }
+  syncVersionNoticeDisplay();
 }
 let rereadSeq = 0;
 /** Authoritative reread of the displayed document; signals and focus only decide when to run it. */
@@ -1509,6 +2593,45 @@ async function rereadDisplayed(): Promise<void> {
   } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
   else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE);
 }
+let rereadSecondarySeq = 0;
+/** Authoritative reread of the dual-document companion session. */
+async function rereadSecondary(): Promise<void> {
+  if (!secondary || !db || loadingDraft || !dualDocumentSplit()) return;
+  while (secondary.saving) await secondary.saving.catch(() => undefined);
+  if (!secondary || !dualDocumentSplit()) return;
+  const id = secondary.draft.id;
+  const generationAtStart = secondary.sessionGeneration;
+  const seq = ++rereadSecondarySeq;
+  let stored: StoredDraft | undefined;
+  try { stored = await getStoredDraft(db, id); } catch { return; }
+  if (!secondary || seq !== rereadSecondarySeq || secondary.sessionGeneration !== generationAtStart || secondary.draft.id !== id) return;
+  if (secondary.saving) { void rereadSecondary(); return; }
+  const reader = secondary.editBlock !== '' && !secondary.dirty;
+  const action = decideReread({
+    role: reader ? 'viewer' : 'editor',
+    displayedRevision: secondary.draft.revision,
+    displayedUpdatedAt: secondary.draft.updatedAt,
+    stored,
+  });
+  if (action === 'refresh' && stored) {
+    companionWritingPosition.save();
+    loadingDraft = true;
+    try {
+      secondary.draft = stored;
+      companionEditor.load(stored.text);
+      if (stored.history) companionEditor.restoreHistory(stored.history);
+      draftTitleB.value = stored.title;
+    } finally { loadingDraft = false; }
+    companionWritingPosition.restore(stored.id);
+    clearVersionNotice('secondary');
+    updateSaveIndicatorB();
+    renderPaneBDrafts();
+  } else if (action === 'missing') {
+    if (secondary.draft.revision >= 1) showVersionNotice(DELETED_NOTICE, 'secondary');
+    renderPaneBDrafts();
+  } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE, 'secondary');
+  else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE, 'secondary');
+}
 let listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleListRefresh(): void {
   if (!viewMode || !db) return;
@@ -1521,10 +2644,18 @@ signalChannel?.addEventListener('message', event => {
   // While loading, `active` is not the represented document yet; reread once it is.
   if (field.disabled) { rereadAfterInit = true; return; }
   scheduleListRefresh();
-  if (!shouldApplyDocumentSignal(signal, active.id, active.revision)) return;
-  // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
-  if (ownershipRetry) { rereadAfterOwnershipRetry = true; return; }
-  void rereadDisplayed();
+  if (shouldApplyDocumentSignal(signal, active.id, active.revision)) {
+    // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
+    if (ownershipRetry) rereadAfterOwnershipRetry = true;
+    else void rereadDisplayed();
+  }
+  if (secondary && shouldApplyDocumentSignal(signal, secondary.draft.id, secondary.draft.revision)) {
+    if (mayRetryEditOwnership(secondary.editBlock)) {
+      if (secondaryOwnershipRetry) rereadAfterSecondaryOwnershipRetry = true;
+      else retrySecondaryOwnership();
+    } else if (secondaryOwnershipRetry) rereadAfterSecondaryOwnershipRetry = true;
+    else void rereadSecondary();
+  }
 });
 function reconcileSignals(): void {
   if (document.visibilityState !== 'visible') return;
@@ -1532,9 +2663,14 @@ function reconcileSignals(): void {
   // Readers: single-flight reread+acquire. Owners/viewers: still reread so missed signals surface.
   if (mayRetryEditOwnership(editBlock)) retryOwnership();
   else void rereadDisplayed();
+  if (secondary && dualDocumentSplit()) {
+    if (mayRetryEditOwnership(secondary.editBlock)) retrySecondaryOwnership();
+    else void rereadSecondary();
+  }
 }
 // Focusing the text is the clearest sign the user wants to edit here; it never steals a held lock.
 field.addEventListener('focus', retryOwnership);
+companionField.addEventListener('focus', retrySecondaryOwnership);
 window.addEventListener('focus', reconcileSignals);
 document.addEventListener('visibilitychange', reconcileSignals);
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
@@ -1630,12 +2766,26 @@ function downloadText(filename: string, content: string, mime: string): void {
 function safeFilename(title: string): string {
   return (title.trim().split('').map(char => char.charCodeAt(0) < 32 || '/\\\\:*?"<>|'.includes(char) ? '-' : char).join('').slice(0, 80) || 'document');
 }
+function exportSurface(): { title: string; text: string } {
+  if (dualDocumentSplit() && workspace.activePaneId() === SECOND_PANE_ID && secondary) {
+    return {
+      title: draftTitleB.value.trim() || UNTITLED_TITLE,
+      text: companionField.value,
+    };
+  }
+  return {
+    title: draftTitle.value.trim() || UNTITLED_TITLE,
+    text: field.value,
+  };
+}
 document.querySelector<HTMLButtonElement>('#export-txt')!.addEventListener('click', () => {
-  downloadText(safeFilename(draftTitle.value) + '.txt', field.value, 'text/plain;charset=utf-8');
+  const { title, text } = exportSurface();
+  downloadText(safeFilename(title) + '.txt', text, 'text/plain;charset=utf-8');
   announceAction('Text exported');
 });
 document.querySelector<HTMLButtonElement>('#export-json')!.addEventListener('click', () => {
-  const draft = { title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
+  const { title, text } = exportSurface();
+  const draft = { title, text };
   downloadText(safeFilename(draft.title) + '.typebridge.json', JSON.stringify({ format: 'typebridge-draft', version: 1, draft }, null, 2), 'application/json;charset=utf-8');
   announceAction('Document exported');
 });
@@ -1674,42 +2824,81 @@ importFile.addEventListener('change', async () => {
   }
 });
 
-if (!viewMode) window.addEventListener('pagehide', () => { savePending(); clearTimeout(saveTimer); void persist(); });
+if (!viewMode) window.addEventListener('pagehide', () => {
+  savePending();
+  flushSecondaryOnUnload();
+  clearTimeout(saveTimer);
+  void persist();
+});
 let allowUpdateReload = false;
 let privateReloadChoice: { id: string; generation: number } | undefined;
+let privateReloadChoiceB: { id: string; generation: number } | undefined;
 async function prepareUpdateReload(): Promise<boolean> {
   if (transitioning || deleting || field.disabled) return false;
   privateReloadChoice = undefined;
-  if (workspace.dirty() && !autosave.checked) {
+  privateReloadChoiceB = undefined;
+  const secondaryDirty = !!secondary?.dirty;
+  if ((workspace.dirty() || secondaryDirty) && !autosave.checked) {
     const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#update-reload')! });
-    if (discard) privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
+    if (discard) {
+      privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
+      if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
+    }
     return discard;
   }
   savePending();
+  savePendingSecondary();
   if (workspace.dirty()) await persist();
-  if (!workspace.dirty()) return true;
+  if (secondary?.dirty) await persistSecondary();
+  if (!workspace.dirty() && !secondary?.dirty) return true;
   savePending();
+  savePendingSecondary();
   const pending = readPending();
-  return !!pending && sameContent(pending, snapshot());
+  const pendingB = readPendingB();
+  const primaryOk = !workspace.dirty() || (!!pending && sameContent(pending, snapshot()));
+  const secondaryOk = !secondary?.dirty || (!!pendingB && secondary && sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)));
+  return primaryOk && secondaryOk;
 }
 function reloadAfterUpdate(): void {
   if (transitioning || deleting || field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
-  if (workspace.dirty()) {
+  if (workspace.dirty() || secondary?.dirty) {
     if (!autosave.checked) {
-      if (privateReloadChoice?.id !== active.id || privateReloadChoice.generation !== workspace.contentRevision()) throw new Error('Private edits changed');
+      if (workspace.dirty() && (privateReloadChoice?.id !== active.id || privateReloadChoice.generation !== workspace.contentRevision())) {
+        throw new Error('Private edits changed');
+      }
+      if (secondary?.dirty && (privateReloadChoiceB?.id !== secondary.draft.id || privateReloadChoiceB.generation !== secondary.contentRevision)) {
+        throw new Error('Private edits changed');
+      }
     } else {
       savePending();
+      savePendingSecondary();
       const pending = readPending();
-      if (!pending || !sameContent(pending, snapshot())) throw new Error('Reload backup unavailable');
+      const pendingB = readPendingB();
+      if (workspace.dirty() && (!pending || !sameContent(pending, snapshot()))) throw new Error('Reload backup unavailable');
+      if (secondary?.dirty && (!pendingB || !sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)))) {
+        throw new Error('Reload backup unavailable');
+      }
     }
   }
   allowUpdateReload = true;
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
 if (!viewMode) window.addEventListener('beforeunload', event => {
-  if (workspace.dirty()) { savePending(); clearTimeout(saveTimer); void persist(); if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; } }
+  if (workspace.dirty() || secondary?.dirty) {
+    savePending();
+    flushSecondaryOnUnload();
+    clearTimeout(saveTimer);
+    void persist();
+    if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; }
+  }
 });
-if (!viewMode) document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
+if (!viewMode) document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    clearTimeout(saveTimer);
+    void persist();
+    flushSecondaryOnUnload();
+  }
+});
 updateStats();
 
 setupResetSettings({ actions: [

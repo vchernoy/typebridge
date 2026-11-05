@@ -7,6 +7,8 @@ const SPLIT_LAYOUT_KEY = 'typebridge.split.v1';
 const DEFAULT_RATIO = 50;
 const MIN_RATIO = 20;
 const MAX_RATIO = 80;
+/** Stacked (narrow) End must leave enough height for picker chrome + a usable textarea. */
+const MAX_RATIO_STACKED = 65;
 
 export type SplitLayout = { open: boolean; ratio: number };
 
@@ -59,12 +61,18 @@ export function setupSplitPane(options: {
     return window.matchMedia('(max-width: 640px)').matches;
   }
 
+  function maxRatio(): number {
+    return stacked() ? MAX_RATIO_STACKED : MAX_RATIO;
+  }
+
   function applyRatio(): void {
-    const clamped = Math.min(MAX_RATIO, Math.max(MIN_RATIO, Math.round(ratio)));
+    const clamped = Math.min(maxRatio(), Math.max(MIN_RATIO, Math.round(ratio)));
     ratio = clamped;
     // Share is of the space remaining after the divider, not the full shell.
     options.shell.style.setProperty('--split-ratio', `${clamped}%`);
     options.shell.style.setProperty('--split-primary-share', String(clamped / 100));
+    options.divider.setAttribute('aria-valuemin', String(MIN_RATIO));
+    options.divider.setAttribute('aria-valuemax', String(maxRatio()));
     options.divider.setAttribute('aria-valuenow', String(clamped));
   }
 
@@ -72,6 +80,8 @@ export function setupSplitPane(options: {
     const horizontal = stacked();
     options.divider.setAttribute('aria-orientation', horizontal ? 'horizontal' : 'vertical');
     options.shell.dataset.splitOrientation = horizontal ? 'stacked' : 'side';
+    // Reclamp when crossing the stacked threshold so End cannot starve the companion.
+    applyRatio();
   }
 
   /** Viewers force the UI closed locally but must not overwrite the editor's preference. */
@@ -159,7 +169,7 @@ export function setupSplitPane(options: {
       setRatio(MIN_RATIO);
       event.preventDefault();
     } else if (event.key === 'End') {
-      setRatio(MAX_RATIO);
+      setRatio(maxRatio());
       event.preventDefault();
     }
   });
