@@ -56,8 +56,8 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | --- | --- | --- |
 | **0** (done) | Stop/supersede #159 S-slices; pause #174/#164 | Docs/process |
 | **1** (this PR) | This ADR + ARCHITECTURE / UI / ROADMAP | No |
-| **2** | Per-window identity; key sessionStorage by window id; two-instance Playwright “like two tabs” | Yes (shipped in this slice) |
-| **3** | Embedded mode + host page; single-window parity; Settings/update notice on host | Yes |
+| **2** | Per-window identity; key sessionStorage by window id; two-instance Playwright “like two tabs” | Yes (shipped) |
+| **3** | Embedded mode + host page; single-window parity; Settings/update notice on host | Yes (this slice: `/host.html`, `?embed=1`, update notice on host; Settings stay in the iframe until step 7; standalone `/` kept for existing e2e) |
 | **4** | Focus handoff (flush, lock, reread, IME/buffer, same-tab unsaved transfer) | Yes |
 | **5** | Window manager (desktop free layout) | Yes |
 | **6** | Phone stack, Layout setting, Focus mode | Yes |

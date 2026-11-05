@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (() => {
+        let choice = 'system';
+        try {
+          const saved = localStorage.getItem('typebridge.appearance.v1');
+          if (saved === 'light' || saved === 'dark') choice = saved;
+        } catch {
+          /* System remains usable when storage is blocked. */
+        }
+        document.documentElement.dataset.colorScheme =
+          choice === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : choice;
+      })();
+    </script>
+    <title>TypeBridge</title>
+    <meta name="description" content="A local-first text editor with optional Russian transliteration." />
+    <meta name="theme-color" content="#3153e9" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  </head>
+  <body class="host-page">
+    <!-- #175 step 3: host owns the update notice; Settings stay in the iframe until step 7. -->
+    <div id="host-notice" class="host-notice"></div>
+    <div id="host-root" class="host-root">
+      <iframe
+        id="editor-window"
+        class="host-editor"
+        title="TypeBridge editor"
+        allow="clipboard-read; clipboard-write"
+      ></iframe>
+    </div>
+    <script type="module" src="/src/host/main.ts"></script>
+  </body>
+</html>

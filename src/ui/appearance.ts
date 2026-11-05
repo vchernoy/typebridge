@@ -10,8 +10,13 @@ export function setupAppearance(preferenceSaved: (name: string, saved: boolean) 
   let choice: Appearance = 'system';
   try { choice = appearanceChoice(localStorage.getItem(APPEARANCE_KEY)); } catch { /* Keep System when storage is blocked. */ }
   function apply(): void {
-    document.documentElement.dataset.colorScheme = choice === 'system' ? (system.matches ? 'dark' : 'light') : choice;
+    const scheme = choice === 'system' ? (system.matches ? 'dark' : 'light') : choice;
+    document.documentElement.dataset.colorScheme = scheme;
     select.value = choice;
+    // #175 host page: Settings panel may live on the parent while this runs in the iframe.
+    try {
+      if (window.parent !== window) window.parent.document.documentElement.dataset.colorScheme = scheme;
+    } catch { /* Cross-origin parent is out of scope. */ }
   }
   function save(value: Appearance): boolean {
     choice = value;

@@ -5,9 +5,20 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   cancelReload: () => void;
   /** sessionStorage key for dismissal (#175 window scoping). */
   dismissedKey?: string;
+  /**
+   * Where to mount the notice (#175 host page). When omitted, insert before
+   * `main > section` as in the standalone editor.
+   */
+  mount?: HTMLElement;
+  /**
+   * Element set `inert` while preparing a reload. Prefer the editor's
+   * `main > section` (confirm dialogs append to `body`, so they stay usable).
+   * Pass a getter for the host so the surface is resolved inside the iframe
+   * after it loads. `null` skips freezing.
+   */
+  freezeSurface?: HTMLElement | null | (() => HTMLElement | null);
 }): void {
   const workerContainer = navigator.serviceWorker;
-  const workspace = document.querySelector<HTMLElement>('main > section')!;
   const notice = document.createElement('div');
   notice.id = 'update-notice';
   notice.className = 'update-notice';
@@ -22,7 +33,14 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   dismiss.type = 'button';
   dismiss.textContent = 'Not now';
   notice.append(message, reload, dismiss);
-  workspace.before(notice);
+  const defaultWorkspace = document.querySelector<HTMLElement>('main > section');
+  if (deps.mount) deps.mount.prepend(notice);
+  else defaultWorkspace?.before(notice);
+  function resolveFreezeSurface(): HTMLElement | null {
+    if (typeof deps.freezeSurface === 'function') return deps.freezeSurface();
+    if (deps.freezeSurface !== undefined) return deps.freezeSurface;
+    return deps.mount ?? defaultWorkspace ?? null;
+  }
   const DISMISSED = deps.dismissedKey ?? 'typebridge.updateNotice.dismissed.v1';
   let dismissed = false;
   try { dismissed = sessionStorage.getItem(DISMISSED) === 'yes'; } catch { /* Current-page choice still works. */ }
@@ -52,15 +70,16 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   notice.addEventListener('keydown', event => event.stopPropagation());
   reload.addEventListener('click', async () => {
     if (!waiting) return;
-    const originalInert = workspace.inert;
-    workspace.inert = true;
+    const workspace = resolveFreezeSurface();
+    const originalInert = workspace ? workspace.inert : false;
+    if (workspace) workspace.inert = true;
     notice.tabIndex = -1;
     notice.focus();
     reload.disabled = dismiss.disabled = true;
     message.textContent = 'Preparing your work for reload…';
     let navigating = false;
     const restore = (): void => {
-      workspace.inert = originalInert;
+      if (workspace) workspace.inert = originalInert;
       reload.disabled = dismiss.disabled = false;
       reload.focus({ preventScroll: true });
     };

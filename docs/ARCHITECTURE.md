@@ -23,6 +23,8 @@ Input processing for live editing needs bounded context around the caret to reco
 
 Same-origin iframes in one tab share `sessionStorage`. Step 2 scopes tab-local keys (`activeDraft`, pending backups, Find/Replace text, writing-position namespaces, update-notice dismissal) by an opaque `?window=` id (`src/view/window-id.ts`). Absent or invalid `window` keeps today’s unscoped key names so the top-level editor and existing tests stay stable. `journalTab` remains a per-load UUID (not sessionStorage). Find CASE/REGEX stay in `localStorage` (shared by design).
 
+Step 3 adds a **host page** (`host.html` / `src/host/`) that embeds one editor iframe with a stable window id and `?embed=1`. The host registers the service worker and shows the update notice. Settings remain in the iframe for single-window parity (lazy `document.querySelector` lookups); page-level shared Settings is step 7. Standalone `/` remains the current entry (existing e2e unchanged); cutover of `/` to the host is a later step.
+
 ## Quality and deployment
 Unit tests cover rules, conflicting mappings, case, Unicode, boundaries, storage validation and transactional concurrency. Browser tests cover typing, selection, IME where automation permits, clipboard fallback, resize, mobile layout, persistence and keyboard navigation. Manual testing remains necessary for real IMEs, screen readers and mobile devices. CI runs quality checks and a Chromium/Firefox/WebKit matrix on pull requests. Pages deploys from main; for how main revisions are checked before deployment ([#75](https://github.com/vchernoy/typebridge/issues/75)), consult the workflow YAML and [deployment notes](PREVIEW.md). Successful Actions runs and real-device/production verification are separate evidence.
 
