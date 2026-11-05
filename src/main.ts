@@ -2257,34 +2257,59 @@ function beginAutosaveToggleGate(): void {
 function endAutosaveToggleGate(): void {
   releaseAutosaveToggleGate?.();
 }
-autosave.addEventListener('change', async () => {
+/**
+ * Apply an Autosave preference change to this window.
+ * Local Settings uses prompts; host/shared sync applies without the delete-copy dialog (#175 step 7).
+ */
+async function applyAutosaveChange(
+  enabled: boolean,
+  opts: { promptDeleteSavedCopy: boolean; persistPreference: boolean },
+): Promise<void> {
   if (autosaveControlBlocked() || autosaveToggleActive) return;
+  const alreadyMatching = autosave.checked === enabled;
+  // Remote no-op when nothing changed and there is no dirty text left to flush.
+  if (!opts.persistPreference && alreadyMatching && !(enabled && workspace.dirty())) return;
   autosaveToggleActive = true;
   autosave.disabled = true;
   beginAutosaveToggleGate();
   try {
-  try { setAutosaveEnabled(autosave.checked); preferenceSaved('autosave', true); }
-  catch { preferenceSaved('autosave', false); }
-  // Always show the accurate save state. Without storage, no save can succeed: keep saying so.
-  const announce = (text: string): void => {
-    // storageProblem, not !db: db is also unset while initialization runs.
-    if (storageProblem) setSaveStatus(riskText(), 'failure');
-    else setSaveStatus(text);
-  };
-  if (autosave.checked) {
-    clearNotices();
-    if (workspace.dirty()) showSaving(); else announce('Autosave on');
-    if (workspace.dirty()) { journalEdit(); void persist(); }
-    if (secondary?.dirty && !secondary.editBlock) {
-      updateSaveIndicatorB();
-      void persistSecondary();
+    autosave.checked = enabled;
+    if (opts.persistPreference) {
+      try {
+        setAutosaveEnabled(enabled);
+        preferenceSaved('autosave', true);
+        notifyPrefsChanged({
+          name: 'autosave',
+          origin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+        });
+      } catch { preferenceSaved('autosave', false); }
     }
-  }
-  else {
+    // Always show the accurate save state. Without storage, no save can succeed: keep saying so.
+    const announce = (text: string): void => {
+      // storageProblem, not !db: db is also unset while initialization runs.
+      if (storageProblem) setSaveStatus(riskText(), 'failure');
+      else setSaveStatus(text);
+    };
+    if (enabled) {
+      clearNotices();
+      if (workspace.dirty()) showSaving(); else announce('Autosave on');
+      if (workspace.dirty()) { journalEdit(); void persist(); }
+      if (secondary?.dirty && !secondary.editBlock) {
+        updateSaveIndicatorB();
+        void persistSecondary();
+      }
+      return;
+    }
     clearTimeout(saveTimer);
     if (secondary) {
       clearTimeout(secondary.saveTimer);
       updateSaveIndicatorB();
+    }
+    if (!opts.promptDeleteSavedCopy) {
+      clearNotices();
+      updateSaveIndicatorB();
+      announce(AUTOSAVE_OFF);
+      return;
     }
     const companionActive = workspace.activePaneId() === SECOND_PANE_ID
       && dualDocumentSplit() && !!secondary && secondary.editBlock === '';
@@ -2395,17 +2420,24 @@ autosave.addEventListener('change', async () => {
     }
     updateSaveIndicatorB();
     announce(AUTOSAVE_OFF);
-  }
   } finally {
     endAutosaveToggleGate();
     autosaveToggleActive = false;
     updateSaveIndicatorB();
     // Match syncAutosaveControl — companion-active sessions can toggle while A is blocked.
     autosave.disabled = autosaveControlBlocked();
-    // Re-focus after re-enabling: the dialog cannot restore while this control
-    // is disabled, and a delete may await before this finally runs (#114 review).
-    autosave.focus({ preventScroll: true });
+    // Re-focus after re-enabling only for local Settings (host owns focus on shared toggles).
+    if (opts.promptDeleteSavedCopy || opts.persistPreference) {
+      if (!embedded) autosave.focus({ preventScroll: true });
+    }
   }
+}
+
+autosave.addEventListener('change', () => {
+  void applyAutosaveChange(autosave.checked, {
+    promptDeleteSavedCopy: !embedded,
+    persistPreference: true,
+  });
 });
 async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
@@ -3594,11 +3626,10 @@ if (!embedded) {
 }
 
 function applyAutosaveFromStorage(): void {
-  try {
-    const next = autosaveEnabled();
-    if (autosave.checked === next) return;
-    autosave.checked = next;
-  } catch { /* Keep the current control state. */ }
+  let next: boolean;
+  try { next = autosaveEnabled(); }
+  catch { return; }
+  void applyAutosaveChange(next, { promptDeleteSavedCopy: false, persistPreference: false });
 }
 
 function applyPrefs(name: PrefName): void {

@@ -24,8 +24,10 @@ export type HostSettingsApi = {
   open: (opts?: { focus?: string }) => void;
 };
 
-function preferenceSaved(_name: string, _saved: boolean): void {
+function preferenceSaved(name: string, saved: boolean): void {
   // Host Settings has no combined status line; per-control statuses remain.
+  void name;
+  void saved;
 }
 
 export function installHostSettings(deps: {
@@ -82,9 +84,7 @@ export function installHostSettings(deps: {
   });
   shortcutReset?.addEventListener('click', () => { saveShortcut('default'); });
 
-  let autosaveBusy = false;
   autosave.addEventListener('change', () => {
-    if (autosaveBusy) return;
     try { setAutosaveEnabled(autosave.checked); }
     catch { /* Keep the control state; windows still try to apply. */ }
     broadcast('autosave');
