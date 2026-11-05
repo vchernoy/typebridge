@@ -88,10 +88,15 @@ describe('handoff helpers', () => {
     })).toBe('save-failed');
   });
 
-  it('buffers printable keys and Enter with kind for transliteration replay', () => {
+  it('buffers printable keys, Enter and deletes; never traps Tab', () => {
     const key = (partial: Partial<KeyboardEvent>) => partial as KeyboardEvent;
+    const field = { selectionStart: 3, selectionEnd: 3 };
     expect(bufferInsertFromKeyboard(key({ key: 'a' }))).toEqual({ kind: 'type', text: 'a' });
     expect(bufferInsertFromKeyboard(key({ key: 'Enter' }))).toEqual({ kind: 'break', text: '\n' });
+    expect(bufferInsertFromKeyboard(key({ key: 'Backspace' }), field)).toEqual({
+      kind: 'delete', direction: 'backward', start: 3, end: 3,
+    });
+    expect(bufferInsertFromKeyboard(key({ key: 'Tab' }))).toBeUndefined();
     expect(bufferInsertFromKeyboard(key({ key: 'a', ctrlKey: true }))).toBeUndefined();
     expect(bufferInsertFromKeyboard(key({ key: 'Shift' }))).toBeUndefined();
   });

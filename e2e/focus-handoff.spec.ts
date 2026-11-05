@@ -165,6 +165,23 @@ test('keys typed during delayed acquire are all kept', async ({ page }) => {
   await expect(beta.locator('#editor')).toHaveValue('Shared handoff text123');
 });
 
+test('Backspace during delayed acquire is buffered with surrounding keys', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { beta } = await openSharedDocument(page);
+
+  await page.locator('#win-beta').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1_000;
+  });
+
+  await beta.locator('#editor').click();
+  await beta.locator('#editor').press('1');
+  await beta.locator('#editor').press('2');
+  await beta.locator('#editor').press('Backspace');
+  await beta.locator('#editor').press('3');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff text13');
+});
+
 test('Кириллица transliterates keys buffered during handoff', async ({ page }) => {
   test.setTimeout(90_000);
   const { beta } = await openSharedDocument(page);

@@ -1871,6 +1871,25 @@ async function takeOverFromHandoff(input: {
       unfreezeEditorsAfterTransition();
       return false;
     }
+    // Requester may still hold private text after a prior loseOwnership — never replace or
+    // skip-reread silently.
+    if (workspace.dirty()) {
+      const replace = !!input.snapshot;
+      const confirmed = await askConfirmChoice({
+        title: replace ? 'Replace unsaved text here?' : 'Keep unsaved text here?',
+        message: replace
+          ? 'This window still has unsaved changes. Taking editing from the other window replaces them with that window’s text. Copy or export first if you need them.'
+          : 'This window still has unsaved changes. Edit here keeps them and does not load the latest saved copy.',
+        confirmLabel: replace ? 'Replace and edit here' : 'Keep unsaved and edit',
+        cancelLabel: 'Cancel',
+        returnFocus: field,
+      });
+      if (!confirmed || active.id !== input.documentId) {
+        void access.ownership.release();
+        unfreezeEditorsAfterTransition();
+        return false;
+      }
+    }
     if (input.snapshot) {
       writingPosition.save();
       active = {
