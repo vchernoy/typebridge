@@ -119,7 +119,7 @@ const workspace = createSinglePaneWorkspace({
 
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
-const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field, {
+const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setupLayout(field, {
   getFocusTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionField : field,
   focusToggleSurfaces: () => [field, companionField],
   onFocusModeChange: enabled => {
@@ -3587,10 +3587,12 @@ if (embedded) {
     __typebridgePrepareWindowClose?: () => Promise<boolean>;
     /** Host calls immediately before removing the iframe after prepareClose succeeds. */
     __typebridgeCommitWindowClose?: () => void;
+    __typebridgeSetFocusMode?: (enabled: boolean) => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
   hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; suppressPendingBackup = false; };
   hooks.__typebridgePrepareWindowClose = prepareWindowClose;
   hooks.__typebridgeCommitWindowClose = commitWindowClose;
+  hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
 }

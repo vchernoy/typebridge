@@ -149,6 +149,18 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     }
   };
 
+  const syncEmbeddedFocusChrome = (enabled: boolean): void => {
+    for (const [wid, frame] of frames) {
+      try {
+        const hooks = frame.contentWindow as (Window & {
+          __typebridgeSetFocusMode?: (on: boolean) => void;
+        }) | null;
+        // Only the focused window shows Exit focus; others stay Normal.
+        hooks?.__typebridgeSetFocusMode?.(enabled && wid === activeId);
+      } catch { /* Unexpected cross-origin. */ }
+    }
+  };
+
   const applyModeChrome = (): void => {
     deps.root.dataset.layoutMode = mode;
     document.body.classList.toggle('host-stacked', mode === 'stacked');
@@ -298,6 +310,12 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         if (!doc) return;
         doc.addEventListener('pointerdown', activateFromIframe);
         doc.addEventListener('focusin', activateFromIframe);
+        if (hostFocus) {
+          const hooks = frame.contentWindow as (Window & {
+            __typebridgeSetFocusMode?: (on: boolean) => void;
+          }) | null;
+          hooks?.__typebridgeSetFocusMode?.(win.id === activeId);
+        }
       } catch { /* Unexpected cross-origin — chrome-only activation remains. */ }
     });
 
@@ -628,6 +646,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         ));
         applyAllGeometry();
         applyModeChrome();
+        syncEmbeddedFocusChrome(true);
         return;
       }
       if (!hostFocus) return;
@@ -647,6 +666,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       }
       applyAllGeometry();
       applyModeChrome();
+      syncEmbeddedFocusChrome(false);
       persist();
     },
     dispose: () => {

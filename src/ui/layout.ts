@@ -12,7 +12,12 @@ export function setupLayout(
     /** #175 step 6: host maximizes the active window when Focus mode toggles in an embed. */
     onFocusModeChange?: (enabled: boolean) => void;
   },
-): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
+): {
+  setFocusMode: (enabled: boolean) => void;
+  restoreFocusMode: () => void;
+  resetLayout: () => boolean;
+  applyFocusModeOnly: (enabled: boolean) => void;
+} {
   const FOCUS_KEY = 'typebridge.focusMode.v1';
   const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
   const editorSizeWarning = document.createElement('span');
@@ -152,12 +157,12 @@ export function setupLayout(
     document.body.classList.toggle('focus-mode', enabled);
     focusButton.setAttribute('aria-pressed', String(enabled));
     exitFocusButton.hidden = !enabled;
-    options?.onFocusModeChange?.(enabled);
     // Prefer the active pane surface so Focus entry/exit does not silently retarget commands.
     (options?.getFocusTarget?.() ?? field).focus({ preventScroll: true });
   }
   function setFocusMode(enabled: boolean): void {
     applyFocusMode(enabled);
+    options?.onFocusModeChange?.(enabled);
     try { localStorage.setItem(FOCUS_KEY, enabled ? 'on' : 'off'); }
     catch { /* Optional layout preference; editing remains available. */ }
   }
@@ -207,5 +212,9 @@ export function setupLayout(
     editorSizeWarning.textContent = saved ? '' : 'Editor layout defaults could not be saved in this browser.';
     return saved;
   }
-  return { setFocusMode, restoreFocusMode, resetLayout };
+  /** Host-driven Focus chrome without writing the shared preference or re-notifying the host. */
+  function applyFocusModeOnly(enabled: boolean): void {
+    applyFocusMode(enabled);
+  }
+  return { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly };
 }

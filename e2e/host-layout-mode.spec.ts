@@ -120,3 +120,22 @@ test('host Focus mode maximizes the active window and restores on exit', async (
     h: before.find(win => win.id === 'main')!.h,
   });
 });
+
+test('host Focus restore after reload shows Exit focus in the focused iframe', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
+  const main = await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  await main.locator('#focus-mode').click();
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  await expect(main.locator('#exit-focus')).toBeVisible();
+
+  await page.reload();
+  const restored = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(restored.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  await expect(restored.locator('#exit-focus')).toBeVisible({ timeout: 10_000 });
+  await restored.locator('#exit-focus').click();
+  await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
+});
