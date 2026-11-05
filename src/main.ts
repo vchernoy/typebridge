@@ -957,8 +957,12 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   secondary = undefined;
   sessionRegistry.setSecondary(undefined);
   currentJournalSecondary = undefined;
-  // Retire pane-B reload backup so a later restore cannot resurrect pre-promotion text.
-  try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
+  // Retire both reload backups: the discarded primary snapshot must not resurrect on
+  // the next boot, and pane-B's key must not reopen pre-promotion text.
+  try {
+    sessionStorage.removeItem(PENDING_KEY);
+    sessionStorage.removeItem(PENDING_KEY_B);
+  } catch { /* Optional backup. */ }
   // Handle was acquired for pane B; after promote, loss must freeze the primary session.
   clearOwnershipLost(promotedOwnership);
   if (ownership) void ownership.release();
