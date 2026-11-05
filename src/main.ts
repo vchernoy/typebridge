@@ -59,6 +59,7 @@ import { setupWritingPosition } from './editor/writing-position';
 import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { parseEmbedMode } from './view/embed';
+import { notifyPrefsChanged, onPrefsChanged, type PrefName } from './view/prefs-sync';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -132,7 +133,7 @@ const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setu
     } catch { /* Cross-origin parent is out of scope. */ }
   },
 });
-setupSettings();
+setupSettings({ embedded });
 setupDocumentMenu();
 setupMoreMenu();
 setupKeyboardShortcuts();
@@ -300,8 +301,10 @@ function preferenceSaved(name: string, saved: boolean): void {
     : `Could not save the ${names.join(' and ')} settings; they may reset on reload.`;
   preferenceWarning.hidden = names.length === 0;
 }
-const appearanceSettings = setupAppearance(preferenceSaved);
-const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved);
+const appearanceSettings = setupAppearance(preferenceSaved, { prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' });
+const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved, {
+  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+});
 
 // One status line carries both save state and action feedback (#52).
 // 'progress' is save state that a later save may replace; 'action' is
@@ -706,9 +709,28 @@ const TAB_INDENT_KEY = 'typebridge.editor.tabIndent.v1';
 const tabIndent = document.querySelector<HTMLInputElement>('#tab-indent')!;
 try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* Keep the default. */ }
 function saveTabIndent(): boolean {
-  try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); return true; } catch { return false; }
+  try {
+    localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off');
+    notifyPrefsChanged({
+      name: 'tabIndent',
+      origin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+    });
+    return true;
+  } catch { return false; }
 }
-tabIndent.addEventListener('change', saveTabIndent);
+let applyingTabIndentRemote = false;
+tabIndent.addEventListener('change', () => {
+  if (applyingTabIndentRemote) return;
+  saveTabIndent();
+});
+function applyTabIndentFromStorage(): void {
+  applyingTabIndentRemote = true;
+  try {
+    try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* keep */ }
+  } finally {
+    applyingTabIndentRemote = false;
+  }
+}
 function handleTabIndent(event: KeyboardEvent, surface: HTMLTextAreaElement, surfaceEditor: Editor): void {
   if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || surface.readOnly || !canMutatePrimary()) return;
   const change = indentEdit(surface.value, surface.selectionStart, surface.selectionEnd, event.shiftKey);
@@ -744,6 +766,7 @@ const typingSettings = setupTransliteration(enabled, editor, {
   syncSearchEditors: () => syncSearchEditors(),
   preferenceSaved,
   extraEditors: () => [companionEditor],
+  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
 });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   // Capture before the await so a focus change cannot redirect fallback selection.
@@ -882,7 +905,10 @@ document.addEventListener('keydown', event => {
 });
 
 
-const resetRules = setupRules(() => [editor, companionEditor, findEditor, replaceEditor, titleEditor, titleEditorB]);
+const resetRules = setupRules(
+  () => [editor, companionEditor, findEditor, replaceEditor, titleEditor, titleEditorB],
+  { prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' },
+);
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 // One document list, in the ▾ menu; Focus mode shows the same title bar (#104).
@@ -3559,11 +3585,36 @@ if (!viewMode) document.addEventListener('visibilitychange', () => {
 });
 updateStats();
 
-setupResetSettings({ actions: [
-  ['appearance', appearanceSettings.reset], ['window layout', windowLayoutSettings.reset],
-  ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
-  ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
-], announce: announceAction });
+if (!embedded) {
+  setupResetSettings({ actions: [
+    ['appearance', appearanceSettings.reset], ['window layout', windowLayoutSettings.reset],
+    ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
+    ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
+  ], announce: announceAction });
+}
+
+function applyAutosaveFromStorage(): void {
+  try {
+    const next = autosaveEnabled();
+    if (autosave.checked === next) return;
+    autosave.checked = next;
+  } catch { /* Keep the current control state. */ }
+}
+
+function applyPrefs(name: PrefName): void {
+  if (name === 'appearance' || name === 'reset') appearanceSettings.applyFromStorage();
+  if (name === 'transliteration' || name === 'shortcut' || name === 'reset') typingSettings.applyFromStorage();
+  if (name === 'tabIndent' || name === 'reset') applyTabIndentFromStorage();
+  if (name === 'autosave' || name === 'reset') applyAutosaveFromStorage();
+  if (name === 'reset') {
+    try { resetOptions(); } catch { /* Find bar may be closed. */ }
+    try { resetLayout(); } catch { /* Layout reset is best-effort. */ }
+  }
+}
+
+onPrefsChanged(detail => {
+  applyPrefs(detail.name);
+}, { skipOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' });
 
 // Host page registers the service worker and shows the update notice once (#175 step 3).
 if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
@@ -3588,6 +3639,8 @@ if (embedded) {
     /** Host calls immediately before removing the iframe after prepareClose succeeds. */
     __typebridgeCommitWindowClose?: () => void;
     __typebridgeSetFocusMode?: (enabled: boolean) => void;
+    /** #175 step 7: host Settings asks every window to apply a shared preference. */
+    __typebridgeApplyPrefs?: (name: PrefName, origin?: string) => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
@@ -3595,4 +3648,8 @@ if (embedded) {
   hooks.__typebridgePrepareWindowClose = prepareWindowClose;
   hooks.__typebridgeCommitWindowClose = commitWindowClose;
   hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
+  hooks.__typebridgeApplyPrefs = (name, origin) => {
+    if (origin && origin === `window:${windowId ?? 'main'}`) return;
+    applyPrefs(name);
+  };
 }

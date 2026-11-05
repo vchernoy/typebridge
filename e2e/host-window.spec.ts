@@ -1,5 +1,5 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
-import { moreAction, setAutosave } from './settings-helpers';
+import { moreAction, setHostAutosave } from './settings-helpers';
 
 /** #175 step 5: host free-layout windows; update notice on the host. */
 
@@ -101,18 +101,21 @@ test('host mounts an editor when localStorage access is blocked', async ({ page 
   await expect(editor.locator('#editor')).toBeEnabled();
 });
 
-test('host keeps Settings in the iframe so delayed lookups still work', async ({ page }) => {
+test('host owns Settings; shortcuts sheet can open the host panel', async ({ page }) => {
   const editor = await openHost(page);
-  await expect(editor.locator('#settings-panel')).toHaveCount(1);
-  await expect(page.locator('#settings-panel')).toHaveCount(0);
+  await expect(page.locator('#settings-panel')).toHaveCount(1);
+  await expect(editor.locator('#settings-open')).toBeHidden();
 
-  await editor.locator('#settings-open').click();
-  await expect(editor.locator('#settings-panel')).toBeVisible();
-  await editor.locator('#settings-close').click();
-  await expect(editor.locator('#settings-panel')).toBeHidden();
+  await page.locator('#settings-open').click();
+  await expect(page.locator('#settings-panel')).toBeVisible();
+  await page.locator('#settings-close').click();
+  await expect(page.locator('#settings-panel')).toBeHidden();
 
   await moreAction(editor as unknown as Page, '#keyboard-shortcuts');
   await expect(editor.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true })).toBeVisible();
+  await editor.getByRole('button', { name: 'Change typing shortcut' }).click();
+  await expect(page.locator('#settings-panel')).toBeVisible();
+  await expect(page.locator('#translit-shortcut')).toBeFocused();
 });
 
 test('embedded editor does not mount its own update notice', async ({ page }) => {
@@ -143,7 +146,7 @@ test('offline host refresh stays on the host shell', async ({ page, context }) =
 
 test('host does not reload when private edits change after update consent', async ({ page }) => {
   const editor = await openHost(page);
-  await setAutosave(editor as unknown as Page, false);
+  await setHostAutosave(page, false);
   await editor.locator('#editor').fill('Keep this private text');
   await expect(editor.locator('#save-indicator')).toHaveText('Not saved');
 
@@ -235,7 +238,7 @@ test('update reload asks every window about private text', async ({ page }) => {
   await page.getByRole('button', { name: 'New window' }).click();
   const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
-  await setAutosave(second as unknown as Page, false);
+  await setHostAutosave(page, false);
   await second.locator('#editor').fill('Private only in second');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
 
@@ -274,7 +277,7 @@ test('failed second-window assert cancels prior allowUpdateReload', async ({ pag
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
   // Only the second window is private — first stays clean so prepare shows one dialog.
-  await setAutosave(second as unknown as Page, false);
+  await setHostAutosave(page, false);
   await second.locator('#editor').fill('Private in second');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
 
@@ -321,7 +324,9 @@ test('failed second-window assert cancels prior allowUpdateReload', async ({ pag
   });
   expect(outcome).toContain('Private edits changed');
 
-  // Cancel must leave the first window able to back up failed saves again.
+  // Shared Autosave was off for the private-text dialog; restore it so the first
+  // window can attempt a save (and leave a pending backup when puts fail).
+  await setHostAutosave(page, true);
   await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
   await first.locator('#editor').fill('Pending after cancelled assert');
   await expect(first.locator('#save-indicator')).toHaveText('Save failed');
@@ -372,7 +377,7 @@ test('refused multi-window update leaves backups and visibility saves working', 
   const first = page.frameLocator('.host-window[data-window-id="main"] iframe');
   const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
-  await setAutosave(second as unknown as Page, false);
+  await setHostAutosave(page, false);
   await second.locator('#editor').fill('Private refuse reload');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
 
@@ -396,6 +401,9 @@ test('refused multi-window update leaves backups and visibility saves working', 
     }
   });
 
+  // Shared Autosave was off for the private refuse path; turn it back on for the
+  // post-refuse save / backup checks on the first window.
+  await setHostAutosave(page, true);
   await first.locator('#editor').fill('Still autosaved after refuse');
   await expect(first.locator('#save-indicator')).toHaveText('Saved');
   await page.locator('.host-window[data-window-id="main"] iframe').evaluate((frame: HTMLIFrameElement) => {
@@ -509,7 +517,7 @@ test('closing a dirty Autosave-off window asks before removing it', async ({ pag
   const secondShell = page.locator('.host-window[data-window-id="w2"]');
   const second = secondShell.frameLocator('iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
-  await setAutosave(second as unknown as Page, false);
+  await setHostAutosave(page, false);
   await second.locator('#editor').fill('Private in second');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
 

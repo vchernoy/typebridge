@@ -46,6 +46,22 @@ export async function setAutosave(
   await closeSettings(page);
 }
 
+/**
+ * #175 step 7: Autosave lives on the host Settings panel. Turning it off writes the
+ * shared preference; embedded windows apply without the per-window delete dialog.
+ */
+export async function setHostAutosave(page: Page, on: boolean): Promise<void> {
+  await openSettings(page);
+  const box = page.locator('#autosave');
+  if (on) await box.check();
+  else await box.uncheck();
+  await expect.poll(async () => page.evaluate(() => {
+    const raw = localStorage.getItem('typebridge.autosave.v1');
+    return raw !== 'off';
+  })).toBe(on);
+  await closeSettings(page);
+}
+
 /** Find and Go to line open on demand (#123, step 2). */
 export async function openFind(page: Page): Promise<void> {
   const bar = page.locator('#find-bar');

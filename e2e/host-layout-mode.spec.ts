@@ -9,22 +9,24 @@ async function openHost(page: Page): Promise<FrameLocator> {
   return frame;
 }
 
-async function openEmbeddedSettings(frame: FrameLocator): Promise<void> {
-  const panel = frame.locator('#settings-panel');
-  if (await panel.isHidden()) await frame.locator('#settings-open').click();
+async function openHostSettings(page: Page): Promise<void> {
+  const panel = page.locator('#settings-panel');
+  if (await panel.isHidden()) await page.locator('#settings-open').click();
   await expect(panel).toBeVisible();
 }
 
 test('Settings Layout Stacked forces a scrollable full-width phone stack', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const main = await openHost(page);
-  await openEmbeddedSettings(main);
-  await main.locator('#window-layout').selectOption('stacked');
+  await openHost(page);
+  await openHostSettings(page);
+  await page.locator('#window-layout').selectOption('stacked');
   await expect.poll(() => page.evaluate(() => {
     const hooks = window as Window & { __typebridgeHostLayoutMode?: () => string };
     return hooks.__typebridgeHostLayoutMode?.();
   })).toBe('stacked');
   await expect(page.locator('body')).toHaveClass(/host-stacked/);
+  await page.locator('#settings-close').click();
+  await expect(page.locator('#settings-panel')).toBeHidden();
 
   await page.getByRole('button', { name: 'New window' }).click();
   await page.getByRole('button', { name: 'New window' }).click();
@@ -134,23 +136,28 @@ test('host Focus mode maximizes the active window and restores on exit', async (
 
 test('leaving Stacked for Free keeps every window reachable in the viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  const main = await openHost(page);
-  await openEmbeddedSettings(main);
-  await main.locator('#window-layout').selectOption('stacked');
+  await openHost(page);
+  await openHostSettings(page);
+  await page.locator('#window-layout').selectOption('stacked');
   await expect.poll(() => page.evaluate(() => {
     const hooks = window as Window & { __typebridgeHostLayoutMode?: () => string };
     return hooks.__typebridgeHostLayoutMode?.();
   })).toBe('stacked');
+  await page.locator('#settings-close').click();
+  await expect(page.locator('#settings-panel')).toBeHidden();
   await page.getByRole('button', { name: 'New window' }).click();
   await page.getByRole('button', { name: 'New window' }).click();
   await expect(page.locator('.host-window')).toHaveCount(3);
 
-  await main.locator('#window-layout').selectOption('free');
+  await openHostSettings(page);
+  await page.locator('#window-layout').selectOption('free');
   await expect.poll(() => page.evaluate(() => {
     const hooks = window as Window & { __typebridgeHostLayoutMode?: () => string };
     return hooks.__typebridgeHostLayoutMode?.();
   })).toBe('free');
   await expect(page.locator('body')).not.toHaveClass(/host-stacked/);
+  await page.locator('#settings-close').click();
+  await expect(page.locator('#settings-panel')).toBeHidden();
 
   const boxes = await page.evaluate(() => {
     const hooks = window as Window & {

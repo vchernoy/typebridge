@@ -1,11 +1,11 @@
 import { SHORTCUTS, formatShortcut, TRANSLITERATION_SHORTCUTS, transliterationShortcutLabel, type TransliterationShortcut } from '../editor/keyboard-shortcuts';
 import { askConfirmChoice } from './confirm-dialog';
-import { openSettingsTo } from './settings';
+import { openHostSettings, openSettingsTo } from './settings';
 
 export function setupKeyboardShortcuts(): void {
   const trigger = document.querySelector<HTMLButtonElement>('#keyboard-shortcuts')!;
   const more = document.querySelector<HTMLButtonElement>('#more-open')!;
-  const shortcut = document.querySelector<HTMLSelectElement>('#translit-shortcut')!;
+  const shortcut = document.querySelector<HTMLSelectElement>('#translit-shortcut');
   const apple = /Mac|iPhone|iPad/.test(navigator.platform);
   const label = (key: keyof typeof SHORTCUTS): string => formatShortcut(SHORTCUTS[key], apple);
   for (const [id, key] of [['convert-cyrillic', 'convertCyrillic'], ['convert-latin', 'convertLatin'], ['find-open', 'find'], ['goto-open', 'goto'], ['focus-mode', 'focus']] as const) {
@@ -14,9 +14,13 @@ export function setupKeyboardShortcuts(): void {
     control.title = `${name} (${label(key)})`;
   }
   trigger.addEventListener('click', async () => {
-    const choice: TransliterationShortcut = TRANSLITERATION_SHORTCUTS.some(value => value === shortcut.value)
-      ? shortcut.value as TransliterationShortcut : 'default';
-    const indent = document.querySelector<HTMLInputElement>('#tab-indent')!.checked;
+    let choice: TransliterationShortcut = 'default';
+    try {
+      const stored = shortcut?.value ?? localStorage.getItem('typebridge.transliteration.shortcut.v1');
+      if (TRANSLITERATION_SHORTCUTS.some(value => value === stored)) choice = stored as TransliterationShortcut;
+    } catch { /* default */ }
+    const indent = document.querySelector<HTMLInputElement>('#tab-indent')?.checked
+      ?? (() => { try { return localStorage.getItem('typebridge.editor.tabIndent.v1') !== 'off'; } catch { return true; } })();
     const rows: Array<[string, string]> = [
       ['Toggle typing mode', transliterationShortcutLabel(choice, apple)],
       ['Convert selection to Cyrillic', label('convertCyrillic')],
@@ -47,8 +51,15 @@ export function setupKeyboardShortcuts(): void {
     reserveNote.className = 'shortcut-note';
     reserveNote.textContent = 'Some systems reserve Ctrl+Shift+Space for keyboard-language switching. Use Change typing shortcut to choose another binding or disable it. Browser/OS-reserved shortcuts may take priority.';
     content.append(list, escapeNote, reserveNote);
-    const change = await askConfirmChoice({ title: 'Keyboard shortcuts', message: content,
-      confirmLabel: 'Change typing shortcut', cancelLabel: 'Close', returnFocus: accepted => accepted ? shortcut : more });
-    if (change) openSettingsTo(shortcut, more);
+    const change = await askConfirmChoice({
+      title: 'Keyboard shortcuts',
+      message: content,
+      confirmLabel: 'Change typing shortcut',
+      cancelLabel: 'Close',
+      returnFocus: more,
+    });
+    if (!change) return;
+    if (document.documentElement.dataset.embed === '1' && openHostSettings('translit-shortcut')) return;
+    if (shortcut) openSettingsTo(shortcut, more);
   });
 }

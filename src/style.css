@@ -1188,9 +1188,20 @@ body.focus-mode .bottom {
   margin: 0 8px 8px;
   font: inherit;
 }
-/* #175 step 6: Layout preference only applies on the multi-window host. */
-html:not([data-embed="1"]) .settings-host-only {
+/* #175 step 6–7: Layout preference only on the host Settings panel. */
+body:not(.host-page) .settings-host-only {
   display: none;
+}
+
+/* #175 step 7: Settings panel lives on the host; keep embed chrome clean. */
+html[data-embed='1'] #settings-open,
+html[data-embed='1'] #settings-panel {
+  display: none !important;
+}
+
+body.host-page .host-settings-panel {
+  position: fixed;
+  z-index: 40;
 }
 
 /* #175 step 5 host shell: notice + toolbar + free-layout windows. */
