@@ -1,5 +1,5 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
-import { moreAction } from './settings-helpers';
+import { moreAction, setAutosave } from './settings-helpers';
 
 /** #175 step 3: host page embeds one editor window; update notice lives on the host. */
 
@@ -37,4 +37,37 @@ test('host keeps Settings in the iframe so delayed lookups still work', async ({
 test('embedded editor does not mount its own update notice', async ({ page }) => {
   const editor = await openHost(page);
   await expect(editor.locator('#update-notice')).toHaveCount(0);
+});
+
+test('host does not reload when private edits change after update consent', async ({ page }) => {
+  const editor = await openHost(page);
+  await setAutosave(editor as unknown as Page, false);
+  await editor.locator('#editor').fill('Keep this private text');
+  await expect(editor.locator('#save-indicator')).toHaveText('Not saved');
+
+  const prepare = page.evaluate(async () => {
+    const frame = document.querySelector<HTMLIFrameElement>('#editor-window')!;
+    const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
+    return hooks.__typebridgePrepareUpdateReload?.() ?? false;
+  });
+  const dialog = editor.getByRole('dialog', { name: 'Reload without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
+  expect(await prepare).toBe(true);
+
+  // Type after consent — generation changes; reload must refuse (host must not navigate).
+  await editor.locator('#editor').pressSequentially(' more');
+  const outcome = await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('#editor-window')!;
+    const hooks = frame.contentWindow as Window & { __typebridgeAssertSafeUpdateReload?: () => void };
+    try {
+      hooks.__typebridgeAssertSafeUpdateReload?.();
+      return 'allowed';
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  });
+  expect(outcome).toContain('Private edits changed');
+  await expect(page).toHaveURL(/host\.html/);
+  await expect(editor.locator('#editor')).toHaveValue('Keep this private text more');
 });

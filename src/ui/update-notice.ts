@@ -11,11 +11,12 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
    */
   mount?: HTMLElement;
   /**
-   * Element set `inert` while preparing a reload. Pass `null` on the host so
-   * iframe confirmation dialogs stay interactive. When omitted with no mount,
-   * freezes `main > section` as before.
+   * Element set `inert` while preparing a reload. Prefer the editor's
+   * `main > section` (confirm dialogs append to `body`, so they stay usable).
+   * Pass a getter for the host so the surface is resolved inside the iframe
+   * after it loads. `null` skips freezing.
    */
-  freezeSurface?: HTMLElement | null;
+  freezeSurface?: HTMLElement | null | (() => HTMLElement | null);
 }): void {
   const workerContainer = navigator.serviceWorker;
   const notice = document.createElement('div');
@@ -35,9 +36,11 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   const defaultWorkspace = document.querySelector<HTMLElement>('main > section');
   if (deps.mount) deps.mount.prepend(notice);
   else defaultWorkspace?.before(notice);
-  const workspace = deps.freezeSurface === undefined
-    ? (deps.mount ?? defaultWorkspace)
-    : deps.freezeSurface;
+  function resolveFreezeSurface(): HTMLElement | null {
+    if (typeof deps.freezeSurface === 'function') return deps.freezeSurface();
+    if (deps.freezeSurface !== undefined) return deps.freezeSurface;
+    return deps.mount ?? defaultWorkspace ?? null;
+  }
   const DISMISSED = deps.dismissedKey ?? 'typebridge.updateNotice.dismissed.v1';
   let dismissed = false;
   try { dismissed = sessionStorage.getItem(DISMISSED) === 'yes'; } catch { /* Current-page choice still works. */ }
@@ -67,6 +70,7 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   notice.addEventListener('keydown', event => event.stopPropagation());
   reload.addEventListener('click', async () => {
     if (!waiting) return;
+    const workspace = resolveFreezeSurface();
     const originalInert = workspace ? workspace.inert : false;
     if (workspace) workspace.inert = true;
     notice.tabIndex = -1;

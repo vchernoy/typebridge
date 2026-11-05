@@ -3124,13 +3124,24 @@ if (!viewMode) window.addEventListener('pagehide', () => {
 let allowUpdateReload = false;
 let privateReloadChoice: { id: string; generation: number } | undefined;
 let privateReloadChoiceB: { id: string; generation: number } | undefined;
+function updateReloadReturnFocus(): HTMLElement {
+  const local = document.querySelector<HTMLButtonElement>('#update-reload');
+  if (local) return local;
+  try {
+    const host = window.parent !== window
+      ? window.parent.document.querySelector<HTMLButtonElement>('#update-reload')
+      : null;
+    if (host) return host;
+  } catch { /* Cross-origin parent. */ }
+  return field;
+}
 async function prepareUpdateReload(): Promise<boolean> {
   if (transitioning || deleting || field.disabled) return false;
   privateReloadChoice = undefined;
   privateReloadChoiceB = undefined;
   const secondaryDirty = !!secondary?.dirty;
   if ((workspace.dirty() || secondaryDirty) && !autosave.checked) {
-    const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#update-reload')! });
+    const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: updateReloadReturnFocus() });
     if (discard) {
       privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
       if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
@@ -3150,7 +3161,8 @@ async function prepareUpdateReload(): Promise<boolean> {
   const secondaryOk = !secondary?.dirty || (!!pendingB && secondary && sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)));
   return primaryOk && secondaryOk;
 }
-function reloadAfterUpdate(): void {
+/** Validate and arm reload; throws to abort. Does not navigate (host reloads the top page). */
+function assertSafeToReloadAfterUpdate(): void {
   if (transitioning || deleting || field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
   if (workspace.dirty() || secondary?.dirty) {
     if (!autosave.checked) {
@@ -3172,6 +3184,9 @@ function reloadAfterUpdate(): void {
     }
   }
   allowUpdateReload = true;
+}
+function reloadAfterUpdate(): void {
+  assertSafeToReloadAfterUpdate();
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
 if (!viewMode) window.addEventListener('beforeunload', event => {
@@ -3213,10 +3228,10 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
 if (embedded) {
   const hooks = window as Window & {
     __typebridgePrepareUpdateReload?: () => Promise<boolean>;
-    __typebridgeReloadAfterUpdate?: () => void;
+    __typebridgeAssertSafeUpdateReload?: () => void;
     __typebridgeCancelUpdateReload?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
-  hooks.__typebridgeReloadAfterUpdate = reloadAfterUpdate;
+  hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
   hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; };
 }

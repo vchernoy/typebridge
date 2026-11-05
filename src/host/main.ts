@@ -14,7 +14,7 @@ frame.src = `/?window=${encodeURIComponent(windowId)}&embed=1`;
 
 type EditorHooks = {
   __typebridgePrepareUpdateReload?: () => Promise<boolean>;
-  __typebridgeReloadAfterUpdate?: () => void;
+  __typebridgeAssertSafeUpdateReload?: () => void;
   __typebridgeCancelUpdateReload?: () => void;
 };
 
@@ -22,14 +22,21 @@ function editorHooks(): EditorHooks {
   return (frame.contentWindow ?? {}) as EditorHooks;
 }
 
+function editorWorkspace(): HTMLElement | null {
+  try {
+    return frame.contentDocument?.querySelector<HTMLElement>('main > section') ?? null;
+  } catch {
+    return null;
+  }
+}
+
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(registration => watchForUpdates(registration, {
-        // Notice sits outside the iframe so prepareReload confirmations inside the
-        // editor stay interactive (do not freeze #host-root / the iframe).
         mount: noticeMount,
-        freezeSurface: null,
+        // Freeze the iframe editor section only — confirm dialogs append to iframe body.
+        freezeSurface: editorWorkspace,
         dismissedKey: 'typebridge.updateNotice.dismissed.v1',
         prepareReload: async () => {
           const prepare = editorHooks().__typebridgePrepareUpdateReload;
@@ -37,7 +44,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
           return prepare();
         },
         reload: () => {
-          try { editorHooks().__typebridgeReloadAfterUpdate?.(); } catch { /* Host reload still proceeds. */ }
+          const assertSafe = editorHooks().__typebridgeAssertSafeUpdateReload;
+          if (!assertSafe) throw new Error('Editor reload unavailable');
+          // Intentional throws ("Private edits changed", backup missing, busy) must
+          // abort the host navigation — same as standalone watchForUpdates.
+          assertSafe();
           window.location.reload();
         },
         cancelReload: () => { editorHooks().__typebridgeCancelUpdateReload?.(); },
