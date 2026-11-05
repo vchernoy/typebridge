@@ -3,6 +3,18 @@ import { moreAction, setAutosave } from './settings-helpers';
 
 /** #175 step 5: host free-layout windows; update notice on the host. */
 
+function luminance(color: string): number {
+  const rgb = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(value => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+}
+function contrastRatio(first: string, second: string): number {
+  const colors = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  return (colors[0] + 0.05) / (colors[1] + 0.05);
+}
+
 async function openHost(page: Page): Promise<FrameLocator> {
   await page.goto('/host.html');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
@@ -17,6 +29,27 @@ test('host single window matches standalone editor typing and save', async ({ pa
   await editor.locator('#editor').pressSequentially('privet');
   await expect(editor.locator('#save-indicator')).toHaveText('Saved');
   await expect(editor.locator('#editor')).toHaveValue('привет');
+});
+
+test('host toolbar buttons stay readable in dark appearance', async ({ page }, testInfo) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.addInitScript(() => localStorage.setItem('typebridge.appearance.v1', 'dark'));
+  await openHost(page);
+  await expect(page.locator('html')).toHaveAttribute('data-color-scheme', 'dark');
+  const button = page.locator('#host-toolbar button').first();
+  await expect(button).toBeVisible();
+  const colors = await button.evaluate(element => {
+    const view = element.ownerDocument.defaultView!;
+    const style = view.getComputedStyle(element);
+    return { color: style.color, background: style.backgroundColor };
+  });
+  expect(colors.color).not.toBe(colors.background);
+  expect(contrastRatio(colors.color, colors.background)).toBeGreaterThanOrEqual(4.5);
+  await page.screenshot({
+    path: testInfo.outputPath('host-toolbar-dark.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
 });
 
 test('dragging the title bar moves a full-bleed window', async ({ page }) => {
