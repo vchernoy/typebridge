@@ -169,7 +169,8 @@ export function ownerYieldBlock(input: {
   if (input.transitioning) return 'busy';
   if (input.composing) return 'ime';
   if (input.saving) return 'saving';
-  if (input.saveFailed) return 'save-failed';
+  // Failed save: same-tab may still pass the dirty snapshot in memory; cross-tab must refuse.
+  if (input.saveFailed && !input.allowPrivateTransfer) return 'save-failed';
   // Cross-tab must never receive private/unsaved text; refuse so requester shows Edit here.
   if (input.dirty && !input.autosaveOn && !input.allowPrivateTransfer) return 'cross-tab-private';
   return '';
@@ -184,12 +185,12 @@ export function handoffRefuseGuidance(reason: HandoffRefuseReason): string {
     case 'saving':
       return 'The editing window is still saving. Wait a moment, then click here again.';
     case 'save-failed':
-      return 'The editing window could not save. Fix or export there, then click here again.';
+      return 'The editing window could not save. Fix or export there, then try Edit here again.';
     case 'private':
     case 'cross-tab-private':
-      return 'The editing window still has unsaved or private changes. Use Edit here after finishing or exporting there, or continue in that window.';
+      return 'The editing window still has unsaved or private changes that cannot be sent here. Edit here takes over with the last saved text; that window keeps its unsaved text for copy or export.';
     case 'unresponsive':
-      return 'The other window did not respond. Taking over may leave its unsaved changes behind.';
+      return 'The other window did not respond. Taking over may leave its unsaved changes behind for copy or export there.';
   }
 }
 

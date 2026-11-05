@@ -44,11 +44,10 @@ export type FocusHandoffDeps = {
   /** Flush Autosave when on; no-op when off. */
   flushSave: () => Promise<void>;
   captureSnapshot: () => HandoffSnapshot;
-  /**
-   * Release the lock and become read-only while **keeping** text/title/history/dirty.
-   * Text is discarded only after a successful takeover confirmation.
-   */
-  parkOwnership: () => Promise<void>;
+  /** Synchronously freeze the editor before capturing a snapshot / awaiting lock release. */
+  beginParkFreeze: () => void;
+  /** Release the parked lock after the UI is already read-only. */
+  finishParkRelease: () => Promise<void>;
   /** After confirmed takeover: replace parked dirty text with last saved (only if still on `documentId`). */
   discardParkedText: (documentId: string) => Promise<void>;
   /** After failed/timed-out takeover: try to re-acquire for `documentId` while keeping parked text. */
@@ -257,7 +256,10 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     }
   };
 
-  const startRequest = async (options: { steal?: boolean } = {}): Promise<void> => {
+  const startRequest = async (options: {
+    steal?: boolean;
+    initialBuffer?: BufferedInsert[];
+  } = {}): Promise<void> => {
     if (disposed || pending || deps.isViewMode()) return;
     const block = deps.editBlock();
     if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
@@ -268,7 +270,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     pendingDocumentId = documentId;
     pendingCaret = readHandoffCaret(deps.field);
     pendingRequestId = crypto.randomUUID();
-    buffer = [];
+    buffer = options.initialBuffer ? options.initialBuffer.slice() : [];
     deps.hideEditHere?.();
 
     const request = {
@@ -373,10 +375,12 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       if (afterFlush) return { status: 'refused', reason: afterFlush };
     }
 
+    // Freeze before capture/release so mid-yield typing cannot miss the snapshot.
+    deps.beginParkFreeze();
     const dirty = deps.isDirty();
     // Snapshots only on the same-origin path — never for BroadcastChannel.
     const snapshot = allowPrivateTransfer && dirty ? deps.captureSnapshot() : undefined;
-    await deps.parkOwnership();
+    await deps.finishParkRelease();
     beginParked(request.requestId, request.documentId);
 
     if (!allowPrivateTransfer) {
@@ -447,10 +451,14 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     }
   };
 
-  const onPointerDown = (): void => {
-    if (deps.isViewMode()) return;
+  const mayStartFromField = (): boolean => {
+    if (deps.isViewMode() || deps.field.disabled) return false;
     const block = deps.editBlock();
-    if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
+    return block === 'busy' || block === 'lost' || block === 'error';
+  };
+
+  const onPointerDown = (): void => {
+    if (!mayStartFromField()) return;
     void startRequest();
   };
 
@@ -460,36 +468,48 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (!pending) return;
     const insert = bufferInsertFromKeyboard(event);
     if (!insert) return;
+    if (pending) {
+      event.preventDefault();
+      buffer.push(insert);
+      return;
+    }
+    // Keyboard path: first key in a focused read-only field starts handoff (not plain focus).
+    if (!mayStartFromField()) return;
     event.preventDefault();
-    buffer.push(insert);
+    void startRequest({ initialBuffer: [insert] });
   };
 
   const onBeforeInput = (event: InputEvent): void => {
-    if (!pending) return;
     if (event.isComposing) return;
     const data = event.data;
-    if (typeof data === 'string' && data.length > 0) {
+    const insert: BufferedInsert | undefined = typeof data === 'string' && data.length > 0
+      ? { kind: event.inputType === 'insertFromPaste' ? 'paste' : 'type', text: data }
+      : (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph')
+        ? { kind: 'break', text: '\n' }
+        : undefined;
+    if (pending) {
       event.preventDefault();
-      buffer.push({
-        kind: event.inputType === 'insertFromPaste' ? 'paste' : 'type',
-        text: data,
-      });
-    } else if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') {
-      event.preventDefault();
-      buffer.push({ kind: 'break', text: '\n' });
-    } else {
-      event.preventDefault();
+      if (insert) buffer.push(insert);
+      return;
     }
+    if (!insert || !mayStartFromField()) return;
+    event.preventDefault();
+    void startRequest({ initialBuffer: [insert] });
   };
 
   const onPaste = (event: ClipboardEvent): void => {
-    if (!pending) return;
-    event.preventDefault();
     const text = event.clipboardData?.getData('text/plain');
-    if (text) buffer.push({ kind: 'paste', text });
+    if (!text) return;
+    if (pending) {
+      event.preventDefault();
+      buffer.push({ kind: 'paste', text });
+      return;
+    }
+    if (!mayStartFromField()) return;
+    event.preventDefault();
+    void startRequest({ initialBuffer: [{ kind: 'paste', text }] });
   };
 
   deps.field.addEventListener('pointerdown', onPointerDown);

@@ -1768,18 +1768,24 @@ function loseOwnership(): void {
   showSaveState();
 }
 /**
- * Two-phase #175 handoff park: release the lock and become read-only while keeping
- * text/title/history/dirty until the requester confirms takeover.
+ * Two-phase #175 handoff park: freeze the UI synchronously, then release the lock
+ * while keeping text/title/history/dirty until the requester confirms takeover.
  */
-async function parkOwnershipForHandoff(): Promise<void> {
+let parkReleaseHandle: EditOwnership | undefined;
+function beginParkFreeze(): void {
   if (viewMode) return;
-  const previous = ownership;
+  parkReleaseHandle = ownership;
   ownership = undefined;
   editBlock = 'busy';
   clearTimeout(saveTimer);
-  await previous?.release();
+  // Freeze before any await so typing cannot land outside the snapshot.
   applyEditAccess();
   showSaveState();
+}
+async function finishParkRelease(): Promise<void> {
+  const previous = parkReleaseHandle;
+  parkReleaseHandle = undefined;
+  await previous?.release();
 }
 /** Confirmed takeover: show last saved text when this window had transferred private edits. */
 async function discardParkedHandoffText(documentId: string): Promise<void> {
@@ -3145,7 +3151,8 @@ if (!viewMode) {
     autosaveOn: () => autosave.checked,
     flushSave: async () => { await persist(); },
     captureSnapshot: captureHandoffSnapshot,
-    parkOwnership: parkOwnershipForHandoff,
+    beginParkFreeze,
+    finishParkRelease,
     discardParkedText: discardParkedHandoffText,
     recoverParkedOwnership: recoverParkedHandoffOwnership,
     takeOver: takeOverFromHandoff,
@@ -3158,9 +3165,11 @@ if (!viewMode) {
       hideEditHereBar();
       return;
     }
-    const steal = editHereReason === 'unresponsive';
+    // Explicit Edit here is consent: steal for unresponsive or cross-tab private warnings.
+    const steal = editHereReason === 'unresponsive'
+      || editHereReason === 'cross-tab-private'
+      || editHereReason === 'private';
     hideEditHereBar();
-    // Explicit Edit here: retry cooperative yield, or steal only after an unresponsive timeout.
     focusHandoff?.requestHandoff({ steal });
   });
 }

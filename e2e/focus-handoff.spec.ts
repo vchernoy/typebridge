@@ -179,3 +179,27 @@ test('Кириллица transliterates keys buffered during handoff', async ({ 
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
   await expect(beta.locator('#editor')).toHaveValue('Shared handoff textпривет');
 });
+
+test('keyboard typing into a focused read-only field starts handoff', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta } = await openSharedDocument(page);
+
+  await beta.locator('#editor').focus();
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
+  // First key starts handoff (not plain focus); "!" is not transliterated.
+  await beta.locator('#editor').press('!');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff text!');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
+});
+
+test('programmatic focus alone does not take ownership', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta } = await openSharedDocument(page);
+
+  // App-driven focus (e.g. returning from a dialog) must not start handoff without a key.
+  await beta.locator('#editor').evaluate((el: HTMLTextAreaElement) => { el.focus(); });
+  await page.waitForTimeout(300);
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
+});

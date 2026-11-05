@@ -43,7 +43,8 @@ describe('installFocusHandoff', () => {
       revision: 1,
     };
     const DOC = 'a1b2c3d4-e5f6-4789-a012-3456789abcde';
-    const parkOwnership = vi.fn(async () => undefined);
+    const beginParkFreeze = vi.fn();
+    const finishParkRelease = vi.fn(async () => undefined);
     const discardParkedText = vi.fn(async () => undefined);
     const recoverParkedOwnership = vi.fn(async () => undefined);
     const controller = installFocusHandoff({
@@ -63,7 +64,8 @@ describe('installFocusHandoff', () => {
       autosaveOn: () => false,
       flushSave: async () => undefined,
       captureSnapshot: () => snapshot,
-      parkOwnership,
+      beginParkFreeze,
+      finishParkRelease,
       discardParkedText,
       recoverParkedOwnership,
       takeOver: async () => false,
@@ -77,7 +79,8 @@ describe('installFocusHandoff', () => {
       requestId: 'req-1',
     });
     expect(result).toEqual({ status: 'released', snapshot });
-    expect(parkOwnership).toHaveBeenCalledTimes(1);
+    expect(beginParkFreeze).toHaveBeenCalledTimes(1);
+    expect(finishParkRelease).toHaveBeenCalledTimes(1);
     expect(discardParkedText).not.toHaveBeenCalled();
 
     controller.hooks.__typebridgeHandoffComplete?.('req-1', true);
@@ -109,7 +112,8 @@ describe('installFocusHandoff', () => {
       autosaveOn: () => false,
       flushSave: async () => undefined,
       captureSnapshot: () => ({ text: 'x', title: 'y', dirty: true, revision: 1 }),
-      parkOwnership: async () => undefined,
+      beginParkFreeze: () => undefined,
+      finishParkRelease: async () => undefined,
       discardParkedText,
       recoverParkedOwnership,
       takeOver: async () => false,
@@ -150,7 +154,8 @@ describe('installFocusHandoff', () => {
       autosaveOn: () => false,
       flushSave: async () => undefined,
       captureSnapshot: () => ({ text: 'x', title: 'y', dirty: true, revision: 1 }),
-      parkOwnership: async () => { dirty = true; },
+      beginParkFreeze: () => { dirty = true; },
+      finishParkRelease: async () => undefined,
       discardParkedText: async () => undefined,
       recoverParkedOwnership: async () => undefined,
       takeOver: async () => false,

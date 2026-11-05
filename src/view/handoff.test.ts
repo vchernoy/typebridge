@@ -66,6 +66,26 @@ describe('handoff helpers', () => {
       autosaveOn: true,
       allowPrivateTransfer: true,
     })).toBe('ime');
+    expect(ownerYieldBlock({
+      isOwner: true,
+      composing: false,
+      transitioning: false,
+      saving: false,
+      saveFailed: true,
+      dirty: true,
+      autosaveOn: true,
+      allowPrivateTransfer: true,
+    })).toBe('');
+    expect(ownerYieldBlock({
+      isOwner: true,
+      composing: false,
+      transitioning: false,
+      saving: false,
+      saveFailed: true,
+      dirty: true,
+      autosaveOn: true,
+      allowPrivateTransfer: false,
+    })).toBe('save-failed');
   });
 
   it('buffers printable keys and Enter with kind for transliteration replay', () => {
