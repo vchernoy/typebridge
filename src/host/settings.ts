@@ -86,15 +86,34 @@ export function installHostSettings(deps: {
   });
   shortcutReset?.addEventListener('click', () => { saveShortcut('default'); });
 
+  const autosaveStatus = document.querySelector<HTMLElement>('#host-settings-status');
   autosave.addEventListener('change', () => {
-    try { setAutosaveEnabled(autosave.checked); }
-    catch { /* Keep the control state; windows still try to apply. */ }
-    broadcast('autosave');
+    const requested = autosave.checked;
+    try {
+      setAutosaveEnabled(requested);
+      if (autosaveStatus) autosaveStatus.textContent = '';
+      broadcast('autosave');
+    } catch {
+      // Do not promise privacy (or saving) when the preference could not be stored.
+      try { autosave.checked = autosaveEnabled(); } catch { autosave.checked = !requested; }
+      if (autosaveStatus) {
+        autosaveStatus.textContent = 'Autosave preference could not be saved in this browser.';
+      }
+    }
   });
 
   tabIndent.addEventListener('change', () => {
-    try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); } catch { /* ignore */ }
-    broadcast('tabIndent');
+    const requested = tabIndent.checked;
+    try {
+      localStorage.setItem(TAB_INDENT_KEY, requested ? 'on' : 'off');
+      broadcast('tabIndent');
+    } catch {
+      try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; }
+      catch { tabIndent.checked = !requested; }
+      if (autosaveStatus) {
+        autosaveStatus.textContent = 'Tab indents preference could not be saved in this browser.';
+      }
+    }
   });
 
   // Typing mode lives in each window's chrome; keep host labels honest if storage changes.
