@@ -25,7 +25,7 @@ Step-11 must-ship a11y (F6 cycle, named regions, Escape Settings-over-Find) live
 
 | Date (UTC) | Host | Result |
 | --- | --- | --- |
-| 2026-11-05 | Cursor cloud agent VM | See PR / CI for the step-11 head — record pass counts here when the packaging PR lands |
+| 2026-11-05 | Cursor cloud agent VM | **26 passed** Chromium (~8 s): `host-a11y-windows` (4) + `host-window` + `host-layout-mode` smoke. Full three-engine matrix is CI’s job on the PR. |
 
 ## Acceptance 1–10 mapped to suites
 

@@ -30,10 +30,13 @@ for (const shot of shots) {
     colorScheme: shot.colorScheme,
   });
   const page = await context.newPage();
-  await page.addInitScript(({ layout, scheme }) => {
-    localStorage.setItem('typebridge.host.layoutMode.v1', layout);
-    localStorage.setItem('typebridge.appearance.v1', scheme);
-  }, { layout: shot.layout, scheme: shot.colorScheme });
+  // String form keeps Node ESLint from flagging browser globals in the payload.
+  await page.addInitScript(`(() => {
+    try {
+      localStorage.setItem('typebridge.host.layoutMode.v1', ${JSON.stringify(shot.layout)});
+      localStorage.setItem('typebridge.appearance.v1', ${JSON.stringify(shot.colorScheme)});
+    } catch { /* private mode — defaults still render */ }
+  })()`);
   await page.goto(`${baseURL}/host.html`, { waitUntil: 'networkidle' });
   const main = page.frameLocator('.host-window iframe.host-editor').first();
   await main.locator('#editor').waitFor({ state: 'visible', timeout: 30_000 });
@@ -47,9 +50,9 @@ for (const shot of shots) {
   const mainTitle = page.locator('.host-window[data-window-id="main"] .host-window-title');
   const secondTitle = page.locator('.host-window[data-window-id="w2"] .host-window-title');
   await mainTitle.waitFor({ state: 'visible' });
-  await expectEditable(mainTitle);
+  await waitEditable(mainTitle);
   await mainTitle.fill('Evidence A');
-  await expectEditable(secondTitle);
+  await waitEditable(secondTitle);
   await secondTitle.fill('Evidence B');
   await page.screenshot({
     path: path.join(outDir, `${shot.name}.png`),
@@ -63,11 +66,15 @@ await browser.close();
 process.stdout.write(`Wrote screenshots under ${outDir}\n`);
 
 /** Wait until the host title input is writable (iframe title hooks ready). */
-async function expectEditable(locator) {
-  for (let i = 0; i < 60; i++) {
-    const editable = await locator.evaluate(el => !(el).readOnly && !(el).disabled).catch(() => false);
-    if (editable) return;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error('Host title never became editable');
+async function waitEditable(locator) {
+  await locator.evaluate(async el => {
+    const input = /** @type {HTMLInputElement} */ (el);
+    for (let i = 0; i < 60; i++) {
+      if (!input.readOnly && !input.disabled) return;
+      await new Promise(resolve => {
+        globalThis.setTimeout(resolve, 50);
+      });
+    }
+    throw new Error('Host title never became editable');
+  });
 }
