@@ -102,6 +102,24 @@ describe('host layout helpers', () => {
     ] }, undefined)).toBe(false);
   });
 
+  it('survives when accessing the localStorage getter itself throws', () => {
+    const layout = { version: 1 as const, windows: [
+      { id: 'main', x: 0, y: 0, w: 300, h: 220, z: 1 },
+    ] };
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() { throw new Error('blocked'); },
+    });
+    try {
+      expect(readHostLayout()).toBeUndefined();
+      expect(writeHostLayout(layout)).toBe(false);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
+      else delete (globalThis as { localStorage?: Storage }).localStorage;
+    }
+  });
+
   it('parses persisted layout without accepting text payloads', () => {
     const parsed = parseHostLayout({
       version: 1,

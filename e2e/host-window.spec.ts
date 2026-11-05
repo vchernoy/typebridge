@@ -19,6 +19,18 @@ test('host single window matches standalone editor typing and save', async ({ pa
   await expect(editor.locator('#editor')).toHaveValue('привет');
 });
 
+test('host mounts an editor when localStorage access is blocked', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() { throw new DOMException('Access denied', 'SecurityError'); },
+    });
+  });
+  const editor = await openHost(page);
+  await expect(page.locator('.host-window')).toHaveCount(1);
+  await expect(editor.locator('#editor')).toBeEnabled();
+});
+
 test('host keeps Settings in the iframe so delayed lookups still work', async ({ page }) => {
   const editor = await openHost(page);
   await expect(editor.locator('#settings-panel')).toHaveCount(1);

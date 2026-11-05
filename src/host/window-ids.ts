@@ -8,7 +8,7 @@ const FALLBACK_ID = 'main';
 
 export type HostWindowRecord = { id: string };
 
-export function readHostWindowIds(storage: Storage | undefined = localStorage): string[] {
+export function readHostWindowIds(storage?: Storage): string[] {
   return readHostLayout(storage)?.windows.map(win => win.id) ?? [];
 }
 
