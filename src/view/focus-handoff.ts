@@ -64,7 +64,8 @@ export type FocusHandoffDeps = {
   takeOver: (input: {
     documentId: string;
     snapshot: HandoffSnapshot | undefined;
-    caret: number;
+    selectionStart: number;
+    selectionEnd: number;
     steal: boolean;
   }) => Promise<boolean>;
   announce: (message: string) => void;
@@ -91,13 +92,24 @@ function openChannel(existing: BroadcastChannel | null | undefined): BroadcastCh
   }
 }
 
-/** Read-only textareas often keep selection at 0–0 on click; default to end so buffered keys append. */
-function readHandoffCaret(field: HTMLTextAreaElement): number {
+/**
+ * Read-only textareas often keep selection at 0–0 on click; default to a collapsed
+ * end caret so buffered keys append. Otherwise carry both endpoints so the first
+ * buffered insert/delete can replace a pre-handoff selection.
+ */
+function readHandoffSelection(field: HTMLTextAreaElement): { start: number; end: number } {
   const start = field.selectionStart;
   const end = field.selectionEnd;
-  if (typeof start !== 'number') return field.value.length;
-  if (field.readOnly && start === 0 && end === 0 && field.value.length > 0) return field.value.length;
-  return start;
+  if (typeof start !== 'number') {
+    const len = field.value.length;
+    return { start: len, end: len };
+  }
+  const endVal = typeof end === 'number' ? end : start;
+  if (field.readOnly && start === 0 && endVal === 0 && field.value.length > 0) {
+    const len = field.value.length;
+    return { start: len, end: len };
+  }
+  return { start, end: endVal };
 }
 
 function peerFrames(): Window[] {
@@ -154,7 +166,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   let pending = false;
   let pendingRequestId = '';
   let pendingDocumentId = '';
-  let pendingCaret = 0;
+  let pendingSelection = { start: 0, end: 0 };
   let buffer: BufferedInsert[] = [];
   let yieldTimer: ReturnType<typeof setTimeout> | undefined;
   /** Owner-side parked yield awaiting requester confirmation. */
@@ -203,13 +215,23 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     documentId: string,
     notifySameOrigin: boolean,
   ): Promise<void> => {
-    await new Promise<void>(resolve => {
-      requestAnimationFrame(() => {
-        pendingCaret = readHandoffCaret(deps.field);
-        resolve();
-      });
-    });
+    await new Promise<void>(resolve => { requestAnimationFrame(() => resolve()); });
     if (!pending || pendingRequestId !== requestId) return;
+    // Refresh from the live field, but don't let a transient read-only 0–0 wipe a
+    // real selection captured when the request started (or updated on click).
+    {
+      const liveStart = deps.field.selectionStart;
+      const liveEnd = deps.field.selectionEnd;
+      if (typeof liveStart === 'number') {
+        const liveEndVal = typeof liveEnd === 'number' ? liveEnd : liveStart;
+        const wipedToEmpty = deps.field.readOnly
+          && liveStart === 0
+          && liveEndVal === 0
+          && deps.field.value.length > 0
+          && (pendingSelection.start !== pendingSelection.end || pendingSelection.start !== 0);
+        if (!wipedToEmpty) pendingSelection = readHandoffSelection(deps.field);
+      }
+    }
     if (deps.getDocumentId() !== documentId) {
       clearPending();
       if (notifySameOrigin) notifyPeersComplete(requestId, false);
@@ -223,12 +245,18 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       });
       return;
     }
-    const caret = pendingCaret;
+    const selection = pendingSelection;
     // Keep pending=true so keystrokes during acquire/reread stay buffered.
     clearTimeout(yieldTimer);
     yieldTimer = undefined;
 
-    const ok = await deps.takeOver({ documentId, snapshot, caret, steal });
+    const ok = await deps.takeOver({
+      documentId,
+      snapshot,
+      selectionStart: selection.start,
+      selectionEnd: selection.end,
+      steal,
+    });
     if (!pending || pendingRequestId !== requestId) {
       if (notifySameOrigin) notifyPeersComplete(requestId, false);
       postMeta({
@@ -281,7 +309,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     const documentId = deps.getDocumentId();
     pending = true;
     pendingDocumentId = documentId;
-    pendingCaret = readHandoffCaret(deps.field);
+    pendingSelection = readHandoffSelection(deps.field);
     pendingRequestId = crypto.randomUUID();
     buffer = options.initialBuffer ? options.initialBuffer.slice() : [];
     deps.hideEditHere?.();
@@ -477,7 +505,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
 
   const onClick = (): void => {
     if (!pending) return;
-    pendingCaret = readHandoffCaret(deps.field);
+    pendingSelection = readHandoffSelection(deps.field);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {

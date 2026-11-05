@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   bufferInsertFromKeyboard,
+  deleteRangeForDirection,
+  nextGraphemeBoundary,
   ownerYieldBlock,
   parseHandoffMessage,
+  previousGraphemeBoundary,
 } from './handoff';
 
 describe('handoff helpers', () => {
@@ -99,4 +102,27 @@ describe('handoff helpers', () => {
     expect(bufferInsertFromKeyboard(key({ key: 'a', ctrlKey: true }))).toBeUndefined();
     expect(bufferInsertFromKeyboard(key({ key: 'Shift' }))).toBeUndefined();
   });
+
+  it('steps collapsed deletes by grapheme (emoji, flag, combining mark)', () => {
+    const emoji = 'ab😀cd';
+    // 😀 is one grapheme spanning two UTF-16 code units after "ab".
+    expect(previousGraphemeBoundary(emoji, 4)).toBe(2);
+    expect(nextGraphemeBoundary(emoji, 2)).toBe(4);
+    expect(deleteRangeForDirection(emoji, 4, 4, 'backward')).toEqual({ start: 2, end: 4 });
+    expect(deleteRangeForDirection(emoji, 2, 2, 'forward')).toEqual({ start: 2, end: 4 });
+
+    const flag = `xx${String.fromCodePoint(0x1f1fa, 0x1f1f8)}yy`;
+    // US flag is one grapheme (two regional indicators = four UTF-16 units).
+    expect(previousGraphemeBoundary(flag, 6)).toBe(2);
+    expect(nextGraphemeBoundary(flag, 2)).toBe(6);
+    expect(deleteRangeForDirection(flag, 6, 6, 'backward')).toEqual({ start: 2, end: 6 });
+
+    const combined = `aaи\u0306bb`; // base и + combining breve
+    expect(previousGraphemeBoundary(combined, 4)).toBe(2);
+    expect(nextGraphemeBoundary(combined, 2)).toBe(4);
+    expect(deleteRangeForDirection(combined, 4, 4, 'backward')).toEqual({ start: 2, end: 4 });
+    // Non-collapsed selection is replaced as-is.
+    expect(deleteRangeForDirection('hello', 1, 4, 'backward')).toEqual({ start: 1, end: 4 });
+  });
+
 });

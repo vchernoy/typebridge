@@ -232,3 +232,20 @@ test('Tab leaves a read-only editor without starting handoff', async ({ page }) 
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
 });
+
+test('selecting a word then typing replaces that selection after takeover', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta } = await openSharedDocument(page);
+
+  await beta.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.focus();
+    const start = el.value.indexOf('handoff');
+    el.setSelectionRange(start, start + 'handoff'.length);
+  });
+  await expect(beta.locator('#editor')).toBeFocused();
+  // "!" is not transliterated under Кириллица — assert the selection was replaced.
+  await beta.locator('#editor').press('!');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('Shared ! text');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
+});

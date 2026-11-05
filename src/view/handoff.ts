@@ -223,21 +223,100 @@ export function bufferInsertFromKeyboard(event: KeyboardEvent): BufferedInsert |
   return undefined;
 }
 
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/** Start offset of the grapheme that ends at `offset` (Backspace target). */
+export function previousGraphemeBoundary(text: string, offset: number): number {
+  const clamped = Math.max(0, Math.min(offset, text.length));
+  if (clamped <= 0) return 0;
+  try {
+    if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+      const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      let last = 0;
+      for (const { index, segment } of segmenter.segment(text)) {
+        const end = index + segment.length;
+        if (end === clamped) return index;
+        if (index < clamped && clamped < end) return index;
+        if (index >= clamped) break;
+        last = index;
+      }
+      return last;
+    }
+  } catch { /* Fall through to code-point stepping. */ }
+  if (
+    clamped >= 2
+    && isLowSurrogate(text.charCodeAt(clamped - 1))
+    && isHighSurrogate(text.charCodeAt(clamped - 2))
+  ) {
+    return clamped - 2;
+  }
+  return clamped - 1;
+}
+
+/** End offset of the grapheme that starts at `offset` (Delete target). */
+export function nextGraphemeBoundary(text: string, offset: number): number {
+  const clamped = Math.max(0, Math.min(offset, text.length));
+  if (clamped >= text.length) return text.length;
+  try {
+    if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+      const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      for (const { index, segment } of segmenter.segment(text)) {
+        const end = index + segment.length;
+        if (index <= clamped && clamped < end) return end;
+        if (index > clamped) return index;
+      }
+      return text.length;
+    }
+  } catch { /* Fall through to code-point stepping. */ }
+  if (
+    clamped + 1 < text.length
+    && isHighSurrogate(text.charCodeAt(clamped))
+    && isLowSurrogate(text.charCodeAt(clamped + 1))
+  ) {
+    return clamped + 2;
+  }
+  return clamped + 1;
+}
+
+/**
+ * Range a buffered Backspace/Delete should remove. Non-collapsed selections are
+ * replaced as-is; collapsed carets expand by one grapheme (code-point fallback).
+ */
+export function deleteRangeForDirection(
+  text: string,
+  start: number,
+  end: number,
+  direction: 'backward' | 'forward',
+): { start: number; end: number } | undefined {
+  const a = Math.max(0, Math.min(Math.min(start, end), text.length));
+  const b = Math.max(0, Math.min(Math.max(start, end), text.length));
+  if (a !== b) return { start: a, end: b };
+  if (direction === 'backward') {
+    if (a <= 0) return undefined;
+    return { start: previousGraphemeBoundary(text, a), end: a };
+  }
+  if (b >= text.length) return undefined;
+  return { start: b, end: nextGraphemeBoundary(text, b) };
+}
+
 /** Replay one buffered insert through the field so typing hits Editor.beforeInput. */
 export function replayBufferedInsert(field: HTMLTextAreaElement, item: BufferedInsert): void {
   if (item.kind === 'delete') {
     // Use the live caret after prior replayed ops — never stale absolute offsets.
-    let start = field.selectionStart;
-    let end = field.selectionEnd;
-    if (start === end) {
-      if (item.direction === 'backward') {
-        if (start <= 0) return;
-        start -= 1;
-      } else {
-        if (end >= field.value.length) return;
-        end += 1;
-      }
-    }
+    const range = deleteRangeForDirection(
+      field.value,
+      field.selectionStart,
+      field.selectionEnd,
+      item.direction,
+    );
+    if (!range) return;
+    const { start, end } = range;
     field.setSelectionRange(start, end);
     const before = new InputEvent('beforeinput', {
       bubbles: true,

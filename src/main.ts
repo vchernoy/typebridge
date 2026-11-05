@@ -1850,7 +1850,8 @@ function showEditHereBar(reason: HandoffRefuseReason): void {
 async function takeOverFromHandoff(input: {
   documentId: string;
   snapshot: HandoffSnapshot | undefined;
-  caret: number;
+  selectionStart: number;
+  selectionEnd: number;
   steal: boolean;
 }): Promise<boolean> {
   if (viewMode || !db || transitioning || deleting) return false;
@@ -1919,8 +1920,10 @@ async function takeOverFromHandoff(input: {
       }
     }
     installOwnership(access);
-    const caret = Math.max(0, Math.min(input.caret, field.value.length));
-    field.setSelectionRange(caret, caret);
+    const len = field.value.length;
+    const start = Math.max(0, Math.min(input.selectionStart, len));
+    const end = Math.max(0, Math.min(input.selectionEnd, len));
+    field.setSelectionRange(Math.min(start, end), Math.max(start, end));
     unfreezeEditorsAfterTransition();
     // Only schedule save for non-private takeovers (saved reread / clean yield).
     if (workspace.dirty() && autosave.checked && !input.snapshot?.dirty) {
