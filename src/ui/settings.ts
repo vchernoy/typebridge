@@ -24,7 +24,25 @@ function close(): void {
   panel.hidden = true;
   openButton.setAttribute('aria-expanded', 'false');
   const target = returnFocus && returnFocus.isConnected && !panel.contains(returnFocus) ? returnFocus : openButton;
-  target.focus();
+  try { target.focus(); } catch { /* Cross-document restore may be mid-detach. */ }
+}
+
+/** Close Settings if open. Used by host Escape forwarding from embedded editors. */
+export function tryCloseSettings(): boolean {
+  if (!panel || panel.hidden) return false;
+  close();
+  return true;
+}
+
+/** Ask the host page to close its Settings panel (embedded editors only). */
+export function tryCloseHostSettings(): boolean {
+  if (window.parent === window) return false;
+  try {
+    const host = window.parent as Window & { __typebridgeTryCloseSettings?: () => boolean };
+    return !!host.__typebridgeTryCloseSettings?.();
+  } catch {
+    return false;
+  }
 }
 
 /** Ensure the local Settings panel is open (no-op when embedded). */
@@ -76,6 +94,12 @@ export function setupSettings(options?: { embedded?: boolean }): void {
       event.preventDefault();
       openHostSettings('settings-about-title', aboutButton);
     });
+    // Capture phase: close host Settings before the iframe Focus shortcut sees Escape.
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.repeat || event.defaultPrevented) return;
+      if (event.target instanceof HTMLSelectElement && event.target.size <= 1) return;
+      if (tryCloseHostSettings()) event.preventDefault();
+    }, true);
     return;
   }
 
@@ -90,4 +114,5 @@ export function setupSettings(options?: { embedded?: boolean }): void {
     });
   }
   registerEscapeLayer(panel, 30, close);
+  (window as Window & { __typebridgeTryCloseSettings?: () => boolean }).__typebridgeTryCloseSettings = tryCloseSettings;
 }

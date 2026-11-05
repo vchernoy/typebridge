@@ -78,6 +78,24 @@ test('embedded Settings button opens the host panel', async ({ page }) => {
   await expect(page.locator('#settings-panel')).toBeVisible();
 });
 
+test('Escape in an embedded editor closes host Settings without entering Focus', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
+  const main = await openHost(page);
+  await openHostSettings(page);
+  await expect(page.locator('#settings-open')).toHaveAttribute('aria-expanded', 'true');
+
+  // Try a setting in the editor while the panel stays open (#123 / #175 step 7).
+  await fillHostEditor(main, 'try while open');
+  await main.locator('#editor').focus();
+  await page.keyboard.press('Escape');
+
+  await expect(page.locator('#settings-panel')).toBeHidden();
+  await expect(page.locator('#settings-open')).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
+  await expect(main.locator('body')).not.toHaveClass(/focus-mode/);
+});
+
 test('embedded host windows hide Split editor and comparison controls', async ({ page }) => {
   const main = await openHost(page);
   await expect(main.locator('#toggle-split')).toBeHidden();
