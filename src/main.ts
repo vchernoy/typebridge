@@ -77,6 +77,7 @@ const workspace = createSinglePaneWorkspace({
 installEscapeLayers();
 const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field, {
   getFocusTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionField : field,
+  focusToggleSurfaces: () => [field, companionField],
 });
 setupSettings();
 setupDocumentMenu();

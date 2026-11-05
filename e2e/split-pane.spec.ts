@@ -151,6 +151,20 @@ test('entering Focus mode from the companion keeps pane B active', async ({ page
   await expect(page.locator('#convert-cyrillic')).toBeDisabled();
 });
 
+test('Escape from the companion enters Focus mode without stealing the active pane', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('escape from companion');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await expect(page.locator('#editor-b')).toBeFocused();
+});
+
 test('Go to line and caret status follow the companion pane', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

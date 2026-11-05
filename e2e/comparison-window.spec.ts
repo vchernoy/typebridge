@@ -262,24 +262,39 @@ test('the viewer cannot mutate documents through delete, new, import or replace'
   await viewer.goto(`/?doc=${row.id}&mode=view`);
   await expectViewerReady(viewer, 'alpha beta alpha');
 
-  // Re-enable the controls to prove each handler also refuses, not only the disabled state.
-  await viewer.evaluate(() => {
-    for (const id of ['new-draft', 'import-draft', 'delete-draft', 'replace-one', 'replace-all', 'clear', 'convert-latin', 'convert-cyrillic']) {
-      document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
-    }
-    document.querySelector<HTMLInputElement>('#autosave')!.disabled = false;
-  });
+  const mutationIds = ['new-draft', 'import-draft', 'delete-draft', 'replace-one', 'replace-all', 'clear', 'convert-latin', 'convert-cyrillic'] as const;
+  // Real viewer chrome keeps mutation controls disabled.
+  for (const id of mutationIds) await expect(viewer.locator('#' + id)).toBeDisabled();
+  await expect(viewer.locator('#autosave')).toBeDisabled();
+
+  async function unlockViewerMutations(): Promise<void> {
+    await viewer.evaluate(ids => {
+      for (const id of ids) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
+      document.querySelector<HTMLInputElement>('#autosave')!.disabled = false;
+    }, mutationIds as unknown as string[]);
+  }
+
+  // Re-enable immediately before each probe so clicks hit enabled controls and prove handlers refuse.
+  await unlockViewerMutations();
   await documentAction(viewer, '#delete-draft');
+  await unlockViewerMutations();
   await documentAction(viewer, '#new-draft');
+  await unlockViewerMutations();
   await viewer.locator('#import-file').setInputFiles({ name: 'incoming.txt', mimeType: 'text/plain', buffer: Buffer.from('Imported') });
   await viewer.locator('#find-open').click();
   await viewer.locator('#find-text').fill('alpha');
   await viewer.locator('#replace-text').fill('omega');
-  // force: true — handlers must refuse even if chrome is re-enabled; focus/select must not hang the probe.
-  await viewer.locator('#replace-one').click({ force: true });
-  await viewer.locator('#replace-all').click({ force: true });
+  await unlockViewerMutations();
+  await expect(viewer.locator('#replace-one')).toBeEnabled();
+  await viewer.locator('#replace-one').click();
+  await unlockViewerMutations();
+  await expect(viewer.locator('#replace-all')).toBeEnabled();
+  await viewer.locator('#replace-all').click();
   await viewer.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.select());
-  await viewer.locator('#convert-cyrillic').click({ force: true });
+  await unlockViewerMutations();
+  await expect(viewer.locator('#convert-cyrillic')).toBeEnabled();
+  await viewer.locator('#convert-cyrillic').click();
+  await unlockViewerMutations();
   await viewer.locator('#autosave').evaluate((el: HTMLInputElement) => { el.checked = false; el.dispatchEvent(new Event('change', { bubbles: true })); });
   await viewer.locator('#draft-title').press('End');
   await viewer.keyboard.type('title edit');
