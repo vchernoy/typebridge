@@ -985,6 +985,10 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   mirrorCompanion(true);
   companionWritingPosition.restore(promoted.id);
   writingPosition.restore(promoted.id);
+  // Discarded primary failure/notices must not stick to the promoted session.
+  saveFailed = false;
+  clearNotices();
+  clearVersionNotice();
   applyEditAccess();
   showSaveState();
   if (workspace.dirty() && autosave.checked && !editBlock) {
@@ -1133,7 +1137,14 @@ async function openCompanionDocument(id: string): Promise<void> {
       return;
     }
     if (secondary?.draft.id === id) return;
-    const next = await getStoredDraft(db!, id);
+    let next: StoredDraft | undefined;
+    try {
+      next = await getStoredDraft(db!, id);
+    } catch {
+      announceAction('Could not open that document in the other pane.');
+      renderPaneBDrafts();
+      return;
+    }
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
     // Primary may have switched to this document while we awaited storage.
     if (active.id === id) {
