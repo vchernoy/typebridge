@@ -786,6 +786,8 @@ async function releaseSecondarySession(): Promise<boolean> {
     return true;
   }
   clearTimeout(secondary.saveTimer);
+  if (secondary.saving) await secondary.saving;
+  if (!secondary) return true;
   while (secondary.dirty && autosave.checked && !secondary.editBlock) {
     const result = await persistSecondary();
     if (!result.saved && secondary.saveFailed) break;
@@ -824,6 +826,8 @@ async function releaseSecondarySession(): Promise<boolean> {
 async function promoteSecondaryToPrimary(): Promise<boolean> {
   if (!secondary) return true;
   clearTimeout(secondary.saveTimer);
+  if (secondary.saving) await secondary.saving;
+  if (!secondary) return true;
   // Flush the document being left in the primary pane first.
   while (workspace.dirty() && autosave.checked && !editBlock) {
     const result = await persist();
@@ -960,76 +964,102 @@ function scheduleSaveSecondary(fromTitle = false): void {
     if (becameDirty || fromTitle) renderPaneBDrafts();
   }
 }
+/** Serializes pane-B document opens so overlapping picks cannot orphan locks. */
+let companionOpenGeneration = 0;
+let companionOpenInFlight: Promise<void> | undefined;
 async function openCompanionDocument(id: string): Promise<void> {
   if (viewMode || !workspace.splitOpen() || !db) return;
-  if (id === active.id) {
-    if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
-    mirrorCompanion(true);
-    companionWritingPosition.restore(active.id);
-    renderPaneBDrafts();
-    return;
-  }
-  const represented = resolveSessionForDocument(id, [
-    { sessionId: 'session-1', documentId: active.id },
-    ...(secondary ? [{ sessionId: secondary.sessionId, documentId: secondary.draft.id }] : []),
-  ]);
-  if (represented === 'session-1') {
-    if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
-    return;
-  }
-  if (secondary?.draft.id === id) return;
-  const next = await getStoredDraft(db, id);
-  if (!next || next.revision < 1) {
-    announceAction('Could not open that document in the other pane.');
-    renderPaneBDrafts();
-    return;
-  }
-  if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
-  const access = await acquireFor(next.id);
-  let target = next;
-  if (access.ownership && db) {
-    const fresh = await getStoredDraft(db, next.id);
-    if (!fresh) {
-      void access.ownership.release();
-      announceAction('Could not open that document in the other pane.');
+  const generation = ++companionOpenGeneration;
+  paneBDrafts.disabled = true;
+  const run = (async () => {
+    if (companionOpenInFlight) await companionOpenInFlight.catch(() => undefined);
+    if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    if (id === active.id) {
+      if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
+      if (generation !== companionOpenGeneration) return;
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
       return;
     }
-    target = fresh;
+    const represented = resolveSessionForDocument(id, [
+      { sessionId: 'session-1', documentId: active.id },
+      ...(secondary ? [{ sessionId: secondary.sessionId, documentId: secondary.draft.id }] : []),
+    ]);
+    if (represented === 'session-1') {
+      if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
+      return;
+    }
+    if (secondary?.draft.id === id) return;
+    const next = await getStoredDraft(db!, id);
+    if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    if (!next || next.revision < 1) {
+      announceAction('Could not open that document in the other pane.');
+      renderPaneBDrafts();
+      return;
+    }
+    if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
+    if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    const access = await acquireFor(next.id);
+    if (generation !== companionOpenGeneration || !workspace.splitOpen()) {
+      void access.ownership?.release();
+      return;
+    }
+    let target = next;
+    if (access.ownership && db) {
+      const fresh = await getStoredDraft(db, next.id);
+      if (generation !== companionOpenGeneration || !workspace.splitOpen()) {
+        void access.ownership.release();
+        return;
+      }
+      if (!fresh) {
+        void access.ownership.release();
+        announceAction('Could not open that document in the other pane.');
+        return;
+      }
+      target = fresh;
+    }
+    companionWritingPosition.save();
+    loadingDraft = true;
+    try {
+      companionEditor.setReadOnly(false);
+      titleEditorB.setReadOnly(false);
+      companionEditor.load(target.text);
+      if (target.history) companionEditor.restoreHistory(target.history);
+      draftTitleB.value = target.title;
+      draftTitleB.hidden = false;
+    } finally {
+      loadingDraft = false;
+    }
+    secondary = createBoundSession({
+      sessionId: 'session-2',
+      editablePaneId: SECOND_PANE_ID,
+      draft: target,
+      editor: companionEditor,
+      field: companionField,
+      title: draftTitleB,
+    });
+    secondary.ownership = access.ownership;
+    secondary.editBlock = access.block;
+    if (access.block) {
+      companionEditor.setReadOnly(true);
+      titleEditorB.setReadOnly(true);
+    }
+    sessionRegistry?.setSecondary(secondary);
+    companionWritingPosition.restore(target.id);
+    updateSaveIndicatorB();
+    syncCompanionChrome();
+    renderPaneBDrafts();
+    syncMutationControls();
+    workspace.setActivePane(SECOND_PANE_ID);
+    companionField.focus({ preventScroll: true });
+  })();
+  companionOpenInFlight = run;
+  try { await run; }
+  finally {
+    if (companionOpenInFlight === run) companionOpenInFlight = undefined;
+    if (generation === companionOpenGeneration) paneBDrafts.disabled = false;
   }
-  companionWritingPosition.save();
-  loadingDraft = true;
-  try {
-    companionEditor.setReadOnly(false);
-    titleEditorB.setReadOnly(false);
-    companionEditor.load(target.text);
-    if (target.history) companionEditor.restoreHistory(target.history);
-    draftTitleB.value = target.title;
-    draftTitleB.hidden = false;
-  } finally {
-    loadingDraft = false;
-  }
-  secondary = createBoundSession({
-    sessionId: 'session-2',
-    editablePaneId: SECOND_PANE_ID,
-    draft: target,
-    editor: companionEditor,
-    field: companionField,
-    title: draftTitleB,
-  });
-  secondary.ownership = access.ownership;
-  secondary.editBlock = access.block;
-  if (access.block) {
-    companionEditor.setReadOnly(true);
-    titleEditorB.setReadOnly(true);
-  }
-  sessionRegistry?.setSecondary(secondary);
-  companionWritingPosition.restore(target.id);
-  updateSaveIndicatorB();
-  syncCompanionChrome();
-  renderPaneBDrafts();
-  syncMutationControls();
-  workspace.setActivePane(SECOND_PANE_ID);
-  companionField.focus({ preventScroll: true });
 }
 async function refreshDrafts(): Promise<void> {
   const delayMs = (window as Window & { __typebridgeDelayRefreshMs?: number }).__typebridgeDelayRefreshMs;
@@ -1372,9 +1402,14 @@ autosave.addEventListener('change', async () => {
     clearNotices();
     if (workspace.dirty()) showSaving(); else announce('Autosave on');
     if (workspace.dirty()) { journalEdit(); void persist(); }
+    if (secondary?.dirty && !secondary.editBlock) {
+      updateSaveIndicatorB();
+      void persistSecondary();
+    }
   }
   else {
     clearTimeout(saveTimer);
+    if (secondary) clearTimeout(secondary.saveTimer);
     // Bind deletion to this document before any await — defense if a switch somehow races the gate.
     const startedId = active.id;
     const startedOwnership = ownership;
@@ -1685,6 +1720,16 @@ function handleDatabaseUpgrade(): void {
   ownership = undefined;
   clearTimeout(saveTimer);
   void previous?.release();
+  if (secondary) {
+    clearTimeout(secondary.saveTimer);
+    const secondaryOwnership = secondary.ownership;
+    secondary.ownership = undefined;
+    secondary.editBlock = 'error';
+    void secondaryOwnership?.release();
+    companionEditor.setReadOnly(true);
+    titleEditorB.setReadOnly(true);
+    updateSaveIndicatorB();
+  }
   db = undefined;
   storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   recoveryNotice.hidden = false;
@@ -1692,6 +1737,7 @@ function handleDatabaseUpgrade(): void {
   // A later upgrade must not erase an earlier conflict-copy notice (#66).
   setRiskStatus('', 'failure');
   applyEditAccess();
+  syncMutationControls();
 }
 async function initializeDrafts(): Promise<void> {
   await ownerReady;
