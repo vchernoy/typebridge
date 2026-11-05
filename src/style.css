@@ -727,13 +727,13 @@ body.focus-mode .bottom {
 /* Stacked orientation needs a definite shell height so percentage shares resolve. */
 .editor-split[data-split="on"][data-split-orientation="stacked"] {
   flex-direction: column;
-  height: min(70dvh, 560px);
+  height: min(75dvh, 640px);
 }
 .editor-split[data-split="on"][data-split-orientation="stacked"] #editor,
 .editor-split[data-split="on"][data-split-orientation="stacked"] #editor-b {
   flex: 1 1 auto;
   height: auto;
-  min-height: 0;
+  min-height: 40px;
 }
 /* Keep the companion textarea usable when the primary takes most of a short stack. */
 .editor-split[data-split="on"][data-split-orientation="stacked"] .editor-pane-companion label[for="editor-b"] {
@@ -748,10 +748,36 @@ body.focus-mode .bottom {
   border: 0;
 }
 .editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
   margin-bottom: 2px;
 }
-.editor-split[data-split="on"][data-split-orientation="stacked"] #split-reset {
+.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .pane-doc-picker {
+  flex: 1 1 7rem;
+  min-width: 0;
+  margin: 0;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .pane-doc-picker select {
   min-height: 32px;
+  width: 100%;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] #draft-title-b {
+  flex: 1 1 7rem;
+  min-width: 0;
+  margin: 0;
+  min-height: 32px;
+  font-size: 0.95rem;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .save-indicator,
+.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .viewer-badge {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.editor-split[data-split="on"][data-split-orientation="stacked"] #split-reset {
+  min-height: 44px;
+  min-width: 44px;
   padding: 0 10px;
 }
 @media (max-width: 640px) {

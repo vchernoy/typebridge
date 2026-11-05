@@ -287,16 +287,21 @@ test('stacked End ratio keeps a usable companion pane after the divider', async 
   await expect(page.locator('#editor')).toBeEnabled();
   await openSplit(page);
   const divider = page.locator('#split-divider');
+  await expect(divider).toHaveAttribute('aria-orientation', 'horizontal');
+  await expect(divider).toHaveAttribute('aria-valuemax', '65');
   await divider.focus();
   await page.keyboard.press('End');
-  await expect(divider).toHaveAttribute('aria-valuenow', '80');
+  await expect(divider).toHaveAttribute('aria-valuenow', '65');
   const companion = await page.locator('.editor-pane-companion').boundingBox();
   const field = await page.locator('#editor-b').boundingBox();
+  const reset = await page.locator('#split-reset').boundingBox();
   expect(companion).toBeTruthy();
   expect(field).toBeTruthy();
+  expect(reset).toBeTruthy();
   expect(companion!.height).toBeGreaterThan(90);
-  // Primary share at End is small; pane chrome (picker) leaves a short textarea.
-  expect(field!.height).toBeGreaterThan(24);
+  expect(field!.height).toBeGreaterThan(40);
+  expect(reset!.height).toBeGreaterThanOrEqual(44);
+  expect(reset!.width).toBeGreaterThanOrEqual(44);
 });
 
 test('Focus mode stacked End ratio does not clip the companion textarea', async ({ page }) => {

@@ -110,12 +110,11 @@ test('promoting a dirty companion still autosaves after the cancelled timer', as
   expect(gamma?.text).toBe('Gamma body dirty');
 });
 
-test('pane B pending snapshot restores after reload', async ({ page }) => {
+test('pane B pagehide writes a pending snapshot that restores after reload', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await setAutosave(page, true);
   const firstId = await saveNamed(page, 'Echo body', 'Echo');
-  const echoRevision = (await readStoredDocs(page)).find(d => d.id === firstId)!.revision;
   await documentAction(page, '#new-draft');
   await saveNamed(page, 'Foxtrot body', 'Foxtrot');
   await openSplit(page);
@@ -126,17 +125,143 @@ test('pane B pending snapshot restores after reload', async ({ page }) => {
   });
   await page.locator('#editor-b').press('End');
   await page.locator('#editor-b').pressSequentially(' pending');
-  // Simulate the unload backup while the delayed secondary save is still in flight.
-  await page.evaluate(({ id, revision }) => {
-    const text = (document.querySelector('#editor-b') as HTMLTextAreaElement).value;
-    const title = (document.querySelector('#draft-title-b') as HTMLInputElement).value;
-    sessionStorage.setItem('typebridge.pendingDraft.paneB.v1', JSON.stringify({
-      id, title, text, revision, updatedAt: Date.now(),
-    }));
-  }, { id: firstId, revision: echoRevision });
+  const pending = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return sessionStorage.getItem('typebridge.pendingDraft.paneB.v1');
+  });
+  expect(pending).toContain('Echo body pending');
   await page.reload();
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#editor-b')).toBeVisible();
   await expect(page.locator('#editor-b')).toHaveValue('Echo body pending');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+});
+
+test('Autosave-off pane B asks before discarding on close split', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Hotel body', 'Hotel');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'India body', 'India');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await setAutosave(page, false, 'keep');
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' private');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Not saved');
+  await documentAction(page, '#toggle-split');
+  const discard = page.getByRole('dialog', { name: 'Discard unsaved changes in the other pane?' });
+  await expect(discard).toBeVisible();
+  await discard.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveValue('Hotel body private');
+});
+
+test('Copy uses the active pane document', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Juliet only in B', 'Juliet');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Kilo only in A', 'Kilo');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await page.locator('#copy').click();
+  await expect(page.locator('#status')).toContainText('Copied');
+  const fromB = await page.evaluate(() => navigator.clipboard.readText());
+  expect(fromB).toBe('Juliet only in B');
+  await page.locator('#editor').focus();
+  await page.locator('#copy').click();
+  await expect(page.locator('#status')).toContainText('Copied');
+  const fromA = await page.evaluate(() => navigator.clipboard.readText());
+  expect(fromA).toBe('Kilo only in A');
+});
+
+test('Copy fallback selects the active companion when clipboard is refused', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Lima in B', 'Lima');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Mike in A', 'Mike');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => { throw new Error('denied'); } },
+    });
+  });
+  await page.locator('#editor-b').focus();
+  await page.locator('#copy').click();
+  await expect(page.locator('#status')).toContainText('Copy unavailable');
+  await expect(page.locator('#editor-b')).toBeFocused();
+  const selected = await page.locator('#editor-b').evaluate(el => {
+    const area = el as HTMLTextAreaElement;
+    return area.value.slice(area.selectionStart, area.selectionEnd);
+  });
+  expect(selected).toBe('Lima in B');
+});
+
+test('pane B save quota failure keeps Not saved and preserves text', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'November body', 'November');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Oscar body', 'Oscar');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    (window as unknown as { restorePut: () => void }).restorePut = () => { IDBObjectStore.prototype.put = put; };
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  });
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' quota');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Save failed');
+  await expect(page.locator('#editor-b')).toHaveValue('November body quota');
+  await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
+});
+
+test('pane B follows foreign saves and can reclaim ownership', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const sharedId = await saveNamed(page, 'Shared v1', 'Shared');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Local primary', 'Local');
+
+  // Another window must own Shared first; pane B never steals a held lock.
+  const owner = await context.newPage();
+  await owner.goto('/');
+  await expect(owner.locator('#editor')).toBeEnabled();
+  await selectDocument(owner, sharedId);
+  await expect(owner.locator('#editor')).toHaveValue('Shared v1');
+  await expect(owner.locator('html')).toHaveAttribute('data-role', 'editor');
+
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(sharedId);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
+  await expect(page.locator('#save-indicator-b')).toHaveText('Read-only');
+
+  await owner.locator('#enabled').uncheck();
+  await owner.locator('#editor').press('End');
+  await owner.locator('#editor').pressSequentially(' from owner');
+  await expect(owner.locator('#save-indicator')).toHaveText('Saved');
+  await expect(page.locator('#editor-b')).toHaveValue('Shared v1 from owner');
+
+  await owner.close();
+  await expect.poll(async () => {
+    await page.bringToFront();
+    await page.locator('#editor-b').dispatchEvent('focus');
+    return page.locator('#editor-b').evaluate(el => (el as HTMLTextAreaElement).readOnly);
+  }).toBe(false);
   await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
 });

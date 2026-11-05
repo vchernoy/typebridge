@@ -103,7 +103,6 @@ if (viewMode) {
 
 /** Second independent document session when pane B shows a different document (#159 S4). */
 let secondary: BoundSession | undefined;
-let sessionRegistry: ReturnType<typeof createSessionRegistry> | undefined;
 /** Guard: setupSplitPane may reopen before draft locals exist. */
 let draftsInitialized = false;
 
@@ -483,8 +482,15 @@ const typingSettings = setupTransliteration(enabled, editor, {
   extraEditors: () => [companionEditor],
 });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(field.value); announceAction('Copied'); }
-  catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
+  // Capture before the await so a focus change cannot redirect fallback selection.
+  const target = workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
+  const text = target.value;
+  try { await navigator.clipboard.writeText(text); announceAction('Copied'); }
+  catch {
+    target.focus();
+    target.select();
+    announceAction('Copy unavailable. Text selected; use your device’s copy command.');
+  }
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
   if (!canMutatePrimary()) return;
@@ -614,7 +620,7 @@ titleEditorB.setReadOnly(true);
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
-sessionRegistry = createSessionRegistry(createBoundSession({
+const sessionRegistry = createSessionRegistry(createBoundSession({
   sessionId: 'session-1',
   editablePaneId: PRIMARY_PANE_ID,
   draft: active,
