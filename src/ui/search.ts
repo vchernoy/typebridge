@@ -8,7 +8,8 @@ export type SearchTarget = { field: HTMLTextAreaElement; editor: Editor };
 /**
  * Find & Replace: query/replacement persistence, Match case/Regex options, transliterating
  * Find/Replace inputs, navigation (including zero-width matches) and Replace/Replace all.
- * Find and Replace follow `getFindTarget` (active pane / session).
+ * Find follows `getFindTarget` (any visible active pane). Replace uses the same
+ * target after `canMutate` so read-only companions stay protected.
  */
 export function setupSearch(
   primary: SearchTarget,

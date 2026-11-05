@@ -566,7 +566,9 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
   enabled,
   {
     canMutate: canMutatePrimary,
-    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit()
+    // Find is read-only: follow any visible active companion (same-doc mirror or dual-doc).
+    // Mutations stay gated by canMutate; split close retargets activePane to primary first.
+    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID && workspace.splitOpen()
       ? companionSearch
       : primarySearch,
     matchSurfaces: [field, companionField],
