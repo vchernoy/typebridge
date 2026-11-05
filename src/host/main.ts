@@ -71,9 +71,17 @@ const manager = installWindowManager({
   },
 });
 
-// Expose for e2e probes without growing a public API surface.
-(window as Window & { __typebridgeHostWindows?: () => ReturnType<typeof manager.windows> })
-  .__typebridgeHostWindows = () => manager.windows();
+// Expose for e2e probes and embedded Focus-mode handoff (#175 step 6).
+const hostHooks = window as Window & {
+  __typebridgeHostWindows?: () => ReturnType<typeof manager.windows>;
+  __typebridgeHostLayoutMode?: () => ReturnType<typeof manager.layoutMode>;
+  __typebridgeHostFocusMode?: (enabled: boolean, sourceWindowId?: string) => void;
+};
+hostHooks.__typebridgeHostWindows = () => manager.windows();
+hostHooks.__typebridgeHostLayoutMode = () => manager.layoutMode();
+hostHooks.__typebridgeHostFocusMode = (enabled, sourceWindowId) => {
+  manager.setHostFocusMode(enabled, sourceWindowId);
+};
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {

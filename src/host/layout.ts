@@ -27,6 +27,8 @@ export type HostWindowLayout = {
 export type HostLayoutState = {
   version: 1;
   windows: HostWindowLayout[];
+  /** #175 step 6: which window Focus mode maximizes (never text). */
+  focusWindowId?: string;
 };
 
 export type ViewportSize = { width: number; height: number };
@@ -220,6 +222,32 @@ export function tileStacked(windows: HostWindowLayout[], viewport: ViewportSize)
 }
 
 /**
+ * Phone stack: full-width scrolling list. Each window keeps its own height
+ * (at least MIN_WINDOW_HEIGHT; not capped to the viewport). Later windows are
+ * pushed down — the host scrolls when the stack exceeds the viewport.
+ */
+export function stackPhoneWindows(
+  windows: HostWindowLayout[],
+  viewport: ViewportSize,
+  heights?: number[],
+): HostWindowLayout[] {
+  if (windows.length === 0) return [];
+  const width = Math.max(MIN_WINDOW_WIDTH, Math.floor(viewport.width));
+  const defaultHeight = Math.max(
+    MIN_WINDOW_HEIGHT,
+    Math.min(420, Math.max(MIN_WINDOW_HEIGHT, Math.floor(viewport.height * 0.55) || MIN_WINDOW_HEIGHT)),
+  );
+  let y = 0;
+  return windows.map((win, index) => {
+    const requested = heights?.[index] ?? (win.h >= MIN_WINDOW_HEIGHT ? win.h : defaultHeight);
+    const h = Math.max(MIN_WINDOW_HEIGHT, Math.floor(requested));
+    const next = { ...win, x: 0, y, w: width, h };
+    y += h;
+    return next;
+  });
+}
+
+/**
  * Snap a free-moving window to halves/quarters when close to edges or center.
  * Returns the same rect when no snap applies.
  */
@@ -297,7 +325,12 @@ export function parseHostLayout(raw: unknown): HostLayoutState | undefined {
     if (windows.length >= MAX_HOST_WINDOWS) break;
   }
   if (windows.length === 0) return undefined;
-  return { version: 1, windows };
+  const focusWindowId = typeof (record as { focusWindowId?: unknown }).focusWindowId === 'string'
+    && isHostWindowId((record as { focusWindowId: string }).focusWindowId)
+    && windows.some(win => win.id === (record as { focusWindowId: string }).focusWindowId)
+    ? (record as { focusWindowId: string }).focusWindowId
+    : undefined;
+  return { version: 1, windows, ...(focusWindowId ? { focusWindowId } : {}) };
 }
 
 /** Resolve localStorage without throwing when the getter itself is blocked. */
@@ -331,6 +364,9 @@ export function writeHostLayout(state: HostLayoutState, storage?: Storage): bool
         z: win.z,
         ...(win.documentId ? { documentId: win.documentId } : {}),
       })),
+      ...(state.focusWindowId && state.windows.some(win => win.id === state.focusWindowId)
+        ? { focusWindowId: state.focusWindowId }
+        : {}),
     };
     store.setItem(HOST_WINDOWS_KEY, JSON.stringify(payload));
     return true;

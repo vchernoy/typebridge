@@ -1,6 +1,6 @@
 /**
- * #175 step 5: free-layout window manager for the host page.
- * Owns chrome (title bar, resize), tiling, persistence — never document text.
+ * #175 step 5–6: free/stacked window manager for the host page.
+ * Owns chrome (title bar, resize), tiling, layout mode, Focus maximize — never document text.
  */
 import {
   KEYBOARD_MOVE_STEP_PX,
@@ -17,6 +17,7 @@ import {
   readHostLayout,
   restoreForMove,
   snapRect,
+  stackPhoneWindows,
   tileSideBySide,
   tileStacked,
   writeHostLayout,
@@ -24,6 +25,13 @@ import {
   type ViewportSize,
   type WindowRect,
 } from './layout';
+import {
+  detectLayoutCapabilities,
+  effectiveLayoutMode,
+  readLayoutModePreference,
+  type EffectiveLayoutMode,
+  type LayoutModePreference,
+} from './layout-mode';
 
 export type WindowManagerDeps = {
   root: HTMLElement;
@@ -66,6 +74,9 @@ export type WindowManager = {
   closeWindow: (id: string) => Promise<boolean>;
   tileSideBySide: () => void;
   tileStacked: () => void;
+  layoutMode: () => EffectiveLayoutMode;
+  refreshLayoutMode: () => void;
+  setHostFocusMode: (enabled: boolean, sourceWindowId?: string) => void;
   dispose: () => void;
 };
 
@@ -93,17 +104,30 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const frames = new Map<string, HTMLIFrameElement>();
   let drag: DragKind | undefined;
   let disposed = false;
+  let mode: EffectiveLayoutMode = 'free';
+  let preference: LayoutModePreference = 'auto';
+  let hostFocus = false;
+  let preFocusLayouts: HostWindowLayout[] | undefined;
+  let activeId = 'main';
 
   const persist = (): void => {
-    const next = layouts.map(win => {
+    // While Focus maximizes a window, keep persisting the pre-Focus geometry so reload
+    // can restore the prior free/stacked arrangement (and which window was focused).
+    const base = hostFocus && preFocusLayouts ? preFocusLayouts : layouts;
+    const next = base.map(win => {
       const frame = frames.get(win.id);
       // Prefer a live probe; if the iframe is already gone (host unload), keep the last known id.
       const probed = frame && deps.readDocumentId ? deps.readDocumentId(frame) : undefined;
       const documentId = probed ?? win.documentId;
       return documentId ? { ...win, documentId } : { ...win, documentId: undefined };
     });
-    layouts = next;
-    writeHostLayout({ version: 1, windows: layouts }, storage);
+    if (hostFocus && preFocusLayouts) preFocusLayouts = next;
+    else layouts = next;
+    writeHostLayout({
+      version: 1,
+      windows: next,
+      ...(hostFocus ? { focusWindowId: activeId } : {}),
+    }, storage);
   };
 
   const applyShellGeometry = (win: HostWindowLayout): void => {
@@ -118,16 +142,108 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   const syncToolbar = (): void => {
     const addBtn = deps.toolbar.querySelector<HTMLButtonElement>('[data-host-action="new-window"]');
-    if (addBtn) addBtn.disabled = layouts.length >= MAX_HOST_WINDOWS;
+    if (addBtn) addBtn.disabled = layouts.length >= MAX_HOST_WINDOWS || hostFocus;
+    for (const action of ['tile-side', 'tile-stack'] as const) {
+      const btn = deps.toolbar.querySelector<HTMLButtonElement>(`[data-host-action="${action}"]`);
+      if (btn) btn.hidden = mode === 'stacked' || hostFocus;
+    }
+  };
+
+  const syncEmbeddedFocusChrome = (enabled: boolean): void => {
+    for (const [wid, frame] of frames) {
+      try {
+        const hooks = frame.contentWindow as (Window & {
+          __typebridgeSetFocusMode?: (on: boolean) => void;
+        }) | null;
+        const want = enabled && wid === activeId;
+        const doc = frame.contentDocument;
+        const already = !!doc?.body.classList.contains('focus-mode');
+        if (want === already) continue;
+        // Only the focused window shows Exit focus; others stay Normal.
+        hooks?.__typebridgeSetFocusMode?.(want);
+      } catch { /* Unexpected cross-origin. */ }
+    }
+  };
+
+  const applyModeChrome = (): void => {
+    deps.root.dataset.layoutMode = mode;
+    document.body.classList.toggle('host-stacked', mode === 'stacked');
+    document.body.classList.toggle('host-focus-mode', hostFocus);
+    for (const [wid, shell] of shells) {
+      shell.classList.toggle('is-host-focused', hostFocus && wid === activeId);
+      shell.hidden = hostFocus && wid !== activeId;
+      const move = shell.querySelector<HTMLElement>('.host-window-move');
+      if (move) {
+        // Keep the title handle focusable in stacked mode for keyboard height resize.
+        move.tabIndex = hostFocus ? -1 : 0;
+        move.setAttribute(
+          'aria-label',
+          mode === 'stacked'
+            ? `Window ${wid} (Ctrl/⌘+Shift+Up/Down to resize height)`
+            : `Move window ${wid} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+        );
+      }
+    }
+    syncToolbar();
+  };
+
+  const applyAllGeometry = (): void => {
+    for (const win of layouts) applyShellGeometry(win);
+  };
+
+  const restackPreservingHeights = (): void => {
+    const view = viewportOf(deps.root);
+    layouts = stackPhoneWindows(layouts, view, layouts.map(win => win.h));
+    applyAllGeometry();
+  };
+
+  const enterStacked = (): void => {
+    layouts = stackPhoneWindows(layouts, viewportOf(deps.root));
+    applyAllGeometry();
+  };
+
+  const refreshMode = (nextPreference?: LayoutModePreference): void => {
+    if (nextPreference) preference = nextPreference;
+    else preference = readLayoutModePreference(storage);
+    const next = effectiveLayoutMode(preference, detectLayoutCapabilities());
+    if (next === mode && deps.root.dataset.layoutMode === mode) {
+      applyModeChrome();
+      return;
+    }
+    const previous = mode;
+    mode = next;
+    if (hostFocus) {
+      // Mode can change under Focus (Auto + viewport). Keep the saved pre-Focus
+      // geometry reachable for the mode that will apply on exit.
+      const base = preFocusLayouts ?? layouts;
+      if (mode === 'stacked' && previous !== 'stacked') {
+        preFocusLayouts = stackPhoneWindows(base, viewportOf(deps.root));
+      } else if (mode === 'free' && previous === 'stacked') {
+        preFocusLayouts = tileSideBySide(base, viewportOf(deps.root));
+      }
+      applyModeChrome();
+      persist();
+      return;
+    }
+    if (mode === 'stacked' && previous !== 'stacked') enterStacked();
+    else if (mode === 'free' && previous === 'stacked') {
+      // Scrollable stack may place windows below the free-mode viewport — tile so all remain reachable.
+      layouts = tileSideBySide(layouts, viewportOf(deps.root));
+      applyAllGeometry();
+    }
+    applyModeChrome();
+    persist();
   };
 
   const setActive = (id: string): void => {
-    layouts = bringToFront(layouts, id);
+    activeId = id;
+    if (mode === 'free' && !hostFocus) layouts = bringToFront(layouts, id);
     for (const win of layouts) applyShellGeometry(win);
     for (const [wid, shell] of shells) {
       shell.classList.toggle('is-active', wid === id);
       shell.setAttribute('aria-selected', wid === id ? 'true' : 'false');
     }
+    if (hostFocus) applyModeChrome();
     persist();
   };
 
@@ -175,7 +291,6 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     frame.dataset.windowId = win.id;
     frame.title = `TypeBridge editor ${win.id}`;
     frame.allow = 'clipboard-read; clipboard-write';
-    frame.src = deps.editorSrc(win.id, win.documentId);
 
     const handles: Array<[string, string]> = [
       ['n', 'top'],
@@ -207,18 +322,39 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     // Iframe pointer/focus events do not bubble to the shell. Wire same-origin
     // content so clicking or focusing the editor still raises the window.
     const activateFromIframe = (): void => { setActive(win.id); };
-    frame.addEventListener('load', () => {
+    const wireFrame = (): void => {
       try {
         const doc = frame.contentDocument;
         if (!doc) return;
         doc.addEventListener('pointerdown', activateFromIframe);
         doc.addEventListener('focusin', activateFromIframe);
+        if (!hostFocus) return;
+        // Hooks register at the end of the editor boot — retry briefly after load.
+        let attempts = 0;
+        const syncFocus = (): void => {
+          const hooks = frame.contentWindow as (Window & {
+            __typebridgeSetFocusMode?: (on: boolean) => void;
+          }) | null;
+          if (hooks?.__typebridgeSetFocusMode) {
+            hooks.__typebridgeSetFocusMode(win.id === activeId);
+            return;
+          }
+          if (attempts++ < 40) window.setTimeout(syncFocus, 50);
+        };
+        syncFocus();
       } catch { /* Unexpected cross-origin — chrome-only activation remains. */ }
-    });
+    };
+    frame.addEventListener('load', wireFrame);
+    frame.src = deps.editorSrc(win.id, win.documentId);
+    // Cached navigations may complete before the listener is attached.
+    try {
+      if (frame.contentDocument?.readyState === 'complete') wireFrame();
+    } catch { /* Ignore. */ }
 
     moveHandle.addEventListener('pointerdown', event => {
       event.preventDefault();
       setActive(win.id);
+      if (mode === 'stacked' || hostFocus) return;
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
       const view = viewportOf(deps.root);
@@ -235,6 +371,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     });
 
     moveHandle.addEventListener('keydown', event => {
+      if (hostFocus) return;
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
       const view = viewportOf(deps.root);
@@ -243,6 +380,23 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         : KEYBOARD_MOVE_STEP_PX;
       // Ctrl/⌘+Shift+Arrow resizes (avoid Alt+Arrow, which navigates history on Windows/Linux).
       const resize = (event.ctrlKey || event.metaKey) && event.shiftKey;
+      if (mode === 'stacked') {
+        // Stacked: height only — keep the title handle as the keyboard resize surface.
+        if (!resize || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        event.preventDefault();
+        setActive(win.id);
+        const heights = layouts.map(w => w.h);
+        const index = layouts.findIndex(w => w.id === win.id);
+        if (index < 0) return;
+        heights[index] = Math.max(
+          MIN_WINDOW_HEIGHT,
+          current.h + (event.key === 'ArrowDown' ? step : -step),
+        );
+        layouts = stackPhoneWindows(layouts, view, heights);
+        applyAllGeometry();
+        persist();
+        return;
+      }
       // Restore full-bleed only for real moves — resize keeps the current size.
       const base = resize ? current : restoreForMove(current, view);
       let next: WindowRect | undefined;
@@ -277,18 +431,23 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         event.preventDefault();
         event.stopPropagation();
         setActive(win.id);
+        if (hostFocus) return;
         const current = layouts.find(w => w.id === win.id);
         if (!current) return;
         const edge = handle.dataset.resize ?? '';
+        // Phone stack: height grip only (south / south-east / south-west).
+        if (mode === 'stacked' && !edge.includes('s')) return;
         drag = {
           type: 'resize',
           id: win.id,
-          edges: {
-            left: edge.includes('w'),
-            right: edge.includes('e'),
-            top: edge.includes('n'),
-            bottom: edge.includes('s'),
-          },
+          edges: mode === 'stacked'
+            ? { bottom: true }
+            : {
+              left: edge.includes('w'),
+              right: edge.includes('e'),
+              top: edge.includes('n'),
+              bottom: edge.includes('s'),
+            },
           originX: event.clientX,
           originY: event.clientY,
           start: { x: current.x, y: current.y, w: current.w, h: current.h },
@@ -327,6 +486,15 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       }, view));
       return;
     }
+    if (mode === 'stacked' && drag.edges.bottom) {
+      const index = layouts.findIndex(w => w.id === drag!.id);
+      if (index < 0) return;
+      const heights = layouts.map(win => win.h);
+      heights[index] = Math.max(MIN_WINDOW_HEIGHT, drag.start.h + dy);
+      layouts = stackPhoneWindows(layouts, view, heights);
+      applyAllGeometry();
+      return;
+    }
     let { x, y, w, h } = drag.start;
     if (drag.edges.left) {
       const nextX = drag.start.x + dx;
@@ -348,7 +516,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const onPointerUp = (): void => {
     if (!drag) return;
     const id = drag.id;
-    const snapAfterMove = drag.type === 'move' && drag.didMove;
+    const snapAfterMove = drag.type === 'move' && drag.didMove && mode === 'free';
     const wasResize = drag.type === 'resize';
     const current = layouts.find(w => w.id === id);
     drag = undefined;
@@ -359,7 +527,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       persist();
       return;
     }
-    if (wasResize) persist();
+    if (wasResize) {
+      if (mode === 'stacked') restackPreservingHeights();
+      persist();
+    }
   };
 
   const mountWindows = (initial: HostWindowLayout[]): void => {
@@ -368,15 +539,21 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     syncToolbar();
   };
 
+  let pendingFocusId: string | undefined;
+
   const boot = (): void => {
     const view = viewportOf(deps.root);
     const saved = readHostLayout(storage);
     if (saved?.windows.length) {
       mountWindows(saved.windows.map((win, index) => ({
         ...win,
-        ...clampRect(win, view),
+        // Stacked heights may exceed the viewport (scrollable list); only clamp in free mode.
+        ...(effectiveLayoutMode(readLayoutModePreference(storage), detectLayoutCapabilities()) === 'stacked'
+          ? { x: 0, w: Math.max(MIN_WINDOW_WIDTH, view.width), h: Math.max(MIN_WINDOW_HEIGHT, win.h) }
+          : clampRect(win, view)),
         z: win.z || index + 1,
       })));
+      pendingFocusId = saved.focusWindowId;
       return;
     }
     const primary: HostWindowLayout = {
@@ -394,16 +571,33 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   };
 
   const onResize = (): void => {
+    refreshMode();
+    if (hostFocus) {
+      const view = viewportOf(deps.root);
+      layouts = layouts.map(win => (
+        win.id === activeId
+          ? { ...win, x: 0, y: 0, w: view.width, h: view.height }
+          : win
+      ));
+      applyAllGeometry();
+      persist();
+      return;
+    }
+    if (mode === 'stacked') {
+      restackPreservingHeights();
+      persist();
+      return;
+    }
     const view = viewportOf(deps.root);
     layouts = layouts.map(win => ({ ...win, ...clampRect(win, view) }));
-    for (const win of layouts) applyShellGeometry(win);
+    applyAllGeometry();
     persist();
   };
 
   const api: WindowManager = {
     windows: () => layouts.slice(),
     addWindow: () => {
-      if (layouts.length >= MAX_HOST_WINDOWS) return undefined;
+      if (hostFocus || layouts.length >= MAX_HOST_WINDOWS) return undefined;
       const view = viewportOf(deps.root);
       const id = mintWindowId(layouts.map(w => w.id));
       const maxZ = layouts.reduce((m, win) => Math.max(m, win.z), 0);
@@ -414,8 +608,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       };
       layouts = [...layouts, win];
       createShell(win);
+      if (mode === 'stacked') enterStacked();
       setActive(id);
-      syncToolbar();
+      applyModeChrome();
       persist();
       return id;
     },
@@ -440,6 +635,14 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       shells.delete(id);
       frames.delete(id);
       layouts = layouts.filter(win => win.id !== id);
+      if (preFocusLayouts) {
+        preFocusLayouts = preFocusLayouts.filter(win => win.id !== id);
+      }
+      if (hostFocus && activeId === id) {
+        hostFocus = false;
+        preFocusLayouts = undefined;
+      }
+      if (activeId === id) activeId = layouts[0]?.id ?? 'main';
       // Drop scoped session keys after the iframe is gone. prepareClose only returns
       // true for a clean close or an explicit discard, so pendingDraft is safe to
       // remove here — and doing it *after* unload beats a pagehide that recreates it.
@@ -456,18 +659,64 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         sessionStorage.removeItem(`typebridge.pendingDraft.v1${marker}`);
         sessionStorage.removeItem(`typebridge.pendingDraft.paneB.v1${marker}`);
       } catch { /* Blocked sessionStorage — layout still closes. */ }
-      syncToolbar();
+      if (mode === 'stacked' && !hostFocus) enterStacked();
+      applyModeChrome();
       persist();
       return true;
     },
     tileSideBySide: () => {
+      if (mode === 'stacked' || hostFocus) return;
       layouts = tileSideBySide(layouts, viewportOf(deps.root));
-      for (const win of layouts) applyShellGeometry(win);
+      applyAllGeometry();
       persist();
     },
     tileStacked: () => {
+      if (mode === 'stacked' || hostFocus) return;
       layouts = tileStacked(layouts, viewportOf(deps.root));
-      for (const win of layouts) applyShellGeometry(win);
+      applyAllGeometry();
+      persist();
+    },
+    layoutMode: () => mode,
+    refreshLayoutMode: () => { refreshMode(); },
+    setHostFocusMode: (enabled, sourceWindowId) => {
+      if (enabled) {
+        if (sourceWindowId && layouts.some(win => win.id === sourceWindowId)) {
+          activeId = sourceWindowId;
+        }
+        if (!preFocusLayouts) {
+          preFocusLayouts = layouts.map(win => ({ ...win }));
+        }
+        hostFocus = true;
+        const view = viewportOf(deps.root);
+        layouts = layouts.map(win => (
+          win.id === activeId
+            ? { ...win, x: 0, y: 0, w: view.width, h: view.height }
+            : win
+        ));
+        applyAllGeometry();
+        applyModeChrome();
+        syncEmbeddedFocusChrome(true);
+        persist();
+        return;
+      }
+      if (!hostFocus) return;
+      hostFocus = false;
+      if (preFocusLayouts?.length) {
+        const byId = new Map(preFocusLayouts.map(win => [win.id, win]));
+        layouts = layouts.map(win => {
+          const prior = byId.get(win.id);
+          return prior ? { ...win, x: prior.x, y: prior.y, w: prior.w, h: prior.h, z: prior.z } : win;
+        });
+      }
+      preFocusLayouts = undefined;
+      if (mode === 'stacked') restackPreservingHeights();
+      else {
+        const view = viewportOf(deps.root);
+        layouts = layouts.map(win => ({ ...win, ...clampRect(win, view) }));
+      }
+      applyAllGeometry();
+      applyModeChrome();
+      syncEmbeddedFocusChrome(false);
       persist();
     },
     dispose: () => {
@@ -479,7 +728,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('pagehide', onPersistDocumentIds);
       window.removeEventListener('message', onActiveDraftMessage);
+      window.removeEventListener('typebridge-layout-mode', onLayoutModeEvent as EventListener);
+      window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onHostHidden);
+      for (const mq of mediaQueries) mq.removeEventListener('change', onCapabilityChange);
       rootObserver?.disconnect();
       for (const shell of shells.values()) shell.remove();
       shells.clear();
@@ -507,8 +759,30 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     layouts = layouts.map(win => (
       win.id === data.windowId ? { ...win, documentId: data.documentId } : win
     ));
-    writeHostLayout({ version: 1, windows: layouts }, storage);
+    if (preFocusLayouts) {
+      preFocusLayouts = preFocusLayouts.map(win => (
+        win.id === data.windowId ? { ...win, documentId: data.documentId } : win
+      ));
+    }
+    // Use Focus-aware persist so maximized geometry / focusWindowId stay correct.
+    persist();
   };
+  const onLayoutModeEvent = (event: Event): void => {
+    const detail = (event as CustomEvent<{ preference?: LayoutModePreference }>).detail;
+    refreshMode(detail?.preference);
+  };
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key !== null && event.key !== 'typebridge.host.layoutMode.v1') return;
+    refreshMode();
+  };
+  const onCapabilityChange = (): void => { refreshMode(); };
+  const mediaQueries = typeof matchMedia === 'function'
+    ? [
+      matchMedia('(max-width: 640px)'),
+      matchMedia('(any-pointer: fine)'),
+      matchMedia('(hover: hover)'),
+    ]
+    : [];
 
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
@@ -516,7 +790,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   window.addEventListener('resize', onResize);
   window.addEventListener('pagehide', onPersistDocumentIds);
   window.addEventListener('message', onActiveDraftMessage);
+  window.addEventListener('typebridge-layout-mode', onLayoutModeEvent as EventListener);
+  window.addEventListener('storage', onStorage);
   document.addEventListener('visibilitychange', onHostHidden);
+  for (const mq of mediaQueries) mq.addEventListener('change', onCapabilityChange);
   // Update notice / toolbar reflow change host-root without a window resize.
   const rootObserver = typeof ResizeObserver !== 'undefined'
     ? new ResizeObserver(() => { onResize(); })
@@ -524,5 +801,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   rootObserver?.observe(deps.root);
 
   boot();
+  refreshMode();
+  if (pendingFocusId && layouts.some(win => win.id === pendingFocusId)) {
+    api.setHostFocusMode(true, pendingFocusId);
+  }
   return api;
 }

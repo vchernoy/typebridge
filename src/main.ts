@@ -1,4 +1,5 @@
 import { setupAppearance } from './ui/appearance';
+import { setupWindowLayoutSetting } from './ui/window-layout-setting';
 import { setupResetSettings } from './ui/reset-settings';
 import { watchForUpdates } from './ui/update-notice';
 import { SHORTCUTS } from './editor/keyboard-shortcuts';
@@ -118,9 +119,18 @@ const workspace = createSinglePaneWorkspace({
 
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
-const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field, {
+const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setupLayout(field, {
   getFocusTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionField : field,
   focusToggleSurfaces: () => [field, companionField],
+  onFocusModeChange: enabled => {
+    if (!embedded || window.parent === window) return;
+    try {
+      const host = window.parent as Window & {
+        __typebridgeHostFocusMode?: (on: boolean, sourceWindowId?: string) => void;
+      };
+      host.__typebridgeHostFocusMode?.(enabled, windowId ?? undefined);
+    } catch { /* Cross-origin parent is out of scope. */ }
+  },
 });
 setupSettings();
 setupDocumentMenu();
@@ -291,6 +301,7 @@ function preferenceSaved(name: string, saved: boolean): void {
   preferenceWarning.hidden = names.length === 0;
 }
 const appearanceSettings = setupAppearance(preferenceSaved);
+const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved);
 
 // One status line carries both save state and action feedback (#52).
 // 'progress' is save state that a later save may replace; 'action' is
@@ -3549,7 +3560,8 @@ if (!viewMode) document.addEventListener('visibilitychange', () => {
 updateStats();
 
 setupResetSettings({ actions: [
-  ['appearance', appearanceSettings.reset], ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
+  ['appearance', appearanceSettings.reset], ['window layout', windowLayoutSettings.reset],
+  ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
   ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
 ], announce: announceAction });
 
@@ -3575,10 +3587,12 @@ if (embedded) {
     __typebridgePrepareWindowClose?: () => Promise<boolean>;
     /** Host calls immediately before removing the iframe after prepareClose succeeds. */
     __typebridgeCommitWindowClose?: () => void;
+    __typebridgeSetFocusMode?: (enabled: boolean) => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
   hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; suppressPendingBackup = false; };
   hooks.__typebridgePrepareWindowClose = prepareWindowClose;
   hooks.__typebridgeCommitWindowClose = commitWindowClose;
+  hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
 }

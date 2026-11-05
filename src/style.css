@@ -1182,10 +1182,15 @@ body.focus-mode .bottom {
   }
 }
 
-#appearance {
+#appearance,
+#window-layout {
   min-height: 44px;
   margin: 0 8px 8px;
   font: inherit;
+}
+/* #175 step 6: Layout preference only applies on the multi-window host. */
+html:not([data-embed="1"]) .settings-host-only {
+  display: none;
 }
 
 /* #175 step 5 host shell: notice + toolbar + free-layout windows. */
@@ -1369,6 +1374,57 @@ body.host-page {
   width: 12px;
   height: 12px;
   cursor: nesw-resize;
+}
+/* #175 step 6: phone stack — scrolling list, height grip only; Focus maximizes the active window. */
+body.host-stacked .host-root {
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+body.host-stacked .host-window {
+  position: relative;
+  left: auto !important;
+  top: auto !important;
+  width: 100% !important;
+  flex: 0 0 auto;
+  /* Keep the height grip hittable inside the window box. */
+  overflow: visible;
+}
+body.host-stacked .host-window-move {
+  cursor: default;
+}
+body.host-stacked .host-window-resize-n,
+body.host-stacked .host-window-resize-e,
+body.host-stacked .host-window-resize-w,
+body.host-stacked .host-window-resize-ne,
+body.host-stacked .host-window-resize-nw {
+  display: none;
+}
+body.host-stacked .host-window-resize-s {
+  bottom: 0;
+  height: 24px;
+  touch-action: none;
+}
+body.host-stacked .host-window-resize-se,
+body.host-stacked .host-window-resize-sw {
+  bottom: 0;
+  width: 24px;
+  height: 24px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+body.host-focus-mode .host-toolbar [data-host-action="tile-side"],
+body.host-focus-mode .host-toolbar [data-host-action="tile-stack"],
+body.host-focus-mode .host-toolbar [data-host-action="new-window"] {
+  display: none;
+}
+body.host-focus-mode .host-window-resize {
+  display: none;
+}
+body.host-focus-mode .host-window.is-host-focused {
+  border-color: var(--accent);
 }
 body.host-page .update-notice {
   position: relative;

@@ -9,8 +9,15 @@ export function setupLayout(
     getFocusTarget?: () => HTMLTextAreaElement;
     /** Surfaces where Escape enters Focus from Normal mode (defaults to the primary field). */
     focusToggleSurfaces?: () => Iterable<HTMLTextAreaElement>;
+    /** #175 step 6: host maximizes the active window when Focus mode toggles in an embed. */
+    onFocusModeChange?: (enabled: boolean) => void;
   },
-): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
+): {
+  setFocusMode: (enabled: boolean) => void;
+  restoreFocusMode: () => void;
+  resetLayout: () => boolean;
+  applyFocusModeOnly: (enabled: boolean) => void;
+} {
   const FOCUS_KEY = 'typebridge.focusMode.v1';
   const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
   const editorSizeWarning = document.createElement('span');
@@ -133,7 +140,7 @@ export function setupLayout(
   const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
   const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
   let normalEditorSize = { width: '', height: '' };
-  function applyFocusMode(enabled: boolean): void {
+  function applyFocusMode(enabled: boolean, opts?: { moveFocus?: boolean }): void {
     cancelResize();
     if (enabled && !document.body.classList.contains('focus-mode')) {
       normalEditorSize = { width: field.style.width, height: field.style.height };
@@ -150,17 +157,23 @@ export function setupLayout(
     document.body.classList.toggle('focus-mode', enabled);
     focusButton.setAttribute('aria-pressed', String(enabled));
     exitFocusButton.hidden = !enabled;
+    // Host-driven sync must not steal focus into background iframes (#175 step 6).
+    if (opts?.moveFocus === false) return;
     // Prefer the active pane surface so Focus entry/exit does not silently retarget commands.
     (options?.getFocusTarget?.() ?? field).focus({ preventScroll: true });
   }
   function setFocusMode(enabled: boolean): void {
     applyFocusMode(enabled);
+    options?.onFocusModeChange?.(enabled);
     try { localStorage.setItem(FOCUS_KEY, enabled ? 'on' : 'off'); }
     catch { /* Optional layout preference; editing remains available. */ }
   }
   function restoreFocusMode(): void {
     // Called after the draft is loaded and the textarea is enabled. Do not write
     // the preference or Normal-mode size while restoring it.
+    // #175 step 6: embedded editors leave Focus restore to the host so every
+    // iframe does not race to maximize itself after reload.
+    if (document.documentElement.dataset.embed === '1') return;
     try { if (localStorage.getItem(FOCUS_KEY) === 'on') applyFocusMode(true); }
     catch { /* Start in Normal mode when storage is unavailable. */ }
   }
@@ -201,5 +214,9 @@ export function setupLayout(
     editorSizeWarning.textContent = saved ? '' : 'Editor layout defaults could not be saved in this browser.';
     return saved;
   }
-  return { setFocusMode, restoreFocusMode, resetLayout };
+  /** Host-driven Focus chrome without writing the shared preference, notifying the host, or moving focus. */
+  function applyFocusModeOnly(enabled: boolean): void {
+    applyFocusMode(enabled, { moveFocus: false });
+  }
+  return { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly };
 }
