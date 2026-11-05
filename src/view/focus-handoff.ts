@@ -362,8 +362,35 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       return;
     }
 
-    // Prefer same-origin in-tab yield (may carry unsaved text in memory).
-    const local = await requestSameOriginYield(request);
+    // Prefer same-origin in-tab yield (may carry unsaved text in memory), but
+    // bound the wait so a stalled flush/park cannot swallow input forever.
+    let sameOriginTimedOut = false;
+    const local = await Promise.race([
+      requestSameOriginYield(request).then(result => {
+        if (sameOriginTimedOut) {
+          // Owner answered after we already fell through — reject a late park.
+          if (result?.status === 'released') {
+            notifyPeersComplete(request.requestId, false);
+            postMeta({
+              v: 1,
+              type: 'handoff-complete',
+              documentId,
+              requestId: request.requestId,
+              ok: false,
+              at: Date.now(),
+            });
+          }
+          return undefined;
+        }
+        return result;
+      }),
+      new Promise<undefined>(resolve => {
+        setTimeout(() => {
+          sameOriginTimedOut = true;
+          resolve(undefined);
+        }, HANDOFF_YIELD_TIMEOUT_MS);
+      }),
+    ]);
     if (!pending || pendingRequestId !== request.requestId) return;
     if (deps.getDocumentId() !== documentId) {
       clearPending();
@@ -377,13 +404,15 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       if (local.reason === 'cross-tab-private' || local.reason === 'private') {
         offerEditHere(local.reason);
       } else {
+        const dropped = buffer.length > 0;
         clearPending();
         deps.announce(handoffRefuseGuidance(local.reason));
+        if (dropped) deps.announce('Your typing was not applied.');
       }
       return;
     }
 
-    // Cross-tab / no peer owner: metadata-only BroadcastChannel (never same-tab).
+    // Cross-tab / no peer owner / timed-out same-origin: metadata-only BroadcastChannel.
     postMeta({
       v: 1,
       type: 'handoff-request',
@@ -524,8 +553,10 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       ) {
         offerEditHere(message.reason);
       } else {
+        const dropped = buffer.length > 0;
         clearPending();
         deps.announce(handoffRefuseGuidance(message.reason));
+        if (dropped) deps.announce('Your typing was not applied.');
       }
     }
   };
