@@ -8,6 +8,7 @@ import {
   mintWindowId,
   parseHostLayout,
   readHostLayout,
+  restoreForMove,
   snapRect,
   tileSideBySide,
   tileStacked,
@@ -82,6 +83,14 @@ describe('host layout helpers', () => {
   it('snaps to a left half near the left edge', () => {
     const snapped = snapRect({ x: 8, y: 8, w: 480, h: 784 }, viewport);
     expect(snapped).toEqual({ x: 0, y: 0, w: 500, h: 800 });
+  });
+
+  it('restores a full-bleed window to a movable size before the first move', () => {
+    const full = { x: 0, y: 0, w: viewport.width, h: viewport.height };
+    const restored = restoreForMove(full, viewport);
+    expect(restored.w).toBeLessThan(viewport.width);
+    expect(restored.h).toBeLessThan(viewport.height);
+    expect(restoreForMove(restored, viewport)).toEqual(restored);
   });
 
   it('brings a window to the front and mints ids up to the cap', () => {

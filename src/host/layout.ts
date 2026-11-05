@@ -60,6 +60,22 @@ export function clampRect(rect: WindowRect, viewport: ViewportSize): WindowRect 
   };
 }
 
+/** True when the window fills the viewport (nothing left to move into). */
+export function isFullscreenRect(rect: WindowRect, viewport: ViewportSize): boolean {
+  return rect.x <= 0 && rect.y <= 0
+    && rect.w >= viewport.width
+    && rect.h >= viewport.height;
+}
+
+/**
+ * Desktop-style restore: a full-bleed window becomes a movable default size
+ * before the first drag or arrow move.
+ */
+export function restoreForMove(rect: WindowRect, viewport: ViewportSize): WindowRect {
+  if (!isFullscreenRect(rect, viewport)) return rect;
+  return clampRect(defaultRectForIndex(0, viewport), viewport);
+}
+
 export function bringToFront(windows: HostWindowLayout[], id: string): HostWindowLayout[] {
   const maxZ = windows.reduce((m, win) => Math.max(m, win.z), 0);
   return windows.map(win => (win.id === id ? { ...win, z: maxZ + 1 } : win));

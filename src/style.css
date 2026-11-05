@@ -1254,9 +1254,8 @@ body.host-page {
 .host-window-titlebar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.35rem 0.25rem 0.65rem;
-  cursor: grab;
+  gap: 0.25rem;
+  padding: 0.25rem 0.35rem 0.25rem 0.35rem;
   user-select: none;
   background: color-mix(in srgb, var(--tb-bg, #eef0f4) 85%, var(--tb-accent, #3153e9) 8%);
   border-bottom: 1px solid var(--tb-border, #c5c9d3);
@@ -1265,8 +1264,21 @@ body.host-page {
 .host-window.is-active .host-window-titlebar {
   background: color-mix(in srgb, var(--tb-accent, #3153e9) 16%, var(--tb-bg, #eef0f4));
 }
-.host-window-titlebar:active {
+.host-window-move {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0.15rem 0.35rem;
+  cursor: grab;
+  border-radius: 4px;
+}
+.host-window-move:active {
   cursor: grabbing;
+}
+.host-window-move:focus-visible {
+  outline: 2px solid var(--tb-accent, #3153e9);
+  outline-offset: 1px;
 }
 .host-window-title {
   flex: 1 1 auto;

@@ -19,6 +19,34 @@ test('host single window matches standalone editor typing and save', async ({ pa
   await expect(editor.locator('#editor')).toHaveValue('привет');
 });
 
+test('dragging the title bar moves a full-bleed window', async ({ page }) => {
+  await openHost(page);
+  const before = await page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }> };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main');
+  });
+  expect(before).toBeTruthy();
+
+  const handle = page.getByRole('button', { name: /Move window main/ });
+  const box = await handle.boundingBox();
+  expect(box).toBeTruthy();
+  const startX = box!.x + box!.width / 2;
+  const startY = box!.y + box!.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 120, startY + 80);
+  await page.mouse.up();
+
+  const after = await page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }> };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main');
+  });
+  expect(after).toBeTruthy();
+  expect(after!.w).toBeLessThan(before!.w);
+  expect(after!.h).toBeLessThan(before!.h);
+  expect(after!.x + after!.y).toBeGreaterThan(0);
+});
+
 test('host mounts an editor when localStorage access is blocked', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'localStorage', {
@@ -244,7 +272,7 @@ test('clicking a background editor raises its window', async ({ page }) => {
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
   await page.getByRole('button', { name: 'Tile side by side' }).click();
-  await page.locator('.host-window[data-window-id="main"] .host-window-titlebar').click();
+  await page.getByRole('button', { name: /Move window main/ }).click();
   await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
 
   await second.locator('#editor').click();

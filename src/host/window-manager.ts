@@ -12,6 +12,7 @@ import {
   defaultRectForIndex,
   mintWindowId,
   readHostLayout,
+  restoreForMove,
   snapRect,
   tileSideBySide,
   tileStacked,
@@ -125,15 +126,22 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     shell.setAttribute('role', 'group');
     shell.setAttribute('aria-label', `Editor window ${win.id}`);
 
-    const titleBar = document.createElement('div');
+    const titleBar = document.createElement('header');
     titleBar.className = 'host-window-titlebar';
-    titleBar.tabIndex = 0;
-    titleBar.setAttribute('role', 'button');
-    titleBar.setAttribute('aria-label', `Move window ${win.id}`);
+
+    const moveHandle = document.createElement('div');
+    moveHandle.className = 'host-window-move';
+    moveHandle.tabIndex = 0;
+    moveHandle.setAttribute('role', 'button');
+    moveHandle.setAttribute(
+      'aria-label',
+      `Move window ${win.id} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+    );
 
     const title = document.createElement('span');
     title.className = 'host-window-title';
     title.textContent = win.id === 'main' ? 'TypeBridge' : `Window ${win.id}`;
+    moveHandle.append(title);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -142,7 +150,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     closeBtn.setAttribute('aria-label', `Close window ${win.id}`);
     closeBtn.textContent = '×';
 
-    titleBar.append(title, closeBtn);
+    titleBar.append(moveHandle, closeBtn);
 
     const frame = document.createElement('iframe');
     frame.className = 'host-editor';
@@ -190,25 +198,29 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       } catch { /* Unexpected cross-origin — chrome-only activation remains. */ }
     });
 
-    titleBar.addEventListener('pointerdown', event => {
-      if ((event.target as HTMLElement).closest('button')) return;
+    moveHandle.addEventListener('pointerdown', event => {
       event.preventDefault();
       setActive(win.id);
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
+      const view = viewportOf(deps.root);
+      const start = restoreForMove(current, view);
+      if (start.w !== current.w || start.h !== current.h) updateLayout(win.id, start);
       drag = {
         type: 'move',
         id: win.id,
         originX: event.clientX,
         originY: event.clientY,
-        start: { x: current.x, y: current.y, w: current.w, h: current.h },
+        start,
       };
-      titleBar.setPointerCapture(event.pointerId);
+      moveHandle.setPointerCapture(event.pointerId);
     });
 
-    titleBar.addEventListener('keydown', event => {
+    moveHandle.addEventListener('keydown', event => {
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
+      const view = viewportOf(deps.root);
+      const base = restoreForMove(current, view);
       const step = event.shiftKey && !event.ctrlKey && !event.metaKey
         ? KEYBOARD_MOVE_STEP_PX * 4
         : KEYBOARD_MOVE_STEP_PX;
@@ -217,25 +229,25 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       let next: WindowRect | undefined;
       if (event.key === 'ArrowLeft') {
         next = resize
-          ? { ...current, w: current.w - step }
-          : { ...current, x: current.x - step };
+          ? { ...base, w: base.w - step }
+          : { ...base, x: base.x - step };
       } else if (event.key === 'ArrowRight') {
         next = resize
-          ? { ...current, w: current.w + step }
-          : { ...current, x: current.x + step };
+          ? { ...base, w: base.w + step }
+          : { ...base, x: base.x + step };
       } else if (event.key === 'ArrowUp') {
         next = resize
-          ? { ...current, h: current.h - step }
-          : { ...current, y: current.y - step };
+          ? { ...base, h: base.h - step }
+          : { ...base, y: base.y - step };
       } else if (event.key === 'ArrowDown') {
         next = resize
-          ? { ...current, h: current.h + step }
-          : { ...current, y: current.y + step };
+          ? { ...base, h: base.h + step }
+          : { ...base, y: base.y + step };
       }
       if (!next) return;
       event.preventDefault();
       setActive(win.id);
-      updateLayout(win.id, clampRect(next, viewportOf(deps.root)));
+      updateLayout(win.id, clampRect(next, view));
       persist();
     });
 
