@@ -212,7 +212,16 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     const previous = mode;
     mode = next;
     if (hostFocus) {
+      // Mode can change under Focus (Auto + viewport). Keep the saved pre-Focus
+      // geometry reachable for the mode that will apply on exit.
+      const base = preFocusLayouts ?? layouts;
+      if (mode === 'stacked' && previous !== 'stacked') {
+        preFocusLayouts = stackPhoneWindows(base, viewportOf(deps.root));
+      } else if (mode === 'free' && previous === 'stacked') {
+        preFocusLayouts = tileSideBySide(base, viewportOf(deps.root));
+      }
       applyModeChrome();
+      persist();
       return;
     }
     if (mode === 'stacked' && previous !== 'stacked') enterStacked();
