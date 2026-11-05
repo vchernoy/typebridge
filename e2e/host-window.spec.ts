@@ -143,6 +143,23 @@ test('host does not reload when private edits change after update consent', asyn
   await expect(editor.locator('#editor')).toHaveValue('Keep this private text!');
 });
 
+test('new window stays a blank editor after host reload without typing', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(second.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(second.locator('#editor')).toHaveValue('');
+
+  await page.reload();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  const restored = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(restored.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(restored.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(restored.locator('#editor')).toHaveValue('');
+});
+
 test('New window tiles and persists two free windows', async ({ page }) => {
   test.setTimeout(90_000);
   await openHost(page);
