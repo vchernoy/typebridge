@@ -29,6 +29,8 @@ export type WindowManagerDeps = {
   storage?: Storage;
   /** Ask the iframe whether it is safe to close (unsaved/private prompts). */
   prepareClose: (frame: HTMLIFrameElement) => Promise<boolean>;
+  /** After prepareClose succeeds, arm discard/unload suppression before removing the iframe. */
+  commitClose?: (frame: HTMLIFrameElement) => void;
   /** Optional document-id probe for layout persistence (never text). */
   readDocumentId?: (frame: HTMLIFrameElement) => string | undefined;
 };
@@ -378,6 +380,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         } catch { /* Cross-origin unexpectedly — fall through to prepareClose. */ }
         const ok = await deps.prepareClose(frame);
         if (!ok) return false;
+        deps.commitClose?.(frame);
       }
       shells.get(id)?.remove();
       shells.delete(id);

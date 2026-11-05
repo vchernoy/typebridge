@@ -17,6 +17,7 @@ type EditorHooks = {
   __typebridgeAssertSafeUpdateReload?: () => void;
   __typebridgeCancelUpdateReload?: () => void;
   __typebridgePrepareWindowClose?: () => Promise<boolean>;
+  __typebridgeCommitWindowClose?: () => void;
 };
 
 function editorHooks(frame: HTMLIFrameElement): EditorHooks {
@@ -54,6 +55,9 @@ const manager = installWindowManager({
       ?? editorHooks(frame).__typebridgePrepareUpdateReload;
     if (!prepare) return true;
     return prepare();
+  },
+  commitClose: frame => {
+    editorHooks(frame).__typebridgeCommitWindowClose?.();
   },
   readDocumentId: frame => {
     const shell = frame.closest<HTMLElement>('[data-window-id]');

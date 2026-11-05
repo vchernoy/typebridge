@@ -246,6 +246,66 @@ test('clicking a background editor raises its window', async ({ page }) => {
   expect(secondZ).toBeGreaterThan(mainZ);
 });
 
+test('refused multi-window update leaves backups and visibility saves working', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const first = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await setAutosave(second as unknown as Page, false);
+  await second.locator('#editor').fill('Private refuse reload');
+  await expect(second.locator('#save-indicator')).toHaveText('Not saved');
+
+  const prepare = page.evaluate(async () => {
+    const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    for (const frame of frames) {
+      const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
+      if (!await hooks.__typebridgePrepareUpdateReload?.()) return false;
+    }
+    return true;
+  });
+  const dialog = second.getByRole('dialog', { name: 'Reload without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing' }).click();
+  expect(await prepare).toBe(false);
+
+  await page.evaluate(() => {
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')) {
+      const hooks = frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void };
+      hooks.__typebridgeCancelUpdateReload?.();
+    }
+  });
+
+  await first.locator('#editor').fill('Still autosaved after refuse');
+  await expect(first.locator('#save-indicator')).toHaveText('Saved');
+  await page.locator('.host-window[data-window-id="main"] iframe').evaluate((frame: HTMLIFrameElement) => {
+    const doc = frame.contentDocument!;
+    Object.defineProperty(doc, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    doc.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(first.locator('#save-indicator')).toHaveText('Saved');
+
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await first.locator('#editor').fill('Pending after refused reload');
+  await expect(first.locator('#save-indicator')).toHaveText('Save failed');
+  await page.locator('.host-window[data-window-id="main"] iframe').evaluate((frame: HTMLIFrameElement) => {
+    frame.contentWindow!.dispatchEvent(new Event('pagehide'));
+  });
+  await expect.poll(async () =>
+    page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:main') ?? ''),
+  ).toContain('Pending after refused reload');
+});
+
 test('discarded close after save failure does not revive text under a reused id', async ({ page }) => {
   test.setTimeout(90_000);
   await page.addInitScript(() => {

@@ -3396,9 +3396,17 @@ function updateReloadReturnFocus(): HTMLElement {
   return field;
 }
 function clearPendingBackups(): void {
-  suppressPendingBackup = true;
   try { sessionStorage.removeItem(PENDING_KEY); } catch { /* Optional backup. */ }
   try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
+}
+
+/**
+ * Host calls this immediately before removing the iframe. Arming suppress here — not during
+ * prepare — keeps reload/close consent cancellable without disabling backups for the session.
+ */
+function commitWindowClose(): void {
+  suppressPendingBackup = true;
+  clearPendingBackups();
 }
 
 async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
@@ -3417,7 +3425,6 @@ async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolea
     if (discard) {
       privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
       if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
-      if (kind === 'close') clearPendingBackups();
     }
     return discard;
   }
@@ -3425,10 +3432,7 @@ async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolea
   savePendingSecondary();
   if (workspace.dirty()) await persist();
   if (secondary?.dirty) await persistSecondary();
-  if (!workspace.dirty() && !secondary?.dirty) {
-    clearPendingBackups();
-    return true;
-  }
+  if (!workspace.dirty() && !secondary?.dirty) return true;
   savePending();
   savePendingSecondary();
   const pending = readPending();
@@ -3438,15 +3442,13 @@ async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolea
   if (kind === 'reload') return primaryOk && secondaryOk;
   // Close: a session backup is not enough — closing removes the iframe and must not
   // silently destroy the only copy after a failed save. Ask for explicit discard.
-  const discard = await askConfirmChoice({
+  return askConfirmChoice({
     title: 'Close and discard unsaved changes?',
     message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
     confirmLabel: 'Discard changes and close',
     cancelLabel: 'Keep editing',
     returnFocus: updateReloadReturnFocus(),
   });
-  if (discard) clearPendingBackups();
-  return discard;
 }
 async function prepareUpdateReload(): Promise<boolean> {
   return prepareLeaveWithUnsaved('reload');
@@ -3514,7 +3516,7 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
       .then(registration => watchForUpdates(registration, {
         prepareReload: prepareUpdateReload,
         reload: reloadAfterUpdate,
-        cancelReload: () => { allowUpdateReload = false; },
+        cancelReload: () => { allowUpdateReload = false; suppressPendingBackup = false; },
         dismissedKey: updateDismissKey,
       }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
@@ -3527,9 +3529,12 @@ if (embedded) {
     __typebridgeCancelUpdateReload?: () => void;
     /** Host window manager asks before removing this iframe (#175 step 5). */
     __typebridgePrepareWindowClose?: () => Promise<boolean>;
+    /** Host calls immediately before removing the iframe after prepareClose succeeds. */
+    __typebridgeCommitWindowClose?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
-  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; };
+  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; suppressPendingBackup = false; };
   hooks.__typebridgePrepareWindowClose = prepareWindowClose;
+  hooks.__typebridgeCommitWindowClose = commitWindowClose;
 }
