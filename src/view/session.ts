@@ -1,6 +1,7 @@
 /**
- * In-tab split-workspace contracts for #159 (S1).
+ * Session/pane contracts for #159 foundations (#175 step 10: single primary pane).
  * Document sessions are distinct from pane views. Pure helpers only — no DOM.
+ * Pane-transfer / pane-close helpers for the in-page split were removed with that UI.
  */
 
 import { isDocumentId } from './route';
@@ -31,9 +32,7 @@ export type CommandGeneration = {
   paneGeneration: number;
   /**
    * Bumped when the session's document identity changes (switch/open different id,
-   * attach a new session, release/destroy). Not bumped on every keystroke, and
-   * **not** bumped on local Edit in this pane (editable-role moves between panes
-   * of the same session — that updates paneGeneration / roleEditablePaneId only).
+   * attach a new session, release/destroy). Not bumped on every keystroke.
    */
   sessionGeneration: number;
   /**
@@ -46,16 +45,12 @@ export type CommandGeneration = {
 };
 
 /**
- * Identity token for a session persist loop. Pane focus/activation and local
- * Edit-in-this-pane transfers are irrelevant: dirty/save/conflict lifecycle stays
+ * Identity token for a session persist loop. Dirty/save/conflict lifecycle stays
  * on the session until it completes or fails (retain/retry; never drop text).
  */
 export type SessionPersistGeneration = {
   sessionId: SessionId;
-  /**
-   * Same bump rule as CommandGeneration.sessionGeneration (document identity only).
-   * Do not advance this solely because the editable pane binding changed.
-   */
+  /** Same bump rule as CommandGeneration.sessionGeneration (document identity only). */
   sessionGeneration: number;
 };
 
@@ -130,11 +125,8 @@ export function contentCommandStillCurrent(
 }
 
 /**
- * Whether an in-flight session save may still commit. Ignored: active-pane changes
- * and local editable-role transfers within the same session. Invalidate only when
+ * Whether an in-flight session save may still commit. Invalidate only when
  * the session's document identity epoch changed (document switch, session release).
- * S5 must test: transfer Edit in this pane during an in-flight save — no dropped
- * text, no duplicate commits.
  */
 export function sessionPersistStillCurrent(
   started: SessionPersistGeneration,
@@ -144,61 +136,7 @@ export function sessionPersistStillCurrent(
 }
 
 /**
- * Same-document local Edit in this pane (S5). Never a cross-window handoff (#164 deferred).
- * Returns '' when the transfer may proceed; otherwise a short refuse token.
- * Callers must invoke this (or equivalent) before applying `paneCloseDisposition` transfer.
- */
-export function localPaneTransferBlock(input: {
-  sameSession: boolean;
-  targetAlreadyEditable: boolean;
-  composing: boolean;
-  transitioning: boolean;
-  /** External tab holds the document lock — neither local pane may edit. */
-  externallyBlocked: boolean;
-}): '' | 'different-session' | 'already-editable' | 'composing' | 'busy' | 'external' {
-  if (!input.sameSession) return 'different-session';
-  if (input.targetAlreadyEditable) return 'already-editable';
-  if (input.externallyBlocked) return 'external';
-  if (input.transitioning) return 'busy';
-  if (input.composing) return 'composing';
-  return '';
-}
-
-/**
- * Guards that must pass before closing a pane or transferring its editable role.
- * `paneCloseDisposition` alone does not enforce these — check here first (S5).
- */
-export function paneCloseBlock(input: {
-  composing: boolean;
-  transitioning: boolean;
-}): '' | 'composing' | 'busy' {
-  if (input.transitioning) return 'busy';
-  if (input.composing) return 'composing';
-  return '';
-}
-
-/**
- * Closing a pane: whether the session must still be retained in memory.
- * Last view of a dirty/private/failed session needs existing discard protection.
- * Does not encode IME/transition guards — call `paneCloseBlock` first.
- */
-export function paneCloseDisposition(input: {
-  remainingPanesForSession: number;
-  dirty: boolean;
-  autosaveOn: boolean;
-  saveFailed: boolean;
-  wasEditable: boolean;
-}): 'detach-only' | 'transfer-editable' | 'ask-discard' | 'release-clean' {
-  if (input.remainingPanesForSession > 0) {
-    return input.wasEditable ? 'transfer-editable' : 'detach-only';
-  }
-  if (input.dirty && (!input.autosaveOn || input.saveFailed)) return 'ask-discard';
-  if (input.dirty) return 'ask-discard';
-  return 'release-clean';
-}
-
-/**
- * Choosing a document already open in another pane must reuse that session
+ * Choosing a document already open in another session must reuse that session
  * (never invent a second session for the same documentId in one tab).
  */
 export function resolveSessionForDocument(
@@ -211,7 +149,7 @@ export function resolveSessionForDocument(
 
 /**
  * Active-pane routing for shared chrome: editable panes become active on focus;
- * a same-document read-only pane may be active for Find/Copy but not for mutations.
+ * a read-only surface may be active for Find/Copy but not for mutations.
  */
 export function commandAllowedOnPane(input: {
   activePaneId: PaneId;

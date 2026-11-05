@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { commandStillCurrent, contentCommandStillCurrent, sessionPersistStillCurrent } from './session';
-import { PRIMARY_PANE_ID, PRIMARY_SESSION_ID, SECOND_PANE_ID, createSinglePaneWorkspace } from './workspace';
+import { PRIMARY_PANE_ID, PRIMARY_SESSION_ID, createSinglePaneWorkspace } from './workspace';
 
 function fakeElement(): HTMLElement {
   return { dataset: {} } as unknown as HTMLElement;
@@ -15,12 +15,15 @@ describe('createSinglePaneWorkspace', () => {
     expect(workspace.paneId).toBe(PRIMARY_PANE_ID);
     expect(root.dataset.sessionId).toBe(PRIMARY_SESSION_ID);
     expect(root.dataset.activePane).toBe(PRIMARY_PANE_ID);
-    expect(root.dataset.split).toBe('off');
+    expect(root.dataset.split).toBeUndefined();
     expect(pane.dataset.paneId).toBe(PRIMARY_PANE_ID);
     expect(pane.dataset.paneRole).toBe('editable');
     expect(workspace.snapshotSession({
       autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
     }).roleEditablePaneId).toBe(PRIMARY_PANE_ID);
+    expect(workspace.snapshotSession({
+      autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
+    }).paneIds).toEqual([PRIMARY_PANE_ID]);
   });
 
   it('keeps session and content counters independent', () => {
@@ -65,95 +68,19 @@ describe('createSinglePaneWorkspace', () => {
     })).toBe(false);
   });
 
-  it('opens a same-session companion pane without changing document identity', () => {
-    const root = fakeElement();
-    const companion = fakeElement();
-    const workspace = createSinglePaneWorkspace({
-      root,
-      paneSurface: fakeElement(),
-      companionSurface: companion,
-    });
-    workspace.setDocumentId('doc-1');
-    expect(workspace.companionPaneId).toBe(SECOND_PANE_ID);
-    expect(workspace.splitOpen()).toBe(false);
-    expect(workspace.snapshotSession({
-      autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
-    }).paneIds).toEqual([PRIMARY_PANE_ID]);
-    const persist = workspace.capturePersistGeneration();
-    workspace.setSplitOpen(true);
-    expect(workspace.splitOpen()).toBe(true);
-    expect(root.dataset.split).toBe('on');
-    expect(root.dataset.documentId).toBe('doc-1');
-    expect(companion.dataset.paneId).toBe(SECOND_PANE_ID);
-    expect(companion.dataset.paneRole).toBe('readonly');
-    expect(workspace.paneGeneration()).toBe(1);
-    expect(workspace.sessionGeneration()).toBe(0);
-    expect(sessionPersistStillCurrent(persist, {
-      sessionId: workspace.sessionId,
-      sessionGeneration: workspace.sessionGeneration(),
-    })).toBe(true);
-    expect(workspace.snapshotSession({
-      autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
-    }).paneIds).toEqual([PRIMARY_PANE_ID, SECOND_PANE_ID]);
-    expect(workspace.snapshotPane(SECOND_PANE_ID).role).toBe('readonly');
-  });
-
-  it('tracks the active pane for shared chrome without changing sessionGeneration', () => {
+  it('keeps activePane on the primary surface', () => {
     const root = fakeElement();
     const workspace = createSinglePaneWorkspace({
       root,
       paneSurface: fakeElement(),
-      companionSurface: fakeElement(),
     });
-    workspace.setSplitOpen(true);
     expect(workspace.activePaneId()).toBe(PRIMARY_PANE_ID);
     expect(root.dataset.activePane).toBe(PRIMARY_PANE_ID);
-    workspace.setActivePane(SECOND_PANE_ID);
-    expect(workspace.activePaneId()).toBe(SECOND_PANE_ID);
-    expect(root.dataset.activePane).toBe(SECOND_PANE_ID);
-    expect(workspace.snapshotPane(SECOND_PANE_ID).active).toBe(true);
-    expect(workspace.snapshotPane(PRIMARY_PANE_ID).active).toBe(false);
-    expect(workspace.sessionGeneration()).toBe(0);
-    workspace.setSplitOpen(false);
+    workspace.setActivePane('pane-b');
     expect(workspace.activePaneId()).toBe(PRIMARY_PANE_ID);
-  });
-
-  it('moves the editable role between same-session panes without bumping sessionGeneration', () => {
-    const primary = fakeElement();
-    const companion = fakeElement();
-    const workspace = createSinglePaneWorkspace({
-      root: fakeElement(),
-      paneSurface: primary,
-      companionSurface: companion,
-    });
-    workspace.setSplitOpen(true);
-    const persist = workspace.capturePersistGeneration();
-    const beforePane = workspace.paneGeneration();
-    workspace.setEditablePaneId(SECOND_PANE_ID);
-    expect(workspace.editablePaneId()).toBe(SECOND_PANE_ID);
-    expect(primary.dataset.paneRole).toBe('readonly');
-    expect(companion.dataset.paneRole).toBe('editable');
-    expect(workspace.paneGeneration()).toBe(beforePane + 1);
+    workspace.setActivePane(PRIMARY_PANE_ID);
+    expect(workspace.snapshotPane(PRIMARY_PANE_ID).active).toBe(true);
     expect(workspace.sessionGeneration()).toBe(0);
-    expect(sessionPersistStillCurrent(persist, {
-      sessionId: workspace.sessionId,
-      sessionGeneration: workspace.sessionGeneration(),
-    })).toBe(true);
-    expect(workspace.snapshotSession({
-      autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
-    }).roleEditablePaneId).toBe(SECOND_PANE_ID);
-    workspace.setPaneRole('readonly');
-    expect(primary.dataset.paneRole).toBe('readonly');
-    expect(companion.dataset.paneRole).toBe('readonly');
-    expect(workspace.snapshotSession({
-      autosaveOn: true, composing: false, saving: false, saveFailed: false, conflict: false, editBlock: '',
-    }).roleEditablePaneId).toBeUndefined();
-    workspace.setPaneRole('editable');
-    expect(companion.dataset.paneRole).toBe('editable');
-    expect(primary.dataset.paneRole).toBe('readonly');
-    workspace.setSplitOpen(false);
-    expect(workspace.editablePaneId()).toBe(PRIMARY_PANE_ID);
-    expect(primary.dataset.paneRole).toBe('editable');
   });
 
   it('syncs documentId into the root dataset without bumping sessionGeneration', () => {

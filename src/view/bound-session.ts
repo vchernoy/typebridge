@@ -1,7 +1,7 @@
 /**
- * Per-document session binding for #159 S4.
+ * Per-document session binding for #159 S4 foundations (#175 step 10: single primary only).
  * One BoundSession owns draft identity, Editor history, dirty/save counters and ownership
- * for a pane surface. Same documentId must never mint a second session in one tab.
+ * for a pane surface. Dual secondary registry removed with the in-page split.
  */
 
 import type { Editor } from '../editor/editor';
@@ -18,7 +18,6 @@ import {
 
 export type BoundSession = {
   sessionId: SessionId;
-  /** Pane that currently owns the editable role for this session (S5 may move it). */
   editablePaneId: PaneId;
   draft: StoredDraft;
   editor: Editor;
@@ -88,37 +87,4 @@ export function bumpSessionContent(session: BoundSession): number {
 export function setSessionRole(session: BoundSession, role: PaneRole): void {
   if (session.role === role) return;
   session.role = role;
-}
-
-/**
- * Registry of in-tab sessions. Choosing a document already represented reuses
- * that entry (never a second lock/history for the same id).
- */
-export type SessionRegistry = {
-  primary: BoundSession;
-  secondary: BoundSession | undefined;
-  all(): BoundSession[];
-  byDocumentId(documentId: string): BoundSession | undefined;
-  bySessionId(sessionId: SessionId): BoundSession | undefined;
-  setSecondary(session: BoundSession | undefined): void;
-};
-
-export function createSessionRegistry(primary: BoundSession): SessionRegistry {
-  let secondary: BoundSession | undefined;
-  return {
-    primary,
-    get secondary() { return secondary; },
-    all: () => secondary ? [primary, secondary] : [primary],
-    byDocumentId: documentId => {
-      if (primary.draft.id === documentId) return primary;
-      if (secondary?.draft.id === documentId) return secondary;
-      return undefined;
-    },
-    bySessionId: sessionId => {
-      if (primary.sessionId === sessionId) return primary;
-      if (secondary?.sessionId === sessionId) return secondary;
-      return undefined;
-    },
-    setSecondary: next => { secondary = next; },
-  };
 }
