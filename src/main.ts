@@ -55,7 +55,7 @@ import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
-import { comparisonViewerHref, parseComparisonRoute } from './view/route';
+import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { parseEmbedMode } from './view/embed';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
@@ -1052,7 +1052,20 @@ function flushSecondaryOnUnload(): void {
   clearTimeout(secondary.saveTimer);
   void persistSecondary();
 }
-function rememberActive(): void { if (viewMode) return; try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
+function rememberActive(): void {
+  if (viewMode) return;
+  try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ }
+  // Tell the #175 host so layout persistence can record this window's document id.
+  if (embedded && window.parent !== window) {
+    try {
+      window.parent.postMessage({
+        type: 'typebridge-active-draft',
+        windowId,
+        documentId: active.id,
+      }, window.location.origin);
+    } catch { /* Cross-origin parent — host will probe on unload. */ }
+  }
+}
 function renderDrafts(): void {
   const visible = viewMissing || drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
   const displayTitle = draftTitle.value.trim() || UNTITLED_TITLE;
@@ -2657,11 +2670,25 @@ async function initializeDrafts(): Promise<void> {
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
     try { selected = readActiveDraftId(); } catch { /* Optional hint. */ }
+    // #175 host restores each window with ?doc= when session hints are cold (fresh tab).
+    if (!selected) {
+      try {
+        const doc = new URLSearchParams(window.location.search).get('doc');
+        if (doc && isDocumentId(doc)) selected = doc;
+      } catch { /* Malformed search — fall through. */ }
+    }
     const pending = readPending();
     const committed = pending && drafts.find(d => d.id === pending.id);
     if (pending && committed && sameContent(pending, committed)) clearPending(pending);
     const restorePending = !!pending && (!committed || !sameContent(pending, committed));
-    let chosen = restorePending ? pending! : drafts.find(d => d.id === selected) ?? drafts[0] ?? active;
+    // A new host window must not inherit main's drafts[0] — that steals ownership and
+    // makes "Saved" text disappear when the primary window still owns the document.
+    const openFresh = embedded && !!windowId && windowId !== 'main' && !selected && !restorePending;
+    let chosen = restorePending
+      ? pending!
+      : drafts.find(d => d.id === selected)
+        ?? (openFresh ? { ...newDraft(), revision: 0 } : drafts[0])
+        ?? active;
     // First acquirer among cooperating windows edits; the others open this document read-only.
     bootAccess = await acquireFor(chosen.id);
     // The list was read before this window owned the document; reread under the fence.

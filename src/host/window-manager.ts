@@ -97,7 +97,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const persist = (): void => {
     const next = layouts.map(win => {
       const frame = frames.get(win.id);
-      const documentId = frame && deps.readDocumentId ? deps.readDocumentId(frame) : win.documentId;
+      // Prefer a live probe; if the iframe is already gone (host unload), keep the last known id.
+      const probed = frame && deps.readDocumentId ? deps.readDocumentId(frame) : undefined;
+      const documentId = probed ?? win.documentId;
       return documentId ? { ...win, documentId } : { ...win, documentId: undefined };
     });
     layouts = next;
@@ -476,7 +478,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('pagehide', onPersistDocumentIds);
-      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('message', onActiveDraftMessage);
       document.removeEventListener('visibilitychange', onHostHidden);
       rootObserver?.disconnect();
       for (const shell of shells.values()) shell.remove();
@@ -496,10 +498,16 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const onHostHidden = (): void => {
     if (document.visibilityState === 'hidden') onPersistDocumentIds();
   };
-  const onStorage = (event: StorageEvent): void => {
-    if (event.storageArea !== sessionStorage) return;
-    if (!event.key?.includes('activeDraft')) return;
-    persist();
+  const onActiveDraftMessage = (event: MessageEvent): void => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data as { type?: string; windowId?: string; documentId?: string } | null;
+    if (!data || data.type !== 'typebridge-active-draft') return;
+    if (typeof data.windowId !== 'string' || typeof data.documentId !== 'string' || !data.documentId) return;
+    if (!layouts.some(win => win.id === data.windowId)) return;
+    layouts = layouts.map(win => (
+      win.id === data.windowId ? { ...win, documentId: data.documentId } : win
+    ));
+    writeHostLayout({ version: 1, windows: layouts }, storage);
   };
 
   window.addEventListener('pointermove', onPointerMove);
@@ -507,7 +515,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   window.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('resize', onResize);
   window.addEventListener('pagehide', onPersistDocumentIds);
-  window.addEventListener('storage', onStorage);
+  window.addEventListener('message', onActiveDraftMessage);
   document.addEventListener('visibilitychange', onHostHidden);
   // Update notice / toolbar reflow change host-root without a window resize.
   const rootObserver = typeof ResizeObserver !== 'undefined'

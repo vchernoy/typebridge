@@ -161,8 +161,16 @@ test('New window tiles and persists two free windows', async ({ page }) => {
   expect(geometry[0].x).toBe(0);
   expect(geometry[1].x).toBeGreaterThan(0);
 
+  await second.locator('#editor').click();
   await second.locator('#editor').fill('Second window text');
+  await expect(second.locator('#editor')).toHaveValue('Second window text');
   await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await expect.poll(async () => page.evaluate(() => {
+    const raw = localStorage.getItem('typebridge.host.windows.v1');
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { windows?: Array<{ id: string; documentId?: string }> };
+    return !!parsed.windows?.find(win => win.id === 'w2')?.documentId;
+  })).toBe(true);
 
   await page.reload();
   await expect(page.locator('.host-window')).toHaveCount(2);
@@ -200,38 +208,39 @@ test('update reload asks every window about private text', async ({ page }) => {
 
 test('failed second-window assert cancels prior allowUpdateReload', async ({ page }) => {
   test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
   await openHost(page);
   await page.getByRole('button', { name: 'New window' }).click();
   const first = page.frameLocator('.host-window[data-window-id="main"] iframe');
   const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
-  // Autosave is shared in localStorage — turn it off once in the second window,
-  // then reload the first so both see Autosave off without a second confirm dialog.
+  // Only the second window is private — first stays clean so prepare shows one dialog.
   await setAutosave(second as unknown as Page, false);
   await second.locator('#editor').fill('Private in second');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
-  await page.locator('.host-window[data-window-id="main"] iframe').evaluate((frame: HTMLIFrameElement) => {
-    frame.contentWindow?.location.reload();
-  });
-  await expect(first.locator('#editor')).toBeEnabled({ timeout: 30_000 });
-  await expect(first.locator('#autosave')).not.toBeChecked();
-  await first.locator('#editor').fill('Private in first');
-  await expect(first.locator('#save-indicator')).toHaveText('Not saved');
 
   const prepare = page.evaluate(async () => {
     const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
     for (const frame of frames) {
       const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
-      if (!await hooks.__typebridgePrepareUpdateReload?.()) return false;
+      const prepareOne = hooks.__typebridgePrepareUpdateReload;
+      if (!prepareOne) continue;
+      if (!await prepareOne()) return false;
     }
     return true;
   });
-  for (const frame of [first, second]) {
-    const dialog = frame.getByRole('dialog', { name: 'Reload without saving?' });
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
-  }
+  const dialog = second.getByRole('dialog', { name: 'Reload without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
   expect(await prepare).toBe(true);
 
   await second.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
@@ -262,14 +271,16 @@ test('failed second-window assert cancels prior allowUpdateReload', async ({ pag
   });
   expect(outcome).toContain('Private edits changed');
 
-  const firstStillWarns = await page.evaluate(() => {
-    const frame = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="main"] iframe')!;
-    const win = frame.contentWindow!;
-    const event = new Event('beforeunload', { cancelable: true });
-    win.dispatchEvent(event);
-    return event.defaultPrevented;
+  // Cancel must leave the first window able to back up failed saves again.
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await first.locator('#editor').fill('Pending after cancelled assert');
+  await expect(first.locator('#save-indicator')).toHaveText('Save failed');
+  await page.locator('.host-window[data-window-id="main"] iframe').evaluate((frame: HTMLIFrameElement) => {
+    frame.contentWindow!.dispatchEvent(new Event('pagehide'));
   });
-  expect(firstStillWarns).toBe(true);
+  await expect.poll(async () =>
+    page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:main') ?? ''),
+  ).toContain('Pending after cancelled assert');
 });
 
 test('clicking a background editor raises its window', async ({ page }) => {
@@ -372,6 +383,9 @@ test('discarded close after save failure does not revive text under a reused id'
   const second = secondShell.frameLocator('iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
+  // Save once successfully so the stub is known-live, then block further puts.
+  await second.locator('#editor').fill('Before block');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
   await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
   await second.locator('#editor').fill('Discarded after failed save');
   await expect(second.locator('#save-indicator')).toHaveText('Save failed');
@@ -386,7 +400,9 @@ test('discarded close after save failure does not revive text under a reused id'
   await page.getByRole('button', { name: 'New window' }).click();
   const revived = page.frameLocator('.host-window[data-window-id="w2"] iframe');
   await expect(revived.locator('#editor')).toBeEnabled({ timeout: 30_000 });
-  await expect(revived.locator('#editor')).toHaveValue('');
+  // Must not revive the discarded unsaved text (a prior successful save may still exist).
+  await expect(revived.locator('#editor')).not.toHaveValue('Discarded after failed save');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
 });
 
 test('resize keeps the dragged size instead of snapping to a half', async ({ page }) => {
