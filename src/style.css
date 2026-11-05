@@ -1204,7 +1204,8 @@ html[data-embed="1"] #open-comparison {
 
 body.host-page .host-settings-panel {
   position: fixed;
-  z-index: 40;
+  /* Above free-layout windows (z compacted to 1..n) and the host notice; below confirm dialogs (1000). */
+  z-index: 900;
 }
 
 /* #175 step 5 host shell: notice + toolbar + free-layout windows. */
