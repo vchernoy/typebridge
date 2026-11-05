@@ -33,7 +33,7 @@ test('dragging the title bar moves a full-bleed window', async ({ page }) => {
     const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }> };
     return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main');
   });
-  // Click may raise z-order but must not restore/shrink a full-bleed window.
+  // Click may raise z-order but must not restore/shrink or quarter-snap a full-bleed window.
   expect(afterClick).toMatchObject({ x: before!.x, y: before!.y, w: before!.w, h: before!.h });
 
   const box = await handle.boundingBox();
@@ -42,7 +42,7 @@ test('dragging the title bar moves a full-bleed window', async ({ page }) => {
   const startY = box!.y + box!.height / 2;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + 120, startY + 80);
+  await page.mouse.move(startX + 50, startY + 40);
   await page.mouse.up();
 
   const after = await page.evaluate(() => {
@@ -52,6 +52,7 @@ test('dragging the title bar moves a full-bleed window', async ({ page }) => {
   expect(after).toBeTruthy();
   expect(after!.w).toBeLessThan(before!.w);
   expect(after!.h).toBeLessThan(before!.h);
+  expect(after!.w).toBeGreaterThan(before!.w / 3);
   expect(after!.x + after!.y).toBeGreaterThan(0);
 });
 

@@ -10,6 +10,7 @@ import {
   bringToFront,
   clampRect,
   defaultRectForIndex,
+  MOVE_RESTORE_THRESHOLD_PX,
   isFullscreenRect,
   mintWindowId,
   readHostLayout,
@@ -44,8 +45,10 @@ type DragKind =
     originX: number;
     originY: number;
     start: WindowRect;
-    /** Full-bleed windows restore only after the pointer actually moves. */
+    /** Full-bleed windows restore only after the pointer passes the move threshold. */
     restoreOnDrag: boolean;
+    /** True once the pointer moved far enough to count as a drag (enables snap). */
+    didMove: boolean;
   }
   | {
     type: 'resize';
@@ -223,6 +226,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         originY: event.clientY,
         start: { x: current.x, y: current.y, w: current.w, h: current.h },
         restoreOnDrag: isFullscreenRect(current, view),
+        didMove: false,
       };
       moveHandle.setPointerCapture(event.pointerId);
     });
@@ -297,9 +301,20 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     const dy = event.clientY - drag.originY;
     const view = viewportOf(deps.root);
     if (drag.type === 'move') {
-      if (drag.restoreOnDrag && (dx !== 0 || dy !== 0)) {
-        drag.start = restoreForMove(drag.start, view);
+      const distance = Math.hypot(dx, dy);
+      if (distance < MOVE_RESTORE_THRESHOLD_PX && !drag.didMove) return;
+      drag.didMove = true;
+      if (drag.restoreOnDrag) {
+        const rootBox = deps.root.getBoundingClientRect();
+        drag.start = restoreForMove(drag.start, view, {
+          x: event.clientX - rootBox.left,
+          y: event.clientY - rootBox.top,
+        });
+        drag.originX = event.clientX;
+        drag.originY = event.clientY;
         drag.restoreOnDrag = false;
+        updateLayout(drag.id, drag.start);
+        return;
       }
       updateLayout(drag.id, clampRect({
         x: drag.start.x + dx,
@@ -330,14 +345,18 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const onPointerUp = (): void => {
     if (!drag) return;
     const id = drag.id;
-    const wasMove = drag.type === 'move';
+    const snapAfterMove = drag.type === 'move' && drag.didMove;
+    const wasResize = drag.type === 'resize';
     const current = layouts.find(w => w.id === id);
     drag = undefined;
     if (!current) return;
-    // Snap only after move — resizing a full-bleed window must keep the dragged size,
-    // not jump to a half/quarter because edges still touch the viewport.
-    if (wasMove) updateLayout(id, snapRect(current, viewportOf(deps.root)));
-    persist();
+    // Snap only after a real drag — a title-bar click must not restore or quarter-snap.
+    if (snapAfterMove) {
+      updateLayout(id, snapRect(current, viewportOf(deps.root)));
+      persist();
+      return;
+    }
+    if (wasResize) persist();
   };
 
   const mountWindows = (initial: HostWindowLayout[]): void => {

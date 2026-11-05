@@ -60,6 +60,9 @@ export function clampRect(rect: WindowRect, viewport: ViewportSize): WindowRect 
   };
 }
 
+/** Pointer must travel this far before a full-bleed window restores on drag. */
+export const MOVE_RESTORE_THRESHOLD_PX = 4;
+
 /** True when the window fills the viewport (nothing left to move into). */
 export function isFullscreenRect(rect: WindowRect, viewport: ViewportSize): boolean {
   return rect.x <= 0 && rect.y <= 0
@@ -68,12 +71,22 @@ export function isFullscreenRect(rect: WindowRect, viewport: ViewportSize): bool
 }
 
 /**
- * Desktop-style restore: a full-bleed window becomes a movable default size
- * before the first drag or arrow move.
+ * Desktop-style restore: a full-bleed window becomes a movable default size.
+ * When `pointer` is given (host-root coordinates), centre the restored window on it.
  */
-export function restoreForMove(rect: WindowRect, viewport: ViewportSize): WindowRect {
+export function restoreForMove(
+  rect: WindowRect,
+  viewport: ViewportSize,
+  pointer?: { x: number; y: number },
+): WindowRect {
   if (!isFullscreenRect(rect, viewport)) return rect;
-  return clampRect(defaultRectForIndex(0, viewport), viewport);
+  const base = defaultRectForIndex(0, viewport);
+  if (!pointer) return clampRect(base, viewport);
+  return clampRect({
+    ...base,
+    x: pointer.x - base.w / 2,
+    y: pointer.y - base.h / 2,
+  }, viewport);
 }
 
 export function bringToFront(windows: HostWindowLayout[], id: string): HostWindowLayout[] {

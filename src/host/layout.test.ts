@@ -91,6 +91,10 @@ describe('host layout helpers', () => {
     expect(restored.w).toBeLessThan(viewport.width);
     expect(restored.h).toBeLessThan(viewport.height);
     expect(restoreForMove(restored, viewport)).toEqual(restored);
+
+    const centred = restoreForMove(full, viewport, { x: 400, y: 300 });
+    expect(centred.x + centred.w / 2).toBeCloseTo(400, 0);
+    expect(centred.y + centred.h / 2).toBeCloseTo(300, 0);
   });
 
   it('brings a window to the front and mints ids up to the cap', () => {
