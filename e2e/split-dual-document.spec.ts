@@ -737,4 +737,5 @@ test('storage upgrade keeps pane B editable in memory for copy/export', async ({
   await expect(page.locator('#editor')).toHaveJSProperty('readOnly', false);
   await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
   await expect(page.locator('#editor-b')).toHaveValue('Primary body unsaved');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Save failed');
 });

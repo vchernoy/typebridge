@@ -2423,7 +2423,6 @@ function handleDatabaseUpgrade(): void {
     // user can still copy/export unsaved pane-B text after storage dies (#159 S4 P2).
     secondary.editBlock = '';
     void secondaryOwnership?.release();
-    updateSaveIndicatorB();
   }
   db = undefined;
   storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
@@ -2431,6 +2430,8 @@ function handleDatabaseUpgrade(): void {
   recoveryNotice.textContent = storageProblem;
   // A later upgrade must not erase an earlier conflict-copy notice (#66).
   setRiskStatus('', 'failure');
+  // Refresh B after storageProblem/db are installed so a cancelled timer cannot leave “Saving…”.
+  if (secondary) updateSaveIndicatorB();
   applyEditAccess();
   syncMutationControls();
 }
