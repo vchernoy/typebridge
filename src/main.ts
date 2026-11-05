@@ -3847,8 +3847,9 @@ if (embedded) {
     const length = draftTitle.value.length;
     const start = Math.max(0, Math.min(payload.start, length));
     const end = Math.max(start, Math.min(payload.end, length));
-    draftTitle.focus({ preventScroll: true });
-    draftTitle.setSelectionRange(start, end);
+    // Do not focus the hidden embed #draft-title — that steals caret from the host
+    // title bar (especially on Firefox) and drops later keystrokes.
+    try { draftTitle.setSelectionRange(start, end); } catch { /* Not focused. */ }
     const event = new InputEvent('beforeinput', {
       bubbles: true,
       cancelable: true,

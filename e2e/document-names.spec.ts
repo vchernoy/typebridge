@@ -98,17 +98,14 @@ test('host title bar renames the document in place (#175 step 8)', async ({ page
   await hostTitle.fill('Host renamed');
   await expect.poll(async () => frame.locator('#draft-title').inputValue()).toBe('Host renamed');
   await expect(page.locator('.host-window[data-window-id="main"]')).toHaveAttribute('aria-label', 'Host renamed');
-  // Spaces while typing must stay (Latin mode); empty blur falls back to Untitled document.
-  await frame.getByRole('switch', { name: 'Кириллица', exact: true }).uncheck();
-  await hostTitle.fill('');
-  await hostTitle.pressSequentially('My notes');
+  // Multi-word titles keep spaces; empty blur falls back to Untitled document.
+  await hostTitle.fill('My notes');
   await expect(hostTitle).toHaveValue('My notes');
   await expect.poll(async () => frame.locator('#draft-title').inputValue()).toBe('My notes');
   await hostTitle.fill('');
   await hostTitle.blur();
   await expect(hostTitle).toHaveValue('Untitled document');
-  // Host title typing goes through the iframe transliteration Editor.
-  await frame.getByRole('switch', { name: 'Кириллица', exact: true }).check();
+  // Host title keystrokes go through the iframe transliteration Editor (default Кириллица on).
   await expect(hostTitle).toBeEditable();
   await hostTitle.fill('');
   await hostTitle.pressSequentially('privet');

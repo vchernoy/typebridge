@@ -382,18 +382,25 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         } catch { /* Frame mid-navigation. */ }
       }
     });
-    // Route typing through the iframe title Editor so transliteration/IME/undo match standalone (#175 s8 P1).
+    // Route insert typing through the iframe title Editor (transliteration). Let
+    // deletes/clear run natively on the host input, then write through on `input`
+    // so Playwright fill('') and Backspace work on Firefox too.
     title.addEventListener('beforeinput', event => {
       syncTitleEditable();
       if (title.readOnly) {
         event.preventDefault();
         return;
       }
+      const insert = event.inputType === 'insertText'
+        || event.inputType === 'insertFromPaste'
+        || event.inputType === 'insertReplacementText'
+        || event.inputType === 'insertFromDrop';
+      if (!insert) return;
       event.preventDefault();
       try {
         const hooks = frame.contentWindow as TitleHooks | null;
         const result = hooks?.__typebridgeTitleEdit?.({
-          inputType: event.inputType,
+          inputType: event.inputType === 'insertReplacementText' ? 'insertText' : event.inputType,
           data: event.data,
           start: title.selectionStart ?? 0,
           end: title.selectionEnd ?? 0,
@@ -422,7 +429,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         applyChromeMeta(title.value);
         return;
       }
-      // Programmatic fill() path (no beforeinput): write through without per-key transliteration.
+      // Deletes, fill(), and other non-intercepted edits: write through as a whole string.
       if (title.value.length > 150) title.value = title.value.slice(0, 150);
       applyChromeMeta(title.value);
       try {
