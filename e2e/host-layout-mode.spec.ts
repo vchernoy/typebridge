@@ -55,12 +55,13 @@ test('Settings Layout Stacked forces a scrollable full-width phone stack', async
   await handle.scrollIntoViewIfNeeded();
   expect(await handle.evaluate(el => getComputedStyle(el).touchAction)).toBe('none');
   expect(await handle.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(24);
-  const box = await handle.boundingBox();
-  expect(box).toBeTruthy();
-  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2 + 120, { steps: 8 });
-  await page.mouse.up();
+
+  // Keyboard height resize (pointer drag + overflow scroll is flaky in Firefox).
+  const title = page.getByRole('button', { name: /Window main/ });
+  await title.focus();
+  await page.keyboard.press('Control+Shift+ArrowDown');
+  await page.keyboard.press('Control+Shift+ArrowDown');
+  await page.keyboard.press('Control+Shift+ArrowDown');
 
   const after = await page.evaluate(() => {
     const hooks = window as Window & {
