@@ -327,12 +327,34 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       applyChromeMeta(title.value);
     };
 
-    title.addEventListener('pointerdown', event => { event.stopPropagation(); });
+    const syncTitleEditable = (): void => {
+      try {
+        const draft = frame.contentDocument?.querySelector<HTMLInputElement>('#draft-title');
+        const ro = !draft || draft.readOnly || draft.disabled;
+        title.readOnly = ro;
+      } catch {
+        title.readOnly = true;
+      }
+    };
+
+    title.addEventListener('pointerdown', event => { event.stopPropagation(); syncTitleEditable(); });
+    title.addEventListener('focus', () => { syncTitleEditable(); });
     title.addEventListener('keydown', event => {
       // Keep arrow-key window move on the handle; let the input own typing keys.
       event.stopPropagation();
     });
     title.addEventListener('input', () => {
+      syncTitleEditable();
+      if (title.readOnly) {
+        // Iframe rejected renames while read-only; restore the authoritative title.
+        try {
+          const hooks = frame.contentWindow as (Window & { __typebridgeGetTitle?: () => string }) | null;
+          const authoritative = hooks?.__typebridgeGetTitle?.();
+          if (authoritative !== undefined) title.value = authoritative;
+        } catch { /* Frame mid-navigation. */ }
+        applyChromeMeta(title.value);
+        return;
+      }
       // Preserve raw spaces/empty while editing; trim only for chrome metadata + save path.
       if (title.value.length > 150) title.value = title.value.slice(0, 150);
       applyChromeMeta(title.value);
@@ -342,6 +364,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       } catch { /* Frame mid-navigation. */ }
     });
     title.addEventListener('blur', () => {
+      if (title.readOnly) {
+        applyChromeMeta(title.value);
+        return;
+      }
       const label = displayTitle(title.value);
       if (title.value !== label) {
         title.value = label;
@@ -398,6 +424,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
             __typebridgeGetTitle?: () => string;
           }) | null;
           if (hooks?.__typebridgeGetTitle) applyChromeTitle(hooks.__typebridgeGetTitle());
+          syncTitleEditable();
           if (hostFocus) hooks?.__typebridgeSetFocusMode?.(win.id === activeId);
           const ready = !!hooks?.__typebridgeGetTitle && (!hostFocus || !!hooks.__typebridgeSetFocusMode);
           if (ready || attempts++ >= 40) return;

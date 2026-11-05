@@ -1128,8 +1128,10 @@ function openDocumentIdsElsewhere(): Set<string> {
   if (!embedded || window.parent === window) return new Set();
   try {
     const host = window.parent as Window & { __typebridgeOpenDocumentIds?: (exceptWindowId?: string) => string[] };
+    // exceptWindowId already omits this window; keep ids open in *other* windows,
+    // including the active document when it is duplicated (#175 step 8).
     const ids = host.__typebridgeOpenDocumentIds?.(windowId ?? undefined) ?? [];
-    return new Set(ids.filter(id => id && id !== active.id));
+    return new Set(ids.filter(id => !!id));
   } catch {
     return new Set();
   }
