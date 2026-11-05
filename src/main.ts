@@ -475,7 +475,10 @@ function activatePane(paneId: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID): v
   syncMutationControls();
   updateStats();
   // Same-pane refocus (e.g. Replace all returning to the editor) must keep "Replaced N".
-  if (previous !== paneId) showMatchCount();
+  if (previous !== paneId) {
+    showMatchCount();
+    syncVersionNoticeDisplay();
+  }
 }
 field.addEventListener('focus', () => { activatePane(PRIMARY_PANE_ID); });
 companionField.addEventListener('focus', () => { activatePane(SECOND_PANE_ID); });
@@ -926,6 +929,7 @@ async function releaseSecondarySession(
   // observe ifAvailable:true as busy while this tab still holds the lock.
   if (previous.ownership) await previous.ownership.release();
   if (!stillWanted()) return 'aborted';
+  clearVersionNotice('secondary');
   companionEditor.setReadOnly(true);
   titleEditorB.setReadOnly(true);
   companionField.value = field.value;
@@ -1314,7 +1318,7 @@ function showDraft(): void {
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
   workspace.bumpSessionGeneration();
   workspace.setDocumentId(active.id);
-  clearVersionNotice();
+  clearVersionNotice('primary');
   clearNotices();
   loadingDraft = true;
   try {
@@ -1597,7 +1601,7 @@ async function persist(): Promise<PersistResult> {
         const titleOnly = !result.conflict && saved.title !== active.title && saved.text === active.text;
         if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         active = result.draft;
-        clearVersionNotice();
+        clearVersionNotice('primary');
         postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
         writingPosition.save();
         if (workspace.contentRevision() !== version && autosave.checked) journalEdit();
@@ -1759,9 +1763,9 @@ autosave.addEventListener('change', async () => {
       if (!inFlight?.conflict) clearNotices();
       const stayed = secondary === startedSession && secondary.draft.id === startedId
         && secondary.ownership === startedOwnership;
-      const conflictCopy = !!(inFlight?.conflict && secondary && secondary !== startedSession
-        && secondary.ownership && secondary.ownership !== startedOwnership
-        && secondary.draft.id !== startedId);
+      // Conflict copies update draft/ownership in place on the same session object.
+      const conflictCopy = !!(inFlight?.conflict && secondary && secondary.ownership
+        && secondary.ownership !== startedOwnership && secondary.draft.id !== startedId);
       if (!stayed && !conflictCopy) {
         updateSaveIndicatorB();
         announce(AUTOSAVE_OFF);
@@ -2214,6 +2218,59 @@ async function initializeDrafts(): Promise<void> {
   }
 }
 
+/**
+ * Install a pane-B session from a pending snapshot when its IndexedDB row is gone.
+ * Keeps the unsaved text reachable for copy/export/recovery even without a backing document.
+ */
+async function installOrphanPendingSecondary(pending: StoredDraft): Promise<boolean> {
+  if (viewMode || !db || pending.id === active.id) return false;
+  if ((await releaseSecondarySession()) === 'cancelled') return false;
+  if (pending.id === active.id || !workspace.splitOpen()) return false;
+  const access = await acquireFor(pending.id);
+  if (pending.id === active.id || !workspace.splitOpen()) {
+    void access.ownership?.release();
+    return false;
+  }
+  companionWritingPosition.save();
+  loadingDraft = true;
+  try {
+    companionEditor.setReadOnly(false);
+    titleEditorB.setReadOnly(false);
+    companionEditor.load(pending.text);
+    if (pending.history) companionEditor.restoreHistory(pending.history);
+    draftTitleB.value = pending.title;
+    draftTitleB.hidden = false;
+  } finally {
+    loadingDraft = false;
+  }
+  secondary = createBoundSession({
+    sessionId: 'session-2',
+    editablePaneId: SECOND_PANE_ID,
+    draft: { ...pending },
+    editor: companionEditor,
+    field: companionField,
+    title: draftTitleB,
+  });
+  secondary.ownership = access.ownership;
+  secondary.editBlock = access.block;
+  secondary.dirty = true;
+  secondary.contentRevision = 1;
+  bindOwnershipLost(access.ownership, () => {
+    if (access.ownership) loseSecondaryOwnership(access.ownership);
+  });
+  if (access.block) {
+    companionEditor.setReadOnly(true);
+    titleEditorB.setReadOnly(true);
+  }
+  sessionRegistry.setSecondary(secondary);
+  companionWritingPosition.restore(pending.id);
+  updateSaveIndicatorB();
+  syncCompanionChrome();
+  renderPaneBDrafts();
+  syncMutationControls();
+  return true;
+}
+
 /** Restore a pane-B reload snapshot after the primary session is live. */
 async function restorePendingSecondary(): Promise<void> {
   if (viewMode || !db) return;
@@ -2226,7 +2283,8 @@ async function restorePendingSecondary(): Promise<void> {
     const delayMs = (window as Window & { __typebridgeDelayPendingSecondaryMs?: number }).__typebridgeDelayPendingSecondaryMs;
     if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     let committed: StoredDraft | undefined;
-    try { committed = await getStoredDraft(db, pending.id); } catch { return; }
+    try { committed = await getStoredDraft(db, pending.id); }
+    catch { committed = undefined; }
     if (committed && sameContent(pending, committed)) {
       clearPendingSecondary(pending);
       return;
@@ -2235,32 +2293,40 @@ async function restorePendingSecondary(): Promise<void> {
     if (pending.id === active.id) return;
     if (!workspace.splitOpen()) splitControls.setOpen(true);
     const generationBeforeOpen = companionOpenGeneration;
-    await openCompanionDocument(pending.id);
-    // A newer user pick (generation advanced past this open) wins over boot restore.
-    if (companionOpenGeneration !== generationBeforeOpen + 1) return;
-    if (!secondary || secondary.draft.id !== pending.id) return;
-    // Never clobber a session the user already dirtied while restore awaited.
-    if (secondary.dirty || secondary.contentRevision !== 0) return;
-    const sessionId = secondary.sessionId;
-    const contentAtOpen = secondary.contentRevision;
-    companionWritingPosition.save();
-    loadingDraft = true;
-    try {
-      if (!secondary || secondary.sessionId !== sessionId || secondary.draft.id !== pending.id) return;
-      if (secondary.dirty || secondary.contentRevision !== contentAtOpen) return;
-      companionEditor.load(pending.text);
-      if (pending.history) companionEditor.restoreHistory(pending.history);
-      draftTitleB.value = pending.title;
-      secondary.draft = { ...pending };
-      secondary.dirty = true;
-      secondary.contentRevision += 1;
-    } finally {
-      loadingDraft = false;
+    let openedExisting = false;
+    if (committed && committed.revision >= 1) {
+      await openCompanionDocument(pending.id);
+      // A newer user pick (generation advanced past this open) wins over boot restore.
+      if (companionOpenGeneration !== generationBeforeOpen + 1) return;
+      openedExisting = !!secondary && secondary.draft.id === pending.id;
     }
-    if (!secondary || secondary.sessionId !== sessionId) return;
-    companionWritingPosition.restore(pending.id);
-    updateSaveIndicatorB();
-    syncMutationControls();
+    if (!openedExisting) {
+      if (!(await installOrphanPendingSecondary(pending))) return;
+    } else {
+      // Never clobber a session the user already dirtied while restore awaited.
+      if (!secondary || secondary.dirty || secondary.contentRevision !== 0) return;
+      const sessionId = secondary.sessionId;
+      const contentAtOpen = secondary.contentRevision;
+      companionWritingPosition.save();
+      loadingDraft = true;
+      try {
+        if (!secondary || secondary.sessionId !== sessionId || secondary.draft.id !== pending.id) return;
+        if (secondary.dirty || secondary.contentRevision !== contentAtOpen) return;
+        companionEditor.load(pending.text);
+        if (pending.history) companionEditor.restoreHistory(pending.history);
+        draftTitleB.value = pending.title;
+        secondary.draft = { ...pending };
+        secondary.dirty = true;
+        secondary.contentRevision += 1;
+      } finally {
+        loadingDraft = false;
+      }
+      if (!secondary || secondary.sessionId !== sessionId) return;
+      companionWritingPosition.restore(pending.id);
+      updateSaveIndicatorB();
+      syncMutationControls();
+    }
+    if (!secondary) return;
     if (secondary.editBlock) {
       setSaveStatus('Recovered unsaved text in the other pane, but another window is editing that document, so it was not saved. Copy or export it.', 'failure');
     } else if (autosave.checked) {
@@ -2393,14 +2459,36 @@ function postSignal(type: DocumentSignal['type'], documentId: string, revision: 
 const versionNotice = document.querySelector<HTMLElement>('#version-notice')!;
 const NEWER_VERSION_NOTICE = 'A newer saved version of this document exists in another window. Your text here has not been changed.';
 const DELETED_NOTICE = 'This saved document was deleted in another window. Your text here has not been changed.';
-function showVersionNotice(text: string): void {
+/** Per-session version warnings so a primary save/switch does not erase pane-B feedback. */
+let primaryVersionNotice = '';
+let secondaryVersionNotice = '';
+function syncVersionNoticeDisplay(): void {
+  const preferSecondary = workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit();
+  const text = preferSecondary
+    ? (secondaryVersionNotice || primaryVersionNotice)
+    : (primaryVersionNotice || secondaryVersionNotice);
+  if (!text) {
+    if (versionNotice.hidden && !versionNotice.textContent) return;
+    versionNotice.hidden = true;
+    versionNotice.textContent = '';
+    return;
+  }
   if (versionNotice.textContent !== text) versionNotice.textContent = text;
   versionNotice.hidden = false;
 }
-function clearVersionNotice(): void {
-  if (versionNotice.hidden && !versionNotice.textContent) return;
-  versionNotice.hidden = true;
-  versionNotice.textContent = '';
+function showVersionNotice(text: string, target: 'primary' | 'secondary' = 'primary'): void {
+  if (target === 'secondary') secondaryVersionNotice = text;
+  else primaryVersionNotice = text;
+  syncVersionNoticeDisplay();
+}
+function clearVersionNotice(target?: 'primary' | 'secondary'): void {
+  if (target === 'secondary') secondaryVersionNotice = '';
+  else if (target === 'primary') primaryVersionNotice = '';
+  else {
+    primaryVersionNotice = '';
+    secondaryVersionNotice = '';
+  }
+  syncVersionNoticeDisplay();
 }
 let rereadSeq = 0;
 /** Authoritative reread of the displayed document; signals and focus only decide when to run it. */
@@ -2480,13 +2568,14 @@ async function rereadSecondary(): Promise<void> {
       draftTitleB.value = stored.title;
     } finally { loadingDraft = false; }
     companionWritingPosition.restore(stored.id);
+    clearVersionNotice('secondary');
     updateSaveIndicatorB();
     renderPaneBDrafts();
   } else if (action === 'missing') {
-    if (secondary.draft.revision >= 1) showVersionNotice(DELETED_NOTICE);
+    if (secondary.draft.revision >= 1) showVersionNotice(DELETED_NOTICE, 'secondary');
     renderPaneBDrafts();
-  } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
-  else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE);
+  } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE, 'secondary');
+  else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE, 'secondary');
 }
 let listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleListRefresh(): void {

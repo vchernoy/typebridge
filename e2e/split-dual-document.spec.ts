@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { closeDocuments, documentAction, openDocuments, openFind, selectDocument, setAutosave } from './settings-helpers';
-import { readStoredDocs } from './storage-helpers';
+import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 async function openSplit(page: Page): Promise<void> {
   await documentAction(page, '#toggle-split');
@@ -452,6 +452,76 @@ test('pane B save quota failure keeps Not saved and preserves text', async ({ pa
   await expect(page.locator('#save-indicator-b')).toHaveText('Save failed');
   await expect(page.locator('#editor-b')).toHaveValue('November body quota');
   await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
+});
+
+test('pane B version notice survives a primary save', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Version body', 'Versioned');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Primary stay', 'PrimaryStayNotice');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs = 60_000;
+  });
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' local');
+  await writeForeignRevision(page, { text: 'Version body foreign' }, firstId);
+  await page.locator('#editor-b').dispatchEvent('focus');
+  await expect(page.locator('#version-notice')).toBeVisible();
+  await expect(page.locator('#version-notice')).toContainText('newer saved version');
+  await page.locator('#editor').press('End');
+  await page.locator('#editor').pressSequentially('!');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('#version-notice')).toBeVisible();
+  await expect(page.locator('#version-notice')).toContainText('newer saved version');
+});
+
+test('pending pane B restores after its saved row was deleted', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Orphan body', 'OrphanDoc');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Keep primary', 'KeepPrimary');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs = 60_000;
+  });
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' orphaned');
+  const pending = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return sessionStorage.getItem('typebridge.pendingDraft.paneB.v1');
+  });
+  expect(pending).toContain('Orphan body orphaned');
+  await page.evaluate(async id => {
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open('typebridge');
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction(['documents', 'editOwnership'], 'readwrite');
+        tx.objectStore('documents').delete(id);
+        tx.objectStore('editOwnership').delete(id);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  }, firstId);
+  expect((await readStoredDocs(page)).some(d => d.id === firstId)).toBe(false);
+  await page.reload();
+  await expect(page.locator('#editor')).toBeEnabled({ timeout: 8_000 });
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveValue('Orphan body orphaned');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+  await expect.poll(async () => (await readStoredDocs(page)).some(d => d.text === 'Orphan body orphaned')).toBe(true);
 });
 
 test('pane B follows foreign saves and can reclaim ownership', async ({ page, context }) => {
