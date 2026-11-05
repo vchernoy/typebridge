@@ -83,7 +83,10 @@ hostHooks.__typebridgeHostFocusMode = (enabled, sourceWindowId) => {
   manager.setHostFocusMode(enabled, sourceWindowId);
 };
 
-installHostSettings({ frames: editorFrames });
+installHostSettings({
+  frames: editorFrames,
+  exitHostFocus: () => { manager.setHostFocusMode(false); },
+});
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {

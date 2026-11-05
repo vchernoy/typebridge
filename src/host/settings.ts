@@ -32,6 +32,8 @@ function preferenceSaved(name: string, saved: boolean): void {
 
 export function installHostSettings(deps: {
   frames: () => HTMLIFrameElement[];
+  /** Clear host Focus maximize when Reset clears Focus preference (#175 step 7). */
+  exitHostFocus?: () => void;
 }): HostSettingsApi {
   setupSettings();
 
@@ -168,8 +170,10 @@ export function installHostSettings(deps: {
           localStorage.removeItem('typebridge.editor.size.v1');
           localStorage.removeItem('typebridge.editor.focusSize.v1');
           localStorage.removeItem('typebridge.focusMode.v1');
+          deps.exitHostFocus?.();
           return true;
         } catch {
+          deps.exitHostFocus?.();
           return false;
         }
       }],

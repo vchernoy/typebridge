@@ -95,3 +95,24 @@ test('host Autosave on persists unsaved text in every window', async ({ page }) 
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
   await expect.poll(async () => page.evaluate(() => localStorage.getItem('typebridge.autosave.v1'))).toBe('off');
 });
+
+test('Reset settings exits host Focus mode', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
+  const main = await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  await main.locator('#focus-mode').evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
+
+  await openHostSettings(page);
+  await page.locator('#reset-settings').click();
+  const dialog = page.getByRole('dialog', { name: 'Reset settings to defaults?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Reset settings' }).click();
+  await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New window' })).toBeEnabled();
+});
