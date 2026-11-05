@@ -42,10 +42,13 @@ test('host Settings appearance and typing mode apply to every window', async ({ 
   await page.locator('#settings-close').click();
   await expect(page.locator('#settings-panel')).toBeHidden();
 
-  // Mode switch stays in window chrome and syncs across windows.
+  // Mode switch stays in window chrome and syncs across windows, including titles.
   await main.locator('.mode-switch .mode-side').first().click();
   await expect(main.locator('#enabled')).not.toBeChecked();
   await expect.poll(async () => second.locator('#enabled').isChecked()).toBe(false);
+  await second.locator('#draft-title').fill('');
+  await second.locator('#draft-title').pressSequentially('w');
+  await expect(second.locator('#draft-title')).toHaveValue('w');
 });
 
 test('host custom rules apply live in every window without reload', async ({ page }) => {

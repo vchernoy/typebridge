@@ -117,8 +117,9 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
     try {
       try { enabled.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; }
       catch { /* Keep the current mode when storage is blocked. */ }
-      syncEditorModes();
-      syncSearchEditors();
+      // Dispatch so listeners outside this module (title editors in main.ts) sync too.
+      // applyingRemote keeps the change handler from rewriting storage or re-notifying.
+      enabled.dispatchEvent(new Event('change', { bubbles: true }));
       try {
         const stored = localStorage.getItem(SHORTCUT_KEY);
         if (shortcutOptions.some(value => value === stored)) shortcut = stored as Shortcut;
