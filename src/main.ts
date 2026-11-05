@@ -856,7 +856,10 @@ function openFind(): void {
   // Re-read the shared last search so another window's query is visible immediately.
   try {
     const shared = sessionStorage.getItem(FIND_KEY);
-    if (shared !== null && findInput.value !== shared) findInput.value = shared;
+    if (shared !== null && findInput.value !== shared) {
+      findInput.value = shared;
+      findEditor.syncFromField();
+    }
   } catch { /* Optional restore. */ }
   showMatchCount();
   findInput.focus();

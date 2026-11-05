@@ -316,6 +316,16 @@ export class Editor {
     this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
   setEnabled(value: boolean): void { this.enabled = value; this.pending = null; this.lastEditAt = 0; }
+  /**
+   * Adopt the field's current value after an external write (shared Find query, host
+   * title sync, …). Clears any pending transliteration sequence and re-bases undo.
+   */
+  syncFromField(): void {
+    this.pending = null;
+    this.before = null;
+    this.known = this.capture();
+    this.lastEditAt = 0;
+  }
   clear(): void {
     if (this.viewOnly || !this.field.value) return;
     this.before = this.capture(); this.field.value = ''; this.pending = null;

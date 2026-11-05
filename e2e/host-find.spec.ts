@@ -60,8 +60,13 @@ test('read-only host window keeps Find but disables Replace', async ({ page }) =
   if (await second.locator('#doc-menu').isVisible()) await second.locator('#doc-menu-open').click();
   await expect(second.locator('#doc-menu')).toBeHidden();
 
-  await second.locator('#find-open').click();
+  // Host title mirrors iframe editability on focus; then Ctrl/⌘+F must still open Find.
+  const secondTitle = page.locator('.host-window[data-window-id="w2"] .host-window-title');
+  await secondTitle.focus();
+  await expect(secondTitle).toHaveJSProperty('readOnly', true);
+  await page.keyboard.press('Control+f');
   await expect(second.locator('#find-bar')).toBeVisible();
+  await expect(second.locator('#find-text')).toBeFocused();
   await second.locator('#find-text').fill('shared');
   await expect(second.locator('#find-status')).toContainText(/match/i);
   await expect(second.locator('#replace-one')).toBeDisabled();

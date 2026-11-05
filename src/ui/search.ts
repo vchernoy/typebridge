@@ -156,6 +156,8 @@ export function setupSearch(
       const next = event.newValue ?? '';
       if (findInput.value === next) return;
       findInput.value = next;
+      // Drop pending transliteration from the previous local query (#175 Codex P2).
+      findEditor.syncFromField();
       showMatchCount();
     });
   }
