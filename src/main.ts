@@ -2315,18 +2315,28 @@ async function applyAutosaveChange(
       else setSaveStatus(text);
     };
     if (enabled) {
-      if (blocked) {
-        // Preference is mirrored; persist when this window can mutate again.
+      // Persist every editable dirty session independently of which pane is active.
+      // A blocked active pane must not skip an editable companion (or vice versa).
+      const primaryCanSave = !viewMode && !transferFrozen && editBlock === '';
+      const secondaryCanSave = !viewMode && !transferFrozen && !!secondary && secondary.editBlock === '';
+      if (!primaryCanSave && !secondaryCanSave) {
         updateSaveIndicatorB();
         return;
       }
       clearNotices();
-      if (workspace.dirty()) showSaving(); else announce('Autosave on');
-      if (workspace.dirty()) { journalEdit(); void persist(); }
-      if (secondary?.dirty && !secondary.editBlock) {
+      let flushed = false;
+      if (primaryCanSave && workspace.dirty()) {
+        showSaving();
+        journalEdit();
+        void persist();
+        flushed = true;
+      }
+      if (secondaryCanSave && secondary?.dirty) {
         updateSaveIndicatorB();
         void persistSecondary();
+        flushed = true;
       }
+      if (!flushed) announce('Autosave on');
       return;
     }
     clearTimeout(saveTimer);

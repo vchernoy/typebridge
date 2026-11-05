@@ -25,9 +25,9 @@ export type HostSettingsApi = {
 };
 
 function preferenceSaved(name: string, saved: boolean): void {
-  // Host Settings has no combined status line; per-control statuses remain.
-  void name;
-  void saved;
+  const live = document.querySelector<HTMLElement>('#host-settings-status');
+  if (!live) return;
+  live.textContent = saved ? '' : `${name} preference could not be saved in this browser.`;
 }
 
 export function installHostSettings(deps: {
