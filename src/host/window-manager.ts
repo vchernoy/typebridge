@@ -1085,7 +1085,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (event.isComposing || event.repeat || event.defaultPrevented) return;
     event.preventDefault();
-    cycleFocus();
+    // Move/close controls activate only on pointer — Tab into them leaves activeId stale.
+    const focused = document.activeElement;
+    const shell = focused instanceof Element ? focused.closest('.host-window') : null;
+    const fromId = shell instanceof HTMLElement ? shell.dataset.windowId : undefined;
+    cycleFocus(fromId);
   };
 
   deps.toolbar.querySelector('[data-host-action="new-window"]')

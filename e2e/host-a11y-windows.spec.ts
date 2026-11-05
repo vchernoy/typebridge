@@ -115,6 +115,25 @@ test('F6 from an inactive host title cycles relative to that window', async ({ p
   await expect(page.locator('.host-window[data-window-id="w3"]')).toHaveClass(/is-active/);
 });
 
+test('F6 from an inactive move handle cycles relative to that window', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 2);
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await main.locator('#editor').focus();
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
+
+  // Tab focus on the move handle does not raise the shell (pointerdown does).
+  const w2Move = page.getByRole('button', { name: /Move window w2/ });
+  await w2Move.focus();
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
+
+  await page.keyboard.press('F6');
+  await expect.poll(() => activeWindowId(page)).toBe('w3');
+  await expect(page.locator('.host-window[data-window-id="w3"]')).toHaveClass(/is-active/);
+});
+
 test('F6 in host Focus maximizes the next window', async ({ page }) => {
   await openHost(page, 'free');
   await addWindows(page, 1);
