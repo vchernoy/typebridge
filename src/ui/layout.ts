@@ -140,7 +140,7 @@ export function setupLayout(
   const focusButton = document.querySelector<HTMLButtonElement>('#focus-mode')!;
   const exitFocusButton = document.querySelector<HTMLButtonElement>('#exit-focus')!;
   let normalEditorSize = { width: '', height: '' };
-  function applyFocusMode(enabled: boolean): void {
+  function applyFocusMode(enabled: boolean, opts?: { moveFocus?: boolean }): void {
     cancelResize();
     if (enabled && !document.body.classList.contains('focus-mode')) {
       normalEditorSize = { width: field.style.width, height: field.style.height };
@@ -157,6 +157,8 @@ export function setupLayout(
     document.body.classList.toggle('focus-mode', enabled);
     focusButton.setAttribute('aria-pressed', String(enabled));
     exitFocusButton.hidden = !enabled;
+    // Host-driven sync must not steal focus into background iframes (#175 step 6).
+    if (opts?.moveFocus === false) return;
     // Prefer the active pane surface so Focus entry/exit does not silently retarget commands.
     (options?.getFocusTarget?.() ?? field).focus({ preventScroll: true });
   }
@@ -212,9 +214,9 @@ export function setupLayout(
     editorSizeWarning.textContent = saved ? '' : 'Editor layout defaults could not be saved in this browser.';
     return saved;
   }
-  /** Host-driven Focus chrome without writing the shared preference or re-notifying the host. */
+  /** Host-driven Focus chrome without writing the shared preference, notifying the host, or moving focus. */
   function applyFocusModeOnly(enabled: boolean): void {
-    applyFocusMode(enabled);
+    applyFocusMode(enabled, { moveFocus: false });
   }
   return { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly };
 }

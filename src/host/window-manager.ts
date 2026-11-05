@@ -155,8 +155,12 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         const hooks = frame.contentWindow as (Window & {
           __typebridgeSetFocusMode?: (on: boolean) => void;
         }) | null;
+        const want = enabled && wid === activeId;
+        const doc = frame.contentDocument;
+        const already = !!doc?.body.classList.contains('focus-mode');
+        if (want === already) continue;
         // Only the focused window shows Exit focus; others stay Normal.
-        hooks?.__typebridgeSetFocusMode?.(enabled && wid === activeId);
+        hooks?.__typebridgeSetFocusMode?.(want);
       } catch { /* Unexpected cross-origin. */ }
     }
   };

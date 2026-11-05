@@ -77,6 +77,8 @@ test('host Focus mode maximizes the active window and restores on exit', async (
   await page.getByRole('button', { name: 'New window' }).click();
   await expect(page.locator('.host-window')).toHaveCount(2);
   await page.getByRole('button', { name: 'Tile side by side' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
   const before = await page.evaluate(() => {
     const hooks = window as Window & {
@@ -86,9 +88,14 @@ test('host Focus mode maximizes the active window and restores on exit', async (
   });
   expect(before).toHaveLength(2);
 
+  await main.locator('#editor').click();
   await main.locator('#focus-mode').click();
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
+  await expect(main.locator('#exit-focus')).toBeVisible();
+  await expect(main.locator('body')).toHaveClass(/focus-mode/);
+  await expect(second.locator('body')).not.toHaveClass(/focus-mode/);
 
   const focused = await page.evaluate(() => {
     const hooks = window as Window & {
@@ -104,6 +111,7 @@ test('host Focus mode maximizes the active window and restores on exit', async (
 
   await main.locator('#exit-focus').click();
   await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
 
   const after = await page.evaluate(() => {
@@ -166,15 +174,23 @@ test('host Focus restore after reload shows Exit focus in the focused iframe', a
   const main = await openHost(page);
   await page.getByRole('button', { name: 'New window' }).click();
   await expect(page.locator('.host-window')).toHaveCount(2);
+  await expect(page.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor'))
+    .toBeEnabled({ timeout: 30_000 });
+  await main.locator('#editor').click();
   await main.locator('#focus-mode').click();
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
   await expect(main.locator('#exit-focus')).toBeVisible();
 
   await page.reload();
   const restored = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(restored.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
   await expect(restored.locator('#exit-focus')).toBeVisible({ timeout: 10_000 });
   await restored.locator('#exit-focus').click();
   await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
 });
