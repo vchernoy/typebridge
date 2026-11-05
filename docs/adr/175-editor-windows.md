@@ -64,8 +64,8 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | **7** | Shared settings live across windows | Yes (this slice: one Settings panel on `/host.html`; live apply via prefs-sync + iframe hooks; mode chrome stays per window) |
 | **8** | Title/picker redesign | Yes (this slice: host title-bar rename; picker search/preview/time/open-elsewhere; numbered Untitled defaults) |
 | **9** | Find/Replace per window | Yes (this slice: shared Find query across windows; Replace text + UI per window; Replace disabled when read-only; host Ctrl/⌘+F from title) |
-| **10** | Remove in-page split | Yes (this slice: delete pane B / live mirror / split prefs; keep W1–W4 `mode=view` comparison popup; GC `typebridge.split.v1` + pane-B pending keys without touching documents) |
-| **11** | Verification, screenshots, honest device/AT limits | Docs + tests |
+| **10** | Remove in-page split | Yes (shipped: delete pane B / live mirror / split prefs; keep W1–W4 `mode=view` comparison popup; GC `typebridge.split.v1` + pane-B pending keys without touching documents) |
+| **11** | Verification, screenshots, honest device/AT limits | Docs + tests (this slice: F6 window cycle; `role="region"` + title `aria-label`; Playwright a11y/host smoke; [evidence/175](../evidence/175/README.md) packaging — no real-device/AT/IME/production claims) |
 
 ## Merge / PR notes
 
