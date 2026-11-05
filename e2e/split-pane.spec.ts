@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { documentAction, openGoto, setAutosave } from './settings-helpers';
-import { readStoredDocs } from './storage-helpers';
+import { claimFenceElsewhere, readStoredDocs } from './storage-helpers';
 
 async function openSplit(page: Page): Promise<void> {
   await documentAction(page, '#toggle-split');
@@ -309,6 +309,36 @@ test('closing split after Edit in this pane keeps text and history on the primar
   await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'editable');
   await page.locator('#undo').click();
   await expect(page.locator('#editor')).toHaveValue('keep me');
+});
+
+test('closing split after ownership loss still parks history on the primary', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await page.locator('#editor').fill('owned text');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const id = (await readStoredDocs(page))[0]!.id;
+  await openSplit(page);
+  await page.locator('#edit-in-pane-b').click();
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'editable');
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    const end = node.value.length;
+    node.setSelectionRange(end, end);
+  });
+  await page.locator('#editor-b').pressSequentially('!');
+  await expect(page.locator('#editor-b')).toHaveValue('owned text!');
+  // Steal the fence the way a waking stale owner discovers loss (#159 W4).
+  await claimFenceElsewhere(page, id);
+  await page.locator('#editor-b').pressSequentially('?');
+  await expect(page.locator('#ownership-notice')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
+  // parkHistory must still move Undo onto A so close does not strand it in hidden B.
+  await documentAction(page, '#toggle-split');
+  await expect(page.locator('#editor-b')).toBeHidden();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-split', 'off');
+  await expect(page.locator('#editor')).toHaveValue('owned text!?');
+  await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'readonly');
 });
 
 test('Edit in this pane on a clean saved document does not mark dirty or commit', async ({ page }) => {

@@ -191,7 +191,13 @@ const splitControls = setupSplitPane({
         return;
       }
       // Move history back to pane A before workspace forgets B held the editable role.
-      if (sameDocEditableInB()) transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true });
+      // parkHistory: allow this even after external ownership loss so Undo is not stranded in B.
+      if (sameDocEditableInB()
+        && !transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true, parkHistory: true })) {
+        splitControls.setOpen(true);
+        announceAction('Could not move editing back to this pane. Keep the split open.');
+        return;
+      }
     }
     workspace.setSplitOpen(open);
     toggleSplit.setAttribute('aria-pressed', open ? 'true' : 'false');
@@ -473,7 +479,16 @@ function liveCommandState(): {
  */
 function transferSameDocumentEdit(
   target: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID,
-  options: { silent?: boolean; /** Bypass companion-open busy (parking before picker load). */ force?: boolean } = {},
+  options: {
+    silent?: boolean;
+    /** Bypass companion-open busy (parking before picker load). */
+    force?: boolean;
+    /**
+     * Internal history handoff (close split / picker). May run while externally
+     * read-only so Undo is not stranded in a pane that is about to hide.
+     */
+    parkHistory?: boolean;
+  } = {},
 ): boolean {
   if (viewMode || !workspace.splitOpen() || dualDocumentSplit()) {
     if (!options.silent) announceAction('Edit in this pane is only available for the same-document companion.');
@@ -483,8 +498,8 @@ function transferSameDocumentEdit(
     sameSession: true,
     targetAlreadyEditable: workspace.editablePaneId() === target,
     composing: editor.composing || companionEditor.composing,
-    transitioning: transitioning || (!options.force && companionOpenBusy),
-    externallyBlocked: readOnlyNow(),
+    transitioning: transitioning || (!options.force && !options.parkHistory && companionOpenBusy),
+    externallyBlocked: options.parkHistory ? false : readOnlyNow(),
   });
   if (block) {
     if (!options.silent) {
@@ -1383,7 +1398,7 @@ async function openCompanionDocument(id: string): Promise<void> {
     // Dual-doc and picker restores reuse #editor-b; park same-doc history on A first.
     // Refuse the whole open if IME/busy blocks parking — do not load over live history.
     if (sameDocEditableInB()) {
-      if (!transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true, force: true })) {
+      if (!transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true, force: true, parkHistory: true })) {
         announceAction('Finish composing text before opening another document in the other pane.');
         return;
       }
