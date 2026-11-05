@@ -75,12 +75,64 @@ test('F6 cycles host windows in stacked layout', async ({ page }) => {
   await expect.poll(() => activeWindowId(page)).toBe('main');
 });
 
+test('F6 from the host title cycles windows', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 1);
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+
+  // Activate main via the editor (title pointerdown stops shell activation).
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await main.locator('#editor').focus();
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
+
+  const hostTitle = page.locator('.host-window[data-window-id="main"] .host-window-title');
+  await expect(hostTitle).toBeEditable({ timeout: 15_000 });
+  await hostTitle.focus();
+
+  await page.keyboard.press('F6');
+  await expect.poll(() => activeWindowId(page)).toBe('w2');
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
+});
+
+test('F6 in host Focus maximizes the next window', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 1);
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await main.locator('#focus-mode').evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
+
+  await main.locator('#editor').focus();
+  await page.keyboard.press('F6');
+  await expect.poll(() => activeWindowId(page)).toBe('w2');
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeHidden();
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+
+  const focused = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'w2');
+  });
+  expect(focused).toBeTruthy();
+  expect(focused!.x).toBe(0);
+  expect(focused!.y).toBe(0);
+  expect(focused!.w).toBeGreaterThan(1000);
+  expect(focused!.h).toBeGreaterThan(500);
+});
+
 test('host window shells are named regions with the document title', async ({ page }) => {
   const frame = await openHost(page, 'free');
   const shell = page.locator('.host-window[data-window-id="main"]');
   await expect(shell).toHaveAttribute('role', 'region');
   await expect(shell).toHaveAttribute('data-window-id', 'main');
   await expect(shell).toHaveAttribute('aria-label', 'Untitled document');
+  await expect(shell).toHaveAttribute('aria-current', 'true');
+  await expect(shell).not.toHaveAttribute('aria-selected');
 
   const hostTitle = page.locator('.host-window[data-window-id="main"] .host-window-title');
   await expect(hostTitle).toBeEditable({ timeout: 15_000 });

@@ -44,7 +44,7 @@ From the [#175](https://github.com/vchernoy/typebridge/issues/175) acceptance li
 | 9 | Phone stacked (390 / 320), height grip, no horizontal overflow | Covered (synthetic viewport) | `host-layout-mode` — not a physical phone |
 | 10 | Unique IDs/labels per window; announcements not duplicated | Covered (partial live-region depth) | `host-a11y-windows` (regions + titles), `document-names`, `window-identity` |
 
-Step-11 extras (must-ship a11y, not numbered in 1–10): **F6** cycles windows (`host-a11y-windows`); host shells are **`role="region"`** with `aria-label` = document title; Escape closes host Settings before Find when both are open.
+Step-11 extras (must-ship a11y, not numbered in 1–10): **F6** cycles windows (`host-a11y-windows`), including from the host title and while host Focus is on (next window is maximized); host shells are **`role="region"`** with `aria-label` = document title and `aria-current` on the active shell; Escape closes host Settings before Find when both are open; F6 is ignored while a confirm modal is open.
 
 ## Layout screenshots (synthetic viewports)
 

@@ -249,7 +249,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     for (const win of layouts) applyShellGeometry(win);
     for (const [wid, shell] of shells) {
       shell.classList.toggle('is-active', wid === id);
-      shell.setAttribute('aria-selected', wid === id ? 'true' : 'false');
+      // Regions do not support aria-selected; mark the active shell with aria-current.
+      if (wid === id) shell.setAttribute('aria-current', 'true');
+      else shell.removeAttribute('aria-current');
     }
     if (hostFocus) {
       applyModeChrome();
@@ -273,12 +275,42 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     title?.focus();
   };
 
+  /** True when a confirm modal is open on the host or any embedded window. */
+  const confirmModalOpen = (): boolean => {
+    if (document.querySelector('.confirm-backdrop, [aria-modal="true"]')) return true;
+    for (const frame of frames.values()) {
+      try {
+        if (frame.contentDocument?.querySelector('.confirm-backdrop, [aria-modal="true"]')) {
+          return true;
+        }
+      } catch { /* Mid-navigation. */ }
+    }
+    return false;
+  };
+
+  /** Maximize the active window to the host viewport without rewriting preFocusLayouts. */
+  const maximizeActiveForFocus = (): void => {
+    if (!hostFocus || !activeId) return;
+    const view = viewportOf(deps.root);
+    layouts = layouts.map(win => (
+      win.id === activeId
+        ? { ...win, x: 0, y: 0, w: view.width, h: view.height }
+        : win
+    ));
+    applyAllGeometry();
+  };
+
   /** Cycle to the next host window (DOM/layout order). Raises z-order in free mode. */
   const cycleFocus = (): void => {
     if (layouts.length === 0) return;
+    // Keep modal focus traps intact (discard / Edit here / private reload).
+    if (confirmModalOpen()) return;
     const index = layouts.findIndex(win => win.id === activeId);
     const next = layouts[(index < 0 ? 0 : index + 1) % layouts.length]!;
     setActive(next.id);
+    // In host Focus, setActive only swaps visibility — apply full-viewport geometry
+    // so the newly active window matches setHostFocusMode(true) maximize behavior.
+    if (hostFocus) maximizeActiveForFocus();
     // After Focus maximize swaps the visible shell, focus on the next frame.
     window.requestAnimationFrame(() => { focusWindowSurface(next.id); });
   };
@@ -422,6 +454,15 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     });
     title.addEventListener('keydown', event => {
       // Keep arrow-key window move on the handle; let the input own typing keys.
+      // F6 must cycle windows even while renaming — handle before stopPropagation so
+      // the document-level host listener is not required for the title field.
+      if (event.key === 'F6' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+        && !event.isComposing && !event.repeat) {
+        event.preventDefault();
+        event.stopPropagation();
+        cycleFocus();
+        return;
+      }
       event.stopPropagation();
       if (event.isComposing) return;
       try {
@@ -1132,6 +1173,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   boot();
   refreshMode();
+  // Mark the initial active shell (is-active + aria-current) before Focus restore.
+  if (layouts.some(win => win.id === activeId)) setActive(activeId);
+  else if (layouts[0]) setActive(layouts[0].id);
   if (pendingFocusId && layouts.some(win => win.id === pendingFocusId)) {
     api.setHostFocusMode(true, pendingFocusId);
   }
