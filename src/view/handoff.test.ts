@@ -68,10 +68,10 @@ describe('handoff helpers', () => {
     })).toBe('ime');
   });
 
-  it('buffers printable keys and Enter', () => {
+  it('buffers printable keys and Enter with kind for transliteration replay', () => {
     const key = (partial: Partial<KeyboardEvent>) => partial as KeyboardEvent;
-    expect(bufferInsertFromKeyboard(key({ key: 'a' }))).toEqual({ text: 'a' });
-    expect(bufferInsertFromKeyboard(key({ key: 'Enter' }))).toEqual({ text: '\n' });
+    expect(bufferInsertFromKeyboard(key({ key: 'a' }))).toEqual({ kind: 'type', text: 'a' });
+    expect(bufferInsertFromKeyboard(key({ key: 'Enter' }))).toEqual({ kind: 'break', text: '\n' });
     expect(bufferInsertFromKeyboard(key({ key: 'a', ctrlKey: true }))).toBeUndefined();
     expect(bufferInsertFromKeyboard(key({ key: 'Shift' }))).toBeUndefined();
   });

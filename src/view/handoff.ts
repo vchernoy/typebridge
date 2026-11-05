@@ -193,16 +193,56 @@ export function handoffRefuseGuidance(reason: HandoffRefuseReason): string {
   }
 }
 
-/** Character / paste inserts buffered while a handoff is in flight. */
-export type BufferedInsert = { text: string };
+/**
+ * Buffered input while a handoff is in flight.
+ * - `type`: replay via cancelable `beforeinput` insertText (transliteration).
+ * - `paste` / `break`: literal insert (no transliteration pending sequence).
+ */
+export type BufferedInsert =
+  | { kind: 'type'; text: string }
+  | { kind: 'paste'; text: string }
+  | { kind: 'break'; text: string };
 
 export function bufferInsertFromKeyboard(event: KeyboardEvent): BufferedInsert | undefined {
   if (event.isComposing || event.key === 'Process') return undefined;
   if (event.ctrlKey || event.metaKey || event.altKey) return undefined;
-  if (event.key === 'Enter') return { text: '\n' };
-  if (event.key === 'Tab') return { text: '\t' };
-  if (event.key.length === 1) return { text: event.key };
+  if (event.key === 'Enter') return { kind: 'break', text: '\n' };
+  if (event.key === 'Tab') return { kind: 'type', text: '\t' };
+  if (event.key.length === 1) return { kind: 'type', text: event.key };
   return undefined;
+}
+
+/** Replay one buffered insert through the field so typing hits Editor.beforeInput. */
+export function replayBufferedInsert(field: HTMLTextAreaElement, item: BufferedInsert): void {
+  if (item.kind === 'paste' || item.kind === 'break') {
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    field.setRangeText(item.text, start, end, 'end');
+    field.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: item.kind === 'paste' ? 'insertFromPaste' : 'insertLineBreak',
+      data: item.text,
+    }));
+    return;
+  }
+  for (const char of item.text) {
+    const before = new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: char,
+    });
+    field.dispatchEvent(before);
+    if (before.defaultPrevented) continue;
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    field.setRangeText(char, start, end, 'end');
+    field.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertText',
+      data: char,
+    }));
+  }
 }
 
 export type SameOriginYieldResult =

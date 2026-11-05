@@ -1838,15 +1838,26 @@ function showEditHereBar(reason: HandoffRefuseReason): void {
  * Same-tab may supply an in-memory snapshot; otherwise reread IndexedDB.
  */
 async function takeOverFromHandoff(input: {
+  documentId: string;
   snapshot: HandoffSnapshot | undefined;
   caret: number;
   steal: boolean;
 }): Promise<boolean> {
   if (viewMode || !db || transitioning || deleting) return false;
+  if (active.id !== input.documentId) return false;
   freezeEditorsForTransition();
   try {
-    const access = await acquireFor(active.id, { steal: input.steal });
+    if (active.id !== input.documentId) {
+      unfreezeEditorsAfterTransition();
+      return false;
+    }
+    const access = await acquireFor(input.documentId, { steal: input.steal });
     if (!access.ownership) {
+      unfreezeEditorsAfterTransition();
+      return false;
+    }
+    if (active.id !== input.documentId) {
+      void access.ownership.release();
       unfreezeEditorsAfterTransition();
       return false;
     }
@@ -1871,9 +1882,14 @@ async function takeOverFromHandoff(input: {
       }
       workspace.setDirty(input.snapshot.dirty);
       workspace.setDocumentId(active.id);
+      // Private/unsaved transfer must not silently persist even if this window had Autosave on.
+      if (input.snapshot.dirty && autosave.checked) {
+        autosave.checked = false;
+        updateSaveIndicator();
+      }
     } else if (!workspace.dirty()) {
       try {
-        const fresh = await getStoredDraft(db, active.id);
+        const fresh = await getStoredDraft(db, input.documentId);
         if (fresh) {
           writingPosition.save();
           active = fresh;
@@ -1889,7 +1905,8 @@ async function takeOverFromHandoff(input: {
     const caret = Math.max(0, Math.min(input.caret, field.value.length));
     field.setSelectionRange(caret, caret);
     unfreezeEditorsAfterTransition();
-    if (workspace.dirty() && autosave.checked) {
+    // Only schedule save for non-private takeovers (saved reread / clean yield).
+    if (workspace.dirty() && autosave.checked && !input.snapshot?.dirty) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => { void persist(); }, 300);
     }
@@ -2318,6 +2335,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
+  focusHandoff?.cancel();
   if (id && secondary && id === secondary.draft.id) {
     transitioning = true;
     try {
@@ -2422,6 +2440,7 @@ paneBDrafts.addEventListener('change', () => {
 });
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (readOnlyNow() || transitioning) return;
+  focusHandoff?.cancel();
   clearTimeout(saveTimer);
   const requestedId = active.id;
   if (!await askConfirmChoice({ title: 'Delete document?', message: 'Permanently delete this saved document?', confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {

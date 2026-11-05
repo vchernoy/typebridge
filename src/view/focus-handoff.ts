@@ -15,6 +15,7 @@ import {
   handoffRefuseGuidance,
   ownerYieldBlock,
   parseHandoffMessage,
+  replayBufferedInsert,
   type BufferedInsert,
   type FocusHandoffHooks,
   type HandoffMessage,
@@ -57,6 +58,7 @@ export type FocusHandoffDeps = {
    * unsaved/private transfer; otherwise reread IndexedDB under the new fence.
    */
   takeOver: (input: {
+    documentId: string;
     snapshot: HandoffSnapshot | undefined;
     caret: number;
     steal: boolean;
@@ -72,6 +74,8 @@ export type FocusHandoffController = {
   pending: () => boolean;
   /** Start a handoff from user intent (pointer or Edit here). */
   requestHandoff: (options?: { steal?: boolean }) => void;
+  /** Cancel an in-flight requester handoff (document switch / navigation). */
+  cancel: () => void;
 };
 
 function openChannel(existing: BroadcastChannel | null | undefined): BroadcastChannel | null {
@@ -145,6 +149,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   let disposed = false;
   let pending = false;
   let pendingRequestId = '';
+  let pendingDocumentId = '';
   let pendingCaret = 0;
   let buffer: BufferedInsert[] = [];
   let yieldTimer: ReturnType<typeof setTimeout> | undefined;
@@ -160,6 +165,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   const clearPending = (): void => {
     pending = false;
     pendingRequestId = '';
+    pendingDocumentId = '';
     buffer = [];
     clearTimeout(yieldTimer);
     yieldTimer = undefined;
@@ -172,20 +178,8 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     confirmTimer = undefined;
   };
 
-  const applyBuffer = (): void => {
-    if (buffer.length === 0) return;
-    const text = buffer.map(item => item.text).join('');
-    buffer = [];
-    if (!text) return;
-    const field = deps.field;
-    const start = field.selectionStart;
-    const end = field.selectionEnd;
-    const before = field.value.slice(0, start);
-    const after = field.value.slice(end);
-    field.value = before + text + after;
-    const caret = before.length + text.length;
-    field.setSelectionRange(caret, caret);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
+  const applyBuffer = (items: BufferedInsert[]): void => {
+    for (const item of items) replayBufferedInsert(deps.field, item);
   };
 
   const confirmParked = (requestId: string, ok: boolean): void => {
@@ -201,6 +195,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     snapshot: HandoffSnapshot | undefined,
     steal: boolean,
     requestId: string,
+    documentId: string,
     notifySameOrigin: boolean,
   ): Promise<void> => {
     await new Promise<void>(resolve => {
@@ -209,26 +204,55 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
         resolve();
       });
     });
+    if (!pending || pendingRequestId !== requestId) return;
+    if (deps.getDocumentId() !== documentId) {
+      clearPending();
+      if (notifySameOrigin) notifyPeersComplete(requestId, false);
+      postMeta({
+        v: 1,
+        type: 'handoff-complete',
+        documentId,
+        requestId,
+        ok: false,
+        at: Date.now(),
+      });
+      return;
+    }
     const caret = pendingCaret;
+    // Keep pending=true so keystrokes during acquire/reread stay buffered.
+    clearTimeout(yieldTimer);
+    yieldTimer = undefined;
+
+    const ok = await deps.takeOver({ documentId, snapshot, caret, steal });
+    if (!pending || pendingRequestId !== requestId) {
+      if (notifySameOrigin) notifyPeersComplete(requestId, false);
+      postMeta({
+        v: 1,
+        type: 'handoff-complete',
+        documentId,
+        requestId,
+        ok: false,
+        at: Date.now(),
+      });
+      return;
+    }
+    const stillSameDoc = deps.getDocumentId() === documentId;
     const inserts = buffer.slice();
     clearPending();
-    buffer = inserts;
-    const ok = await deps.takeOver({ snapshot, caret, steal });
-    if (notifySameOrigin) notifyPeersComplete(requestId, ok);
+    const succeeded = ok && stillSameDoc;
+    if (notifySameOrigin) notifyPeersComplete(requestId, succeeded);
     postMeta({
       v: 1,
       type: 'handoff-complete',
-      documentId: deps.getDocumentId(),
+      documentId,
       requestId,
-      ok,
+      ok: succeeded,
       at: Date.now(),
     });
-    if (ok) {
-      applyBuffer();
+    if (succeeded) {
+      applyBuffer(inserts);
       deps.hideEditHere?.();
       deps.announce('You can edit this document in this window now.');
-    } else {
-      buffer = [];
     }
   };
 
@@ -238,13 +262,14 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
     if (deps.field.disabled) return;
 
+    const documentId = deps.getDocumentId();
     pending = true;
+    pendingDocumentId = documentId;
     pendingCaret = readHandoffCaret(deps.field);
     pendingRequestId = crypto.randomUUID();
     buffer = [];
     deps.hideEditHere?.();
 
-    const documentId = deps.getDocumentId();
     const request = {
       documentId,
       fromInstanceId: deps.instanceId,
@@ -252,15 +277,19 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     };
 
     if (options.steal) {
-      await finishTakeover(undefined, true, request.requestId, false);
+      await finishTakeover(undefined, true, request.requestId, documentId, false);
       return;
     }
 
     // Prefer same-origin in-tab yield (may carry unsaved text in memory).
     const local = await requestSameOriginYield(request);
     if (!pending || pendingRequestId !== request.requestId) return;
+    if (deps.getDocumentId() !== documentId) {
+      clearPending();
+      return;
+    }
     if (local?.status === 'released') {
-      await finishTakeover(local.snapshot, false, request.requestId, true);
+      await finishTakeover(local.snapshot, false, request.requestId, documentId, true);
       return;
     }
     if (local?.status === 'refused') {
@@ -286,6 +315,10 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
 
     yieldTimer = setTimeout(() => {
       if (!pending || pendingRequestId !== request.requestId) return;
+      if (deps.getDocumentId() !== documentId) {
+        clearPending();
+        return;
+      }
       clearPending();
       // Never auto-steal — ask the user; unsaved text in an old/suspended tab must not vanish silently.
       deps.showEditHere('unresponsive');
@@ -393,8 +426,9 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
 
     if (!pending) return;
     if (message.requestId !== pendingRequestId) return;
+    if (message.documentId !== pendingDocumentId) return;
     if (message.type === 'handoff-released' && message.toInstanceId === deps.instanceId) {
-      void finishTakeover(undefined, false, message.requestId, false);
+      void finishTakeover(undefined, false, message.requestId, pendingDocumentId, false);
       return;
     }
     if (message.type === 'handoff-refused' && message.toInstanceId === deps.instanceId) {
@@ -437,10 +471,13 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     const data = event.data;
     if (typeof data === 'string' && data.length > 0) {
       event.preventDefault();
-      buffer.push({ text: data });
+      buffer.push({
+        kind: event.inputType === 'insertFromPaste' ? 'paste' : 'type',
+        text: data,
+      });
     } else if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') {
       event.preventDefault();
-      buffer.push({ text: '\n' });
+      buffer.push({ kind: 'break', text: '\n' });
     } else {
       event.preventDefault();
     }
@@ -450,7 +487,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     if (!pending) return;
     event.preventDefault();
     const text = event.clipboardData?.getData('text/plain');
-    if (text) buffer.push({ text });
+    if (text) buffer.push({ kind: 'paste', text });
   };
 
   deps.field.addEventListener('pointerdown', onPointerDown);
@@ -476,6 +513,23 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     hooks,
     pending: () => pending,
     requestHandoff: (options) => { void startRequest(options); },
+    cancel: () => {
+      if (!pending) return;
+      const requestId = pendingRequestId;
+      const documentId = pendingDocumentId;
+      clearPending();
+      if (requestId && documentId) {
+        notifyPeersComplete(requestId, false);
+        postMeta({
+          v: 1,
+          type: 'handoff-complete',
+          documentId,
+          requestId,
+          ok: false,
+          at: Date.now(),
+        });
+      }
+    },
     dispose: () => {
       disposed = true;
       clearPending();
