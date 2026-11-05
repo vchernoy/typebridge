@@ -1005,10 +1005,9 @@ body:not(.host-page) .settings-host-only {
 }
 
 /* #175 step 7–8: Settings + document title live on the host; keep embed chrome clean.
-   In-page split / comparison are redundant with host windows (removed in step 10). */
+   Comparison window entry is redundant with host windows (in-page split removed in step 10). */
 html[data-embed="1"] #settings-open,
 html[data-embed="1"] #settings-panel,
-html[data-embed="1"] #toggle-split,
 html[data-embed="1"] #open-comparison,
 html[data-embed="1"] .brand,
 html[data-embed="1"] #draft-title {
