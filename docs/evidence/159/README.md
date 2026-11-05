@@ -1,6 +1,6 @@
 # #159 S6 verification evidence
 
-Honest matrix for the in-tab split workspace (S1–S5b on `main`). This folder records what was run and what was **not**. It does not close #159 by itself.
+Honest matrix for the in-tab split workspace slices on `main` (S1–S5b merged; S2 and delayed-command coverage still partial). This folder is **S6 evidence packaging** (#172), not full S6 acceptance. It records what was run and what was **not**. It does not close #159.
 
 ## Automated Playwright matrix (agent VM)
 
@@ -40,11 +40,13 @@ The following were **not** performed in this S6 pass. Do not treat CI or these s
 
 Record device/browser/AT versions and concrete results on #159 (or #11) when those sessions happen.
 
-## Remaining product gaps (not S6 failures)
+## Remaining product gaps (not packaging failures)
 
-Tracked separately; S6 does not claim them done:
+Tracked separately; #172 does not claim them done:
 
+- Broader delayed-command `CommandGeneration` revalidation (S5b only guarded switch-discard + versionchange-B paths; Clear was S5a).
 - S2 primary `DocumentSession` extraction out of `main.ts` is still partial (#166 / ADR).
 - New document / Import targeting pane B.
+- Full S6: real-device / IME / AT / production smoke sessions.
 - Cross-window Edit here (#164 draft) remains deferred.
 - Broader #48 editor-list refresh and related preference signals.

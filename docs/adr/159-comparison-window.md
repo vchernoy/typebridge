@@ -1,6 +1,6 @@
 # ADR: Split workspace and editing ownership (#159)
 
-Status: **Clarified goal — two document panes in one browser tab** (maintainer, Nov 2026). **W1–W4 foundation preserved** (routing, separate-window read-only companion, saved-version signals, per-document Web Lock + fence). **S1–S5b shipped** (ADR, workspace shell, same-doc live split, dual-document panes, local Edit in this pane, delayed-command / versionchange hardening). **S6** records verification evidence and honest limits in [`docs/evidence/159/`](../evidence/159/). **Cross-window Edit here (old W5/W6) deferred** — PR [#164](https://github.com/vchernoy/typebridge/pull/164) is draft and must not merge for that goal; its branch and review history (including the stale requester/`viewGeneration` finding) stay recorded. Revised sequential plan **S1–S6** below. Does **not** close #159, #48, #40, #37 or #7 until remaining partials and real-device/AT evidence are recorded.
+Status: **Clarified goal — two document panes in one browser tab** (maintainer, Nov 2026). **W1–W4 foundation preserved** (routing, separate-window read-only companion, saved-version signals, per-document Web Lock + fence). **S1–S5b on main as merged slices** — S1 ADR; S2 workspace shell (**partial** — primary persist still in `main.ts`); S3 same-doc live split; S4 dual-document panes; S5a local Edit in this pane; S5b versionchange-B parity + switch-discard generation guard (not every delayed toolbar path). **S6 evidence packaging** (#172) records automated matrix limits in [`docs/evidence/159/`](../evidence/159/) — **not** full S6 acceptance (no real-device/IME/AT/production smoke). **Cross-window Edit here (old W5/W6) deferred** — PR [#164](https://github.com/vchernoy/typebridge/pull/164) is draft and must not merge for that goal; its branch and review history (including the stale requester/`viewGeneration` finding) stay recorded. Revised sequential plan **S1–S6** below. Does **not** close #159, #48, #40, #37 or #7.
 
 ## Context (audit of current code — post W1–W4)
 
@@ -312,8 +312,8 @@ Status: This saved document is no longer available.
 | **S3** (done #167) | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
 | **S4** (done #169) | Two different editable documents | Independent sessions, locks, Undo, switch/close; dual unload/pending/reconcile |
 | **S5a** (done #170) | Local Edit in this pane | Transfer, IME/transition/open-busy guards, close parking |
-| **S5b** (done #171) | Lifecycle / delayed-command hardening | Generation-guarded delayed commands; versionchange B parity |
-| **S6** (this PR) | Verification, docs, evidence | Split Playwright matrix (Chromium/Firefox/WebKit); layout screenshots; explicit non-claims for real device/IME/AT |
+| **S5b** (partial #171) | Lifecycle hardening (narrow) | Versionchange B parity; switch-discard `sessionPersistStillCurrent` revalidation. Broader delayed-command `CommandGeneration` coverage still open |
+| **S6** (partial #172) | Verification packaging | Split Playwright matrix note + layout screenshots + explicit non-claims. Full S6 (real device/IME/AT/production) still open |
 
 Playwright: Chromium, Firefox, WebKit. Multi-page tests remain for W2–W4 cross-window behavior; S3–S5 add in-tab multi-pane coverage. Real devices / IME / AT = manual evidence only.
 
@@ -442,22 +442,23 @@ Shipped in #170: same-document **Edit in this pane** moves the editable role bet
 
 ## S5b implementation notes
 
-Shipped in #171: finish lifecycle hardening called out after S5a.
+Shipped in #171: **narrow** lifecycle hardening after S5a — not full S5 completion.
 
 - **Versionchange parity:** pane B releases ownership like primary but stays editable in memory for copy/export (S4 P2).
+- **B save indicator / blocked-B clear:** interrupted autosave and storage-upgrade paths from #171.
 - **Switch discard:** revalidates `sessionPersistStillCurrent` + content revision after the discard dialog so a mid-dialog document-identity change cannot silently drop the wrong session.
-- **Delayed commands:** generation/content-revision revalidation on remaining async toolbar/document paths covered by the S5b PR.
-- **Still deferred after S5b:** full primary DocumentSession extraction; New/Import targeting pane B; real-device/IME/AT sessions (S6 records limits, does not invent passes).
+- **Not claimed in #171:** generation guards on every remaining delayed toolbar/document path (Clear already guarded in S5a; broader Convert/Replace/Import/Delete/etc. revalidation remains open).
+- **Still deferred:** full primary DocumentSession extraction (S2); New/Import targeting pane B; real-device/IME/AT (S6).
 
 ## S6 implementation notes
 
-Shipped in this PR: verification packaging only — no intentional runtime behavior change.
+Merged in #172 as **evidence packaging only** — not full S6 acceptance. No intentional runtime behavior change.
 
-- **Automated matrix:** `e2e/split-pane.spec.ts` + `e2e/split-dual-document.spec.ts` on Chromium, Firefox and WebKit — **147 passed** on the agent VM (2026-11-05 UTC). Final-head CI on this PR is the merge gate.
-- **Screenshots:** light/dark desktop (1280×800) and narrow stacked (390×844) under [`docs/evidence/159/`](../evidence/159/); capture helper `scripts/capture-159-evidence.mjs`.
-- **Docs:** this ADR slice map, [ROADMAP](../ROADMAP.md), [ARCHITECTURE](../ARCHITECTURE.md), [UI](../UI.md) reconciled to S1–S5b + S6 evidence.
-- **Explicit non-claims:** no real phone/tablet, production Pages smoke, real IME, or screen-reader session in this pass. See the evidence README. Do not mark #11 / production-verified shipping from CI alone.
-- **Remaining on #159 (not closed by S6):** S2 primary pipeline extraction; New/Import → pane B; deferred #164; carry-forwards (#48 list refresh, W4 BFCache notes) unless separately verified.
+- **Automated matrix (agent VM):** `e2e/split-pane.spec.ts` + `e2e/split-dual-document.spec.ts` on Chromium, Firefox and WebKit — reported **147 passed** (2026-11-05 UTC). Independent review did not re-execute that VM run; merge gate was final-head CI378.
+- **Screenshots:** light/dark desktop (1280×800) and narrow stacked (390×844) under [`docs/evidence/159/`](../evidence/159/); capture helper `scripts/capture-159-evidence.mjs` (synthetic Chromium viewports).
+- **Docs:** ADR/ROADMAP/ARCHITECTURE/UI pointed at evidence; wording must not imply S2 or full S5 completion.
+- **Explicit non-claims:** no real phone/tablet, production Pages smoke, real IME, or screen-reader session. See the evidence README. Do not mark #11 / production-verified shipping from CI alone.
+- **Remaining on #159:** broader delayed-command guards; S2 primary pipeline extraction; New/Import → pane B; full S6 manual evidence; deferred #164; carry-forwards (#48 list refresh, W4 BFCache notes) unless separately verified.
 
 ## Implementation notes for later work
 
