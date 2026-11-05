@@ -281,7 +281,6 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     frame.dataset.windowId = win.id;
     frame.title = `TypeBridge editor ${win.id}`;
     frame.allow = 'clipboard-read; clipboard-write';
-    frame.src = deps.editorSrc(win.id, win.documentId);
 
     const handles: Array<[string, string]> = [
       ['n', 'top'],
@@ -313,20 +312,34 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     // Iframe pointer/focus events do not bubble to the shell. Wire same-origin
     // content so clicking or focusing the editor still raises the window.
     const activateFromIframe = (): void => { setActive(win.id); };
-    frame.addEventListener('load', () => {
+    const wireFrame = (): void => {
       try {
         const doc = frame.contentDocument;
         if (!doc) return;
         doc.addEventListener('pointerdown', activateFromIframe);
         doc.addEventListener('focusin', activateFromIframe);
-        if (hostFocus) {
+        if (!hostFocus) return;
+        // Hooks register at the end of the editor boot — retry briefly after load.
+        let attempts = 0;
+        const syncFocus = (): void => {
           const hooks = frame.contentWindow as (Window & {
             __typebridgeSetFocusMode?: (on: boolean) => void;
           }) | null;
-          hooks?.__typebridgeSetFocusMode?.(win.id === activeId);
-        }
+          if (hooks?.__typebridgeSetFocusMode) {
+            hooks.__typebridgeSetFocusMode(win.id === activeId);
+            return;
+          }
+          if (attempts++ < 40) window.setTimeout(syncFocus, 50);
+        };
+        syncFocus();
       } catch { /* Unexpected cross-origin — chrome-only activation remains. */ }
-    });
+    };
+    frame.addEventListener('load', wireFrame);
+    frame.src = deps.editorSrc(win.id, win.documentId);
+    // Cached navigations may complete before the listener is attached.
+    try {
+      if (frame.contentDocument?.readyState === 'complete') wireFrame();
+    } catch { /* Ignore. */ }
 
     moveHandle.addEventListener('pointerdown', event => {
       event.preventDefault();

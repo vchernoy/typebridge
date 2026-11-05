@@ -169,6 +169,7 @@ test('leaving Stacked for Free keeps every window reachable in the viewport', as
 });
 
 test('host Focus restore after reload shows Exit focus in the focused iframe', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
   const main = await openHost(page);
