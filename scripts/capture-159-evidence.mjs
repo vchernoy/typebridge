@@ -5,6 +5,7 @@
 import { chromium } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,8 +39,8 @@ for (const shot of shots) {
     fullPage: false,
   });
   await context.close();
-  console.log(`wrote ${shot.name}.png`);
+  process.stdout.write(`wrote ${shot.name}.png\n`);
 }
 
 await browser.close();
-console.log(`Wrote screenshots under ${outDir}`);
+process.stdout.write(`Wrote screenshots under ${outDir}\n`);
