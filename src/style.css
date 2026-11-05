@@ -748,9 +748,6 @@ body.focus-mode .bottom {
 #editor-b {
   width: 100%;
 }
-.editor-split[data-split="off"] #editor {
-  margin-bottom: 0;
-}
 /* Drawn corner grip (#70): iOS Safari never shows the native textarea grip.
    The touch target reaches outside the editor so that, inside it, it covers
    only the bottom padding strip (16 px padding + 1 px border), never text at
