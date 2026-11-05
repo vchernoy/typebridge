@@ -739,3 +739,41 @@ test('storage upgrade keeps pane B editable in memory for copy/export', async ({
   await expect(page.locator('#editor-b')).toHaveValue('Primary body unsaved');
   await expect(page.locator('#save-indicator-b')).toHaveText('Save failed');
 });
+
+test('storage upgrade unfreezes a previously blocked pane B', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await setAutosave(page, true);
+  const sharedId = await saveNamed(page, 'Shared blocked', 'Shared');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Local primary', 'Local');
+
+  const owner = await context.newPage();
+  await owner.goto('/');
+  await expect(owner.locator('#editor')).toBeEnabled();
+  await selectDocument(owner, sharedId);
+  await expect(owner.locator('html')).toHaveAttribute('data-role', 'editor');
+
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(sharedId);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
+  await expect(page.locator('#save-indicator-b')).toHaveText('Read-only');
+
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      IDBObjectStore.prototype.put = put;
+      const db = this.transaction.db;
+      const result = put.apply(this, args);
+      db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 2, newVersion: 3 }));
+      return result;
+    };
+  });
+  await page.locator('#editor').pressSequentially('!');
+  await expect(page.locator('#status')).toContainText('Storage was upgraded in another tab');
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#draft-title-b')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#save-indicator-b')).toHaveText('Save failed');
+  await owner.close();
+});

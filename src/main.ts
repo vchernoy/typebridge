@@ -2423,6 +2423,9 @@ function handleDatabaseUpgrade(): void {
     // user can still copy/export unsaved pane-B text after storage dies (#159 S4 P2).
     secondary.editBlock = '';
     void secondaryOwnership?.release();
+    // applyEditAccess skips dual-doc companion setReadOnly; clear a prior busy/lost gate.
+    companionEditor.setReadOnly(false);
+    titleEditorB.setReadOnly(false);
   }
   db = undefined;
   storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
