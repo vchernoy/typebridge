@@ -3439,6 +3439,18 @@ function clearPendingBackups(): void {
 function commitWindowClose(): void {
   suppressPendingBackup = true;
   clearPendingBackups();
+  // Confirmed discard must forget this window's emergency journals so another
+  // window's recovery poll does not re-offer text the user chose to discard.
+  const discardedJournal = currentJournal;
+  const discardedSecondary = currentJournalSecondary;
+  currentJournal = undefined;
+  currentJournalSecondary = undefined;
+  if (discardedJournal) {
+    try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
+  }
+  if (discardedSecondary) {
+    try { clearRecovery(localStorage, discardedSecondary); } catch { /* Optional backup. */ }
+  }
 }
 
 async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {

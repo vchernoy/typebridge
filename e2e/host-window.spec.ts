@@ -406,6 +406,12 @@ test('discarded close after save failure does not revive text under a reused id'
   await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
   await second.locator('#editor').fill('Discarded after failed save');
   await expect(second.locator('#save-indicator')).toHaveText('Save failed');
+  await expect.poll(() => page.evaluate(() =>
+    Object.keys(localStorage).some(key =>
+      key.startsWith('typebridge.recovery.v1.')
+      && (localStorage.getItem(key) ?? '').includes('Discarded after failed save'),
+    ),
+  )).toBe(true);
 
   await secondShell.locator('.host-window-close').click();
   const dialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
@@ -413,6 +419,12 @@ test('discarded close after save failure does not revive text under a reused id'
   await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
   await expect(page.locator('.host-window')).toHaveCount(1);
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
+  expect(await page.evaluate(() =>
+    Object.keys(localStorage).filter(key =>
+      key.startsWith('typebridge.recovery.v1.')
+      && (localStorage.getItem(key) ?? '').includes('Discarded after failed save'),
+    ),
+  )).toEqual([]);
 
   await page.getByRole('button', { name: 'New window' }).click();
   const revived = page.frameLocator('.host-window[data-window-id="w2"] iframe');
@@ -420,6 +432,7 @@ test('discarded close after save failure does not revive text under a reused id'
   // Must not revive the discarded unsaved text (a prior successful save may still exist).
   await expect(revived.locator('#editor')).not.toHaveValue('Discarded after failed save');
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
+  await expect(revived.getByRole('button', { name: /Recover / })).toHaveCount(0);
 });
 
 test('resize keeps the dragged size instead of snapping to a half', async ({ page }) => {
