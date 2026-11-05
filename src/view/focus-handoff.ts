@@ -41,6 +41,11 @@ export type FocusHandoffDeps = {
   saveFailed: () => boolean;
   isDirty: () => boolean;
   autosaveOn: () => boolean;
+  /**
+   * When this window still holds unsaved text after a prior loss, ask before starting
+   * a handoff that will replace it with the owner's state. Return false to abort.
+   */
+  confirmDiscardDirtyForHandoff: () => Promise<boolean>;
   /** Flush Autosave when on; no-op when off. */
   flushSave: () => Promise<void>;
   captureSnapshot: () => HandoffSnapshot;
@@ -264,6 +269,14 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     const block = deps.editBlock();
     if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
     if (deps.field.disabled) return;
+
+    // Dirty after loseOwnership: consent before requesting so we never silently drop private text.
+    if (deps.isDirty()) {
+      const discard = await deps.confirmDiscardDirtyForHandoff();
+      if (!discard || disposed) return;
+      // Re-check after the dialog — user may have navigated or ownership may have changed.
+      if (deps.editBlock() !== 'busy' && deps.editBlock() !== 'lost' && deps.editBlock() !== 'error') return;
+    }
 
     const documentId = deps.getDocumentId();
     pending = true;

@@ -220,3 +220,15 @@ test('programmatic focus alone does not take ownership', async ({ page }) => {
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
 });
+
+test('Tab leaves a read-only editor without starting handoff', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta } = await openSharedDocument(page);
+
+  await beta.locator('#editor').focus();
+  await expect(beta.locator('#editor')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(beta.locator('#editor')).not.toBeFocused();
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
+});

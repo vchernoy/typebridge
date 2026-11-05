@@ -1871,25 +1871,8 @@ async function takeOverFromHandoff(input: {
       unfreezeEditorsAfterTransition();
       return false;
     }
-    // Requester may still hold private text after a prior loseOwnership — never replace or
-    // skip-reread silently.
-    if (workspace.dirty()) {
-      const replace = !!input.snapshot;
-      const confirmed = await askConfirmChoice({
-        title: replace ? 'Replace unsaved text here?' : 'Keep unsaved text here?',
-        message: replace
-          ? 'This window still has unsaved changes. Taking editing from the other window replaces them with that window’s text. Copy or export first if you need them.'
-          : 'This window still has unsaved changes. Edit here keeps them and does not load the latest saved copy.',
-        confirmLabel: replace ? 'Replace and edit here' : 'Keep unsaved and edit',
-        cancelLabel: 'Cancel',
-        returnFocus: field,
-      });
-      if (!confirmed || active.id !== input.documentId) {
-        void access.ownership.release();
-        unfreezeEditorsAfterTransition();
-        return false;
-      }
-    }
+    // After consent (before the request), always install the owner's state — never keep
+    // this window's prior dirty text across a successful takeover.
     if (input.snapshot) {
       writingPosition.save();
       active = {
@@ -1916,9 +1899,14 @@ async function takeOverFromHandoff(input: {
         autosave.checked = false;
         updateSaveIndicator();
       }
-    } else if (!workspace.dirty()) {
+    } else {
       try {
         const fresh = await getStoredDraft(db, input.documentId);
+        if (fresh === undefined) {
+          void access.ownership.release();
+          unfreezeEditorsAfterTransition();
+          return false;
+        }
         if (fresh) {
           writingPosition.save();
           active = fresh;
@@ -3168,6 +3156,34 @@ if (!viewMode) {
     saveFailed: () => saveFailed,
     isDirty: () => workspace.dirty(),
     autosaveOn: () => autosave.checked,
+    confirmDiscardDirtyForHandoff: async () => {
+      const discard = await askConfirmChoice({
+        title: 'Discard unsaved changes?',
+        message: editBlock
+          ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).'
+          : 'Copy or export unsaved changes first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).',
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing',
+        returnFocus: field,
+      });
+      if (!discard) return false;
+      // Apply the discard immediately (same as the switch path) so a failed takeover
+      // cannot resurrect the private text the user already agreed to drop.
+      if (db) {
+        try {
+          const fresh = await getStoredDraft(db, active.id);
+          if (fresh) {
+            writingPosition.save();
+            active = fresh;
+            showDraft();
+            workspace.setDirty(false);
+          }
+        } catch { /* Keep editing; takeover will reread under the new fence. */ }
+      }
+      applyEditAccess();
+      showSaveState();
+      return true;
+    },
     flushSave: async () => { await persist(); },
     captureSnapshot: captureHandoffSnapshot,
     beginParkFreeze,
