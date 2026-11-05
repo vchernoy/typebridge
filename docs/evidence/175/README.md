@@ -21,11 +21,11 @@ npx playwright test \
   --project=chromium --project=firefox --project=webkit
 ```
 
-Step-11 must-ship a11y (F6 cycle, named regions, Escape Settings-over-Find) lives in `e2e/host-a11y-windows.spec.ts`. Prefer Chromium for local iteration; CI still runs the three-engine matrix on PRs.
+Step-11 must-ship a11y (F6 cycle, named regions, Escape Settings-over-Find, Focus F6 maximize/close restore, title/chrome cycle origin, reload z-order) lives in `e2e/host-a11y-windows.spec.ts` (**10** tests). Prefer Chromium for local iteration; CI still runs the three-engine matrix on PRs.
 
 | Date (UTC) | Host | Result |
 | --- | --- | --- |
-| 2026-11-05 | Cursor cloud agent VM | **26 passed** Chromium (~8 s): `host-a11y-windows` (4) + `host-window` + `host-layout-mode` smoke. Full three-engine matrix is CI’s job on the PR. |
+| 2026-11-05 | Cursor cloud agent VM | **32 passed** Chromium (~10 s) on head `e5dc793`: `host-a11y-windows` (10) + `host-window` (17) + `host-layout-mode` (5). Full three-engine matrix is CI’s job on the PR. |
 
 ## Acceptance 1–10 mapped to suites
 
@@ -44,7 +44,7 @@ From the [#175](https://github.com/vchernoy/typebridge/issues/175) acceptance li
 | 9 | Phone stacked (390 / 320), height grip, no horizontal overflow | Covered (synthetic viewport) | `host-layout-mode` — not a physical phone |
 | 10 | Unique IDs/labels per window; announcements not duplicated | Covered (partial live-region depth) | `host-a11y-windows` (regions + titles), `document-names`, `window-identity` |
 
-Step-11 extras (must-ship a11y, not numbered in 1–10): **F6** cycles windows (`host-a11y-windows`), including from the host title and while host Focus is on (next window is maximized); host shells are **`role="region"`** with `aria-label` = document title and `aria-current` on the active shell; Escape closes host Settings before Find when both are open; F6 is ignored while a confirm modal is open.
+Step-11 extras (must-ship a11y, not numbered in 1–10): **F6** cycles windows (`host-a11y-windows`), including from the host title / move handle and while host Focus is on (next window maximized; non-active restored from pre-Focus geometry; Focus-close restores tiled rects); host shells are **`role="region"`** with `aria-label` = document title and `aria-current` on the active shell; Escape closes host Settings before Find when both are open; F6 is ignored while a confirm modal is open; reload keeps the front window’s z-order.
 
 ## Layout screenshots (synthetic viewports)
 
