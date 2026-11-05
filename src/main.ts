@@ -3755,8 +3755,18 @@ if (embedded) {
   hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
   hooks.__typebridgeApplyPrefs = (name, origin) => {
     if (origin && origin === `window:${windowId ?? 'main'}`) return;
-    // Re-dispatch locally so every module listener (rules, appearance, …) runs.
-    // main.ts's onPrefsChanged → applyPrefs covers autosave/tabIndent/reset layout.
-    window.dispatchEvent(new CustomEvent(PREFS_EVENT, { detail: { name, origin } }));
+    // Re-dispatch in this window with iframe-local primitives so every module
+    // listener runs (rules, appearance, …). Avoid host-realm detail objects.
+    window.dispatchEvent(new CustomEvent(PREFS_EVENT, {
+      detail: {
+        name: String(name) as PrefName,
+        origin: origin !== undefined ? String(origin) : undefined,
+      },
+    }));
   };
+  // Catch prefs the host broadcast before this iframe finished booting.
+  syncAutosaveCheckboxFromStorage();
+  try { applyTabIndentFromStorage(); } catch { /* optional */ }
+  try { appearanceSettings.applyFromStorage(); } catch { /* optional */ }
+  try { typingSettings.applyFromStorage(); } catch { /* optional */ }
 }

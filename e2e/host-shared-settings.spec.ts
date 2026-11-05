@@ -1,5 +1,5 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
-import { setHostAutosave } from './settings-helpers';
+import { fillHostEditor, setHostAutosave } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 
 /** #175 step 7: one host Settings panel; prefs apply live to every window. */
@@ -46,7 +46,7 @@ test('host Settings appearance and typing mode apply to every window', async ({ 
   await main.locator('.mode-switch .mode-side').first().click();
   await expect(main.locator('#enabled')).not.toBeChecked();
   await expect.poll(async () => second.locator('#enabled').isChecked()).toBe(false);
-  await second.locator('#draft-title').fill('');
+  await fillHostEditor(second, '', '#draft-title');
   await second.locator('#draft-title').pressSequentially('w');
   await expect(second.locator('#draft-title')).toHaveValue('w');
 });
@@ -94,7 +94,7 @@ test('host Autosave on persists unsaved text in every window', async ({ page }) 
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
   await setHostAutosave(page, false);
-  await second.locator('#editor').fill('Shared autosave flush');
+  await fillHostEditor(second, 'Shared autosave flush');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
 
   await setHostAutosave(page, true);
@@ -122,7 +122,7 @@ test('host Autosave on persists unsaved text in every window', async ({ page }) 
   })).toBe('Shared autosave flush');
 
   await setHostAutosave(page, false);
-  await second.locator('#editor').fill('Private again');
+  await fillHostEditor(second, 'Private again');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
   await expect.poll(async () => page.evaluate(() => localStorage.getItem('typebridge.autosave.v1'))).toBe('off');
 });
@@ -132,7 +132,7 @@ test('host Autosave off updates a read-only window checkbox', async ({ page }) =
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
   const main = await openHost(page);
-  await main.locator('#editor').fill('Shared before privacy');
+  await fillHostEditor(main, 'Shared before privacy');
   await expect(main.locator('#save-indicator')).toHaveText('Saved');
   await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === 'Shared before privacy')).toBe(true);
   const docId = (await readStoredDocs(page)).find(row => row.text === 'Shared before privacy')!.id;
@@ -196,7 +196,7 @@ test('closing a window does not leave a prefs listener that resurrects discarded
   });
   const mainShell = page.locator('.host-window[data-window-id="main"]');
   const main = await openHost(page);
-  await main.locator('#editor').fill('private text that must stay discarded');
+  await fillHostEditor(main, 'private text that must stay discarded');
   await expect(main.locator('#save-indicator')).toHaveText('Not saved');
   await page.getByRole('button', { name: 'New window' }).click();
   await expect(page.locator('.host-window')).toHaveCount(2);
