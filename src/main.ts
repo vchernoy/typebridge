@@ -462,16 +462,17 @@ function updateCaretPosition(): void {
   const { line, column } = lineColumnAtOffset(surface.value, surface.selectionStart);
   caretPosition.textContent = `Ln ${line}, Col ${column}`;
 }
-field.addEventListener('focus', () => {
-  workspace.setActivePane(PRIMARY_PANE_ID);
+/** Switch the active pane; refresh Find totals only when the target pane changes. */
+function activatePane(paneId: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID): void {
+  const previous = workspace.activePaneId();
+  workspace.setActivePane(paneId);
   syncMutationControls();
   updateStats();
-});
-companionField.addEventListener('focus', () => {
-  workspace.setActivePane(SECOND_PANE_ID);
-  syncMutationControls();
-  updateStats();
-});
+  // Same-pane refocus (e.g. Replace all returning to the editor) must keep "Replaced N".
+  if (previous !== paneId) showMatchCount();
+}
+field.addEventListener('focus', () => { activatePane(PRIMARY_PANE_ID); });
+companionField.addEventListener('focus', () => { activatePane(SECOND_PANE_ID); });
 // Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
 // "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
 // outdent moves focus as usual.
@@ -552,9 +553,6 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
     matchSurfaces: [field, companionField],
   },
 );
-// Find totals follow getFindTarget; refresh when the active pane changes.
-field.addEventListener('focus', showMatchCount);
-companionField.addEventListener('focus', showMatchCount);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
 // Find and Go to line open on demand (#123): from their toolbar buttons or with
@@ -1673,19 +1671,13 @@ companionField.addEventListener('historychange', () => {
 });
 draftTitleB.addEventListener('focus', () => {
   if (!dualDocumentSplit()) return;
-  workspace.setActivePane(SECOND_PANE_ID);
-  syncMutationControls();
-  updateStats();
-  showMatchCount();
+  activatePane(SECOND_PANE_ID);
 });
 draftTitleB.addEventListener('input', () => {
   if (dualDocumentSplit()) scheduleSaveSecondary(true);
 });
 draftTitle.addEventListener('focus', () => {
-  workspace.setActivePane(PRIMARY_PANE_ID);
-  syncMutationControls();
-  updateStats();
-  showMatchCount();
+  activatePane(PRIMARY_PANE_ID);
 });
 function syncTitleTooltip(): void {
   // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
