@@ -11,12 +11,12 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
    */
   mount?: HTMLElement;
   /**
-   * Element set `inert` while preparing a reload. Prefer the editor's
+   * Element(s) set `inert` while preparing a reload. Prefer the editor's
    * `main > section` (confirm dialogs append to `body`, so they stay usable).
-   * Pass a getter for the host so the surface is resolved inside the iframe
-   * after it loads. `null` skips freezing.
+   * Pass a getter for the host so surfaces are resolved inside each iframe
+   * after it loads. `null` / `[]` skips freezing. Arrays cover multi-window hosts (#175).
    */
-  freezeSurface?: HTMLElement | null | (() => HTMLElement | null);
+  freezeSurface?: HTMLElement | HTMLElement[] | null | (() => HTMLElement | HTMLElement[] | null);
 }): void {
   const workerContainer = navigator.serviceWorker;
   const notice = document.createElement('div');
@@ -36,10 +36,13 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   const defaultWorkspace = document.querySelector<HTMLElement>('main > section');
   if (deps.mount) deps.mount.prepend(notice);
   else defaultWorkspace?.before(notice);
-  function resolveFreezeSurface(): HTMLElement | null {
-    if (typeof deps.freezeSurface === 'function') return deps.freezeSurface();
-    if (deps.freezeSurface !== undefined) return deps.freezeSurface;
-    return deps.mount ?? defaultWorkspace ?? null;
+  function resolveFreezeSurfaces(): HTMLElement[] {
+    let value: HTMLElement | HTMLElement[] | null | undefined;
+    if (typeof deps.freezeSurface === 'function') value = deps.freezeSurface();
+    else if (deps.freezeSurface !== undefined) value = deps.freezeSurface;
+    else value = deps.mount ?? defaultWorkspace ?? null;
+    if (!value) return [];
+    return Array.isArray(value) ? value.filter(Boolean) : [value];
   }
   const DISMISSED = deps.dismissedKey ?? 'typebridge.updateNotice.dismissed.v1';
   let dismissed = false;
@@ -70,16 +73,16 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   notice.addEventListener('keydown', event => event.stopPropagation());
   reload.addEventListener('click', async () => {
     if (!waiting) return;
-    const workspace = resolveFreezeSurface();
-    const originalInert = workspace ? workspace.inert : false;
-    if (workspace) workspace.inert = true;
+    const workspaces = resolveFreezeSurfaces();
+    const originalInert = workspaces.map(workspace => workspace.inert);
+    for (const workspace of workspaces) workspace.inert = true;
     notice.tabIndex = -1;
     notice.focus();
     reload.disabled = dismiss.disabled = true;
     message.textContent = 'Preparing your work for reload…';
     let navigating = false;
     const restore = (): void => {
-      if (workspace) workspace.inert = originalInert;
+      workspaces.forEach((workspace, index) => { workspace.inert = originalInert[index] ?? false; });
       reload.disabled = dismiss.disabled = false;
       reload.focus({ preventScroll: true });
     };

@@ -23,6 +23,10 @@ function editorHooks(frame: HTMLIFrameElement): EditorHooks {
   return (frame.contentWindow ?? {}) as EditorHooks;
 }
 
+function editorFrames(): HTMLIFrameElement[] {
+  return [...root.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+}
+
 function editorWorkspace(frame: HTMLIFrameElement): HTMLElement | null {
   try {
     return frame.contentDocument?.querySelector<HTMLElement>('main > section') ?? null;
@@ -31,22 +35,20 @@ function editorWorkspace(frame: HTMLIFrameElement): HTMLElement | null {
   }
 }
 
-function readDocumentId(frame: HTMLIFrameElement): string | undefined {
-  const id = frame.dataset.windowId
-    ?? frame.closest<HTMLElement>('[data-window-id]')?.dataset.windowId;
-  if (!id) return undefined;
-  try {
-    const key = scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, id);
-    return sessionStorage.getItem(key) ?? undefined;
-  } catch {
-    return undefined;
-  }
+function allEditorWorkspaces(): HTMLElement[] {
+  return editorFrames()
+    .map(editorWorkspace)
+    .filter((el): el is HTMLElement => !!el);
 }
 
 const manager = installWindowManager({
   root,
   toolbar,
-  editorSrc: windowId => `/?window=${encodeURIComponent(windowId)}&embed=1`,
+  editorSrc: (windowId, documentId) => {
+    const params = new URLSearchParams({ window: windowId, embed: '1' });
+    if (documentId) params.set('doc', documentId);
+    return `/?${params.toString()}`;
+  },
   prepareClose: async frame => {
     const prepare = editorHooks(frame).__typebridgePrepareWindowClose
       ?? editorHooks(frame).__typebridgePrepareUpdateReload;
@@ -55,15 +57,13 @@ const manager = installWindowManager({
   },
   readDocumentId: frame => {
     const shell = frame.closest<HTMLElement>('[data-window-id]');
-    if (shell?.dataset.windowId) {
-      try {
-        return sessionStorage.getItem(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, shell.dataset.windowId))
-          ?? undefined;
-      } catch {
-        return undefined;
-      }
+    const id = shell?.dataset.windowId ?? frame.dataset.windowId;
+    if (!id) return undefined;
+    try {
+      return sessionStorage.getItem(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, id)) ?? undefined;
+    } catch {
+      return undefined;
     }
-    return readDocumentId(frame);
   },
 });
 
@@ -74,35 +74,35 @@ const manager = installWindowManager({
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
-      .then(registration => {
-        const primaryFrame = () => root.querySelector<HTMLIFrameElement>('iframe.host-editor');
-        return watchForUpdates(registration, {
-          mount: noticeMount,
-          freezeSurface: () => {
-            const frame = primaryFrame();
-            return frame ? editorWorkspace(frame) : null;
-          },
-          dismissedKey: 'typebridge.updateNotice.dismissed.v1',
-          prepareReload: async () => {
-            const frame = primaryFrame();
-            if (!frame) return false;
+      .then(registration => watchForUpdates(registration, {
+        mount: noticeMount,
+        // Freeze every window's editor section so multi-window private text is protected.
+        freezeSurface: () => allEditorWorkspaces(),
+        dismissedKey: 'typebridge.updateNotice.dismissed.v1',
+        prepareReload: async () => {
+          // Ask each window in turn so each Autosave-off dialog appears in its iframe.
+          for (const frame of editorFrames()) {
             const prepare = editorHooks(frame).__typebridgePrepareUpdateReload;
-            if (!prepare) return false;
-            return prepare();
-          },
-          reload: () => {
-            const frame = primaryFrame();
-            const assertSafe = frame && editorHooks(frame).__typebridgeAssertSafeUpdateReload;
+            if (!prepare) continue;
+            if (!await prepare()) return false;
+          }
+          return true;
+        },
+        reload: () => {
+          for (const frame of editorFrames()) {
+            const assertSafe = editorHooks(frame).__typebridgeAssertSafeUpdateReload;
             if (!assertSafe) throw new Error('Editor reload unavailable');
+            // Intentional throws ("Private edits changed", backup missing, busy) must abort.
             assertSafe();
-            window.location.reload();
-          },
-          cancelReload: () => {
-            const frame = primaryFrame();
-            if (frame) editorHooks(frame).__typebridgeCancelUpdateReload?.();
-          },
-        });
-      })
+          }
+          window.location.reload();
+        },
+        cancelReload: () => {
+          for (const frame of editorFrames()) {
+            editorHooks(frame).__typebridgeCancelUpdateReload?.();
+          }
+        },
+      }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
   });
 }

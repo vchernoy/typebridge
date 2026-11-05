@@ -122,6 +122,33 @@ test('New window tiles and persists two free windows', async ({ page }) => {
   await expect(restored.locator('#editor')).toHaveValue('Second window text');
 });
 
+test('update reload asks every window about private text', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await setAutosave(second as unknown as Page, false);
+  await second.locator('#editor').fill('Private only in second');
+  await expect(second.locator('#save-indicator')).toHaveText('Not saved');
+
+  const prepare = page.evaluate(async () => {
+    const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    for (const frame of frames) {
+      const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
+      const prepareOne = hooks.__typebridgePrepareUpdateReload;
+      if (!prepareOne) continue;
+      if (!await prepareOne()) return false;
+    }
+    return true;
+  });
+  const dialog = second.getByRole('dialog', { name: 'Reload without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Keep editing' }).click();
+  expect(await prepare).toBe(false);
+  await expect(second.locator('#editor')).toHaveValue('Private only in second');
+});
+
 test('closing a dirty Autosave-off window asks before removing it', async ({ page }) => {
   test.setTimeout(90_000);
   const editor = await openHost(page);

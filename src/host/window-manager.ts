@@ -24,8 +24,8 @@ import {
 export type WindowManagerDeps = {
   root: HTMLElement;
   toolbar: HTMLElement;
-  /** Build the iframe src for a window id (embed mode). */
-  editorSrc: (windowId: string) => string;
+  /** Build the iframe src for a window id (embed mode; may include saved document id). */
+  editorSrc: (windowId: string, documentId?: string) => string;
   storage?: Storage;
   /** Ask the iframe whether it is safe to close (unsaved/private prompts). */
   prepareClose: (frame: HTMLIFrameElement) => Promise<boolean>;
@@ -147,7 +147,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     frame.dataset.windowId = win.id;
     frame.title = `TypeBridge editor ${win.id}`;
     frame.allow = 'clipboard-read; clipboard-write';
-    frame.src = deps.editorSrc(win.id);
+    frame.src = deps.editorSrc(win.id, win.documentId);
 
     const handles: Array<[string, string]> = [
       ['n', 'top'],
@@ -195,22 +195,26 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     titleBar.addEventListener('keydown', event => {
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
-      const step = event.shiftKey ? KEYBOARD_MOVE_STEP_PX * 4 : KEYBOARD_MOVE_STEP_PX;
+      const step = event.shiftKey && !event.ctrlKey && !event.metaKey
+        ? KEYBOARD_MOVE_STEP_PX * 4
+        : KEYBOARD_MOVE_STEP_PX;
+      // Ctrl/⌘+Shift+Arrow resizes (avoid Alt+Arrow, which navigates history on Windows/Linux).
+      const resize = (event.ctrlKey || event.metaKey) && event.shiftKey;
       let next: WindowRect | undefined;
       if (event.key === 'ArrowLeft') {
-        next = event.altKey
+        next = resize
           ? { ...current, w: current.w - step }
           : { ...current, x: current.x - step };
       } else if (event.key === 'ArrowRight') {
-        next = event.altKey
+        next = resize
           ? { ...current, w: current.w + step }
           : { ...current, x: current.x + step };
       } else if (event.key === 'ArrowUp') {
-        next = event.altKey
+        next = resize
           ? { ...current, h: current.h - step }
           : { ...current, y: current.y - step };
       } else if (event.key === 'ArrowDown') {
-        next = event.altKey
+        next = resize
           ? { ...current, h: current.h + step }
           : { ...current, y: current.y + step };
       }
@@ -353,6 +357,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (layouts.length <= 1) return false;
       const frame = frames.get(id);
       if (frame) {
+        try {
+          if (frame.contentDocument && frame.contentDocument.readyState !== 'complete') {
+            return false;
+          }
+        } catch { /* Cross-origin unexpectedly — fall through to prepareClose. */ }
         const ok = await deps.prepareClose(frame);
         if (!ok) return false;
       }
@@ -360,6 +369,18 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       shells.delete(id);
       frames.delete(id);
       layouts = layouts.filter(win => win.id !== id);
+      // Drop this window's scoped session keys so a reused id cannot revive stale state.
+      try {
+        const marker = `::w:${id}`;
+        const writingMarker = `w:${id}.`;
+        const remove: string[] = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (!key) continue;
+          if (key.includes(marker) || key.includes(writingMarker)) remove.push(key);
+        }
+        for (const key of remove) sessionStorage.removeItem(key);
+      } catch { /* Blocked sessionStorage — layout still closes. */ }
       syncToolbar();
       persist();
       return true;
