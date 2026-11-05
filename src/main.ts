@@ -14,7 +14,13 @@ import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commi
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
-import { commandAllowedOnPane } from './view/session';
+import { commandAllowedOnPane, resolveSessionForDocument } from './view/session';
+import {
+  createBoundSession,
+  createSessionRegistry,
+  snapshotBoundSession,
+  type BoundSession,
+} from './view/bound-session';
 import { mirrorTextarea } from './view/mirror';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
@@ -86,15 +92,40 @@ setupKeyboardShortcuts();
 const editor = new Editor(field);
 const companionEditor = new Editor(companionField);
 companionEditor.setReadOnly(true);
+const draftTitleB = document.querySelector<HTMLInputElement>('#draft-title-b')!;
+const paneBDrafts = document.querySelector<HTMLSelectElement>('#pane-b-drafts')!;
+const saveIndicatorB = document.querySelector<HTMLElement>('#save-indicator-b')!;
+const companionBadge = document.querySelector<HTMLElement>('#companion-badge')!;
 if (viewMode) {
   editor.setReadOnly(true);
   workspace.setPaneRole('readonly');
 }
 
+/** Second independent document session when pane B shows a different document (#159 S4). */
+let secondary: BoundSession | undefined;
+let sessionRegistry: ReturnType<typeof createSessionRegistry> | undefined;
+
+function dualDocumentSplit(): boolean {
+  return !!secondary && secondary.draft.id !== active.id && workspace.splitOpen();
+}
+
 /** Keep the companion text current even while hidden so position restore uses the right length. */
 function mirrorCompanion(force = false): void {
   if (!force && !workspace.splitOpen()) return;
+  if (dualDocumentSplit()) return;
   mirrorTextarea(field, companionField);
+}
+
+function syncCompanionChrome(): void {
+  const dual = dualDocumentSplit();
+  companionBadge.hidden = dual;
+  draftTitleB.hidden = !dual;
+  saveIndicatorB.hidden = !dual;
+  paneBDrafts.hidden = !workspace.splitOpen() || viewMode;
+  if (!dual) {
+    companionBadge.textContent = 'Live view · Read-only';
+    draftTitleB.value = '';
+  }
 }
 
 const resizeGrip = document.querySelector<HTMLButtonElement>('#resize-editor')!;
@@ -114,8 +145,15 @@ const splitControls = setupSplitPane({
     // Grip still writes inline width while split forces width:100%; hide it until closed.
     resizeGrip.hidden = open;
     resizeGrip.tabIndex = open ? -1 : 0;
-    if (open) mirrorCompanion();
-    else workspace.setActivePane(PRIMARY_PANE_ID);
+    if (open) {
+      mirrorCompanion();
+      syncCompanionChrome();
+      renderPaneBDrafts();
+    } else {
+      void releaseSecondarySession();
+      workspace.setActivePane(PRIMARY_PANE_ID);
+      syncCompanionChrome();
+    }
     paneChrome.syncMutations();
   },
 });
@@ -300,12 +338,35 @@ const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
-/** Shared chrome mutates only the primary editable pane; refuse while the companion is active. */
+/** Active editable session for shared chrome (#159 S3/S4). */
+function activeEditableSession(): { paneId: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID; role: 'editable' | 'readonly'; editor: Editor; field: HTMLTextAreaElement; canUndo: boolean; canRedo: boolean } {
+  if (workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit() && secondary) {
+    const blocked = viewMode || secondary.editBlock !== '';
+    return {
+      paneId: SECOND_PANE_ID,
+      role: blocked ? 'readonly' : 'editable',
+      editor: secondary.editor,
+      field: secondary.field,
+      canUndo: secondary.editor.canUndo,
+      canRedo: secondary.editor.canRedo,
+    };
+  }
+  return {
+    paneId: PRIMARY_PANE_ID,
+    role: readOnlyNow() ? 'readonly' : 'editable',
+    editor,
+    field,
+    canUndo: editor.canUndo,
+    canRedo: editor.canRedo,
+  };
+}
+/** Shared chrome mutates the active editable pane; refuse while a same-doc companion is active. */
 function canMutatePrimary(): boolean {
+  const target = activeEditableSession();
   return commandAllowedOnPane({
     activePaneId: workspace.activePaneId(),
-    targetPaneId: PRIMARY_PANE_ID,
-    role: readOnlyNow() ? 'readonly' : 'editable',
+    targetPaneId: target.paneId,
+    role: target.role,
     mutatesDocument: true,
   });
 }
@@ -314,8 +375,9 @@ function syncMutationControls(): void {
   // temporarily re-enable controls to prove handlers still refuse mutations.
   if (viewMode) return;
   const blocked = !canMutatePrimary();
-  undo.disabled = blocked || !editor.canUndo;
-  redo.disabled = blocked || !editor.canRedo;
+  const target = activeEditableSession();
+  undo.disabled = blocked || !target.canUndo;
+  redo.disabled = blocked || !target.canRedo;
   for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
     document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
   }
@@ -323,12 +385,14 @@ function syncMutationControls(): void {
 const syncHistory = () => { syncMutationControls(); };
 paneChrome.syncMutations = syncMutationControls;
 field.addEventListener('historychange', syncHistory);
-for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
+for (const [button, kind] of [[undo, 'undo'], [redo, 'redo']] as const) {
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
     if (!canMutatePrimary()) return;
-    action();
-    field.focus({ preventScroll: true });
+    const target = activeEditableSession();
+    if (kind === 'undo') target.editor.undo();
+    else target.editor.redo();
+    target.field.focus({ preventScroll: true });
   });
 }
 syncHistory();
@@ -337,7 +401,8 @@ for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-la
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
     if (!canMutatePrimary()) return;
-    if (!editor.convertSelection(direction)) announceAction('Select text to convert');
+    const target = activeEditableSession();
+    if (!target.editor.convertSelection(direction)) announceAction('Select text to convert');
   });
 }
 field.addEventListener('keydown', event => {
@@ -347,6 +412,15 @@ field.addEventListener('keydown', event => {
   if (!canMutatePrimary() || field.selectionStart === field.selectionEnd) return;
   event.preventDefault();
   editor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
+});
+companionField.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+  if (!dualDocumentSplit()) return;
+  const key = event.key.toLowerCase();
+  if (key !== SHORTCUTS.convertCyrillic.key && key !== SHORTCUTS.convertLatin.key) return;
+  if (!canMutatePrimary() || companionField.selectionStart === companionField.selectionEnd) return;
+  event.preventDefault();
+  companionEditor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
 });
 function updateCaretPosition(): void {
   const surface = workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
@@ -400,8 +474,14 @@ document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', as
   catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
-  if (!canMutatePrimary() || !field.value) return;
-  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
+  if (!canMutatePrimary()) return;
+  const target = activeEditableSession();
+  if (!target.field.value) return;
+  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? target.field : document.querySelector<HTMLButtonElement>('#more-open')! })) {
+    target.editor.clear();
+    target.field.focus();
+    announceAction('Cleared');
+  }
 });
 
 
@@ -501,7 +581,7 @@ document.addEventListener('keydown', event => {
 });
 
 
-const resetRules = setupRules(() => [editor, findEditor, replaceEditor, titleEditor]);
+const resetRules = setupRules(() => [editor, companionEditor, findEditor, replaceEditor, titleEditor, titleEditorB]);
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 // One document list, in the ▾ menu; Focus mode shows the same title bar (#104).
@@ -511,10 +591,24 @@ const draftTitle = document.querySelector<HTMLInputElement>('#draft-title')!;
 const titleEditor = new Editor(draftTitle);
 titleEditor.setEnabled(enabled.checked);
 if (viewMode) titleEditor.setReadOnly(true);
-enabled.addEventListener('change', () => titleEditor.setEnabled(enabled.checked));
+enabled.addEventListener('change', () => {
+  titleEditor.setEnabled(enabled.checked);
+  titleEditorB.setEnabled(enabled.checked);
+});
+const titleEditorB = new Editor(draftTitleB);
+titleEditorB.setEnabled(enabled.checked);
+titleEditorB.setReadOnly(true);
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
+sessionRegistry = createSessionRegistry(createBoundSession({
+  sessionId: 'session-1',
+  editablePaneId: PRIMARY_PANE_ID,
+  draft: active,
+  editor,
+  field,
+  title: draftTitle,
+}));
 let drafts: StoredDraft[] = [];
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let saving: Promise<PersistResult> | undefined;
@@ -631,6 +725,208 @@ function renderDrafts(): void {
   }
   // Shown as a list inside the document menu: at least two rows, at most eight.
   draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
+  renderPaneBDrafts();
+}
+function renderPaneBDrafts(): void {
+  if (viewMode) return;
+  const selectedId = dualDocumentSplit() && secondary ? secondary.draft.id : active.id;
+  const displayTitle = dualDocumentSplit() && secondary
+    ? (secondary.title.value.trim() || UNTITLED_TITLE)
+    : (draftTitle.value.trim() || UNTITLED_TITLE);
+  const visible = drafts.some(d => d.id === selectedId) ? drafts : [
+    ...(dualDocumentSplit() && secondary ? [secondary.draft] : [active]),
+    ...drafts,
+  ];
+  paneBDrafts.replaceChildren();
+  for (const draft of visible) {
+    const option = document.createElement('option');
+    option.value = draft.id;
+    const isCurrent = draft.id === selectedId;
+    option.textContent = draftOptionLabel({
+      savedTitle: draft.title,
+      displayTitle,
+      isCurrent,
+      unsaved: isCurrent && (dualDocumentSplit() && secondary ? secondary.dirty : workspace.dirty()),
+    });
+    paneBDrafts.append(option);
+  }
+  paneBDrafts.value = selectedId;
+  syncCompanionChrome();
+}
+function updateSaveIndicatorB(): void {
+  if (!secondary) return;
+  const state = storageProblem || secondary.saveFailed ? 'failed'
+    : secondary.editBlock ? (secondary.dirty ? 'unsaved' : 'readonly')
+    : !autosave.checked || !db ? 'unsaved' : secondary.dirty ? 'saving' : 'saved';
+  const label = { failed: 'Save failed', readonly: 'Read-only', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[state];
+  if (saveIndicatorB.textContent !== label) saveIndicatorB.textContent = label;
+  saveIndicatorB.dataset.state = state;
+}
+async function releaseSecondarySession(): Promise<void> {
+  if (!secondary) {
+    companionEditor.setReadOnly(true);
+    titleEditorB.setReadOnly(true);
+    syncCompanionChrome();
+    return;
+  }
+  clearTimeout(secondary.saveTimer);
+  if (secondary.dirty && autosave.checked && !secondary.editBlock) {
+    await persistSecondary();
+  }
+  const previous = secondary;
+  secondary = undefined;
+  sessionRegistry?.setSecondary(undefined);
+  void previous.ownership?.release();
+  companionEditor.setReadOnly(true);
+  titleEditorB.setReadOnly(true);
+  companionField.value = field.value;
+  draftTitleB.value = '';
+  syncCompanionChrome();
+  mirrorCompanion(true);
+  syncMutationControls();
+}
+async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }> {
+  if (!secondary || viewMode) return { saved: true, conflict: false };
+  clearTimeout(secondary.saveTimer);
+  if (!autosave.checked || !secondary.dirty) return { saved: !secondary.dirty, conflict: false };
+  if (secondary.editBlock) return { saved: false, conflict: false };
+  if (secondary.saving) return secondary.saving;
+  const session = secondary;
+  session.saving = (async () => {
+    let createdConflict = false;
+    try {
+      if (!db) throw new Error('Storage unavailable');
+      while (session.dirty && autosave.checked && !session.editBlock) {
+        const version = session.contentRevision;
+        const saved = snapshotBoundSession(session, UNTITLED_TITLE);
+        if (session.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
+        const owner = await session.ownership.writeFence();
+        const result = await commitOrCreateConflictCopy(db, saved, session.draft.revision, crypto.randomUUID(), owner);
+        const titleOnly = !result.conflict && saved.title !== session.draft.title && saved.text === session.draft.text;
+        session.draft = result.draft;
+        postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
+        session.saveFailed = false;
+        session.dirty = session.contentRevision !== version;
+        updateSaveIndicatorB();
+        if (result.conflict) {
+          createdConflict = true;
+          draftTitleB.value = session.draft.title;
+          const access = await acquireFor(result.draft.id);
+          if (session.ownership) void session.ownership.release();
+          session.ownership = access.ownership;
+          session.editBlock = access.block;
+        }
+      }
+      try { await refreshDrafts(); } catch { /* List is advisory. */ }
+      return { saved: !session.dirty, conflict: createdConflict };
+    } catch (error) {
+      if (error instanceof EditOwnershipLostError) {
+        session.ownership = undefined;
+        session.editBlock = 'lost';
+        companionEditor.setReadOnly(true);
+        titleEditorB.setReadOnly(true);
+        updateSaveIndicatorB();
+        syncMutationControls();
+        return { saved: false, conflict: createdConflict };
+      }
+      session.saveFailed = true;
+      updateSaveIndicatorB();
+      return { saved: false, conflict: createdConflict };
+    }
+  })();
+  try { return await session.saving; }
+  finally {
+    session.saving = undefined;
+    if (session.dirty && autosave.checked && !session.saveFailed && !session.editBlock) {
+      clearTimeout(session.saveTimer);
+      session.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
+    }
+  }
+}
+function scheduleSaveSecondary(fromTitle = false): void {
+  if (!secondary || viewMode || secondary.editBlock) return;
+  const becameDirty = !secondary.dirty;
+  secondary.dirty = true;
+  secondary.contentRevision += 1;
+  clearTimeout(secondary.saveTimer);
+  if (autosave.checked) {
+    updateSaveIndicatorB();
+    secondary.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
+  } else {
+    updateSaveIndicatorB();
+    if (becameDirty || fromTitle) renderPaneBDrafts();
+  }
+}
+async function openCompanionDocument(id: string): Promise<void> {
+  if (viewMode || !workspace.splitOpen() || !db) return;
+  if (id === active.id) {
+    await releaseSecondarySession();
+    mirrorCompanion(true);
+    companionWritingPosition.restore(active.id);
+    renderPaneBDrafts();
+    return;
+  }
+  const represented = resolveSessionForDocument(id, [
+    { sessionId: 'session-1', documentId: active.id },
+    ...(secondary ? [{ sessionId: secondary.sessionId, documentId: secondary.draft.id }] : []),
+  ]);
+  if (represented === 'session-1') {
+    await releaseSecondarySession();
+    return;
+  }
+  if (secondary?.draft.id === id) return;
+  const next = await getStoredDraft(db, id);
+  if (!next || next.revision < 1) {
+    announceAction('Could not open that document in the other pane.');
+    renderPaneBDrafts();
+    return;
+  }
+  await releaseSecondarySession();
+  const access = await acquireFor(next.id);
+  let target = next;
+  if (access.ownership && db) {
+    const fresh = await getStoredDraft(db, next.id);
+    if (!fresh) {
+      void access.ownership.release();
+      announceAction('Could not open that document in the other pane.');
+      return;
+    }
+    target = fresh;
+  }
+  companionWritingPosition.save();
+  loadingDraft = true;
+  try {
+    companionEditor.setReadOnly(false);
+    titleEditorB.setReadOnly(false);
+    companionEditor.load(target.text);
+    if (target.history) companionEditor.restoreHistory(target.history);
+    draftTitleB.value = target.title;
+    draftTitleB.hidden = false;
+  } finally {
+    loadingDraft = false;
+  }
+  secondary = createBoundSession({
+    sessionId: 'session-2',
+    editablePaneId: SECOND_PANE_ID,
+    draft: target,
+    editor: companionEditor,
+    field: companionField,
+    title: draftTitleB,
+  });
+  secondary.ownership = access.ownership;
+  secondary.editBlock = access.block;
+  if (access.block) {
+    companionEditor.setReadOnly(true);
+    titleEditorB.setReadOnly(true);
+  }
+  sessionRegistry?.setSecondary(secondary);
+  companionWritingPosition.restore(target.id);
+  updateSaveIndicatorB();
+  syncCompanionChrome();
+  renderPaneBDrafts();
+  syncMutationControls();
+  workspace.setActivePane(SECOND_PANE_ID);
+  companionField.focus({ preventScroll: true });
 }
 async function refreshDrafts(): Promise<void> {
   const delayMs = (window as Window & { __typebridgeDelayRefreshMs?: number }).__typebridgeDelayRefreshMs;
@@ -924,6 +1220,15 @@ function scheduleSave(fromTitle = false): void {
 }
 field.addEventListener('input', () => { scheduleSave(); mirrorCompanion(); });
 field.addEventListener('historychange', () => { scheduleSave(); mirrorCompanion(); });
+companionField.addEventListener('input', () => {
+  if (dualDocumentSplit()) scheduleSaveSecondary();
+});
+companionField.addEventListener('historychange', () => {
+  if (dualDocumentSplit()) { scheduleSaveSecondary(); syncHistory(); }
+});
+draftTitleB.addEventListener('input', () => {
+  if (dualDocumentSplit()) scheduleSaveSecondary(true);
+});
 function syncTitleTooltip(): void {
   // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
   draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
@@ -1104,6 +1409,7 @@ document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click
 for (const picker of documentPickers) {
   picker.addEventListener('change', () => { void (viewMode ? viewerOpen(picker.value) : switchDraft(picker.value)); });
 }
+paneBDrafts.addEventListener('change', () => { void openCompanionDocument(paneBDrafts.value); });
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (readOnlyNow() || transitioning) return;
   clearTimeout(saveTimer);

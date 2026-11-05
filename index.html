@@ -357,9 +357,20 @@
           <div class="editor-pane editor-pane-companion" data-pane-slot="companion" hidden>
             <div class="pane-chrome">
               <span id="companion-badge" class="viewer-badge">Live view · Read-only</span>
+              <input
+                id="draft-title-b"
+                type="text"
+                aria-label="Document title in other pane"
+                hidden
+              />
+              <label class="pane-doc-picker" for="pane-b-drafts">
+                <span class="visually-hidden">Document in other pane</span>
+                <select id="pane-b-drafts" aria-label="Document in other pane" size="1"></select>
+              </label>
+              <span id="save-indicator-b" class="save-indicator" data-state="saved" hidden>Saved</span>
               <button id="split-reset" type="button" hidden>Reset split</button>
             </div>
-            <label for="editor-b">Live companion</label>
+            <label for="editor-b">Other pane</label>
             <textarea id="editor-b" spellcheck="false" readonly tabindex="0"></textarea>
           </div>
         </div>

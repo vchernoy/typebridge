@@ -676,6 +676,37 @@ body.focus-mode .bottom {
 .pane-chrome .viewer-badge {
   position: static;
 }
+.pane-chrome .pane-doc-picker {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 12rem;
+  margin: 0;
+}
+.pane-chrome .pane-doc-picker select {
+  max-width: 100%;
+  font: inherit;
+}
+.pane-chrome #draft-title-b {
+  min-width: 0;
+  max-width: 10rem;
+  flex: 1 1 6rem;
+  font: inherit;
+}
+.pane-chrome .save-indicator {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .split-divider {
   flex: 0 0 var(--split-divider-size);
   align-self: stretch;

@@ -295,7 +295,8 @@ test('stacked End ratio keeps a usable companion pane after the divider', async 
   expect(companion).toBeTruthy();
   expect(field).toBeTruthy();
   expect(companion!.height).toBeGreaterThan(90);
-  expect(field!.height).toBeGreaterThan(40);
+  // Primary share at End is small; pane chrome (picker) leaves a short textarea.
+  expect(field!.height).toBeGreaterThan(24);
 });
 
 test('Focus mode stacked End ratio does not clip the companion textarea', async ({ page }) => {

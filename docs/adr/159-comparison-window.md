@@ -311,8 +311,8 @@ Status: This saved document is no longer available.
 | **W5/W6** (deferred #164) | Cross-window Edit here | Paused — do not merge for that goal |
 | **S1** (done #165) | Revised split ADR/UX + `session` contracts | Vitest session/pane helpers; runtime unchanged |
 | **S2** (done #166) | Session/pane separation, single-pane parity | Vitest workspace; existing e2e still green; no split UI yet |
-| **S3** (this PR) | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
-| **S4** | Two different editable documents | Independent sessions, locks, Undo, switch/close |
+| **S3** (done #167) | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
+| **S4** (this PR) | Two different editable documents | Independent sessions, locks, Undo, switch/close |
 | **S5** | Local Edit in this pane + lifecycle | Transfer, IME/transition guards, delayed commands |
 | **S6** | Verification, docs, evidence | Full browser matrix; record real-device/AT limits |
 
@@ -420,9 +420,17 @@ Shipped in this PR: optional same-document live companion pane in one tab.
 - **Active pane:** focus on `#editor` / `#editor-b` sets the active target. Shared mutations (Undo/Convert/Clear/Replace) use `commandAllowedOnPane` and are disabled/refused while the read-only companion is active; Find/Copy remain available. Toolbar mousedown preserves the last pane target.
 - **Not in S3:** second document session, Edit in this pane, dual pickers, toolbar `CommandGeneration` capture.
 
+## S4 implementation notes
+
+Shipped in this PR: companion document picker can open a **different** saved document as a second editable session.
+
+- **`BoundSession` / registry** (`src/view/bound-session.ts`): primary stays the existing main pipeline; optional `session-2` binds `#editor-b` + `#draft-title-b` with its own dirty/save timer, ownership handle and history.
+- **Picker:** `#pane-b-drafts` lists saved documents. Choosing the primary’s id releases the secondary and restores S3 live mirror + **Live view · Read-only**. Choosing another id acquires that document’s Web Lock/fence, loads into pane B as editable, and stops mirroring.
+- **Routing:** Undo/Convert/Replace/Find follow the active pane’s session when dual-document; same-document companion remains mutation-refused.
+- **Not in S4:** full extraction of primary persist out of `main.ts`, dual pending-reload keys, Edit in this pane (S5), CommandGeneration on every delayed toolbar command, New/Import targeting pane B.
+
 ## Implementation notes for later PRs
 
-- S4: second session + picker; per-document lock/save; safe last-view close.
-- S5: `localPaneTransferBlock` wiring; generation-guarded delayed commands.
+- S5: `localPaneTransferBlock` wiring; generation-guarded delayed commands; finish primary DocumentSession extraction.
 - Keep separate-window companion routing **before** ordinary boot; do not delete W2–W4.
 - Recovery Web Lock stays page-scoped; in-tab read-only panes must not take recovery ownership that clears another tab’s journals.
