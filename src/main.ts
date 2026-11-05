@@ -2729,7 +2729,8 @@ function showViewerDocument(draft: StoredDraft): void {
   showViewerStatus();
 }
 function syncViewerUrl(id: string): void {
-  const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', id);
+  // Preserve ?window= so a viewer iframe keeps scoped sessionStorage across doc switches (#175).
+  const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', id, windowId);
   if (!href) return;
   // Keep the hash: it is reserved for portable share links (#39).
   try { history.replaceState(null, '', href + window.location.hash); } catch { /* The address bar is optional. */ }

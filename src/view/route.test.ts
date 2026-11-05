@@ -45,4 +45,9 @@ describe('comparison route', () => {
     expect(comparisonViewerHref('/', RECOVERY)).toBe(`/?doc=${encodeURIComponent(RECOVERY)}&mode=view`);
     expect(comparisonViewerHref('/', 'bad')).toBeUndefined();
   });
+
+  it('preserves an optional window id on viewer hrefs (#175)', () => {
+    expect(comparisonViewerHref('/', DOC, 'alpha')).toBe(`/?doc=${DOC}&mode=view&window=alpha`);
+    expect(comparisonViewerHref('/', DOC, undefined)).toBe(`/?doc=${DOC}&mode=view`);
+  });
 });
