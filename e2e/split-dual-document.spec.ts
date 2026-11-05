@@ -151,7 +151,7 @@ test('cancelling promotion reschedules pane B autosave', async ({ page }) => {
   await setAutosave(page, true);
   const firstId = await saveNamed(page, 'Romeo body', 'Romeo');
   await documentAction(page, '#new-draft');
-  await saveNamed(page, 'Sierra body', 'Sierra');
+  const sierraId = await saveNamed(page, 'Sierra body', 'Sierra');
   await openSplit(page);
   await page.locator('#pane-b-drafts').selectOption(firstId);
   await page.locator('#enabled').uncheck();
@@ -169,11 +169,48 @@ test('cancelling promotion reschedules pane B autosave', async ({ page }) => {
   await page.locator('#drafts').selectOption(firstId);
   const discard = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
   await expect(discard).toBeVisible();
+  // Companion picker stays frozen on the promoting document while the flush dialog is open.
+  await page.locator('#pane-b-drafts').selectOption(sierraId);
+  await expect(page.locator('#pane-b-drafts')).toHaveValue(firstId);
+  await expect(page.locator('#editor-b')).toHaveValue('Romeo body dirty');
   await discard.getByRole('button', { name: 'Keep editing' }).click();
   await closeDocuments(page);
   await expect(page.locator('#editor-b')).toHaveValue('Romeo body dirty');
   await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
   await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+});
+
+test('Autosave stays usable for an editable companion while primary is read-only', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const sharedId = await saveNamed(page, 'Shared body', 'Shared');
+  await documentAction(page, '#new-draft');
+  const privateId = await saveNamed(page, 'Private body', 'Private');
+  // Another window claims Shared while this tab stays on Private.
+  const other = await context.newPage();
+  await other.goto('/');
+  await expect(other.locator('#editor')).toBeEnabled();
+  await selectDocument(other, sharedId);
+  await expect(other.locator('#editor')).toHaveJSProperty('readOnly', false);
+  await selectDocument(page, sharedId);
+  await expect(page.locator('#editor')).toHaveJSProperty('readOnly', true);
+  await expect(page.locator('#autosave')).toBeDisabled();
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(privateId);
+  await page.locator('#editor-b').focus();
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await setAutosave(page, false, 'keep');
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' private');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Not saved');
+  await setAutosave(page, true);
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+  const docs = await readStoredDocs(page);
+  expect(docs.find(d => d.id === privateId)?.text).toBe('Private body private');
+  await other.close();
 });
 
 test('ownership loss after promoting pane B freezes the primary immediately', async ({ page, context }) => {

@@ -96,6 +96,8 @@ const draftTitleB = document.querySelector<HTMLInputElement>('#draft-title-b')!;
 const paneBDrafts = document.querySelector<HTMLSelectElement>('#pane-b-drafts')!;
 const saveIndicatorB = document.querySelector<HTMLElement>('#save-indicator-b')!;
 const companionBadge = document.querySelector<HTMLElement>('#companion-badge')!;
+/** Declared early: syncMutationControls runs during module init before draft locals. */
+const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 if (viewMode) {
   editor.setReadOnly(true);
   workspace.setPaneRole('readonly');
@@ -142,6 +144,11 @@ const splitControls = setupSplitPane({
   resetButton: splitReset,
   allowOpen: !viewMode,
   onOpenChange: open => {
+    // Do not tear down pane B while promotion is flushing/confirming the primary.
+    if (!open && transitioning) {
+      splitControls.setOpen(true);
+      return;
+    }
     workspace.setSplitOpen(open);
     toggleSplit.setAttribute('aria-pressed', open ? 'true' : 'false');
     toggleSplit.textContent = open ? 'Close split' : 'Split editor';
@@ -385,6 +392,18 @@ function canMutatePrimary(): boolean {
     mutatesDocument: true,
   });
 }
+/** Autosave follows the active editable session (pane B may own a different document). */
+function autosaveControlBlocked(): boolean {
+  if (transferFrozen) return true;
+  if (workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit() && secondary) {
+    return secondary.editBlock !== '';
+  }
+  return editBlock !== '';
+}
+function syncAutosaveControl(): void {
+  if (viewMode || autosaveToggleActive) return;
+  autosave.disabled = autosaveControlBlocked();
+}
 function syncMutationControls(): void {
   // Comparison viewers own these attributes via applyViewerChrome; do not fight tests that
   // temporarily re-enable controls to prove handlers still refuse mutations.
@@ -396,6 +415,7 @@ function syncMutationControls(): void {
   for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
     document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
   }
+  syncAutosaveControl();
 }
 const syncHistory = () => { syncMutationControls(); };
 paneChrome.syncMutations = syncMutationControls;
@@ -638,7 +658,6 @@ enabled.addEventListener('change', () => {
 const titleEditorB = new Editor(draftTitleB);
 titleEditorB.setEnabled(enabled.checked);
 titleEditorB.setReadOnly(true);
-const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 let db: IDBDatabase | undefined;
 let active: StoredDraft = { ...newDraft(), revision: 0 };
 const sessionRegistry = createSessionRegistry(createBoundSession({
@@ -915,13 +934,20 @@ function rescheduleSecondaryAutosave(): void {
 }
 async function promoteSecondaryToPrimary(): Promise<boolean> {
   if (!secondary) return true;
+  const promoting = secondary;
   clearTimeout(secondary.saveTimer);
   const restoreSecondaryTimer = secondary.dirty && autosave.checked && !secondary.editBlock;
+  const abortPromote = (): false => {
+    if (restoreSecondaryTimer && secondary === promoting) rescheduleSecondaryAutosave();
+    return false;
+  };
   if (secondary.saving) await secondary.saving;
-  if (!secondary) return true;
+  // Companion may have been released/replaced while awaiting (close split / picker).
+  if (secondary !== promoting) return abortPromote();
   // Flush the document being left in the primary pane first.
   while (workspace.dirty() && autosave.checked && !editBlock) {
     const result = await persist();
+    if (secondary !== promoting) return abortPromote();
     if (!result.saved && saveFailed) {
       if (!await askConfirmChoice({
         title: 'Discard unsaved changes?',
@@ -929,10 +955,8 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
         confirmLabel: 'Discard changes',
         cancelLabel: 'Keep editing',
         returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
-      })) {
-        if (restoreSecondaryTimer) rescheduleSecondaryAutosave();
-        return false;
-      }
+      })) return abortPromote();
+      if (secondary !== promoting) return abortPromote();
       break;
     }
   }
@@ -945,18 +969,17 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
       confirmLabel: 'Discard changes',
       cancelLabel: 'Keep editing',
       returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
-    })) {
-      if (restoreSecondaryTimer) rescheduleSecondaryAutosave();
-      return false;
-    }
+    })) return abortPromote();
+    if (secondary !== promoting) return abortPromote();
   }
+  if (secondary !== promoting) return abortPromote();
   writingPosition.save();
   companionWritingPosition.save();
-  const promoted = snapshotBoundSession(secondary, UNTITLED_TITLE);
-  const promotedDirty = secondary.dirty;
-  const promotedOwnership = secondary.ownership;
-  const promotedBlock = secondary.editBlock;
-  secondary.ownership = undefined;
+  const promoted = snapshotBoundSession(promoting, UNTITLED_TITLE);
+  const promotedDirty = promoting.dirty;
+  const promotedOwnership = promoting.ownership;
+  const promotedBlock = promoting.editBlock;
+  promoting.ownership = undefined;
   secondary = undefined;
   sessionRegistry.setSecondary(undefined);
   currentJournalSecondary = undefined;
@@ -1121,7 +1144,7 @@ let companionOpenInFlight: Promise<void> | undefined;
 /** True while boot is restoring pane-B pending; keeps the picker disabled. */
 let bootRestoringSecondary = false;
 async function openCompanionDocument(id: string): Promise<void> {
-  if (viewMode || !workspace.splitOpen() || !db) return;
+  if (viewMode || !workspace.splitOpen() || !db || transitioning) return;
   const generation = ++companionOpenGeneration;
   paneBDrafts.disabled = true;
   const run = (async () => {
@@ -1310,8 +1333,6 @@ function applyEditAccess(): void {
   if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
   if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
-  // installOwnership during an in-flight Autosave-off save must not re-enable the checkbox.
-  autosave.disabled = blocked || autosaveToggleActive;
   document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
   // Temporary transfer freeze must not announce "another window is editing".
   const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, workspace.dirty());
@@ -1689,7 +1710,7 @@ function endAutosaveToggleGate(): void {
   releaseAutosaveToggleGate?.();
 }
 autosave.addEventListener('change', async () => {
-  if (readOnlyNow() || autosaveToggleActive) return;
+  if (autosaveControlBlocked() || autosaveToggleActive) return;
   autosaveToggleActive = true;
   autosave.disabled = true;
   beginAutosaveToggleGate();
@@ -1716,6 +1737,64 @@ autosave.addEventListener('change', async () => {
     if (secondary) {
       clearTimeout(secondary.saveTimer);
       updateSaveIndicatorB();
+    }
+    const companionActive = workspace.activePaneId() === SECOND_PANE_ID
+      && dualDocumentSplit() && !!secondary && secondary.editBlock === '';
+    if (companionActive && secondary) {
+      // Bind deletion to the companion document before any await.
+      const startedSession = secondary;
+      const startedId = secondary.draft.id;
+      const startedOwnership = secondary.ownership;
+      const inFlight = secondary.saving ? await secondary.saving : undefined;
+      if (!inFlight?.conflict) clearNotices();
+      const stayed = secondary === startedSession && secondary.draft.id === startedId
+        && secondary.ownership === startedOwnership;
+      const conflictCopy = !!(inFlight?.conflict && secondary && secondary !== startedSession
+        && secondary.ownership && secondary.ownership !== startedOwnership
+        && secondary.draft.id !== startedId);
+      if (!stayed && !conflictCopy) {
+        updateSaveIndicatorB();
+        announce(AUTOSAVE_OFF);
+        return;
+      }
+      const targetId = secondary.draft.id;
+      const targetRevision = secondary.draft.revision;
+      const targetOwnership = secondary.ownership!;
+      const deleteSaved = await askConfirmChoice({
+        title: 'Delete the saved copy?',
+        message: 'Delete the saved copy of this document? Keep saved copy leaves it in your Documents list.',
+        confirmLabel: 'Delete saved copy',
+        cancelLabel: 'Keep saved copy',
+        returnFocus: autosave,
+      });
+      if (deleteSaved) {
+        try {
+          if (!db || !secondary || targetOwnership.documentId !== targetId) throw new Error('Storage unavailable');
+          if (secondary.draft.id !== targetId || secondary.ownership !== targetOwnership
+            || secondary.editBlock || transferFrozen || transitioning) {
+            throw new Error('Document changed');
+          }
+          if (!await deleteStoredDraft(db, targetId, targetRevision, await targetOwnership.writeFence())) {
+            throw new Error('Draft changed');
+          }
+          if (targetRevision >= 1) postSignal('deleted', targetId, targetRevision);
+          if (secondary && secondary.draft.id === targetId) {
+            secondary.draft = { ...secondary.draft, revision: 0 };
+            secondary.dirty = true;
+          }
+          clearNotices();
+          await refreshDrafts();
+        } catch (error) {
+          if (error instanceof EditOwnershipLostError && secondary?.ownership) {
+            loseSecondaryOwnership(secondary.ownership);
+          }
+          announceAction('Could not delete saved document; current text is kept', { keepConflict: true });
+          return;
+        }
+      }
+      updateSaveIndicatorB();
+      announce(AUTOSAVE_OFF);
+      return;
     }
     // Bind deletion to this document before any await — defense if a switch somehow races the gate.
     const startedId = active.id;
@@ -1773,8 +1852,8 @@ autosave.addEventListener('change', async () => {
     endAutosaveToggleGate();
     autosaveToggleActive = false;
     updateSaveIndicatorB();
-    // Match applyEditAccess / readOnlyNow — a concurrent switch may have set transferFrozen.
-    autosave.disabled = editBlock !== '' || transferFrozen;
+    // Match syncAutosaveControl — companion-active sessions can toggle while A is blocked.
+    autosave.disabled = autosaveControlBlocked();
     // Re-focus after re-enabling: the dialog cannot restore while this control
     // is disabled, and a delete may await before this finally runs (#114 review).
     autosave.focus({ preventScroll: true });
@@ -1868,7 +1947,10 @@ document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click
 for (const picker of documentPickers) {
   picker.addEventListener('change', () => { void (viewMode ? viewerOpen(picker.value) : switchDraft(picker.value)); });
 }
-paneBDrafts.addEventListener('change', () => { void openCompanionDocument(paneBDrafts.value); });
+paneBDrafts.addEventListener('change', () => {
+  if (transitioning) { renderPaneBDrafts(); return; }
+  void openCompanionDocument(paneBDrafts.value);
+});
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (readOnlyNow() || transitioning) return;
   clearTimeout(saveTimer);
