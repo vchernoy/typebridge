@@ -71,11 +71,11 @@ test('boot clears obsolete split prefs without touching documents', async ({ pag
   await expect(recovery.getByRole('button', { name: /Recover Scoped leftover/ })).toBeVisible();
 });
 
-test('boot drops empty pane-B leftovers without writing recovery', async ({ page }) => {
+test('boot migrates empty pane-B leftovers that still carry title or history', async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.setItem('typebridge.pendingDraft.paneB.v1', JSON.stringify({
       id: '33333333-3333-4333-8333-333333333333',
-      title: 'Empty leftover',
+      title: 'Cleared leftover',
       text: '',
       revision: 0,
       updatedAt: Date.now(),
@@ -87,8 +87,31 @@ test('boot drops empty pane-B leftovers without writing recovery', async ({ page
 
   const state = await page.evaluate(() => ({
     pendingB: sessionStorage.getItem('typebridge.pendingDraft.paneB.v1'),
-    recovery: Object.keys(localStorage).filter(key => key.startsWith('typebridge.recovery.v1.split-pane-b-migrate')),
+    recovery: Object.keys(localStorage)
+      .filter(key => key.startsWith('typebridge.recovery.v1.'))
+      .map(key => {
+        try {
+          return JSON.parse(localStorage.getItem(key) ?? 'null') as {
+            title?: string;
+            text?: string;
+            tab?: string;
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is { title?: string; text?: string; tab?: string } => !!row),
   }));
   expect(state.pendingB).toBeNull();
-  expect(state.recovery).toEqual([]);
+  expect(state.recovery.some(row => (
+    row.tab?.startsWith('split-pane-b-migrate.')
+    && row.title === 'Cleared leftover'
+    && row.text === ''
+  ))).toBe(true);
+
+  const recovery = page.locator('.recovery-panel');
+  await expect(recovery.locator('button').first()).toBeVisible({ timeout: 15_000 });
+  const inspect = recovery.getByRole('button', { name: 'Check emergency backups' });
+  if (await inspect.isVisible()) await inspect.click();
+  await expect(recovery.getByRole('button', { name: /Recover Cleared leftover/ })).toBeVisible({ timeout: 15_000 });
 });
