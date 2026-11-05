@@ -14,7 +14,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
   });
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('Привет! Это мой длинный пост.\nВторая строка.');
-  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await expect(page.locator('#status')).toContainText('Saved locally');
   await context.setOffline(true);
   await page.reload();
   try {
@@ -31,7 +31,7 @@ test('reopens the editor and restores a saved Russian draft after offline refres
     throw new Error(`Offline restoration failed: ${JSON.stringify({ diagnostics, errors })}`, { cause: error });
   }
   await field.fill('Редактирую без интернета');
-  await expect(page.getByRole('status')).toContainText('Saved locally');
+  await expect(page.locator('#status')).toContainText('Saved locally');
   await page.reload();
   await expect(field).toHaveValue('Редактирую без интернета');
   await context.setOffline(false);
