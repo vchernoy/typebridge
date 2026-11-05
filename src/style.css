@@ -591,7 +591,8 @@ body.focus-mode #editor {
   max-width: 900px;
   min-width: 0;
   height: calc(100dvh - 160px);
-  min-height: 12rem;
+  /* Match the #70 grip floor (96px); 12rem blocked Focus shrink in the split shell. */
+  min-height: 96px;
   resize: vertical;
   margin: 0 auto;
 }
@@ -741,13 +742,14 @@ body.focus-mode .bottom {
 #editor-b {
   min-width: min(100%, 160px);
   min-height: 96px;
-}
-/* The drawn grip replaces the native one on the main editor in every mode, so
-   there is exactly one, and it works on iOS Safari too. */
-#editor,
-#editor-b {
   resize: none;
+}
+/* Companion always fills its pane; primary keeps intrinsic width so the corner grip can grow past the shell (#70). */
+#editor-b {
   width: 100%;
+}
+.editor-split[data-split="off"] #editor {
+  margin-bottom: 0;
 }
 /* Drawn corner grip (#70): iOS Safari never shows the native textarea grip.
    The touch target reaches outside the editor so that, inside it, it covers

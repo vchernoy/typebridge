@@ -309,6 +309,9 @@ function canMutatePrimary(): boolean {
   });
 }
 function syncMutationControls(): void {
+  // Comparison viewers own these attributes via applyViewerChrome; do not fight tests that
+  // temporarily re-enable controls to prove handlers still refuse mutations.
+  if (viewMode) return;
   const blocked = !canMutatePrimary();
   undo.disabled = blocked || !editor.canUndo;
   redo.disabled = blocked || !editor.canRedo;

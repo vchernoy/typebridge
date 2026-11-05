@@ -275,10 +275,11 @@ test('the viewer cannot mutate documents through delete, new, import or replace'
   await viewer.locator('#find-open').click();
   await viewer.locator('#find-text').fill('alpha');
   await viewer.locator('#replace-text').fill('omega');
-  await viewer.locator('#replace-one').click();
-  await viewer.locator('#replace-all').click();
+  // force: true — handlers must refuse even if chrome is re-enabled; focus/select must not hang the probe.
+  await viewer.locator('#replace-one').click({ force: true });
+  await viewer.locator('#replace-all').click({ force: true });
   await viewer.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.select());
-  await viewer.locator('#convert-cyrillic').click();
+  await viewer.locator('#convert-cyrillic').click({ force: true });
   await viewer.locator('#autosave').evaluate((el: HTMLInputElement) => { el.checked = false; el.dispatchEvent(new Event('change', { bubbles: true })); });
   await viewer.locator('#draft-title').press('End');
   await viewer.keyboard.type('title edit');
