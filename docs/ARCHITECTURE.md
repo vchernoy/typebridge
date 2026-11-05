@@ -25,6 +25,8 @@ Same-origin iframes in one tab share `sessionStorage`. Step 2 scopes tab-local k
 
 Step 3 adds a **host page** (`host.html` / `src/host/`) that embeds one editor iframe with a stable window id and `?embed=1`. The host registers the service worker and shows the update notice. Settings remain in the iframe for single-window parity (lazy `document.querySelector` lookups); page-level shared Settings is step 7. Standalone `/` remains the current entry (existing e2e unchanged); cutover of `/` to the host is a later step.
 
+Step 4 adds **same-document focus handoff** (`src/view/handoff.ts`, `src/view/focus-handoff.ts`): pointer/focus in a read-only window’s text asks the same-tab owner to flush and yield (in-memory snapshot when Autosave is off); cross-tab uses metadata-only `BroadcastChannel` and shows **Edit here** when the owner still has private text; a suspended owner may be taken with `steal: true` after a short timeout. Keystrokes during the handoff are buffered.
+
 ## Quality and deployment
 Unit tests cover rules, conflicting mappings, case, Unicode, boundaries, storage validation and transactional concurrency. Browser tests cover typing, selection, IME where automation permits, clipboard fallback, resize, mobile layout, persistence and keyboard navigation. Manual testing remains necessary for real IMEs, screen readers and mobile devices. CI runs quality checks and a Chromium/Firefox/WebKit matrix on pull requests. Pages deploys from main; for how main revisions are checked before deployment ([#75](https://github.com/vchernoy/typebridge/issues/75)), consult the workflow YAML and [deployment notes](PREVIEW.md). Successful Actions runs and real-device/production verification are separate evidence.
 

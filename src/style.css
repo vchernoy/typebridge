@@ -287,6 +287,23 @@ body {
 .viewer-notice[hidden] {
   display: none;
 }
+.edit-here-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px;
+}
+.edit-here-bar[hidden] {
+  display: none;
+}
+.edit-here-bar .viewer-notice {
+  flex: 1 1 12rem;
+  margin: 0;
+}
+.edit-here-bar #edit-here {
+  flex: 0 0 auto;
+}
 #doc-menu-open {
   min-width: 44px;
   padding: 0 10px;

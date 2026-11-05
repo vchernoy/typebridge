@@ -22,8 +22,9 @@ export type AcquireResult =
   | { status: 'unsupported' };
 
 /**
- * Try to become the editing owner of `documentId` without waiting. `onLost` runs if the browser
- * takes the lock away (for example a `steal` request) while this window still holds it.
+ * Try to become the editing owner of `documentId`. By default never waits or steals
+ * (`ifAvailable: true`). Pass `steal: true` only for #175 suspended-owner handoff.
+ * `onLost` runs if the browser takes the lock away while this window still holds it.
  * Rejects only when the lock request itself fails.
  */
 export function acquireEditOwnership(options: {
@@ -32,8 +33,10 @@ export function acquireEditOwnership(options: {
   documentId: string;
   instanceId: string;
   onLost: () => void;
+  /** Take the lock from a suspended/unresponsive owner (#175 step 4). */
+  steal?: boolean;
 }): Promise<AcquireResult> {
-  const { db, locks, documentId, instanceId, onLost } = options;
+  const { db, locks, documentId, instanceId, onLost, steal = false } = options;
   if (!mayAcquireEditOwnership(locks !== undefined) || !locks) return Promise.resolve({ status: 'unsupported' });
   return new Promise<AcquireResult>((resolve, reject) => {
     let granted = false;
@@ -61,7 +64,8 @@ export function acquireEditOwnership(options: {
         finally { letGo(); }
       },
     };
-    locks.request(editOwnerLockName(documentId), { ifAvailable: true }, async lock => {
+    const lockOptions: LockOptions = steal ? { steal: true } : { ifAvailable: true };
+    locks.request(editOwnerLockName(documentId), lockOptions, async lock => {
       if (!lock) { resolve({ status: 'busy' }); return; }
       // Claiming now invalidates any stale owner's fence; a failed claim is retried before the first write.
       try { await claim(); } catch { /* writeFence() claims again. */ }

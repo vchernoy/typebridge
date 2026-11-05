@@ -26,6 +26,7 @@ class FakeLocks {
   private held = new Map<string, { abort: (error: unknown) => void }>();
   isHeld(name: string): boolean { return this.held.has(name); }
   request(name: string, options: LockOptions, callback: (lock: Lock | null) => unknown): Promise<unknown> {
+    if (options.steal && this.held.has(name)) this.steal(name);
     if (options.ifAvailable && this.held.has(name)) return Promise.resolve(callback(null));
     return new Promise((resolve, reject) => {
       const entry = { abort: reject };
@@ -138,5 +139,20 @@ describe('acquireEditOwnership', () => {
     expect(results.filter(r => r.status === 'acquired')).toHaveLength(1);
     expect(results.filter(r => r.status === 'busy')).toHaveLength(2);
     expect(storage.fences.get(DOC)).toBe(1);
+  });
+
+  it('steals a held lock when steal is requested (#175 suspended owner)', async () => {
+    const lost = vi.fn();
+    const first = await acquire('a', lost);
+    if (first.status !== 'acquired') throw new Error('expected acquire');
+    const second = await acquireEditOwnership({
+      db, locks: locks as unknown as LockManager, documentId: DOC, instanceId: 'b',
+      onLost: () => undefined, steal: true,
+    });
+    await flush();
+    expect(lost).toHaveBeenCalledTimes(1);
+    expect(second.status).toBe('acquired');
+    if (second.status !== 'acquired') return;
+    await expect(second.ownership.writeFence()).resolves.toEqual({ instanceId: 'b', fence: 2 });
   });
 });
