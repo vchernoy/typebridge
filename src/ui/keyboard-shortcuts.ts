@@ -59,7 +59,7 @@ export function setupKeyboardShortcuts(): void {
       returnFocus: more,
     });
     if (!change) return;
-    if (document.documentElement.dataset.embed === '1' && openHostSettings('translit-shortcut')) return;
+    if (document.documentElement.dataset.embed === '1' && openHostSettings('translit-shortcut', more)) return;
     if (shortcut) openSettingsTo(shortcut, more);
   });
 }

@@ -28,9 +28,10 @@ function close(): void {
 }
 
 /** Ensure the local Settings panel is open (no-op when embedded). */
-export function ensureSettingsOpen(): void {
-  if (embedded || !panel || !panel.hidden) return;
-  open();
+export function ensureSettingsOpen(restore?: HTMLElement | null): void {
+  if (embedded || !panel) return;
+  if (panel.hidden) open();
+  if (restore) returnFocus = restore;
 }
 
 /** Open Settings, focus `target`, and restore `restore` when the panel closes. */
@@ -42,14 +43,17 @@ export function openSettingsTo(target: HTMLElement, restore: HTMLElement): void 
 }
 
 /** Open host Settings from an embedded editor (focus a control by id when provided). */
-export function openHostSettings(focusId?: string): boolean {
+export function openHostSettings(focusId?: string, restore?: HTMLElement | null): boolean {
   if (window.parent === window) return false;
   try {
     const host = window.parent as Window & {
-      __typebridgeOpenSettings?: (opts?: { focus?: string }) => void;
+      __typebridgeOpenSettings?: (opts?: { focus?: string; returnFocus?: HTMLElement | null }) => void;
     };
     if (!host.__typebridgeOpenSettings) return false;
-    host.__typebridgeOpenSettings(focusId ? { focus: focusId } : undefined);
+    host.__typebridgeOpenSettings({
+      focus: focusId,
+      returnFocus: restore ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null),
+    });
     return true;
   } catch {
     return false;
@@ -65,12 +69,12 @@ export function setupSettings(options?: { embedded?: boolean }): void {
   if (embedded) {
     openButton.addEventListener('click', event => {
       event.preventDefault();
-      openHostSettings();
+      openHostSettings(undefined, openButton);
     });
     const aboutButton = document.querySelector<HTMLButtonElement>('#about-documents-open');
     aboutButton?.addEventListener('click', event => {
       event.preventDefault();
-      openHostSettings('settings-about-title');
+      openHostSettings('settings-about-title', aboutButton);
     });
     return;
   }

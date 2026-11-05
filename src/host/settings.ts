@@ -144,12 +144,14 @@ export function installHostSettings(deps: {
   }
 
   function resetTabIndent(): boolean {
-    tabIndent.checked = true;
     try {
       localStorage.setItem(TAB_INDENT_KEY, 'on');
+      tabIndent.checked = true;
       broadcast('tabIndent');
       return true;
     } catch {
+      try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; }
+      catch { /* keep */ }
       return false;
     }
   }
@@ -204,13 +206,14 @@ export function installHostSettings(deps: {
     },
   });
 
-  function open(opts?: { focus?: string }): void {
+  function open(opts?: { focus?: string; returnFocus?: HTMLElement | null }): void {
     const openButton = document.querySelector<HTMLButtonElement>('#settings-open');
     if (!openButton) return;
-    ensureSettingsOpen();
+    const restore = opts?.returnFocus ?? openButton;
+    ensureSettingsOpen(restore);
     if (opts?.focus) {
       const target = document.getElementById(opts.focus);
-      if (target instanceof HTMLElement) openSettingsTo(target, openButton);
+      if (target instanceof HTMLElement) openSettingsTo(target, restore);
     }
   }
 
