@@ -1198,7 +1198,7 @@ body.host-page {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--tb-bg, #f4f5f7);
+  background: var(--background);
 }
 .host-notice {
   position: relative;
@@ -1210,16 +1210,16 @@ body.host-page {
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--tb-border, #c5c9d3) 80%, transparent);
-  background: color-mix(in srgb, var(--tb-surface, #fff) 92%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
   flex: 0 0 auto;
 }
 .host-toolbar button {
   font: inherit;
   padding: 0.35rem 0.7rem;
-  border: 1px solid var(--tb-border, #c5c9d3);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--tb-surface, #fff);
+  background: var(--surface);
   color: inherit;
   cursor: pointer;
 }
@@ -1232,8 +1232,8 @@ body.host-page {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--tb-bg, #e8eaef) 70%, transparent), transparent 40%),
-    var(--tb-bg, #e8eaef);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--background) 70%, transparent), transparent 40%),
+    var(--background);
 }
 .host-window {
   position: absolute;
@@ -1241,14 +1241,14 @@ body.host-page {
   flex-direction: column;
   min-width: 280px;
   min-height: 200px;
-  border: 1px solid var(--tb-border, #9aa1b0);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--tb-surface, #fff);
+  background: var(--surface);
   box-shadow: 0 1px 2px color-mix(in srgb, #000 12%, transparent);
   overflow: hidden;
 }
 .host-window.is-active {
-  border-color: var(--tb-accent, #3153e9);
+  border-color: var(--accent);
   box-shadow: 0 4px 18px color-mix(in srgb, #000 18%, transparent);
 }
 .host-window-titlebar {
@@ -1257,12 +1257,12 @@ body.host-page {
   gap: 0.25rem;
   padding: 0.25rem 0.35rem 0.25rem 0.35rem;
   user-select: none;
-  background: color-mix(in srgb, var(--tb-bg, #eef0f4) 85%, var(--tb-accent, #3153e9) 8%);
-  border-bottom: 1px solid var(--tb-border, #c5c9d3);
+  background: color-mix(in srgb, var(--background) 85%, var(--accent) 8%);
+  border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
 .host-window.is-active .host-window-titlebar {
-  background: color-mix(in srgb, var(--tb-accent, #3153e9) 16%, var(--tb-bg, #eef0f4));
+  background: color-mix(in srgb, var(--accent) 16%, var(--background));
 }
 .host-window-move {
   flex: 1 1 auto;
@@ -1277,7 +1277,7 @@ body.host-page {
   cursor: grabbing;
 }
 .host-window-move:focus-visible {
-  outline: 2px solid var(--tb-accent, #3153e9);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .host-window-title {
@@ -1308,7 +1308,7 @@ body.host-page {
   width: 100%;
   min-height: 0;
   border: 0;
-  background: var(--tb-surface, #fff);
+  background: var(--surface);
 }
 .host-window-resize {
   position: absolute;
