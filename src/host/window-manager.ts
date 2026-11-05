@@ -243,16 +243,21 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     persist();
   };
 
-  const setActive = (id: string): void => {
+  /** Sync is-active / aria-current without raising z-order or persisting. */
+  const markActiveChrome = (id: string): void => {
     activeId = id;
-    if (mode === 'free' && !hostFocus) layouts = bringToFront(layouts, id);
-    for (const win of layouts) applyShellGeometry(win);
     for (const [wid, shell] of shells) {
       shell.classList.toggle('is-active', wid === id);
       // Regions do not support aria-selected; mark the active shell with aria-current.
       if (wid === id) shell.setAttribute('aria-current', 'true');
       else shell.removeAttribute('aria-current');
     }
+  };
+
+  const setActive = (id: string): void => {
+    markActiveChrome(id);
+    if (mode === 'free' && !hostFocus) layouts = bringToFront(layouts, id);
+    for (const win of layouts) applyShellGeometry(win);
     if (hostFocus) {
       applyModeChrome();
       syncEmbeddedFocusChrome(true);
@@ -1006,7 +1011,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         preFocusLayouts = undefined;
         syncEmbeddedFocusChrome(false);
       }
-      if (activeId === id) activeId = layouts[0]?.id ?? 'main';
+      if (activeId === id) {
+        const nextId = layouts[0]?.id;
+        if (nextId) markActiveChrome(nextId);
+        else activeId = 'main';
+      }
       // Drop scoped session keys after the iframe is gone. prepareClose only returns
       // true for a clean close or an explicit discard, so pendingDraft is safe to
       // remove here — and doing it *after* unload beats a pagehide that recreates it.
@@ -1219,14 +1228,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     const bootActive = (pendingFocusId && layouts.some(win => win.id === pendingFocusId))
       ? pendingFocusId
       : (topmost?.id ?? layouts[0]?.id);
-    if (bootActive) {
-      activeId = bootActive;
-      for (const [wid, shell] of shells) {
-        shell.classList.toggle('is-active', wid === bootActive);
-        if (wid === bootActive) shell.setAttribute('aria-current', 'true');
-        else shell.removeAttribute('aria-current');
-      }
-    }
+    if (bootActive) markActiveChrome(bootActive);
   }
   if (pendingFocusId && layouts.some(win => win.id === pendingFocusId)) {
     api.setHostFocusMode(true, pendingFocusId);

@@ -165,6 +165,22 @@ test('F6 in host Focus maximizes the next window', async ({ page }) => {
   expect(focused!.h).toBeGreaterThan(500);
 });
 
+test('closing the active window marks the remaining window current', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 1);
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await second.locator('#editor').focus();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveAttribute('aria-current', 'true');
+
+  await page.locator('.host-window[data-window-id="w2"] .host-window-close').click();
+  await expect(page.locator('.host-window')).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveAttribute('aria-current', 'true');
+});
+
 test('closing the Focus window after F6 restores remaining tiled geometry', async ({ page }) => {
   await openHost(page, 'free');
   await addWindows(page, 2);
