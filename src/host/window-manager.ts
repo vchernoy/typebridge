@@ -329,12 +329,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
     const syncTitleEditable = (): void => {
       try {
-        const draft = frame.contentDocument?.querySelector<HTMLInputElement>('#draft-title');
-        const ro = !draft || draft.readOnly || draft.disabled;
-        title.readOnly = ro;
-      } catch {
-        title.readOnly = true;
-      }
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const draft = doc.querySelector<HTMLInputElement>('#draft-title');
+        // Until the iframe mounts the title field, leave the host input editable.
+        if (!draft) return;
+        title.readOnly = draft.readOnly || draft.disabled;
+      } catch { /* Cross-origin or mid-navigation — keep current state. */ }
     };
 
     title.addEventListener('pointerdown', event => { event.stopPropagation(); syncTitleEditable(); });
@@ -417,6 +418,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         doc.addEventListener('pointerdown', activateFromIframe);
         doc.addEventListener('focusin', activateFromIframe);
         // Hooks register at the end of the editor boot — retry briefly after load.
+        // Keep refreshing title editability after hooks appear: draft init may still
+        // hold the iframe title read-only for a few frames (ownership acquire).
         let attempts = 0;
         const syncHooks = (): void => {
           const hooks = frame.contentWindow as (Window & {
@@ -426,8 +429,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           if (hooks?.__typebridgeGetTitle) applyChromeTitle(hooks.__typebridgeGetTitle());
           syncTitleEditable();
           if (hostFocus) hooks?.__typebridgeSetFocusMode?.(win.id === activeId);
-          const ready = !!hooks?.__typebridgeGetTitle && (!hostFocus || !!hooks.__typebridgeSetFocusMode);
-          if (ready || attempts++ >= 40) return;
+          const hooksReady = !!hooks?.__typebridgeGetTitle && (!hostFocus || !!hooks.__typebridgeSetFocusMode);
+          const titleReady = !title.readOnly;
+          if ((hooksReady && titleReady) || attempts++ >= 80) return;
           window.setTimeout(syncHooks, 50);
         };
         syncHooks();
