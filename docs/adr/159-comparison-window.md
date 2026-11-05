@@ -312,8 +312,8 @@ Status: This saved document is no longer available.
 | **S1** (done #165) | Revised split ADR/UX + `session` contracts | Vitest session/pane helpers; runtime unchanged |
 | **S2** (partial #166) | Session/pane separation, single-pane parity | Vitest workspace; existing e2e still green; no split UI yet. Per-document persist/recovery extraction remains incomplete — S4 extends the boundary carefully rather than claiming S2 done. |
 | **S3** (done #167) | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
-| **S4** (this PR; in progress) | Two different editable documents | Independent sessions, locks, Undo, switch/close; dual unload/pending/reconcile required before merge |
-| **S5** | Local Edit in this pane + lifecycle | Transfer, IME/transition guards, delayed commands |
+| **S4** (done #169) | Two different editable documents | Independent sessions, locks, Undo, switch/close; dual unload/pending/reconcile |
+| **S5** (this PR; in progress) | Local Edit in this pane + lifecycle | Transfer, IME/transition guards, delayed commands |
 | **S6** | Verification, docs, evidence | Full browser matrix; record real-device/AT limits |
 
 Playwright: Chromium, Firefox, WebKit. Multi-page tests remain for W2–W4 cross-window behavior; S3–S5 add in-tab multi-pane coverage. Real devices / IME / AT = manual evidence only.
@@ -422,17 +422,27 @@ Shipped in this PR: optional same-document live companion pane in one tab.
 
 ## S4 implementation notes
 
-In progress in this PR: companion document picker can open a **different** saved document as a second editable session. **Do not describe S4 as complete** until dual-document unload/pending/recovery, promotion autosave reschedule, and secondary signal/ownership reconcile are covered by lifecycle e2e (not only happy-path open/edit).
+Shipped in #169: companion document picker can open a **different** saved document as a second editable session.
 
 - **`BoundSession` / registry** (`src/view/bound-session.ts`): primary stays the existing main pipeline; optional `session-2` binds `#editor-b` + `#draft-title-b` with its own dirty/save timer, ownership handle and history.
 - **Picker:** `#pane-b-drafts` lists saved documents. Choosing the primary’s id releases the secondary and restores S3 live mirror + **Live view · Read-only**. Choosing another id acquires that document’s Web Lock/fence, loads into pane B as editable, and stops mirroring.
-- **Routing:** Undo/Convert/Replace/Find/Copy follow the active pane’s session when dual-document; same-document companion remains mutation-refused.
+- **Routing:** Undo/Convert/Replace/Find/Copy follow the active pane’s session when dual-document; same-document companion remains mutation-refused until S5 transfer.
 - **Unload / backup:** pane B uses `typebridge.pendingDraft.paneB.v1`, a secondary recovery journal, and the same `pagehide` / `beforeunload` / visibility flush paths as the primary. Cross-window signals reread and retry ownership for the secondary session too.
 - **Stacked layout:** narrow End clamps to 65% primary share so companion chrome + textarea stay usable (≥40px field, 44px touch reset).
-- **Not finished in S4:** full extraction of primary persist out of `main.ts`, Edit in this pane (S5), CommandGeneration on every delayed toolbar command, New/Import targeting pane B.
+- **Not finished in S4:** full extraction of primary persist out of `main.ts`, Edit in this pane (S5), CommandGeneration on every delayed toolbar command, New/Import targeting pane B. P2 pane-B versionchange in-memory fallback remains tracked on #159.
+
+## S5 implementation notes
+
+In progress in this PR: same-document **Edit in this pane** moves the editable role between local panes sharing one session.
+
+- **Transfer:** `#edit-in-pane-a` / `#edit-in-pane-b` call `localPaneTransferBlock` then move Editor history (`exportHistory` → `restoreHistory`), flip `setReadOnly`, update `workspace.setEditablePaneId` (bumps `paneGeneration` only — persist stays current), and reverse live mirror direction. Selections and scroll are preserved on both surfaces.
+- **Chrome:** RO pane shows **Live view · Read-only** (`#companion-badge` or `#primary-live-badge`); dual-document mode hides transfer controls.
+- **Guards:** IME (`Editor.composing`), `transitioning`, external ownership, and already-editable refuse with status text. Closing the split while B is editable runs `paneCloseBlock` then transfers history back to A before teardown.
+- **Delayed commands:** Clear captures `CommandGeneration` + content revision and revalidates after confirm. Transfer during in-flight `persist` does not bump `sessionGeneration`; snapshot follows the editable surface.
+- **Not finished in S5:** full primary DocumentSession extraction; CommandGeneration on every remaining delayed toolbar path; New/Import targeting pane B.
 
 ## Implementation notes for later PRs
 
-- S5: `localPaneTransferBlock` wiring; generation-guarded delayed commands; finish primary DocumentSession extraction.
+- S6: verification matrix, production evidence, remaining P2/P3.
 - Keep separate-window companion routing **before** ordinary boot; do not delete W2–W4.
 - Recovery Web Lock stays page-scoped; in-tab read-only panes must not take recovery ownership that clears another tab’s journals.

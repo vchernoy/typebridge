@@ -14,7 +14,14 @@ import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commi
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
-import { commandAllowedOnPane, resolveSessionForDocument } from './view/session';
+import {
+  commandAllowedOnPane,
+  contentCommandStillCurrent,
+  localPaneTransferBlock,
+  paneCloseBlock,
+  resolveSessionForDocument,
+  type CommandGeneration,
+} from './view/session';
 import {
   createBoundSession,
   createSessionRegistry,
@@ -54,6 +61,10 @@ let transitioning = false;
 let deleting = false;
 /** True only during the post-flush ownership acquire/reread window (not while flushing). */
 let transferFrozen = false;
+/** True while a pane-B document open is awaiting storage/ownership (#159 S5). */
+let companionOpenBusy = false;
+/** Suppress scheduleSave while moving Editor history between panes (not a content edit). */
+let suppressEditTracking = false;
 /** True for the whole Autosave change handler (including awaits); keeps the checkbox disabled. */
 let autosaveToggleActive = false;
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
@@ -96,6 +107,10 @@ const draftTitleB = document.querySelector<HTMLInputElement>('#draft-title-b')!;
 const paneBDrafts = document.querySelector<HTMLSelectElement>('#pane-b-drafts')!;
 const saveIndicatorB = document.querySelector<HTMLElement>('#save-indicator-b')!;
 const companionBadge = document.querySelector<HTMLElement>('#companion-badge')!;
+const primaryLiveBadge = document.querySelector<HTMLElement>('#primary-live-badge')!;
+const primaryPaneChrome = document.querySelector<HTMLElement>('.pane-chrome-primary')!;
+const editInPaneA = document.querySelector<HTMLButtonElement>('#edit-in-pane-a')!;
+const editInPaneB = document.querySelector<HTMLButtonElement>('#edit-in-pane-b')!;
 /** Declared early: syncMutationControls runs during module init before draft locals. */
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
 if (viewMode) {
@@ -112,22 +127,36 @@ function dualDocumentSplit(): boolean {
   return !!secondary && secondary.draft.id !== active.id && workspace.splitOpen();
 }
 
+/** Same-document editable role currently lives in pane B (S5). Dual-doc uses BoundSession instead. */
+function sameDocEditableInB(): boolean {
+  return !!workspace.splitOpen() && !dualDocumentSplit() && workspace.editablePaneId() === SECOND_PANE_ID;
+}
+
 /** Keep the companion text current even while hidden so position restore uses the right length. */
 function mirrorCompanion(force = false): void {
   if (!force && !workspace.splitOpen()) return;
   if (dualDocumentSplit()) return;
-  mirrorTextarea(field, companionField);
+  // Mirror editable → read-only so local Edit-in-this-pane flips the direction.
+  if (sameDocEditableInB()) mirrorTextarea(companionField, field);
+  else mirrorTextarea(field, companionField);
 }
 
 function syncCompanionChrome(): void {
   const dual = dualDocumentSplit();
-  companionBadge.hidden = dual;
+  const split = workspace.splitOpen();
+  const editableInB = sameDocEditableInB();
+  companionBadge.hidden = dual || editableInB;
+  primaryLiveBadge.hidden = !split || dual || viewMode || !editableInB;
+  primaryPaneChrome.hidden = !split || dual || viewMode || !editableInB;
+  editInPaneA.hidden = !split || dual || viewMode || !editableInB || readOnlyNow() || companionOpenBusy;
+  editInPaneB.hidden = !split || dual || viewMode || editableInB || readOnlyNow() || companionOpenBusy;
   draftTitleB.hidden = !dual;
   saveIndicatorB.hidden = !dual;
-  paneBDrafts.hidden = !workspace.splitOpen() || viewMode;
+  paneBDrafts.hidden = !split || viewMode;
   if (!dual) {
     companionBadge.textContent = 'Live view · Read-only';
-    draftTitleB.value = '';
+    primaryLiveBadge.textContent = 'Live view · Read-only';
+    if (!editableInB) draftTitleB.value = '';
   }
 }
 
@@ -148,6 +177,27 @@ const splitControls = setupSplitPane({
     if (!open && transitioning) {
       splitControls.setOpen(true);
       return;
+    }
+    if (!open && draftsInitialized) {
+      const closeBlock = paneCloseBlock({
+        composing: editor.composing || companionEditor.composing,
+        transitioning,
+      });
+      if (closeBlock) {
+        splitControls.setOpen(true);
+        announceAction(closeBlock === 'composing'
+          ? 'Finish composing text before closing the split.'
+          : 'Finish the current action before closing the split.');
+        return;
+      }
+      // Move history back to pane A before workspace forgets B held the editable role.
+      // parkHistory: allow this even after external ownership loss so Undo is not stranded in B.
+      if (sameDocEditableInB()
+        && !transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true, parkHistory: true })) {
+        splitControls.setOpen(true);
+        announceAction('Could not move editing back to this pane. Keep the split open.');
+        return;
+      }
     }
     workspace.setSplitOpen(open);
     toggleSplit.setAttribute('aria-pressed', open ? 'true' : 'false');
@@ -373,7 +423,7 @@ const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
-/** Active editable session for shared chrome (#159 S3/S4). */
+/** Active editable session for shared chrome (#159 S3–S5). */
 function activeEditableSession(): { paneId: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID; role: 'editable' | 'readonly'; editor: Editor; field: HTMLTextAreaElement; canUndo: boolean; canRedo: boolean } {
   if (workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit() && secondary) {
     const blocked = viewMode || secondary.editBlock !== '';
@@ -386,6 +436,18 @@ function activeEditableSession(): { paneId: typeof PRIMARY_PANE_ID | typeof SECO
       canRedo: secondary.editor.canRedo,
     };
   }
+  // Same-document: editable role may live in pane B after Edit in this pane.
+  if (sameDocEditableInB()) {
+    const blocked = readOnlyNow();
+    return {
+      paneId: SECOND_PANE_ID,
+      role: blocked ? 'readonly' : 'editable',
+      editor: companionEditor,
+      field: companionField,
+      canUndo: companionEditor.canUndo,
+      canRedo: companionEditor.canRedo,
+    };
+  }
   return {
     paneId: PRIMARY_PANE_ID,
     role: readOnlyNow() ? 'readonly' : 'editable',
@@ -394,6 +456,116 @@ function activeEditableSession(): { paneId: typeof PRIMARY_PANE_ID | typeof SECO
     canUndo: editor.canUndo,
     canRedo: editor.canRedo,
   };
+}
+/** Live token for delayed toolbar commands after Edit-in-this-pane / content edits. */
+function liveCommandState(): {
+  sessionId: typeof workspace.sessionId;
+  paneId: ReturnType<typeof workspace.activePaneId>;
+  paneGeneration: number;
+  sessionGeneration: number;
+  contentRevision: number;
+} {
+  return {
+    sessionId: workspace.sessionId,
+    paneId: workspace.activePaneId(),
+    paneGeneration: workspace.paneGeneration(),
+    sessionGeneration: workspace.sessionGeneration(),
+    contentRevision: workspace.contentRevision(),
+  };
+}
+/**
+ * Same-document local Edit in this pane (#159 S5). Moves the editable role and
+ * canonical Editor history between panes without save, reload, or session bump.
+ */
+function transferSameDocumentEdit(
+  target: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID,
+  options: {
+    silent?: boolean;
+    /** Bypass companion-open busy (parking before picker load). */
+    force?: boolean;
+    /**
+     * Internal history handoff (close split / picker). May run while externally
+     * read-only so Undo is not stranded in a pane that is about to hide.
+     */
+    parkHistory?: boolean;
+  } = {},
+): boolean {
+  if (viewMode || !workspace.splitOpen() || dualDocumentSplit()) {
+    if (!options.silent) announceAction('Edit in this pane is only available for the same-document companion.');
+    return false;
+  }
+  const block = localPaneTransferBlock({
+    sameSession: true,
+    targetAlreadyEditable: workspace.editablePaneId() === target,
+    composing: editor.composing || companionEditor.composing,
+    transitioning: transitioning || (!options.force && !options.parkHistory && companionOpenBusy),
+    externallyBlocked: options.parkHistory ? false : readOnlyNow(),
+  });
+  if (block) {
+    if (!options.silent) {
+      const message = {
+        'already-editable': 'This pane is already editable.',
+        composing: 'Finish composing text before moving editing to the other pane.',
+        busy: 'Finish the current action before moving editing.',
+        external: 'Another window is editing this document.',
+        'different-session': 'Open the same document in both panes to move editing here.',
+      }[block];
+      announceAction(message);
+    }
+    return false;
+  }
+  const fromB = workspace.editablePaneId() === SECOND_PANE_ID;
+  const fromEditor = fromB ? companionEditor : editor;
+  const toEditor = target === SECOND_PANE_ID ? companionEditor : editor;
+  const fromField = fromB ? companionField : field;
+  const toField = target === SECOND_PANE_ID ? companionField : field;
+  const fromSel = {
+    start: fromField.selectionStart,
+    end: fromField.selectionEnd,
+    direction: fromField.selectionDirection,
+  };
+  const toSel = {
+    start: toField.selectionStart,
+    end: toField.selectionEnd,
+    direction: toField.selectionDirection,
+  };
+  const fromScroll = { top: fromField.scrollTop, left: fromField.scrollLeft };
+  const toScroll = { top: toField.scrollTop, left: toField.scrollLeft };
+  // Keep both surfaces on the same text before moving history.
+  toField.value = fromField.value;
+  const history = fromEditor.exportHistory();
+  // restoreHistory emits historychange; that must not mark dirty or schedule a save.
+  suppressEditTracking = true;
+  try {
+    fromEditor.setReadOnly(true);
+    fromEditor.restoreHistory({ v: 1, undo: [], redo: [], current: fromField.value });
+    const blocked = readOnlyNow();
+    toEditor.setReadOnly(blocked);
+    toEditor.restoreHistory(history);
+    workspace.setEditablePaneId(target);
+    sessionRegistry.primary.editablePaneId = target;
+  } finally {
+    suppressEditTracking = false;
+  }
+  try {
+    fromField.setSelectionRange(fromSel.start, fromSel.end, fromSel.direction);
+    toField.setSelectionRange(toSel.start, toSel.end, toSel.direction);
+  } catch { /* Selection restore is best-effort. */ }
+  fromField.scrollTop = fromScroll.top;
+  fromField.scrollLeft = fromScroll.left;
+  toField.scrollTop = toScroll.top;
+  toField.scrollLeft = toScroll.left;
+  mirrorCompanion(true);
+  syncCompanionChrome();
+  syncMutationControls();
+  if (!options.silent) {
+    activatePane(target);
+    toField.focus({ preventScroll: true });
+    announceAction(target === SECOND_PANE_ID
+      ? 'Editing moved to the other pane.'
+      : 'Editing moved to this pane.');
+  }
+  return true;
 }
 /** Shared chrome mutates the active editable pane; refuse while a same-doc companion is active. */
 function canMutatePrimary(): boolean {
@@ -464,7 +636,7 @@ field.addEventListener('keydown', event => {
 });
 companionField.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
-  if (!dualDocumentSplit()) return;
+  if (!dualDocumentSplit() && !sameDocEditableInB()) return;
   const key = event.key.toLowerCase();
   if (key !== SHORTCUTS.convertCyrillic.key && key !== SHORTCUTS.convertLatin.key) return;
   if (!canMutatePrimary() || companionField.selectionStart === companionField.selectionEnd) return;
@@ -511,11 +683,11 @@ function handleTabIndent(event: KeyboardEvent, surface: HTMLTextAreaElement, sur
 }
 field.addEventListener('keydown', event => { handleTabIndent(event, field, editor); });
 companionField.addEventListener('keydown', event => {
-  if (!dualDocumentSplit()) return;
+  if (!dualDocumentSplit() && !sameDocEditableInB()) return;
   handleTabIndent(event, companionField, companionEditor);
 });
 function updateStats(): void {
-  const surface = workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit()
+  const surface = workspace.activePaneId() === SECOND_PANE_ID
     ? companionField
     : field;
   count.textContent = formatDocumentStats(surface.value);
@@ -549,14 +721,25 @@ document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', as
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
   if (!canMutatePrimary()) return;
+  const started = workspace.captureCommandGeneration({ contentRevision: workspace.contentRevision() });
   const target = activeEditableSession();
   if (!target.field.value) return;
-  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? target.field : document.querySelector<HTMLButtonElement>('#more-open')! })) {
-    target.editor.clear();
-    target.field.focus();
+  const returnFocusField = target.field;
+  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? returnFocusField : document.querySelector<HTMLButtonElement>('#more-open')! })) {
+    if (!('contentRevision' in started) || !contentCommandStillCurrent(started as CommandGeneration & { contentRevision: number }, liveCommandState())) {
+      announceAction('Clear cancelled — the pane or text changed.');
+      return;
+    }
+    if (!canMutatePrimary()) return;
+    const current = activeEditableSession();
+    if (current.paneId !== started.paneId) return;
+    current.editor.clear();
+    current.field.focus();
     announceAction('Cleared');
   }
 });
+editInPaneA.addEventListener('click', () => { transferSameDocumentEdit(PRIMARY_PANE_ID); });
+editInPaneB.addEventListener('click', () => { transferSameDocumentEdit(SECOND_PANE_ID); });
 
 
 const primarySearch: { field: HTMLTextAreaElement; editor: Editor } = { field, editor };
@@ -768,12 +951,22 @@ function readPendingB(): StoredDraft | undefined {
   catch { return undefined; }
 }
 function snapshot(): StoredDraft {
+  if (sameDocEditableInB()) {
+    return {
+      ...active,
+      text: companionField.value,
+      title: draftTitle.value.trim() || UNTITLED_TITLE,
+      history: companionEditor.exportHistory(),
+      updatedAt: Date.now(),
+    };
+  }
   return { ...active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
 }
 let currentJournalSecondary: RecoverySnapshot | undefined;
 function journalEdit(): void {
   if (viewMode || !autosave.checked) return;
-  const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
+  const text = sameDocEditableInB() ? companionField.value : field.value;
+  const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || UNTITLED_TITLE, text };
   try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
   catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
 }
@@ -1197,9 +1390,19 @@ async function openCompanionDocument(id: string): Promise<void> {
   if (viewMode || !workspace.splitOpen() || !db || transitioning) return;
   const generation = ++companionOpenGeneration;
   paneBDrafts.disabled = true;
+  companionOpenBusy = true;
+  syncCompanionChrome();
   const run = (async () => {
     if (companionOpenInFlight) await companionOpenInFlight.catch(() => undefined);
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    // Dual-doc and picker restores reuse #editor-b; park same-doc history on A first.
+    // Refuse the whole open if IME/busy blocks parking — do not load over live history.
+    if (sameDocEditableInB()) {
+      if (!transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true, force: true, parkHistory: true })) {
+        announceAction('Finish composing text before opening another document in the other pane.');
+        return;
+      }
+    }
     if (id === active.id) {
       if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
       if (generation !== companionOpenGeneration) return;
@@ -1337,7 +1540,11 @@ async function openCompanionDocument(id: string): Promise<void> {
   try { await run; }
   finally {
     if (companionOpenInFlight === run) companionOpenInFlight = undefined;
-    if (generation === companionOpenGeneration && !bootRestoringSecondary) paneBDrafts.disabled = false;
+    if (generation === companionOpenGeneration) {
+      companionOpenBusy = false;
+      if (!bootRestoringSecondary) paneBDrafts.disabled = false;
+      syncCompanionChrome();
+    }
   }
 }
 async function refreshDrafts(): Promise<void> {
@@ -1355,20 +1562,31 @@ function showDraft(): void {
   clearNotices();
   loadingDraft = true;
   try {
+    // Document switches always rebind the same-document editable role to pane A.
+    if (workspace.splitOpen() && !dualDocumentSplit() && workspace.editablePaneId() === SECOND_PANE_ID) {
+      workspace.setEditablePaneId(PRIMARY_PANE_ID);
+      sessionRegistry.primary.editablePaneId = PRIMARY_PANE_ID;
+    }
     editor.load(active.text);
     if (!viewMode) editor.restoreHistory(active.history);
     draftTitle.value = active.title;
     syncTitleTooltip();
     workspace.setDirty(false);
     saveFailed = false; // The editor no longer holds the unsaved text.
-    // Mirror before restoring companion offsets (including when split is closed).
-    mirrorCompanion(true);
+    // Same-document mirror only — dual-document B keeps its own BoundSession text/history.
+    if (!dualDocumentSplit()) {
+      companionEditor.load(active.text);
+      companionEditor.restoreHistory({ v: 1, undo: [], redo: [], current: active.text });
+      if (!viewMode) companionEditor.setReadOnly(true);
+      mirrorCompanion(true);
+    }
     // Dual-document B keeps its own position key; do not apply the primary's offsets.
     companionWritingPosition.restore(
       dualDocumentSplit() && secondary ? secondary.draft.id : active.id,
     );
   } finally { loadingDraft = false; }
   writingPosition.restore(active.id);
+  syncCompanionChrome();
   renderDrafts();
   updateStats();
   updateSaveIndicator();
@@ -1383,7 +1601,15 @@ function applyEditAccess(): void {
   // installOwnership runs before the handler finishes (e.g. refreshDrafts after delete).
   const blocked = editBlock !== '' || transferFrozen;
   workspace.setPaneRole(blocked ? 'readonly' : 'editable');
-  if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
+  const editableInB = sameDocEditableInB();
+  const primaryBlocked = blocked || editableInB;
+  const companionBlocked = dualDocumentSplit()
+    ? (secondary ? secondary.editBlock !== '' : true)
+    : blocked || !editableInB;
+  if (editor.readOnly !== primaryBlocked) editor.setReadOnly(primaryBlocked);
+  if (!dualDocumentSplit() && companionEditor.readOnly !== companionBlocked) {
+    companionEditor.setReadOnly(companionBlocked);
+  }
   if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
   document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
@@ -1391,6 +1617,7 @@ function applyEditAccess(): void {
   const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, workspace.dirty());
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
+  syncCompanionChrome();
   syncHistory();
   syncMutationControls();
   updateSaveIndicator();
@@ -1462,10 +1689,13 @@ function freezeEditorsForTransition(): void {
   workspace.setPaneRole('readonly');
   editor.setReadOnly(true);
   titleEditor.setReadOnly(true);
+  // Same-document editable may live in B; freeze both surfaces so mid-switch typing is not lost.
+  if (!dualDocumentSplit()) companionEditor.setReadOnly(true);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
   undo.disabled = true;
   redo.disabled = true;
   autosave.disabled = true;
+  syncCompanionChrome();
 }
 
 function unfreezeEditorsAfterTransition(): void {
@@ -1705,7 +1935,7 @@ async function persist(): Promise<PersistResult> {
   }
 }
 function scheduleSave(fromTitle = false): void {
-  if (readOnlyNow() || loadingDraft) return;
+  if (readOnlyNow() || loadingDraft || suppressEditTracking) return;
   const becameDirty = !workspace.dirty();
   workspace.setDirty(true);
   workspace.bumpContentRevision();
@@ -1717,13 +1947,23 @@ function scheduleSave(fromTitle = false): void {
   if (autosave.checked) { showSaving(); saveTimer = setTimeout(() => { void persist(); }, 300); }
   else showSaveState();
 }
-field.addEventListener('input', () => { scheduleSave(); mirrorCompanion(); });
-field.addEventListener('historychange', () => { scheduleSave(); mirrorCompanion(); });
+field.addEventListener('input', () => {
+  if (sameDocEditableInB()) return;
+  scheduleSave();
+  mirrorCompanion();
+});
+field.addEventListener('historychange', () => {
+  if (sameDocEditableInB()) return;
+  scheduleSave();
+  mirrorCompanion();
+});
 companionField.addEventListener('input', () => {
   if (dualDocumentSplit()) scheduleSaveSecondary();
+  else if (sameDocEditableInB()) { scheduleSave(); mirrorCompanion(); }
 });
 companionField.addEventListener('historychange', () => {
   if (dualDocumentSplit()) { scheduleSaveSecondary(); syncHistory(); }
+  else if (sameDocEditableInB()) { scheduleSave(); mirrorCompanion(); syncHistory(); }
 });
 draftTitleB.addEventListener('focus', () => {
   if (!dualDocumentSplit()) return;
@@ -2770,6 +3010,12 @@ function exportSurface(): { title: string; text: string } {
   if (dualDocumentSplit() && workspace.activePaneId() === SECOND_PANE_ID && secondary) {
     return {
       title: draftTitleB.value.trim() || UNTITLED_TITLE,
+      text: companionField.value,
+    };
+  }
+  if (sameDocEditableInB() || workspace.activePaneId() === SECOND_PANE_ID) {
+    return {
+      title: draftTitle.value.trim() || UNTITLED_TITLE,
       text: companionField.value,
     };
   }

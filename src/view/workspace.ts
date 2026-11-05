@@ -1,7 +1,8 @@
 /**
- * Workspace shell for #159 S2/S3.
+ * Workspace shell for #159 S2/S3/S5.
  * One document session with an optional same-document live companion pane.
  * Persist/ownership stay in main.ts — never duplicated per pane.
+ * S5 may move the editable role between same-session panes without bumping sessionGeneration.
  */
 
 import {
@@ -44,7 +45,11 @@ export type Workspace = {
   setDirty(value: boolean): void;
   splitOpen(): boolean;
   setSplitOpen(open: boolean): void;
+  /** Overall session editability (external ownership / transfer freeze). */
   setPaneRole(role: PaneRole): void;
+  /** Which same-session pane currently holds the editable role when not blocked. */
+  editablePaneId(): PaneId;
+  setEditablePaneId(id: PaneId): void;
   activePaneId(): PaneId;
   setActivePane(id: PaneId): void;
   captureCommandGeneration(extra?: { contentRevision?: number }): CommandGeneration;
@@ -74,9 +79,17 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
   let sessionGeneration = 0;
   let contentRevision = 0;
   let paneGeneration = 0;
+  /** External/session block — when readonly, neither pane mutates. */
   let role: PaneRole = 'editable';
+  /** Local editable role among same-session panes (S5). Ignored while role is readonly. */
+  let editablePane: PaneId = paneId;
   let activePane: PaneId = paneId;
   let splitOpen = false;
+
+  function roleFor(target: PaneId): PaneRole {
+    if (role === 'readonly') return 'readonly';
+    return editablePane === target ? 'editable' : 'readonly';
+  }
 
   function syncDom(): void {
     options.root.dataset.sessionId = sessionId;
@@ -85,10 +98,10 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
     if (documentId) options.root.dataset.documentId = documentId;
     else delete options.root.dataset.documentId;
     options.paneSurface.dataset.paneId = paneId;
-    options.paneSurface.dataset.paneRole = role;
+    options.paneSurface.dataset.paneRole = roleFor(paneId);
     if (options.companionSurface && companionPaneId) {
       options.companionSurface.dataset.paneId = companionPaneId;
-      options.companionSurface.dataset.paneRole = 'readonly';
+      options.companionSurface.dataset.paneRole = roleFor(companionPaneId);
     }
   }
 
@@ -114,13 +127,27 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
       if (!companionPaneId) return;
       if (splitOpen === open) return;
       splitOpen = open;
-      if (!open) activePane = paneId;
+      if (!open) {
+        activePane = paneId;
+        // Closing the companion returns the editable role to the primary surface.
+        editablePane = paneId;
+      }
       paneGeneration += 1;
       syncDom();
     },
     setPaneRole: next => {
       if (next === role) return;
       role = next;
+      paneGeneration += 1;
+      syncDom();
+    },
+    editablePaneId: () => editablePane,
+    setEditablePaneId: id => {
+      if (id !== paneId && id !== companionPaneId) return;
+      if (!companionPaneId && id !== paneId) return;
+      if (id === companionPaneId && !splitOpen) return;
+      if (editablePane === id) return;
+      editablePane = id;
       paneGeneration += 1;
       syncDom();
     },
@@ -143,7 +170,7 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
     snapshotSession: extra => ({
       sessionId,
       documentId,
-      roleEditablePaneId: role === 'editable' ? paneId : undefined,
+      roleEditablePaneId: role === 'editable' ? editablePane : undefined,
       paneIds: splitOpen && companionPaneId ? [paneId, companionPaneId] : [paneId],
       dirty,
       autosaveOn: extra.autosaveOn,
@@ -161,7 +188,7 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
         return {
           paneId: companionPaneId,
           sessionId,
-          role: 'readonly',
+          role: roleFor(companionPaneId),
           paneGeneration,
           active: activePane === companionPaneId,
         };
@@ -169,7 +196,7 @@ export function createSinglePaneWorkspace(options: WorkspaceOptions): Workspace 
       return {
         paneId,
         sessionId,
-        role,
+        role: roleFor(paneId),
         paneGeneration,
         active: activePane === paneId,
       };
