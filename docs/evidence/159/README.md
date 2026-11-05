@@ -1,6 +1,6 @@
 # #159 S6 verification evidence
 
-Honest matrix for the in-tab split workspace slices on `main` (S1–S5b merged; S2 and delayed-command coverage still partial). This folder is **S6 evidence packaging** (#172), not full S6 acceptance. It records what was run and what was **not**. It does not close #159.
+Historical matrix for the in-tab split slices that landed under #159 (S1–S5b on `main`). Folder from S6 packaging (#172). **#159 is superseded** by [#175](https://github.com/vchernoy/typebridge/issues/175) for further multi-document UX; keep this folder as record only.
 
 ## Automated Playwright matrix (agent VM)
 
