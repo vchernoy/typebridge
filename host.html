@@ -24,7 +24,8 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   </head>
   <body class="host-page">
-    <!-- #175 step 3: host owns update notice + Settings panel; one embedded editor window. -->
+    <!-- #175 step 3: host owns the update notice; Settings stay in the iframe until step 7. -->
+    <div id="host-notice" class="host-notice"></div>
     <div id="host-root" class="host-root">
       <iframe
         id="editor-window"
@@ -33,7 +34,6 @@
         allow="clipboard-read; clipboard-write"
       ></iframe>
     </div>
-    <div id="host-settings-root" class="host-settings-root"></div>
     <script type="module" src="/src/host/main.ts"></script>
   </body>
 </html>

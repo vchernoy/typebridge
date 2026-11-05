@@ -4,10 +4,12 @@
  */
 
 const STORAGE_KEY = 'typebridge.host.windows.v1';
+const FALLBACK_ID = 'main';
 
 export type HostWindowRecord = { id: string };
 
-export function readHostWindowIds(storage: Storage = localStorage): string[] {
+export function readHostWindowIds(storage: Storage | undefined = localStorage): string[] {
+  if (!storage) return [];
   try {
     const raw: unknown = JSON.parse(storage.getItem(STORAGE_KEY) ?? 'null');
     if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { windows?: unknown }).windows)) {
@@ -26,10 +28,18 @@ export function readHostWindowIds(storage: Storage = localStorage): string[] {
   }
 }
 
-export function ensurePrimaryWindowId(storage: Storage = localStorage): string {
-  const existing = readHostWindowIds(storage);
+/** Prefer a persisted id; on blocked/full storage still return a usable default. */
+export function ensurePrimaryWindowId(storage?: Storage): string {
+  let store: Storage | undefined = storage;
+  if (store === undefined) {
+    try { store = localStorage; } catch { store = undefined; }
+  }
+  const existing = readHostWindowIds(store);
   if (existing[0]) return existing[0];
-  const id = 'main';
-  storage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, windows: [{ id }] satisfies HostWindowRecord[] }));
-  return id;
+  if (store) {
+    try {
+      store.setItem(STORAGE_KEY, JSON.stringify({ version: 1, windows: [{ id: FALLBACK_ID } satisfies HostWindowRecord] }));
+    } catch { /* Keep editing with an in-memory id. */ }
+  }
+  return FALLBACK_ID;
 }

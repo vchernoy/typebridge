@@ -10,6 +10,12 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
    * `main > section` as in the standalone editor.
    */
   mount?: HTMLElement;
+  /**
+   * Element set `inert` while preparing a reload. Pass `null` on the host so
+   * iframe confirmation dialogs stay interactive. When omitted with no mount,
+   * freezes `main > section` as before.
+   */
+  freezeSurface?: HTMLElement | null;
 }): void {
   const workerContainer = navigator.serviceWorker;
   const notice = document.createElement('div');
@@ -26,11 +32,12 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   dismiss.type = 'button';
   dismiss.textContent = 'Not now';
   notice.append(message, reload, dismiss);
-  // Surface frozen while preparing an update reload (editor section or host shell).
-  const workspace = deps.mount
-    ?? document.querySelector<HTMLElement>('main > section')!;
+  const defaultWorkspace = document.querySelector<HTMLElement>('main > section');
   if (deps.mount) deps.mount.prepend(notice);
-  else workspace.before(notice);
+  else defaultWorkspace?.before(notice);
+  const workspace = deps.freezeSurface === undefined
+    ? (deps.mount ?? defaultWorkspace)
+    : deps.freezeSurface;
   const DISMISSED = deps.dismissedKey ?? 'typebridge.updateNotice.dismissed.v1';
   let dismissed = false;
   try { dismissed = sessionStorage.getItem(DISMISSED) === 'yes'; } catch { /* Current-page choice still works. */ }
@@ -60,15 +67,15 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   notice.addEventListener('keydown', event => event.stopPropagation());
   reload.addEventListener('click', async () => {
     if (!waiting) return;
-    const originalInert = workspace.inert;
-    workspace.inert = true;
+    const originalInert = workspace ? workspace.inert : false;
+    if (workspace) workspace.inert = true;
     notice.tabIndex = -1;
     notice.focus();
     reload.disabled = dismiss.disabled = true;
     message.textContent = 'Preparing your work for reload…';
     let navigating = false;
     const restore = (): void => {
-      workspace.inert = originalInert;
+      if (workspace) workspace.inert = originalInert;
       reload.disabled = dismiss.disabled = false;
       reload.focus({ preventScroll: true });
     };

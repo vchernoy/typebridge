@@ -17,4 +17,13 @@ describe('host window ids', () => {
     expect(ensurePrimaryWindowId(storage)).toBe('main');
     expect(readHostWindowIds(storage)).toEqual(['main']);
   });
+
+  it('returns main when storage writes fail', () => {
+    const failing = {
+      getItem: () => null,
+      setItem: () => { throw new Error('quota'); },
+      removeItem: () => undefined,
+    } as unknown as Storage;
+    expect(ensurePrimaryWindowId(failing)).toBe('main');
+  });
 });

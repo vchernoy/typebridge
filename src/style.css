@@ -1171,7 +1171,7 @@ body.focus-mode .bottom {
   font: inherit;
 }
 
-/* #175 step 3 host shell: one full-bleed editor iframe; Settings panel mounts beside it. */
+/* #175 step 3 host shell: one full-bleed editor iframe; update notice on the host. */
 html:has(body.host-page),
 body.host-page {
   height: 100%;
@@ -1179,6 +1179,10 @@ body.host-page {
 }
 body.host-page {
   overflow: hidden;
+}
+.host-notice {
+  position: relative;
+  z-index: 50;
 }
 .host-root {
   position: relative;
@@ -1190,17 +1194,6 @@ body.host-page {
   height: 100%;
   border: 0;
 }
-.host-settings-root {
-  position: relative;
-  z-index: 40;
-}
-.host-settings-root .settings-panel {
-  position: fixed;
-}
 body.host-page .update-notice {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 50;
+  position: relative;
 }

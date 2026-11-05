@@ -1,6 +1,6 @@
 /**
  * Embedded editor mode for #175 step 3.
- * Host page owns Settings and the update notice; the iframe runs the editor chrome.
+ * Host page owns the update notice; the iframe keeps Settings until step 7.
  * Pure helpers only — no DOM.
  */
 
@@ -16,19 +16,3 @@ export function parseEmbedMode(search: string): boolean {
   const raw = params.get('embed');
   return raw === '1' || raw === 'true';
 }
-
-/** postMessage type: iframe asks the host to open Settings. */
-export const HOST_OPEN_SETTINGS = 'typebridge.host.openSettings';
-
-/** postMessage type: host tells the iframe a preference changed. */
-export const HOST_PREF_CHANGED = 'typebridge.host.prefChanged';
-
-export type HostOpenSettingsMessage = {
-  type: typeof HOST_OPEN_SETTINGS;
-  section?: 'about';
-};
-
-export type HostPrefChangedMessage = {
-  type: typeof HOST_PREF_CHANGED;
-  key: 'autosave' | 'appearance' | 'tab-indent' | 'transliteration' | 'rules' | 'shortcut';
-};
