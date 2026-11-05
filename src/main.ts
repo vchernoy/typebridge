@@ -930,15 +930,28 @@ async function releaseSecondarySession(
   if (!stillWanted()) return 'aborted';
   if (!secondary) return 'released';
   const previous = secondary;
+  const discardedJournal = currentJournalSecondary;
   secondary = undefined;
   sessionRegistry.setSecondary(undefined);
   currentJournalSecondary = undefined;
   try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
+  // Confirmed discard / teardown must forget the localStorage recovery entry so a
+  // reload does not resurface text the user already discarded.
+  if (discardedJournal) {
+    try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
+  }
   clearOwnershipLost(previous.ownership);
+  // E2E may delay release so a reopen can race the close generation check.
+  const delayReleaseMs = (window as Window & { __typebridgeDelaySecondaryReleaseMs?: number }).__typebridgeDelaySecondaryReleaseMs;
+  if (typeof delayReleaseMs === 'number' && delayReleaseMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, delayReleaseMs));
+  }
   // Await fence/Web Lock cleanup so a quick re-open of the same document does not
   // observe ifAvailable:true as busy while this tab still holds the lock.
   if (previous.ownership) await previous.ownership.release();
-  if (!stillWanted()) return 'aborted';
+  // Split may have reopened during the await. Finish live-mirror read-only cleanup
+  // unless a new secondary session was installed meanwhile.
+  if (secondary) return stillWanted() ? 'released' : 'aborted';
   clearVersionNotice('secondary');
   companionEditor.setReadOnly(true);
   titleEditorB.setReadOnly(true);
@@ -947,7 +960,7 @@ async function releaseSecondarySession(
   syncCompanionChrome();
   mirrorCompanion(true);
   syncMutationControls();
-  return 'released';
+  return stillWanted() ? 'released' : 'aborted';
 }
 /**
  * When the primary opens the document already editable in pane B, promote B's
@@ -1009,7 +1022,11 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   promoting.ownership = undefined;
   secondary = undefined;
   sessionRegistry.setSecondary(undefined);
+  const promotedJournal = currentJournalSecondary;
   currentJournalSecondary = undefined;
+  if (promotedJournal) {
+    try { clearRecovery(localStorage, promotedJournal); } catch { /* Optional backup. */ }
+  }
   // Retire both reload backups: the discarded primary snapshot must not resurrect on
   // the next boot, and pane-B's key must not reopen pre-promotion text.
   try {

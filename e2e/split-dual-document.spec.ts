@@ -297,6 +297,69 @@ test('ownership loss after promoting pane B freezes the primary immediately', as
   await expect(page.locator('#editor')).toHaveValue('Tango body kept');
 });
 
+test('reopening split during secondary teardown restores read-only mirror', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Teardown body', 'TeardownDoc');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Mirror primary', 'MirrorPrimary');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelaySecondaryReleaseMs?: number }).__typebridgeDelaySecondaryReleaseMs = 1500;
+  });
+  await documentAction(page, '#toggle-split');
+  await expect(page.locator('#editor-b')).toBeHidden();
+  await documentAction(page, '#toggle-split');
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('#companion-badge')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
+  await page.locator('#editor-b').click({ force: true });
+  await page.keyboard.type('leak');
+  await expect(page.locator('#editor-b')).toHaveValue('Mirror primary');
+  await expect(page.locator('#editor')).toHaveValue('Mirror primary');
+});
+
+test('discarding dirty pane B clears its recovery journal', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Journal body', 'JournalDoc');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Keep A', 'KeepA');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    (window as unknown as { restorePut: () => void }).restorePut = () => { IDBObjectStore.prototype.put = put; };
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  });
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' secret');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Save failed');
+  expect(await page.evaluate(() =>
+    Object.keys(localStorage).some(key => key.startsWith('typebridge.recovery.v1.')),
+  )).toBe(true);
+  await documentAction(page, '#toggle-split');
+  const discard = page.getByRole('dialog', { name: 'Discard unsaved changes in the other pane?' });
+  await expect(discard).toBeVisible();
+  await discard.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.locator('#editor-b')).toBeHidden();
+  expect(await page.evaluate(() =>
+    Object.keys(localStorage).filter(key => key.startsWith('typebridge.recovery.v1.')),
+  )).toEqual([]);
+  await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
+  await page.close();
+  const next = await context.newPage();
+  await next.goto('/');
+  await expect(next.locator('#editor')).toBeEnabled();
+  await expect(next.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  await next.close();
+});
+
 test('Autosave-off pane B asks before discarding on close split', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
