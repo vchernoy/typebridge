@@ -1121,6 +1121,13 @@ function allocateNewDraft(text = ''): StoredDraft {
   const titles = drafts.map(draft => draft.title);
   titles.push(active.title, draftTitle.value.trim() || UNTITLED_TITLE);
   if (secondary) titles.push(secondary.draft.title, secondary.title.value.trim() || UNTITLED_TITLE);
+  // Other host windows may hold unsaved Untitled titles not yet in IndexedDB.
+  if (embedded && window.parent !== window) {
+    try {
+      const host = window.parent as Window & { __typebridgeOpenTitles?: (exceptWindowId?: string) => string[] };
+      titles.push(...(host.__typebridgeOpenTitles?.(windowId ?? undefined) ?? []));
+    } catch { /* Parent unavailable. */ }
+  }
   return { ...newDraft(text, nextUntitledTitle(titles)), revision: 0 };
 }
 
@@ -3795,6 +3802,14 @@ if (embedded) {
     /** #175 step 8: host title bar rename write-through. */
     __typebridgeSetTitle?: (title: string) => void;
     __typebridgeGetTitle?: () => string;
+    /** Host title beforeinput — runs through the title Editor (transliteration). */
+    __typebridgeTitleEdit?: (payload: {
+      inputType: string;
+      data: string | null;
+      start: number;
+      end: number;
+    }) => { value: string; start: number; end: number } | null;
+    __typebridgeToggleTransliteration?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
@@ -3822,6 +3837,62 @@ if (embedded) {
     syncTitleTooltip();
     rememberActive();
     scheduleSave(true);
+  };
+  hooks.__typebridgeToggleTransliteration = () => {
+    enabled.checked = !enabled.checked;
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  hooks.__typebridgeTitleEdit = payload => {
+    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
+    const length = draftTitle.value.length;
+    const start = Math.max(0, Math.min(payload.start, length));
+    const end = Math.max(start, Math.min(payload.end, length));
+    draftTitle.focus({ preventScroll: true });
+    draftTitle.setSelectionRange(start, end);
+    const event = new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: payload.inputType,
+      data: payload.data ?? undefined,
+    });
+    draftTitle.dispatchEvent(event);
+    if (!event.defaultPrevented) {
+      if (payload.inputType === 'insertText' && payload.data) {
+        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+      } else if (payload.inputType === 'insertFromPaste' && payload.data) {
+        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+      } else if (payload.inputType === 'deleteContentBackward') {
+        if (start === end && start > 0) draftTitle.setRangeText('', start - 1, start, 'end');
+        else draftTitle.setRangeText('', start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+      } else if (payload.inputType === 'deleteContentForward') {
+        if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, start + 1, 'end');
+        else draftTitle.setRangeText('', start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+      } else if (payload.inputType === 'deleteByCut') {
+        draftTitle.setRangeText('', start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+      } else if (payload.inputType === 'historyUndo') {
+        titleEditor.undo();
+      } else if (payload.inputType === 'historyRedo') {
+        titleEditor.redo();
+      }
+      if (draftTitle.value.length > 150) {
+        draftTitle.value = draftTitle.value.slice(0, 150);
+        draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    syncTitleTooltip();
+    rememberActive();
+    return {
+      value: draftTitle.value,
+      start: draftTitle.selectionStart ?? 0,
+      end: draftTitle.selectionEnd ?? 0,
+    };
   };
   // Catch prefs the host broadcast before this iframe finished booting.
   syncAutosaveCheckboxFromStorage();

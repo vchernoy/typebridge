@@ -94,10 +94,12 @@ test('host title bar renames the document in place (#175 step 8)', async ({ page
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   const hostTitle = page.locator('.host-window[data-window-id="main"] .host-window-title');
   await expect(hostTitle).toHaveValue('Untitled document');
+  await expect(hostTitle).toBeEditable({ timeout: 15_000 });
   await hostTitle.fill('Host renamed');
   await expect.poll(async () => frame.locator('#draft-title').inputValue()).toBe('Host renamed');
   await expect(page.locator('.host-window[data-window-id="main"]')).toHaveAttribute('aria-label', 'Host renamed');
-  // Spaces while typing must stay; empty blur falls back to Untitled document.
+  // Spaces while typing must stay (Latin mode); empty blur falls back to Untitled document.
+  await frame.getByRole('switch', { name: 'Кириллица', exact: true }).uncheck();
   await hostTitle.fill('');
   await hostTitle.pressSequentially('My notes');
   await expect(hostTitle).toHaveValue('My notes');
@@ -105,4 +107,11 @@ test('host title bar renames the document in place (#175 step 8)', async ({ page
   await hostTitle.fill('');
   await hostTitle.blur();
   await expect(hostTitle).toHaveValue('Untitled document');
+  // Host title typing goes through the iframe transliteration Editor.
+  await frame.getByRole('switch', { name: 'Кириллица', exact: true }).check();
+  await expect(hostTitle).toBeEditable();
+  await hostTitle.fill('');
+  await hostTitle.pressSequentially('privet');
+  await expect(hostTitle).toHaveValue('привет');
+  await expect.poll(async () => frame.locator('#draft-title').inputValue()).toBe('привет');
 });

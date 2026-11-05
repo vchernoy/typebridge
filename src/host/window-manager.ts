@@ -72,6 +72,8 @@ export type WindowManager = {
   windows: () => HostWindowLayout[];
   /** Document ids currently open in host windows (optionally excluding one window). */
   openDocumentIds: (exceptWindowId?: string) => string[];
+  /** Live on-screen titles across windows (for distinct Untitled defaults). */
+  openTitles: (exceptWindowId?: string) => string[];
   addWindow: () => string | undefined;
   closeWindow: (id: string) => Promise<boolean>;
   tileSideBySide: () => void;
@@ -284,6 +286,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     title.value = 'Untitled document';
     title.setAttribute('aria-label', 'Document title');
     title.spellcheck = false;
+    // Locked until the iframe mounts an editable #draft-title (avoids lost renames).
+    title.readOnly = true;
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -332,10 +336,34 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         const doc = frame.contentDocument;
         if (!doc) return;
         const draft = doc.querySelector<HTMLInputElement>('#draft-title');
-        // Until the iframe mounts the title field, leave the host input editable.
-        if (!draft) return;
+        // Stay locked until the iframe title exists (and is editable).
+        if (!draft) {
+          title.readOnly = true;
+          return;
+        }
         title.readOnly = draft.readOnly || draft.disabled;
       } catch { /* Cross-origin or mid-navigation — keep current state. */ }
+    };
+
+    type TitleHooks = Window & {
+      __typebridgeGetTitle?: () => string;
+      __typebridgeSetTitle?: (value: string) => void;
+      __typebridgeTitleEdit?: (payload: {
+        inputType: string;
+        data: string | null;
+        start: number;
+        end: number;
+      }) => { value: string; start: number; end: number } | null;
+      __typebridgeToggleTransliteration?: () => void;
+    };
+
+    let applyingFromIframe = false;
+    const applyHostTitleResult = (result: { value: string; start: number; end: number }): void => {
+      applyingFromIframe = true;
+      title.value = result.value;
+      try { title.setSelectionRange(result.start, result.end); } catch { /* Input type may reject. */ }
+      applyingFromIframe = false;
+      applyChromeMeta(title.value);
     };
 
     title.addEventListener('pointerdown', event => { event.stopPropagation(); syncTitleEditable(); });
@@ -343,25 +371,62 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     title.addEventListener('keydown', event => {
       // Keep arrow-key window move on the handle; let the input own typing keys.
       event.stopPropagation();
+      if (title.readOnly) return;
+      // Forward the transliteration mode shortcut into the iframe (listener is document-local there).
+      if (!event.isComposing && event.shiftKey && !event.altKey && !event.repeat
+        && ((event.ctrlKey && !event.metaKey) || (event.metaKey && !event.ctrlKey))
+        && (event.code === 'Space' || event.code === 'F7' || event.code === 'F8' || event.code === 'F9')) {
+        try {
+          (frame.contentWindow as TitleHooks | null)?.__typebridgeToggleTransliteration?.();
+          event.preventDefault();
+        } catch { /* Frame mid-navigation. */ }
+      }
     });
-    title.addEventListener('input', () => {
+    // Route typing through the iframe title Editor so transliteration/IME/undo match standalone (#175 s8 P1).
+    title.addEventListener('beforeinput', event => {
       syncTitleEditable();
       if (title.readOnly) {
-        // Iframe rejected renames while read-only; restore the authoritative title.
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      try {
+        const hooks = frame.contentWindow as TitleHooks | null;
+        const result = hooks?.__typebridgeTitleEdit?.({
+          inputType: event.inputType,
+          data: event.data,
+          start: title.selectionStart ?? 0,
+          end: title.selectionEnd ?? 0,
+        });
+        if (result) applyHostTitleResult(result);
+        else {
+          const authoritative = hooks?.__typebridgeGetTitle?.();
+          if (authoritative !== undefined) {
+            applyingFromIframe = true;
+            title.value = authoritative;
+            applyingFromIframe = false;
+            applyChromeMeta(title.value);
+          }
+        }
+      } catch { /* Frame mid-navigation. */ }
+    });
+    title.addEventListener('input', () => {
+      if (applyingFromIframe) return;
+      syncTitleEditable();
+      if (title.readOnly) {
         try {
-          const hooks = frame.contentWindow as (Window & { __typebridgeGetTitle?: () => string }) | null;
+          const hooks = frame.contentWindow as TitleHooks | null;
           const authoritative = hooks?.__typebridgeGetTitle?.();
           if (authoritative !== undefined) title.value = authoritative;
         } catch { /* Frame mid-navigation. */ }
         applyChromeMeta(title.value);
         return;
       }
-      // Preserve raw spaces/empty while editing; trim only for chrome metadata + save path.
+      // Programmatic fill() path (no beforeinput): write through without per-key transliteration.
       if (title.value.length > 150) title.value = title.value.slice(0, 150);
       applyChromeMeta(title.value);
       try {
-        const hooks = frame.contentWindow as (Window & { __typebridgeSetTitle?: (value: string) => void }) | null;
-        hooks?.__typebridgeSetTitle?.(title.value);
+        (frame.contentWindow as TitleHooks | null)?.__typebridgeSetTitle?.(title.value);
       } catch { /* Frame mid-navigation. */ }
     });
     title.addEventListener('blur', () => {
@@ -373,8 +438,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (title.value !== label) {
         title.value = label;
         try {
-          const hooks = frame.contentWindow as (Window & { __typebridgeSetTitle?: (value: string) => void }) | null;
-          hooks?.__typebridgeSetTitle?.(label);
+          (frame.contentWindow as TitleHooks | null)?.__typebridgeSetTitle?.(label);
         } catch { /* Frame mid-navigation. */ }
       }
       applyChromeMeta(label);
@@ -696,6 +760,25 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         if (win.documentId) ids.push(win.documentId);
       }
       return ids;
+    },
+    openTitles: (exceptWindowId?: string) => {
+      const titles: string[] = [];
+      for (const win of layouts) {
+        if (exceptWindowId && win.id === exceptWindowId) continue;
+        const shell = shells.get(win.id);
+        const input = shell?.querySelector<HTMLInputElement>('.host-window-title');
+        const fromChrome = input?.value.trim();
+        if (fromChrome) {
+          titles.push(fromChrome);
+          continue;
+        }
+        try {
+          const hooks = frames.get(win.id)?.contentWindow as (Window & { __typebridgeGetTitle?: () => string }) | null;
+          const fromFrame = hooks?.__typebridgeGetTitle?.()?.trim();
+          if (fromFrame) titles.push(fromFrame);
+        } catch { /* Mid-navigation. */ }
+      }
+      return titles;
     },
     addWindow: () => {
       if (hostFocus || layouts.length >= MAX_HOST_WINDOWS) return undefined;
