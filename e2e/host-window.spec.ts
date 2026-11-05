@@ -149,6 +149,80 @@ test('update reload asks every window about private text', async ({ page }) => {
   await expect(second.locator('#editor')).toHaveValue('Private only in second');
 });
 
+test('failed second-window assert cancels prior allowUpdateReload', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const first = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+
+  // Autosave is shared in localStorage — turn it off once in the second window,
+  // then reload the first so both see Autosave off without a second confirm dialog.
+  await setAutosave(second as unknown as Page, false);
+  await second.locator('#editor').fill('Private in second');
+  await expect(second.locator('#save-indicator')).toHaveText('Not saved');
+  await page.locator('.host-window[data-window-id="main"] iframe').evaluate((frame: HTMLIFrameElement) => {
+    frame.contentWindow?.location.reload();
+  });
+  await expect(first.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(first.locator('#autosave')).not.toBeChecked();
+  await first.locator('#editor').fill('Private in first');
+  await expect(first.locator('#save-indicator')).toHaveText('Not saved');
+
+  const prepare = page.evaluate(async () => {
+    const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    for (const frame of frames) {
+      const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
+      if (!await hooks.__typebridgePrepareUpdateReload?.()) return false;
+    }
+    return true;
+  });
+  for (const frame of [first, second]) {
+    const dialog = frame.getByRole('dialog', { name: 'Reload without saving?' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
+  }
+  expect(await prepare).toBe(true);
+
+  await second.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.value = `${el.value}!`;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  const outcome = await page.evaluate(() => {
+    type Hooks = {
+      __typebridgeAssertSafeUpdateReload?: () => void;
+      __typebridgeCancelUpdateReload?: () => void;
+    };
+    const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    try {
+      for (const frame of frames) {
+        const hooks = frame.contentWindow as Window & Hooks;
+        const assertSafe = hooks.__typebridgeAssertSafeUpdateReload;
+        if (!assertSafe) throw new Error('Editor reload unavailable');
+        assertSafe();
+      }
+      return 'allowed';
+    } catch (error) {
+      for (const frame of frames) {
+        (frame.contentWindow as Window & Hooks).__typebridgeCancelUpdateReload?.();
+      }
+      return error instanceof Error ? error.message : String(error);
+    }
+  });
+  expect(outcome).toContain('Private edits changed');
+
+  const firstStillWarns = await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="main"] iframe')!;
+    const win = frame.contentWindow!;
+    const event = new Event('beforeunload', { cancelable: true });
+    win.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(firstStillWarns).toBe(true);
+});
+
 test('clicking a background editor raises its window', async ({ page }) => {
   test.setTimeout(90_000);
   await openHost(page);

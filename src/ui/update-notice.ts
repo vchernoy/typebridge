@@ -104,6 +104,8 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
         restore();
       }, 10_000);
     } catch {
+      // Reload/assert may have armed allowUpdateReload in one or more windows before throwing.
+      deps.cancelReload();
       message.textContent = 'Could not reload safely. Your text is kept; copy or export it, then retry.';
     } finally {
       if (!navigating) restore();

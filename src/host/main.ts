@@ -89,13 +89,22 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
           return true;
         },
         reload: () => {
-          for (const frame of editorFrames()) {
-            const assertSafe = editorHooks(frame).__typebridgeAssertSafeUpdateReload;
-            if (!assertSafe) throw new Error('Editor reload unavailable');
-            // Intentional throws ("Private edits changed", backup missing, busy) must abort.
-            assertSafe();
+          try {
+            for (const frame of editorFrames()) {
+              const assertSafe = editorHooks(frame).__typebridgeAssertSafeUpdateReload;
+              if (!assertSafe) throw new Error('Editor reload unavailable');
+              // Intentional throws ("Private edits changed", backup missing, busy) must abort.
+              assertSafe();
+            }
+            window.location.reload();
+          } catch (error) {
+            // A later window's throw must not leave earlier windows with allowUpdateReload set —
+            // that would silence their beforeunload private-text warning.
+            for (const frame of editorFrames()) {
+              editorHooks(frame).__typebridgeCancelUpdateReload?.();
+            }
+            throw error;
           }
-          window.location.reload();
         },
         cancelReload: () => {
           for (const frame of editorFrames()) {
