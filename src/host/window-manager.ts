@@ -176,6 +176,18 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
     shell.addEventListener('pointerdown', () => { setActive(win.id); });
 
+    // Iframe pointer/focus events do not bubble to the shell. Wire same-origin
+    // content so clicking or focusing the editor still raises the window.
+    const activateFromIframe = (): void => { setActive(win.id); };
+    frame.addEventListener('load', () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        doc.addEventListener('pointerdown', activateFromIframe);
+        doc.addEventListener('focusin', activateFromIframe);
+      } catch { /* Unexpected cross-origin — chrome-only activation remains. */ }
+    });
+
     titleBar.addEventListener('pointerdown', event => {
       if ((event.target as HTMLElement).closest('button')) return;
       event.preventDefault();

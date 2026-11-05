@@ -149,6 +149,29 @@ test('update reload asks every window about private text', async ({ page }) => {
   await expect(second.locator('#editor')).toHaveValue('Private only in second');
 });
 
+test('clicking a background editor raises its window', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+  await page.locator('.host-window[data-window-id="main"] .host-window-titlebar').click();
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
+
+  await second.locator('#editor').click();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
+  const order = await page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; z: number }> };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  const mainZ = order.find(win => win.id === 'main')?.z ?? 0;
+  const secondZ = order.find(win => win.id === 'w2')?.z ?? 0;
+  expect(secondZ).toBeGreaterThan(mainZ);
+});
+
 test('closing a dirty Autosave-off window asks before removing it', async ({ page }) => {
   test.setTimeout(90_000);
   const editor = await openHost(page);
