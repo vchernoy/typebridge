@@ -1,6 +1,6 @@
 # ADR: Movable editor windows in one tab (#175)
 
-Status: **Accepted plan** (maintainer, Nov 2026). Replaces the in-page split goal from [#159](https://github.com/vchernoy/typebridge/issues/159) (S2–S6). **Keeps #159 W1–W4** (routing, separate-window comparison companion, metadata-only saved-version signals, per-document Web Lock + IndexedDB fence). PR [#174](https://github.com/vchernoy/typebridge/pull/174) and [#164](https://github.com/vchernoy/typebridge/pull/164) stay draft/paused; do not merge them for the old goals. This ADR is **step 1** of #175 — contracts and docs only; **no runtime change**.
+Status: **Accepted plan** (maintainer, Nov 2026). Replaces the in-page split goal from [#159](https://github.com/vchernoy/typebridge/issues/159) (S2–S6). **Keeps #159 W1–W4** (routing, separate-window comparison companion, metadata-only saved-version signals, per-document Web Lock + IndexedDB fence). PR [#174](https://github.com/vchernoy/typebridge/pull/174) and [#164](https://github.com/vchernoy/typebridge/pull/164) stay draft/paused; do not merge them for the old goals. **Step 1** landed as docs-only. **Step 2** (this work): parse `?window=`, scope tab-local sessionStorage keys by window id, keep unscoped keys when the param is absent, and cover two same-tab iframes with Playwright.
 
 ## Context
 
@@ -56,7 +56,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | --- | --- | --- |
 | **0** (done) | Stop/supersede #159 S-slices; pause #174/#164 | Docs/process |
 | **1** (this PR) | This ADR + ARCHITECTURE / UI / ROADMAP | No |
-| **2** | Per-window identity; key sessionStorage by window id; two-instance Playwright “like two tabs” | Yes |
+| **2** | Per-window identity; key sessionStorage by window id; two-instance Playwright “like two tabs” | Yes (shipped in this slice) |
 | **3** | Embedded mode + host page; single-window parity; Settings/update notice on host | Yes |
 | **4** | Focus handoff (flush, lock, reread, IME/buffer, same-tab unsaved transfer) | Yes |
 | **5** | Window manager (desktop free layout) | Yes |

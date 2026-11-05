@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TypeBridge window-identity harness</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        display: flex;
+      }
+      iframe {
+        flex: 1;
+        border: 0;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Same-tab iframes share sessionStorage; #175 step 2 keys state by ?window=. -->
+    <iframe id="win-alpha" title="Window alpha" src="/?window=alpha"></iframe>
+    <iframe id="win-beta" title="Window beta" src="/?window=beta"></iframe>
+  </body>
+</html>
