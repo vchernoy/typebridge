@@ -60,8 +60,8 @@ export function installHostSettings(deps: {
   shortcutSelect.value = shortcut;
 
   function broadcast(name: PrefName): void {
+    // onPrefsChanged below fans out to every live iframe.
     notifyPrefsChanged({ name, origin: PREFS_ORIGIN });
-    applyPrefsToFrames(deps.frames(), name, PREFS_ORIGIN);
   }
 
   function saveShortcut(value: TransliterationShortcut): boolean {
@@ -106,6 +106,7 @@ export function installHostSettings(deps: {
     const requested = tabIndent.checked;
     try {
       localStorage.setItem(TAB_INDENT_KEY, requested ? 'on' : 'off');
+      if (autosaveStatus) autosaveStatus.textContent = '';
       broadcast('tabIndent');
     } catch {
       try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; }
@@ -116,8 +117,11 @@ export function installHostSettings(deps: {
     }
   });
 
-  // Typing mode lives in each window's chrome; keep host labels honest if storage changes.
+  // Fan out every prefs event to live iframes (host writes and window mode chrome).
+  // Do not skip host origin: appearance/layout/rules notify without broadcast().
   onPrefsChanged(detail => {
+    applyPrefsToFrames(deps.frames(), detail.name, detail.origin);
+    if (detail.origin === PREFS_ORIGIN) return;
     if (detail.name === 'autosave' || detail.name === 'reset') {
       try { autosave.checked = autosaveEnabled(); } catch { /* keep */ }
     }
@@ -137,7 +141,7 @@ export function installHostSettings(deps: {
       // No host mode switch; windows own the chrome.
       void localStorage.getItem(TRANSLITERATION_KEY);
     }
-  }, { skipOrigin: PREFS_ORIGIN });
+  });
 
   function resetShortcut(): boolean {
     return saveShortcut('default');

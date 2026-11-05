@@ -36,7 +36,10 @@ export function notifyPrefsChanged(detail: PrefsDetail): void {
 }
 
 /**
- * Listen for prefs changes on this window and, when embedded, the host parent.
+ * Listen for prefs changes on this window.
+ * Embedded editors must not register on `window.parent`: removing an iframe does not
+ * remove parent-owned listeners, and a discarded Autosave-off handler could later
+ * recreate journals. The host fans out via `applyPrefsToFrames` instead.
  * Returns an unsubscribe function.
  */
 export function onPrefsChanged(
@@ -50,18 +53,8 @@ export function onPrefsChanged(
     handler(detail);
   };
   window.addEventListener(PREFS_EVENT, listener);
-  let parentListener: ((event: Event) => void) | undefined;
-  try {
-    if (window.parent !== window) {
-      parentListener = listener;
-      window.parent.addEventListener(PREFS_EVENT, parentListener);
-    }
-  } catch { /* Cross-origin parent is out of scope. */ }
   return () => {
     window.removeEventListener(PREFS_EVENT, listener);
-    if (parentListener) {
-      try { window.parent.removeEventListener(PREFS_EVENT, parentListener); } catch { /* ignore */ }
-    }
   };
 }
 

@@ -1431,7 +1431,11 @@ body.host-stacked .host-window-resize-sw {
 }
 body.host-focus-mode .host-toolbar [data-host-action="tile-side"],
 body.host-focus-mode .host-toolbar [data-host-action="tile-stack"],
-body.host-focus-mode .host-toolbar [data-host-action="new-window"] {
+body.host-focus-mode .host-toolbar [data-host-action="new-window"],
+body.host-focus-mode .host-toolbar #settings-open {
+  display: none;
+}
+body.host-focus-mode .host-settings-panel {
   display: none;
 }
 body.host-focus-mode .host-window-resize {

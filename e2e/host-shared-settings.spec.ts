@@ -138,18 +138,23 @@ test('host Autosave off updates a read-only window checkbox', async ({ page }) =
   })).toBe(false);
 });
 
-test('Reset settings exits host Focus mode', async ({ page }) => {
+test('host Focus mode hides Settings; Reset still exits Focus', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
   const main = await openHost(page);
   await page.getByRole('button', { name: 'New window' }).click();
   await expect(page.locator('.host-window')).toHaveCount(2);
+
+  // Open Settings first; Focus hides the panel and toolbar button (same as standalone).
+  await openHostSettings(page);
   await main.locator('#focus-mode').evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
+  await expect(page.locator('#settings-open')).toBeHidden();
+  await expect(page.locator('#settings-panel')).toBeHidden();
 
-  await openHostSettings(page);
-  await page.locator('#reset-settings').click();
+  // Panel is only CSS-hidden; Reset (via the still-mounted control) still clears host Focus.
+  await page.locator('#reset-settings').evaluate((button: HTMLButtonElement) => button.click());
   const dialog = page.getByRole('dialog', { name: 'Reset settings to defaults?' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Reset settings' }).click();
@@ -157,4 +162,32 @@ test('Reset settings exits host Focus mode', async ({ page }) => {
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'New window' })).toBeEnabled();
+  await expect(page.locator('#settings-open')).toBeVisible();
+});
+
+test('closing a window does not leave a prefs listener that resurrects discarded text', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => {
+    localStorage.setItem('typebridge.host.layoutMode.v1', 'free');
+    localStorage.setItem('typebridge.autosave.v1', 'off');
+  });
+  const mainShell = page.locator('.host-window[data-window-id="main"]');
+  const main = await openHost(page);
+  await main.locator('#editor').fill('private text that must stay discarded');
+  await expect(main.locator('#save-indicator')).toHaveText('Not saved');
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+
+  await mainShell.locator('.host-window-close').click();
+  const dialog = main.getByRole('dialog', { name: 'Close without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(1);
+
+  // A leaked parent listener would run applyAutosaveChange on the discarded editor.
+  await setHostAutosave(page, true);
+  const remaining = page.frameLocator('.host-window iframe').first();
+  await expect(remaining.locator('#editor')).not.toHaveValue('private text that must stay discarded');
+  const stored = await readStoredDocs(page);
+  expect(stored.every(doc => !doc.text.includes('private text that must stay discarded'))).toBe(true);
 });
