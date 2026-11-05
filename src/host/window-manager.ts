@@ -288,16 +288,37 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     return false;
   };
 
-  /** Maximize the active window to the host viewport without rewriting preFocusLayouts. */
+  /**
+   * Maximize the active window to the host viewport without rewriting preFocusLayouts.
+   * Non-active windows are restored from preFocusLayouts so a later Focus exit/close
+   * does not reveal stale full-viewport geometry left by earlier F6 cycles.
+   */
   const maximizeActiveForFocus = (): void => {
     if (!hostFocus || !activeId) return;
     const view = viewportOf(deps.root);
-    layouts = layouts.map(win => (
-      win.id === activeId
-        ? { ...win, x: 0, y: 0, w: view.width, h: view.height }
-        : win
-    ));
+    const byPrior = preFocusLayouts
+      ? new Map(preFocusLayouts.map(win => [win.id, win]))
+      : undefined;
+    layouts = layouts.map(win => {
+      if (win.id === activeId) {
+        return { ...win, x: 0, y: 0, w: view.width, h: view.height };
+      }
+      const prior = byPrior?.get(win.id);
+      return prior
+        ? { ...win, x: prior.x, y: prior.y, w: prior.w, h: prior.h, z: prior.z }
+        : win;
+    });
     applyAllGeometry();
+  };
+
+  /** Restore free/stacked geometry from preFocusLayouts (Focus exit / Focus-close). */
+  const restorePreFocusGeometry = (): void => {
+    if (!preFocusLayouts?.length) return;
+    const byId = new Map(preFocusLayouts.map(win => [win.id, win]));
+    layouts = layouts.map(win => {
+      const prior = byId.get(win.id);
+      return prior ? { ...win, x: prior.x, y: prior.y, w: prior.w, h: prior.h, z: prior.z } : win;
+    });
   };
 
   /**
@@ -978,8 +999,12 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         preFocusLayouts = preFocusLayouts.filter(win => win.id !== id);
       }
       if (hostFocus && activeId === id) {
+        // Closing the Focus window exits Focus — restore remaining windows first so
+        // earlier F6 maximize cycles do not leave full-viewport leftovers (Codex P1).
+        restorePreFocusGeometry();
         hostFocus = false;
         preFocusLayouts = undefined;
+        syncEmbeddedFocusChrome(false);
       }
       if (activeId === id) activeId = layouts[0]?.id ?? 'main';
       // Drop scoped session keys after the iframe is gone. prepareClose only returns
@@ -999,6 +1024,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         sessionStorage.removeItem(`typebridge.pendingDraft.paneB.v1${marker}`);
       } catch { /* Blocked sessionStorage — layout still closes. */ }
       if (mode === 'stacked' && !hostFocus) enterStacked();
+      else applyAllGeometry();
       applyModeChrome();
       persist();
       return true;

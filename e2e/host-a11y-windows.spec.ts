@@ -165,6 +165,59 @@ test('F6 in host Focus maximizes the next window', async ({ page }) => {
   expect(focused!.h).toBeGreaterThan(500);
 });
 
+test('closing the Focus window after F6 restores remaining tiled geometry', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 2);
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+
+  const before = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  expect(before).toHaveLength(3);
+  const mainBefore = before.find(win => win.id === 'main')!;
+  const w2Before = before.find(win => win.id === 'w2')!;
+
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await main.locator('#focus-mode').evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+
+  await main.locator('#editor').focus();
+  await page.keyboard.press('F6');
+  await expect.poll(() => activeWindowId(page)).toBe('w2');
+  await page.keyboard.press('F6');
+  await expect.poll(() => activeWindowId(page)).toBe('w3');
+
+  // Close the focused window — exits Focus and must restore main/w2 tiled sizes.
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('.host-window[data-window-id="w3"] .host-window-close').click();
+  // Clean untitled windows close without a confirm; if a dialog appears, accept above.
+  await expect(page.locator('.host-window')).toHaveCount(2, { timeout: 15_000 });
+  await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
+  await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
+  await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
+
+  const after = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  const mainAfter = after.find(win => win.id === 'main')!;
+  const w2After = after.find(win => win.id === 'w2')!;
+  expect(mainAfter.w).toBe(mainBefore.w);
+  expect(mainAfter.h).toBe(mainBefore.h);
+  expect(mainAfter.x).toBe(mainBefore.x);
+  expect(w2After.w).toBe(w2Before.w);
+  expect(w2After.h).toBe(w2Before.h);
+  expect(w2After.x).toBe(w2Before.x);
+  // Must not both be full-viewport leftovers from Focus maximize.
+  expect(mainAfter.w).toBeLessThan(1000);
+  expect(w2After.w).toBeLessThan(1000);
+});
+
 test('reload keeps the front window active without rewriting z-order', async ({ page }) => {
   await openHost(page, 'free');
   await addWindows(page, 1);
