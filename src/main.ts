@@ -1018,8 +1018,11 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   } catch { /* Optional backup. */ }
   // Handle was acquired for pane B; after promote, loss must freeze the primary session.
   clearOwnershipLost(promotedOwnership);
-  if (ownership) void ownership.release();
+  const displaced = ownership;
   ownership = promotedOwnership;
+  // Await displaced primary lock cleanup so a quick reopen of that document in pane B
+  // does not observe ifAvailable:true as busy while this tab still holds it.
+  if (displaced) await displaced.release();
   editBlock = promotedBlock;
   active = promoted;
   workspace.setDocumentId(promoted.id);
@@ -1089,6 +1092,7 @@ async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }
         const titleOnly = !result.conflict && saved.title !== session.draft.title && saved.text === session.draft.text;
         if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         session.draft = result.draft;
+        clearVersionNotice('secondary');
         postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
         if (session.contentRevision !== version && autosave.checked) journalEditSecondary();
         session.saveFailed = false;
@@ -1554,7 +1558,7 @@ function retrySecondaryOwnership(): void {
     if (!stillHere()) { void access.ownership.release(); return; }
     if (fresh === undefined) {
       void access.ownership.release();
-      if (session.draft.revision >= 1) showVersionNotice(DELETED_NOTICE);
+      if (session.draft.revision >= 1) showVersionNotice(DELETED_NOTICE, 'secondary');
       return;
     }
     if (fresh) {
@@ -1567,6 +1571,7 @@ function retrySecondaryOwnership(): void {
         draftTitleB.value = fresh.title;
       } finally { loadingDraft = false; }
       companionWritingPosition.restore(fresh.id);
+      clearVersionNotice('secondary');
     }
     session.ownership = access.ownership;
     session.editBlock = access.block;

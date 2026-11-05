@@ -91,6 +91,24 @@ test('reopening a just-released companion document stays editable', async ({ pag
   await expect(page.locator('#editor-b')).toHaveValue('Lock release body');
 });
 
+test('reopening the displaced primary in pane B after promotion stays editable', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Promote B body', 'PromoteB');
+  await documentAction(page, '#new-draft');
+  const secondId = await saveNamed(page, 'Displaced A body', 'DisplacedA');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await selectDocument(page, firstId);
+  await expect(page.locator('#editor')).toHaveValue('Promote B body');
+  await expect(page.locator('#companion-badge')).toBeVisible();
+  await page.locator('#pane-b-drafts').selectOption(secondId);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#editor-b')).toHaveValue('Displaced A body');
+});
+
 test('split restore after reload does not crash when split was open', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
