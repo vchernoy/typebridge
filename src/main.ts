@@ -1031,7 +1031,10 @@ async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }
         updateSaveIndicatorB();
         if (result.conflict) {
           createdConflict = true;
-          draftTitleB.value = session.draft.title;
+          // Retain a title typed while the conflict-copy commit was in flight.
+          if ((draftTitleB.value.trim() || UNTITLED_TITLE) === saved.title) {
+            draftTitleB.value = session.draft.title;
+          }
           const access = await acquireFor(result.draft.id);
           clearOwnershipLost(session.ownership);
           if (session.ownership) void session.ownership.release();
