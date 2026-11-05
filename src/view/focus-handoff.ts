@@ -169,21 +169,17 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   /** Text the selection offsets were measured against (reader view before install). */
   let pendingReaderText = '';
   let buffer: BufferedInsert[] = [];
-  /**
-   * Keys typed before an Edit here offer must survive `clearPending` so a later
-   * steal takeover can replay them.
-   */
-  let heldForEditHere: {
-    documentId: string;
-    buffer: BufferedInsert[];
-    selection: { start: number; end: number };
-    readerText: string;
-  } | undefined;
+  /** Pending request is paused on Edit here; input stays buffered until steal or cancel. */
+  let awaitingEditHere = false;
   let yieldTimer: ReturnType<typeof setTimeout> | undefined;
   /** Owner-side parked yield awaiting requester confirmation. */
   let parkedRequestId = '';
   let parkedDocumentId = '';
   let confirmTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const ignoresHandoffRequests = (): boolean =>
+    !!(window as Window & { __typebridgeIgnoreHandoffRequests?: boolean })
+      .__typebridgeIgnoreHandoffRequests;
 
   const postMeta = (message: HandoffMessage): void => {
     try { channel?.postMessage(message); } catch { /* Channel may be closed. */ }
@@ -195,20 +191,16 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     pendingDocumentId = '';
     pendingReaderText = '';
     buffer = [];
+    awaitingEditHere = false;
     clearTimeout(yieldTimer);
     yieldTimer = undefined;
   };
 
   const offerEditHere = (reason: HandoffRefuseReason): void => {
-    if (pendingDocumentId) {
-      heldForEditHere = {
-        documentId: pendingDocumentId,
-        buffer: buffer.slice(),
-        selection: { start: pendingSelection.start, end: pendingSelection.end },
-        readerText: pendingReaderText,
-      };
-    }
-    clearPending();
+    // Keep pending + buffer so keys typed during the wait stay blocked and replayable.
+    clearTimeout(yieldTimer);
+    yieldTimer = undefined;
+    awaitingEditHere = true;
     deps.showEditHere(reason);
   };
 
@@ -323,7 +315,20 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     steal?: boolean;
     initialBuffer?: BufferedInsert[];
   } = {}): Promise<void> => {
-    if (disposed || pending || deps.isViewMode()) return;
+    if (disposed || deps.isViewMode()) return;
+    // Edit here continues the same pending request (buffer + selection intact).
+    if (pending) {
+      if (
+        options.steal
+        && awaitingEditHere
+        && pendingDocumentId === deps.getDocumentId()
+      ) {
+        awaitingEditHere = false;
+        deps.hideEditHere?.();
+        await finishTakeover(undefined, true, pendingRequestId, pendingDocumentId, false);
+      }
+      return;
+    }
     const block = deps.editBlock();
     if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
     if (deps.field.disabled) return;
@@ -337,23 +342,13 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     }
 
     const documentId = deps.getDocumentId();
-    const stashed = heldForEditHere;
-    heldForEditHere = undefined;
     pending = true;
+    awaitingEditHere = false;
     pendingDocumentId = documentId;
     pendingSelection = readHandoffSelection(deps.field);
     pendingReaderText = deps.field.value;
     pendingRequestId = crypto.randomUUID();
-    // Carry keys from a prior Edit here offer; steal restores that selection too.
-    if (stashed && stashed.documentId === documentId) {
-      buffer = stashed.buffer.concat(options.initialBuffer ?? []);
-      if (options.steal) {
-        pendingSelection = stashed.selection;
-        pendingReaderText = stashed.readerText;
-      }
-    } else {
-      buffer = options.initialBuffer ? options.initialBuffer.slice() : [];
-    }
+    buffer = options.initialBuffer ? options.initialBuffer.slice() : [];
     deps.hideEditHere?.();
 
     const request = {
@@ -489,6 +484,8 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
 
     if (message.type === 'handoff-request') {
       if (message.fromInstanceId === deps.instanceId) return;
+      // Test hook: simulate a suspended owner that never answers (forces Edit here timeout).
+      if (ignoresHandoffRequests()) return;
       if (!deps.isOwner() || deps.getDocumentId() !== message.documentId) return;
       // BroadcastChannel is always cross-tab — never allow private transfer.
       void (async () => {
@@ -599,8 +596,10 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   channel?.addEventListener('message', onChannelMessage);
 
   const hooks: FocusHandoffHooks = {
+    // When the ignore hook is set, hide from same-origin discovery so the requester
+    // falls through to BroadcastChannel and the yield timeout (suspended-owner e2e).
     __typebridgeOwnsDocument: (documentId: string) =>
-      deps.isOwner() && deps.getDocumentId() === documentId,
+      !ignoresHandoffRequests() && deps.isOwner() && deps.getDocumentId() === documentId,
     // Direct frame call ⇒ same-tab ⇒ private transfer allowed.
     __typebridgeYieldForHandoff: request => yieldFor(request, true),
     __typebridgeHandoffComplete: confirmParked,
@@ -615,12 +614,14 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     pending: () => pending,
     requestHandoff: (options) => { void startRequest(options); },
     cancel: () => {
-      heldForEditHere = undefined;
       // Requester: abort in-flight takeover and tell a parked peer to recover.
       if (pending) {
         const requestId = pendingRequestId;
         const documentId = pendingDocumentId;
+        const droppedTyping = buffer.length > 0 || awaitingEditHere;
         clearPending();
+        deps.hideEditHere?.();
+        if (droppedTyping) deps.announce('Your typing was not applied.');
         if (requestId && documentId) {
           notifyPeersComplete(requestId, false);
           postMeta({
@@ -632,15 +633,15 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
             at: Date.now(),
           });
         }
+      } else {
+        deps.hideEditHere?.();
       }
       // Owner: abandon park without discard/recover — caller is navigating away;
       // dirty handling belongs to the document switch/delete path.
       clearParked();
-      deps.hideEditHere?.();
     },
     dispose: () => {
       disposed = true;
-      heldForEditHere = undefined;
       clearPending();
       if (parkedRequestId) {
         const documentId = parkedDocumentId;

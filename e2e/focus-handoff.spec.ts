@@ -275,6 +275,26 @@ test('selecting a word then typing replaces that selection after takeover', asyn
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
 });
 
+test('Edit here after unresponsive timeout keeps keys typed during the wait', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta } = await openSharedDocument(page);
+
+  await page.locator('#win-alpha').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeIgnoreHandoffRequests?: boolean })
+      .__typebridgeIgnoreHandoffRequests = true;
+  });
+
+  await beta.locator('#editor').click();
+  await placeCaret(beta, 'end');
+  // Digits are not transliterated — assert the pre-timeout buffer survives Edit here.
+  await beta.locator('#editor').pressSequentially('123');
+  await expect(beta.locator('#edit-here-bar')).toBeVisible({ timeout: 10_000 });
+  await beta.locator('#edit-here').click();
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff text123');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
+});
+
 test('selection maps onto owner private text that diverged before the range', async ({ page }) => {
   test.setTimeout(90_000);
   const { alpha, beta } = await openSharedDocument(page);

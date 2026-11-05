@@ -256,7 +256,8 @@ describe('installFocusHandoff', () => {
 
     await vi.advanceTimersByTimeAsync(HANDOFF_YIELD_TIMEOUT_MS);
     expect(showEditHere).toHaveBeenCalledWith('unresponsive');
-    expect(controller.pending()).toBe(false);
+    // Same request stays pending so input remains blocked and the buffer is kept.
+    expect(controller.pending()).toBe(true);
 
     controller.requestHandoff({ steal: true });
     await vi.runAllTimersAsync();
