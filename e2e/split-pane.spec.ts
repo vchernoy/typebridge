@@ -311,6 +311,27 @@ test('closing split after Edit in this pane keeps text and history on the primar
   await expect(page.locator('#editor')).toHaveValue('keep me');
 });
 
+test('Edit in this pane on a clean saved document does not mark dirty or commit', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await page.locator('#editor').fill('clean transfer');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const before = await readStoredDocs(page);
+  expect(before).toHaveLength(1);
+  const revision = before[0]?.revision;
+  await openSplit(page);
+  await page.locator('#edit-in-pane-b').click();
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'editable');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.waitForTimeout(500);
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const after = await readStoredDocs(page);
+  expect(after).toHaveLength(1);
+  expect(after[0]?.revision).toBe(revision);
+  expect(after[0]?.text).toBe('clean transfer');
+});
+
 test('transfer during an in-flight save keeps dirty text without a second commit race', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

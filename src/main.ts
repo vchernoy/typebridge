@@ -61,6 +61,10 @@ let transitioning = false;
 let deleting = false;
 /** True only during the post-flush ownership acquire/reread window (not while flushing). */
 let transferFrozen = false;
+/** True while a pane-B document open is awaiting storage/ownership (#159 S5). */
+let companionOpenBusy = false;
+/** Suppress scheduleSave while moving Editor history between panes (not a content edit). */
+let suppressEditTracking = false;
 /** True for the whole Autosave change handler (including awaits); keeps the checkbox disabled. */
 let autosaveToggleActive = false;
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
@@ -144,8 +148,8 @@ function syncCompanionChrome(): void {
   companionBadge.hidden = dual || editableInB;
   primaryLiveBadge.hidden = !split || dual || viewMode || !editableInB;
   primaryPaneChrome.hidden = !split || dual || viewMode || !editableInB;
-  editInPaneA.hidden = !split || dual || viewMode || !editableInB || readOnlyNow();
-  editInPaneB.hidden = !split || dual || viewMode || editableInB || readOnlyNow();
+  editInPaneA.hidden = !split || dual || viewMode || !editableInB || readOnlyNow() || companionOpenBusy;
+  editInPaneB.hidden = !split || dual || viewMode || editableInB || readOnlyNow() || companionOpenBusy;
   draftTitleB.hidden = !dual;
   saveIndicatorB.hidden = !dual;
   paneBDrafts.hidden = !split || viewMode;
@@ -469,7 +473,7 @@ function liveCommandState(): {
  */
 function transferSameDocumentEdit(
   target: typeof PRIMARY_PANE_ID | typeof SECOND_PANE_ID,
-  options: { silent?: boolean } = {},
+  options: { silent?: boolean; /** Bypass companion-open busy (parking before picker load). */ force?: boolean } = {},
 ): boolean {
   if (viewMode || !workspace.splitOpen() || dualDocumentSplit()) {
     if (!options.silent) announceAction('Edit in this pane is only available for the same-document companion.');
@@ -479,7 +483,7 @@ function transferSameDocumentEdit(
     sameSession: true,
     targetAlreadyEditable: workspace.editablePaneId() === target,
     composing: editor.composing || companionEditor.composing,
-    transitioning,
+    transitioning: transitioning || (!options.force && companionOpenBusy),
     externallyBlocked: readOnlyNow(),
   });
   if (block) {
@@ -515,13 +519,19 @@ function transferSameDocumentEdit(
   // Keep both surfaces on the same text before moving history.
   toField.value = fromField.value;
   const history = fromEditor.exportHistory();
-  fromEditor.setReadOnly(true);
-  fromEditor.restoreHistory({ v: 1, undo: [], redo: [], current: fromField.value });
-  const blocked = readOnlyNow();
-  toEditor.setReadOnly(blocked);
-  toEditor.restoreHistory(history);
-  workspace.setEditablePaneId(target);
-  sessionRegistry.primary.editablePaneId = target;
+  // restoreHistory emits historychange; that must not mark dirty or schedule a save.
+  suppressEditTracking = true;
+  try {
+    fromEditor.setReadOnly(true);
+    fromEditor.restoreHistory({ v: 1, undo: [], redo: [], current: fromField.value });
+    const blocked = readOnlyNow();
+    toEditor.setReadOnly(blocked);
+    toEditor.restoreHistory(history);
+    workspace.setEditablePaneId(target);
+    sessionRegistry.primary.editablePaneId = target;
+  } finally {
+    suppressEditTracking = false;
+  }
   try {
     fromField.setSelectionRange(fromSel.start, fromSel.end, fromSel.direction);
     toField.setSelectionRange(toSel.start, toSel.end, toSel.direction);
@@ -1365,11 +1375,19 @@ async function openCompanionDocument(id: string): Promise<void> {
   if (viewMode || !workspace.splitOpen() || !db || transitioning) return;
   const generation = ++companionOpenGeneration;
   paneBDrafts.disabled = true;
+  companionOpenBusy = true;
+  syncCompanionChrome();
   const run = (async () => {
     if (companionOpenInFlight) await companionOpenInFlight.catch(() => undefined);
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
     // Dual-doc and picker restores reuse #editor-b; park same-doc history on A first.
-    if (sameDocEditableInB()) transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true });
+    // Refuse the whole open if IME/busy blocks parking — do not load over live history.
+    if (sameDocEditableInB()) {
+      if (!transferSameDocumentEdit(PRIMARY_PANE_ID, { silent: true, force: true })) {
+        announceAction('Finish composing text before opening another document in the other pane.');
+        return;
+      }
+    }
     if (id === active.id) {
       if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
       if (generation !== companionOpenGeneration) return;
@@ -1507,7 +1525,11 @@ async function openCompanionDocument(id: string): Promise<void> {
   try { await run; }
   finally {
     if (companionOpenInFlight === run) companionOpenInFlight = undefined;
-    if (generation === companionOpenGeneration && !bootRestoringSecondary) paneBDrafts.disabled = false;
+    if (generation === companionOpenGeneration) {
+      companionOpenBusy = false;
+      if (!bootRestoringSecondary) paneBDrafts.disabled = false;
+      syncCompanionChrome();
+    }
   }
 }
 async function refreshDrafts(): Promise<void> {
@@ -1652,10 +1674,13 @@ function freezeEditorsForTransition(): void {
   workspace.setPaneRole('readonly');
   editor.setReadOnly(true);
   titleEditor.setReadOnly(true);
+  // Same-document editable may live in B; freeze both surfaces so mid-switch typing is not lost.
+  if (!dualDocumentSplit()) companionEditor.setReadOnly(true);
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
   undo.disabled = true;
   redo.disabled = true;
   autosave.disabled = true;
+  syncCompanionChrome();
 }
 
 function unfreezeEditorsAfterTransition(): void {
@@ -1895,7 +1920,7 @@ async function persist(): Promise<PersistResult> {
   }
 }
 function scheduleSave(fromTitle = false): void {
-  if (readOnlyNow() || loadingDraft) return;
+  if (readOnlyNow() || loadingDraft || suppressEditTracking) return;
   const becameDirty = !workspace.dirty();
   workspace.setDirty(true);
   workspace.bumpContentRevision();
