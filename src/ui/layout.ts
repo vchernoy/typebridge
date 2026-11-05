@@ -3,7 +3,14 @@ import { SHORTCUTS } from '../editor/keyboard-shortcuts';
  * Editor layout: resize control with separately saved Normal and Focus sizes, and Focus mode
  * with its Escape and Cmd/Ctrl+Shift+Enter keys (#67, #83).
  */
-export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
+export function setupLayout(
+  field: HTMLTextAreaElement,
+  options?: {
+    getFocusTarget?: () => HTMLTextAreaElement;
+    /** Surfaces where Escape enters Focus from Normal mode (defaults to the primary field). */
+    focusToggleSurfaces?: () => Iterable<HTMLTextAreaElement>;
+  },
+): { setFocusMode: (enabled: boolean) => void; restoreFocusMode: () => void; resetLayout: () => boolean } {
   const FOCUS_KEY = 'typebridge.focusMode.v1';
   const EDITOR_SIZE_KEY = 'typebridge.editor.size.v1';
   const editorSizeWarning = document.createElement('span');
@@ -143,7 +150,8 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
     document.body.classList.toggle('focus-mode', enabled);
     focusButton.setAttribute('aria-pressed', String(enabled));
     exitFocusButton.hidden = !enabled;
-    field.focus({ preventScroll: true });
+    // Prefer the active pane surface so Focus entry/exit does not silently retarget commands.
+    (options?.getFocusTarget?.() ?? field).focus({ preventScroll: true });
   }
   function setFocusMode(enabled: boolean): void {
     applyFocusMode(enabled);
@@ -161,11 +169,13 @@ export function setupLayout(field: HTMLTextAreaElement): { setFocusMode: (enable
   document.addEventListener('keydown', event => {
     if (event.key === SHORTCUTS.escape.key && !event.repeat && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented
       && !(event.target instanceof HTMLSelectElement && event.target.size <= 1)) {
-      // Escape toggles Focus mode from the editor or with nothing focused (body),
+      // Escape toggles Focus mode from either editor surface or with nothing focused (body),
       // and always exits it; it keeps its cancel role in Find/Replace, selects
       // and other controls (#67).
       const inFocusMode = document.body.classList.contains('focus-mode');
-      if (inFocusMode || event.target === field || event.target === document.body) {
+      const surfaces = options?.focusToggleSurfaces?.() ?? [field];
+      const onEditor = [...surfaces].some(surface => event.target === surface);
+      if (inFocusMode || onEditor || event.target === document.body) {
         event.preventDefault();
         setFocusMode(!inFocusMode);
       }

@@ -3,11 +3,21 @@ import { Editor } from '../editor/editor';
 import { replaceMatchAt } from '../editor/search';
 import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from '../editor/search-settings';
 
+export type SearchTarget = { field: HTMLTextAreaElement; editor: Editor };
+
 /**
  * Find & Replace: query/replacement persistence, Match case/Regex options, transliterating
  * Find/Replace inputs, navigation (including zero-width matches) and Replace/Replace all.
+ * Find navigation follows `getFindTarget` (active pane); Replace always mutates `primary`.
  */
-export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled: HTMLInputElement): {
+export function setupSearch(
+  primary: SearchTarget,
+  enabled: HTMLInputElement,
+  options: {
+    canMutate?: () => boolean;
+    getFindTarget?: () => SearchTarget;
+  } = {},
+): {
   findInput: HTMLInputElement;
   findEditor: Editor;
   replaceEditor: Editor;
@@ -15,6 +25,10 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   showMatchCount: () => void;
   resetOptions: () => boolean;
 } {
+  const field = primary.field;
+  const editor = primary.editor;
+  const canMutate = options.canMutate ?? (() => true);
+  const getFindTarget = options.getFindTarget ?? (() => primary);
   const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
   const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
   const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
@@ -69,31 +83,48 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
       return null;
     }
   }
-  function matches(): Array<[number, number]> {
+  function matches(text: string): Array<[number, number]> {
     const pattern = searchPattern();
     if (!pattern) return [];
-    return Array.from(field.value.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+    return Array.from(text.matchAll(pattern), m => [m.index, m.index + m[0].length]);
   }
-  let lastZeroWidthMatch: { position: number; text: string; query: string; matchCase: boolean; regex: boolean } | undefined;
+  let lastZeroWidthMatch: {
+    field: HTMLTextAreaElement;
+    position: number;
+    text: string;
+    query: string;
+    matchCase: boolean;
+    regex: boolean;
+  } | undefined;
   function resetSearchPosition(): void { lastZeroWidthMatch = undefined; }
   // Caret moves and edits are caught by the position and text checks in findNext.
   field.addEventListener('input', resetSearchPosition);
   function findNext(backwards = false): void {
-    const found = matches();
+    const target = getFindTarget();
+    const found = matches(target.field.value);
     if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = findInput.value ? 'No matches' : 'Enter search text'; return; }
-    const position = backwards ? field.selectionStart : field.selectionEnd;
-    const skipCurrent = lastZeroWidthMatch?.position === position && field.selectionStart === field.selectionEnd &&
-      lastZeroWidthMatch.text === field.value && lastZeroWidthMatch.query === findInput.value &&
-      lastZeroWidthMatch.matchCase === matchCase.checked && lastZeroWidthMatch.regex === regexMode.checked;
+    const position = backwards ? target.field.selectionStart : target.field.selectionEnd;
+    // Zero-width skip state is per pane: mirrored text alone must not skip the first hit.
+    const skipCurrent = lastZeroWidthMatch?.field === target.field && lastZeroWidthMatch.position === position
+      && target.field.selectionStart === target.field.selectionEnd
+      && lastZeroWidthMatch.text === target.field.value && lastZeroWidthMatch.query === findInput.value
+      && lastZeroWidthMatch.matchCase === matchCase.checked && lastZeroWidthMatch.regex === regexMode.checked;
     const match = backwards
       ? [...found].reverse().find(([start]) => start < position) ?? found[found.length - 1]
       : found.find(([start]) => skipCurrent ? start > position : start >= position) ?? found[0];
-    field.focus({ preventScroll: true });
-    field.setSelectionRange(match[0], match[1]);
+    target.field.focus({ preventScroll: true });
+    target.field.setSelectionRange(match[0], match[1]);
     lastZeroWidthMatch = match[0] === match[1]
-      ? { position: match[0], text: field.value, query: findInput.value, matchCase: matchCase.checked, regex: regexMode.checked }
+      ? {
+        field: target.field,
+        position: match[0],
+        text: target.field.value,
+        query: findInput.value,
+        matchCase: matchCase.checked,
+        regex: regexMode.checked,
+      }
       : undefined;
-    editor.revealSelection();
+    target.editor.revealSelection();
     findStatus.textContent = `${found.indexOf(match) + 1} of ${found.length}`;
   }
   function showMatchCount(): void {
@@ -102,7 +133,7 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
     if (findBar.hidden || findBar.getClientRects().length === 0) return;
     // Do not reset zero-width skip state here: openFind/Ctrl+F refreshes totals and
     // must keep advancing past the current zero-width hit (#140 review P1).
-    const found = matches();
+    const found = matches(getFindTarget().field.value);
     if (findStatus.textContent.startsWith('Invalid regex')) return;
     findStatus.textContent = !findInput.value ? '' : found.length
       ? `${found.length} match${found.length === 1 ? '' : 'es'}` : 'No matches';
@@ -112,7 +143,8 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
   document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
-    const found = matches();
+    if (!canMutate()) return;
+    const found = matches(field.value);
     if (!found.length) { if (!findStatus.textContent.startsWith('Invalid regex')) findStatus.textContent = 'No matches'; return; }
     const match = found.find(([start, end]) => start === field.selectionStart && end === field.selectionEnd)
       ?? found.find(([start]) => start >= field.selectionEnd) ?? found[0];
@@ -125,6 +157,7 @@ export function setupSearch(field: HTMLTextAreaElement, editor: Editor, enabled:
     field.focus({ preventScroll: true });
   });
   document.querySelector<HTMLButtonElement>('#replace-all')!.addEventListener('click', () => {
+    if (!canMutate()) return;
     const pattern = searchPattern();
     if (!pattern) return;
     const original = field.value;

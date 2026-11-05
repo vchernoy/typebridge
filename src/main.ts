@@ -13,10 +13,13 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
-import { createSinglePaneWorkspace } from './view/workspace';
+import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
+import { commandAllowedOnPane } from './view/session';
+import { mirrorTextarea } from './view/mirror';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
 import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
+import { setupSplitPane } from './ui/split-pane';
 import { setupSearch } from './ui/search';
 import { setupRules } from './ui/rules';
 import { setupTransliteration } from './ui/transliteration';
@@ -56,20 +59,73 @@ const readOnlyNow = (): boolean => viewMode || editBlock !== '' || transferFroze
 // backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
 // navigation; initializeViewer never reads pending/active hints.
 const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+const companionField = document.querySelector<HTMLTextAreaElement>('#editor-b')!;
 const workspaceRoot = document.querySelector<HTMLElement>('main.workspace')!;
-const workspace = createSinglePaneWorkspace({ root: workspaceRoot, paneSurface: field });
+const editorSplit = document.querySelector<HTMLElement>('#editor-split')!;
+const splitDivider = document.querySelector<HTMLElement>('#split-divider')!;
+const companionPane = document.querySelector<HTMLElement>('.editor-pane-companion')!;
+const primaryPane = document.querySelector<HTMLElement>('.editor-pane-primary')!;
+const splitReset = document.querySelector<HTMLButtonElement>('#split-reset')!;
+const toggleSplit = document.querySelector<HTMLButtonElement>('#toggle-split')!;
+const workspace = createSinglePaneWorkspace({
+  root: workspaceRoot,
+  paneSurface: field,
+  companionSurface: companionField,
+});
 
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
-const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field);
+const { setFocusMode, restoreFocusMode, resetLayout } = setupLayout(field, {
+  getFocusTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionField : field,
+  focusToggleSurfaces: () => [field, companionField],
+});
 setupSettings();
 setupDocumentMenu();
 setupMoreMenu();
 setupKeyboardShortcuts();
 const editor = new Editor(field);
+const companionEditor = new Editor(companionField);
+companionEditor.setReadOnly(true);
 if (viewMode) {
   editor.setReadOnly(true);
   workspace.setPaneRole('readonly');
+}
+
+/** Keep the companion text current even while hidden so position restore uses the right length. */
+function mirrorCompanion(force = false): void {
+  if (!force && !workspace.splitOpen()) return;
+  mirrorTextarea(field, companionField);
+}
+
+const resizeGrip = document.querySelector<HTMLButtonElement>('#resize-editor')!;
+/** Filled after mutation chrome exists; split open/close runs before those listeners are wired. */
+const paneChrome = { syncMutations: (): void => {} };
+const splitControls = setupSplitPane({
+  shell: editorSplit,
+  divider: splitDivider,
+  primaryPane,
+  companionPane,
+  resetButton: splitReset,
+  allowOpen: !viewMode,
+  onOpenChange: open => {
+    workspace.setSplitOpen(open);
+    toggleSplit.setAttribute('aria-pressed', open ? 'true' : 'false');
+    toggleSplit.textContent = open ? 'Close split' : 'Split editor';
+    // Grip still writes inline width while split forces width:100%; hide it until closed.
+    resizeGrip.hidden = open;
+    resizeGrip.tabIndex = open ? -1 : 0;
+    if (open) mirrorCompanion();
+    else workspace.setActivePane(PRIMARY_PANE_ID);
+    paneChrome.syncMutations();
+  },
+});
+if (viewMode) {
+  toggleSplit.disabled = true;
+  splitControls.setOpen(false);
+} else {
+  toggleSplit.addEventListener('click', () => {
+    splitControls.setOpen(!splitControls.isOpen());
+  });
 }
 const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
@@ -244,12 +300,33 @@ const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
 const redo = document.querySelector<HTMLButtonElement>('#redo')!;
-const syncHistory = () => { undo.disabled = readOnlyNow() || !editor.canUndo; redo.disabled = readOnlyNow() || !editor.canRedo; };
+/** Shared chrome mutates only the primary editable pane; refuse while the companion is active. */
+function canMutatePrimary(): boolean {
+  return commandAllowedOnPane({
+    activePaneId: workspace.activePaneId(),
+    targetPaneId: PRIMARY_PANE_ID,
+    role: readOnlyNow() ? 'readonly' : 'editable',
+    mutatesDocument: true,
+  });
+}
+function syncMutationControls(): void {
+  // Comparison viewers own these attributes via applyViewerChrome; do not fight tests that
+  // temporarily re-enable controls to prove handlers still refuse mutations.
+  if (viewMode) return;
+  const blocked = !canMutatePrimary();
+  undo.disabled = blocked || !editor.canUndo;
+  redo.disabled = blocked || !editor.canRedo;
+  for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
+    document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
+  }
+}
+const syncHistory = () => { syncMutationControls(); };
+paneChrome.syncMutations = syncMutationControls;
 field.addEventListener('historychange', syncHistory);
 for (const [button, action] of [[undo, () => editor.undo()], [redo, () => editor.redo()]] as const) {
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
-    if (readOnlyNow()) return;
+    if (!canMutatePrimary()) return;
     action();
     field.focus({ preventScroll: true });
   });
@@ -259,7 +336,7 @@ for (const [id, direction] of [['convert-cyrillic', 'to-cyrillic'], ['convert-la
   const button = document.querySelector<HTMLButtonElement>('#' + id)!;
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
-    if (readOnlyNow()) return;
+    if (!canMutatePrimary()) return;
     if (!editor.convertSelection(direction)) announceAction('Select text to convert');
   });
 }
@@ -267,14 +344,25 @@ field.addEventListener('keydown', event => {
   if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
   const key = event.key.toLowerCase();
   if (key !== SHORTCUTS.convertCyrillic.key && key !== SHORTCUTS.convertLatin.key) return;
-  if (readOnlyNow() || field.selectionStart === field.selectionEnd) return;
+  if (!canMutatePrimary() || field.selectionStart === field.selectionEnd) return;
   event.preventDefault();
   editor.convertSelection(key === SHORTCUTS.convertCyrillic.key ? 'to-cyrillic' : 'to-latin');
 });
 function updateCaretPosition(): void {
-  const { line, column } = lineColumnAtOffset(field.value, field.selectionStart);
+  const surface = workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
+  const { line, column } = lineColumnAtOffset(surface.value, surface.selectionStart);
   caretPosition.textContent = `Ln ${line}, Col ${column}`;
 }
+field.addEventListener('focus', () => {
+  workspace.setActivePane(PRIMARY_PANE_ID);
+  syncMutationControls();
+  updateCaretPosition();
+});
+companionField.addEventListener('focus', () => {
+  workspace.setActivePane(SECOND_PANE_ID);
+  syncMutationControls();
+  updateCaretPosition();
+});
 // Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
 // "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
 // outdent moves focus as usual.
@@ -286,7 +374,7 @@ function saveTabIndent(): boolean {
 }
 tabIndent.addEventListener('change', saveTabIndent);
 field.addEventListener('keydown', event => {
-  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly) return;
+  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly || !canMutatePrimary()) return;
   const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
   // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
   if (!change && event.shiftKey) return;
@@ -303,17 +391,30 @@ field.addEventListener('historychange', updateStats);
 field.addEventListener('keyup', updateCaretPosition);
 field.addEventListener('click', updateCaretPosition);
 field.addEventListener('select', updateCaretPosition);
+companionField.addEventListener('keyup', updateCaretPosition);
+companionField.addEventListener('click', updateCaretPosition);
+companionField.addEventListener('select', updateCaretPosition);
 const typingSettings = setupTransliteration(enabled, editor, { syncSearchEditors: () => syncSearchEditors(), preferenceSaved });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); announceAction('Copied'); }
   catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
 });
 document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', async () => {
-  if (!readOnlyNow() && field.value && await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
+  if (!canMutatePrimary() || !field.value) return;
+  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? field : document.querySelector<HTMLButtonElement>('#more-open')! })) { editor.clear(); field.focus(); announceAction('Cleared'); }
 });
 
 
-const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(field, editor, enabled);
+const primarySearch: { field: HTMLTextAreaElement; editor: Editor } = { field, editor };
+const companionSearch: { field: HTMLTextAreaElement; editor: Editor } = { field: companionField, editor: companionEditor };
+const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(
+  primarySearch,
+  enabled,
+  {
+    canMutate: canMutatePrimary,
+    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionSearch : primarySearch,
+  },
+);
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
 const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
 // Find and Go to line open on demand (#123): from their toolbar buttons or with
@@ -326,8 +427,16 @@ function setBar(bar: HTMLElement, button: HTMLButtonElement, open: boolean): voi
   bar.hidden = !open;
   button.setAttribute('aria-expanded', String(open));
 }
+function leaveFocusPreservingActivePane(): void {
+  if (!document.body.classList.contains('focus-mode')) return;
+  // setFocusMode focuses #editor and would otherwise steal activePane to pane-a.
+  const pane = workspace.activePaneId();
+  setFocusMode(false);
+  workspace.setActivePane(pane);
+  syncMutationControls();
+}
 function openFind(): void {
-  if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  leaveFocusPreservingActivePane();
   setBar(gotoBar, gotoOpen, false);
   setBar(findBar, findOpen, true);
   showMatchCount();
@@ -335,15 +444,18 @@ function openFind(): void {
   findInput.select();
 }
 function openGoto(): void {
-  if (document.body.classList.contains('focus-mode')) setFocusMode(false);
+  leaveFocusPreservingActivePane();
   setBar(findBar, findOpen, false);
   setBar(gotoBar, gotoOpen, true);
   gotoInput.focus();
   gotoInput.select();
 }
+function activeEditorSurface(): HTMLTextAreaElement {
+  return workspace.activePaneId() === SECOND_PANE_ID ? companionField : field;
+}
 function closeBar(bar: HTMLElement, button: HTMLButtonElement): void {
   setBar(bar, button, false);
-  field.focus({ preventScroll: true });
+  activeEditorSurface().focus({ preventScroll: true });
 }
 findOpen.addEventListener('click', () => { if (findBar.hidden) openFind(); else closeBar(findBar, findOpen); });
 gotoOpen.addEventListener('click', () => { if (gotoBar.hidden) openGoto(); else closeBar(gotoBar, gotoOpen); });
@@ -358,10 +470,12 @@ function goToLine(): void {
     gotoStatus.textContent = gotoInput.value.trim() ? 'Use line or line:column' : 'Enter a line number';
     return;
   }
-  const target = offsetForLineColumn(field.value, parsed.line, parsed.column ?? 1);
-  field.focus({ preventScroll: true });
-  field.setSelectionRange(target.offset, target.offset);
-  editor.revealSelection();
+  const surface = activeEditorSurface();
+  const surfaceEditor = surface === companionField ? companionEditor : editor;
+  const target = offsetForLineColumn(surface.value, parsed.line, parsed.column ?? 1);
+  surface.focus({ preventScroll: true });
+  surface.setSelectionRange(target.offset, target.offset);
+  surfaceEditor.revealSelection();
   updateCaretPosition();
   gotoStatus.textContent = target.line === parsed.line && (parsed.column === undefined || target.column === parsed.column)
     ? `Line ${target.line}, column ${target.column}`
@@ -423,6 +537,12 @@ const writingPosition = setupWritingPosition(
   field,
   () => loadingDraft || field.disabled || viewMissing ? undefined : active.id,
   viewMode ? VIEWER_POSITION_NAMESPACE : '',
+);
+// Companion pane keeps an independent scroll/selection namespace (#159 S3).
+const companionWritingPosition = setupWritingPosition(
+  companionField,
+  () => loadingDraft || viewMissing || !workspace.splitOpen() ? undefined : active.id,
+  viewMode ? VIEWER_POSITION_NAMESPACE + 'pane-b:' : 'pane:pane-b:',
 );
 const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
@@ -533,6 +653,9 @@ function showDraft(): void {
     syncTitleTooltip();
     workspace.setDirty(false);
     saveFailed = false; // The editor no longer holds the unsaved text.
+    // Mirror before restoring companion offsets (including when split is closed).
+    mirrorCompanion(true);
+    companionWritingPosition.restore(active.id);
   } finally { loadingDraft = false; }
   writingPosition.restore(active.id);
   renderDrafts();
@@ -560,6 +683,7 @@ function applyEditAccess(): void {
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
   syncHistory();
+  syncMutationControls();
   updateSaveIndicator();
 }
 /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
@@ -725,6 +849,9 @@ async function persist(): Promise<PersistResult> {
         workspace.setDirty(workspace.contentRevision() !== version);
         updateSaveIndicator();
         if (result.conflict) {
+          // Conflict copy is a new document id; keep the workspace identity in sync
+          // without bumping sessionGeneration mid-persist (same in-flight save stream).
+          workspace.setDocumentId(result.draft.id);
           // Retain new edits typed while the transaction was in flight.
           if ((draftTitle.value.trim() || UNTITLED_TITLE) === saved.title) {
             draftTitle.value = active.title;
@@ -795,8 +922,8 @@ function scheduleSave(fromTitle = false): void {
   if (autosave.checked) { showSaving(); saveTimer = setTimeout(() => { void persist(); }, 300); }
   else showSaveState();
 }
-field.addEventListener('input', () => scheduleSave());
-field.addEventListener('historychange', () => scheduleSave());
+field.addEventListener('input', () => { scheduleSave(); mirrorCompanion(); });
+field.addEventListener('historychange', () => { scheduleSave(); mirrorCompanion(); });
 function syncTitleTooltip(): void {
   // Ellipsis may clip the field; the value and tooltip keep the full title (#156).
   draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
@@ -1211,7 +1338,7 @@ const viewerNotice = document.querySelector<HTMLElement>('#viewer-notice')!;
 const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
 const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
 const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
-const VIEWER_DISABLED_CONTROLS = ['new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
+const VIEWER_DISABLED_CONTROLS = ['new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'toggle-split', 'undo', 'redo',
   'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** Controls that only make sense while a saved document is shown. */
 const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];
