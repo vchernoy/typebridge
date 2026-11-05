@@ -648,7 +648,9 @@ const writingPosition = setupWritingPosition(
 // Companion pane keeps an independent scroll/selection namespace (#159 S3).
 const companionWritingPosition = setupWritingPosition(
   companionField,
-  () => loadingDraft || viewMissing || !workspace.splitOpen() ? undefined : active.id,
+  () => loadingDraft || viewMissing || !workspace.splitOpen()
+    ? undefined
+    : (secondary?.draft.id ?? active.id),
   viewMode ? VIEWER_POSITION_NAMESPACE + 'pane-b:' : 'pane:pane-b:',
 );
 const journalTab = crypto.randomUUID();
@@ -680,9 +682,10 @@ try { autosave.checked = autosaveEnabled(); } catch { /* Keep editing available 
 // A tab-scoped emergency snapshot is not the committed draft. It only bridges
 // navigation/reload when the browser aborts an IndexedDB transaction on unload.
 const PENDING_KEY = 'typebridge.pendingDraft.v1';
-function readPending(): StoredDraft | undefined {
+const PENDING_KEY_B = 'typebridge.pendingDraft.paneB.v1';
+function parsePendingDraft(raw: string | null): StoredDraft | undefined {
   try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? 'null');
+    const value: unknown = JSON.parse(raw ?? 'null');
     if (!value || typeof value !== 'object') return undefined;
     const draft = value as Partial<StoredDraft>;
     if (typeof draft.id !== 'string' || !draft.id || typeof draft.title !== 'string' ||
@@ -691,13 +694,36 @@ function readPending(): StoredDraft | undefined {
     return draft as StoredDraft;
   } catch { return undefined; }
 }
+function readPending(): StoredDraft | undefined {
+  try { return parsePendingDraft(sessionStorage.getItem(PENDING_KEY)); }
+  catch { return undefined; }
+}
+function readPendingB(): StoredDraft | undefined {
+  try { return parsePendingDraft(sessionStorage.getItem(PENDING_KEY_B)); }
+  catch { return undefined; }
+}
 function snapshot(): StoredDraft {
   return { ...active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
 }
+let currentJournalSecondary: RecoverySnapshot | undefined;
 function journalEdit(): void {
   if (viewMode || !autosave.checked) return;
   const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: active.id, revision: active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
   try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
+  catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
+}
+function journalEditSecondary(): void {
+  if (viewMode || !autosave.checked || !secondary) return;
+  const entry: RecoverySnapshot = {
+    token: crypto.randomUUID(),
+    tab: journalTab,
+    documentId: secondary.draft.id,
+    revision: secondary.draft.revision,
+    timestamp: Date.now(),
+    title: draftTitleB.value.trim() || UNTITLED_TITLE,
+    text: companionField.value,
+  };
+  try { writeRecovery(localStorage, entry); currentJournalSecondary = entry; journalWarning.hidden = true; }
   catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
 }
 function sameContent(a: StoredDraft, b: StoredDraft): boolean {
@@ -712,9 +738,30 @@ function savePending(): void {
     setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure');
   }
 }
+function savePendingSecondary(): void {
+  if (viewMode || !secondary?.dirty || !autosave.checked) return;
+  try { sessionStorage.setItem(PENDING_KEY_B, JSON.stringify(snapshotBoundSession(secondary, UNTITLED_TITLE))); }
+  catch {
+    setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure');
+  }
+}
 function clearPending(saved: StoredDraft): void {
   try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
   catch { /* A stale backup is safer than removing one we cannot verify. */ }
+}
+function clearPendingSecondary(saved: StoredDraft): void {
+  try {
+    const pending = readPendingB();
+    if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) {
+      sessionStorage.removeItem(PENDING_KEY_B);
+    }
+  } catch { /* A stale backup is safer than removing one we cannot verify. */ }
+}
+function flushSecondaryOnUnload(): void {
+  if (!secondary) return;
+  savePendingSecondary();
+  clearTimeout(secondary.saveTimer);
+  void persistSecondary();
 }
 function rememberActive(): void { if (viewMode) return; try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
 function renderDrafts(): void {
@@ -809,6 +856,8 @@ async function releaseSecondarySession(): Promise<boolean> {
   const previous = secondary;
   secondary = undefined;
   sessionRegistry?.setSecondary(undefined);
+  currentJournalSecondary = undefined;
+  try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
   void previous.ownership?.release();
   companionEditor.setReadOnly(true);
   titleEditorB.setReadOnly(true);
@@ -888,6 +937,12 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   writingPosition.restore(promoted.id);
   applyEditAccess();
   showSaveState();
+  if (workspace.dirty() && autosave.checked && !editBlock) {
+    journalEdit();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { void persist(); }, 300);
+    showSaving();
+  }
   renderDrafts();
   syncMutationControls();
   return true;
@@ -900,6 +955,8 @@ async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }
   if (secondary.saving) return secondary.saving;
   const session = secondary;
   session.saving = (async () => {
+    const delayMs = (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs;
+    if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     let createdConflict = false;
     try {
       if (!db) throw new Error('Storage unavailable');
@@ -908,10 +965,20 @@ async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }
         const saved = snapshotBoundSession(session, UNTITLED_TITLE);
         if (session.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
         const owner = await session.ownership.writeFence();
+        const journal = currentJournalSecondary
+          && currentJournalSecondary.documentId === saved.id
+          && currentJournalSecondary.revision === session.draft.revision
+          && currentJournalSecondary.text === saved.text
+          && currentJournalSecondary.title === saved.title
+          ? currentJournalSecondary
+          : undefined;
         const result = await commitOrCreateConflictCopy(db, saved, session.draft.revision, crypto.randomUUID(), owner);
+        clearPendingSecondary(saved);
         const titleOnly = !result.conflict && saved.title !== session.draft.title && saved.text === session.draft.text;
+        if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
         session.draft = result.draft;
         postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
+        if (session.contentRevision !== version && autosave.checked) journalEditSecondary();
         session.saveFailed = false;
         session.dirty = session.contentRevision !== version;
         updateSaveIndicatorB();
@@ -957,6 +1024,7 @@ function scheduleSaveSecondary(fromTitle = false): void {
   secondary.contentRevision += 1;
   clearTimeout(secondary.saveTimer);
   if (autosave.checked) {
+    journalEditSecondary();
     updateSaveIndicatorB();
     secondary.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
   } else {
@@ -1000,7 +1068,16 @@ async function openCompanionDocument(id: string): Promise<void> {
     }
     if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
-    const access = await acquireFor(next.id);
+    const access = await acquireFor(next.id, held => {
+      if (!secondary || secondary.ownership !== held) return;
+      secondary.ownership = undefined;
+      secondary.editBlock = 'lost';
+      clearTimeout(secondary.saveTimer);
+      companionEditor.setReadOnly(true);
+      titleEditorB.setReadOnly(true);
+      updateSaveIndicatorB();
+      syncMutationControls();
+    });
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) {
       void access.ownership?.release();
       return;
@@ -1119,7 +1196,10 @@ function applyEditAccess(): void {
 let storageGeneration = 0;
 type EditAccess = { ownership?: EditOwnership; block: EditBlock; generation: number };
 /** Try to own `documentId` without waiting; never steals from a live owner. */
-async function acquireFor(documentId: string): Promise<EditAccess> {
+async function acquireFor(
+  documentId: string,
+  onLostHeld?: (held: EditOwnership) => void,
+): Promise<EditAccess> {
   // Without storage nothing can be written, so there is nothing to own.
   if (viewMode || !db) return { block: '', generation: storageGeneration };
   const generation = storageGeneration;
@@ -1131,7 +1211,11 @@ async function acquireFor(documentId: string): Promise<EditAccess> {
   try {
     const result = await acquireEditOwnership({
       db, locks: webLocks, documentId, instanceId,
-      onLost: () => { if (held && ownership === held) loseOwnership(); },
+      onLost: () => {
+        if (!held) return;
+        if (onLostHeld) onLostHeld(held);
+        else if (ownership === held) loseOwnership();
+      },
     });
     // E2E: hold the lock briefly before returning so a mid-flight versionchange can be asserted.
     const afterMs = (window as Window & { __typebridgeDelayAfterAcquireMs?: number }).__typebridgeDelayAfterAcquireMs;
@@ -1198,6 +1282,8 @@ function loseOwnership(): void {
 let ownershipRetry: Promise<void> | undefined;
 /** A BroadcastChannel reread arrived while ownershipRetry held the transition; run after it finishes. */
 let rereadAfterOwnershipRetry = false;
+let secondaryOwnershipRetry: Promise<void> | undefined;
+let rereadAfterSecondaryOwnershipRetry = false;
 /**
  * A read-only ordinary window tries again when shown or focused; it becomes editor only if the lock is free.
  * Always rereads first (single-flight with the acquire): a concurrent refresh must not bump sessionGeneration
@@ -1243,6 +1329,69 @@ function retryOwnership(): void {
     if (!rereadAfterOwnershipRetry) return;
     rereadAfterOwnershipRetry = false;
     void rereadDisplayed();
+  });
+}
+/** Read-only pane B retries ownership when focused or the tab becomes visible again. */
+function retrySecondaryOwnership(): void {
+  const store = db;
+  const session = secondary;
+  if (viewMode || !store || !session || !dualDocumentSplit() || !mayRetryEditOwnership(session.editBlock)
+    || secondaryOwnershipRetry || companionOpenInFlight || field.disabled) return;
+  secondaryOwnershipRetry = (async () => {
+    await rereadSecondary();
+    if (!secondary || secondary !== session || !mayRetryEditOwnership(session.editBlock) || !dualDocumentSplit()) return;
+    const id = session.draft.id;
+    const view = session.sessionGeneration;
+    const stillHere = (): boolean => !!secondary && secondary === session && secondary.draft.id === id
+      && secondary.sessionGeneration === view && mayRetryEditOwnership(secondary.editBlock) && dualDocumentSplit();
+    if (!stillHere()) return;
+    const access = await acquireFor(id, held => {
+      if (!secondary || secondary.ownership !== held) return;
+      secondary.ownership = undefined;
+      secondary.editBlock = 'lost';
+      clearTimeout(secondary.saveTimer);
+      companionEditor.setReadOnly(true);
+      titleEditorB.setReadOnly(true);
+      updateSaveIndicatorB();
+      syncMutationControls();
+    });
+    if (!access.ownership) return;
+    let fresh: StoredDraft | undefined | null = null;
+    try { if (stillHere() && !session.dirty) fresh = await getStoredDraft(store, id); }
+    catch { void access.ownership.release(); return; }
+    if (!stillHere()) { void access.ownership.release(); return; }
+    if (fresh === undefined) {
+      void access.ownership.release();
+      if (session.draft.revision >= 1) showVersionNotice(DELETED_NOTICE);
+      return;
+    }
+    if (fresh) {
+      companionWritingPosition.save();
+      loadingDraft = true;
+      try {
+        session.draft = fresh;
+        companionEditor.load(fresh.text);
+        if (fresh.history) companionEditor.restoreHistory(fresh.history);
+        draftTitleB.value = fresh.title;
+      } finally { loadingDraft = false; }
+      companionWritingPosition.restore(fresh.id);
+    }
+    session.ownership = access.ownership;
+    session.editBlock = access.block;
+    companionEditor.setReadOnly(!!access.block);
+    titleEditorB.setReadOnly(!!access.block);
+    updateSaveIndicatorB();
+    syncMutationControls();
+    announceAction('You can edit this document in the other pane now.', { keepConflict: true });
+    if (session.dirty && autosave.checked) {
+      clearTimeout(session.saveTimer);
+      session.saveTimer = setTimeout(() => { void persistSecondary(); }, 300);
+    }
+  })().finally(() => {
+    secondaryOwnershipRetry = undefined;
+    if (!rereadAfterSecondaryOwnershipRetry) return;
+    rereadAfterSecondaryOwnershipRetry = false;
+    void rereadSecondary();
   });
 }
 async function persist(): Promise<PersistResult> {
@@ -1798,6 +1947,48 @@ async function initializeDrafts(): Promise<void> {
     renderPaneBDrafts();
     void renderRecovery();
     finishInitialization();
+    void restorePendingSecondary();
+  }
+}
+
+/** Restore a pane-B reload snapshot after the primary session is live. */
+async function restorePendingSecondary(): Promise<void> {
+  if (viewMode || !db) return;
+  const pending = readPendingB();
+  if (!pending) return;
+  let committed: StoredDraft | undefined;
+  try { committed = await getStoredDraft(db, pending.id); } catch { return; }
+  if (committed && sameContent(pending, committed)) {
+    clearPendingSecondary(pending);
+    return;
+  }
+  // Same document as primary cannot be a second editable session; keep recovery journal only.
+  if (pending.id === active.id) return;
+  if (!workspace.splitOpen()) splitControls.setOpen(true);
+  await openCompanionDocument(pending.id);
+  if (!secondary || secondary.draft.id !== pending.id) return;
+  companionWritingPosition.save();
+  loadingDraft = true;
+  try {
+    companionEditor.load(pending.text);
+    if (pending.history) companionEditor.restoreHistory(pending.history);
+    draftTitleB.value = pending.title;
+    secondary.draft = { ...pending };
+    secondary.dirty = true;
+    secondary.contentRevision += 1;
+  } finally {
+    loadingDraft = false;
+  }
+  companionWritingPosition.restore(pending.id);
+  updateSaveIndicatorB();
+  syncMutationControls();
+  if (secondary.editBlock) {
+    setSaveStatus('Recovered unsaved text in the other pane, but another window is editing that document, so it was not saved. Copy or export it.', 'failure');
+  } else if (autosave.checked) {
+    setSaveStatus('Recovered unsaved text in the other pane; saving…');
+    await persistSecondary();
+  } else {
+    setSaveStatus('Recovered unsaved text in the other pane; autosave is off');
   }
 }
 
@@ -1977,6 +2168,44 @@ async function rereadDisplayed(): Promise<void> {
   } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
   else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE);
 }
+let rereadSecondarySeq = 0;
+/** Authoritative reread of the dual-document companion session. */
+async function rereadSecondary(): Promise<void> {
+  if (!secondary || !db || loadingDraft || !dualDocumentSplit()) return;
+  while (secondary.saving) await secondary.saving.catch(() => undefined);
+  if (!secondary || !dualDocumentSplit()) return;
+  const id = secondary.draft.id;
+  const generationAtStart = secondary.sessionGeneration;
+  const seq = ++rereadSecondarySeq;
+  let stored: StoredDraft | undefined;
+  try { stored = await getStoredDraft(db, id); } catch { return; }
+  if (!secondary || seq !== rereadSecondarySeq || secondary.sessionGeneration !== generationAtStart || secondary.draft.id !== id) return;
+  if (secondary.saving) { void rereadSecondary(); return; }
+  const reader = secondary.editBlock !== '' && !secondary.dirty;
+  const action = decideReread({
+    role: reader ? 'viewer' : 'editor',
+    displayedRevision: secondary.draft.revision,
+    displayedUpdatedAt: secondary.draft.updatedAt,
+    stored,
+  });
+  if (action === 'refresh' && stored) {
+    companionWritingPosition.save();
+    loadingDraft = true;
+    try {
+      secondary.draft = stored;
+      companionEditor.load(stored.text);
+      if (stored.history) companionEditor.restoreHistory(stored.history);
+      draftTitleB.value = stored.title;
+    } finally { loadingDraft = false; }
+    companionWritingPosition.restore(stored.id);
+    updateSaveIndicatorB();
+    renderPaneBDrafts();
+  } else if (action === 'missing') {
+    if (secondary.draft.revision >= 1) showVersionNotice(DELETED_NOTICE);
+    renderPaneBDrafts();
+  } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
+  else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE);
+}
 let listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleListRefresh(): void {
   if (!viewMode || !db) return;
@@ -1989,10 +2218,18 @@ signalChannel?.addEventListener('message', event => {
   // While loading, `active` is not the represented document yet; reread once it is.
   if (field.disabled) { rereadAfterInit = true; return; }
   scheduleListRefresh();
-  if (!shouldApplyDocumentSignal(signal, active.id, active.revision)) return;
-  // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
-  if (ownershipRetry) { rereadAfterOwnershipRetry = true; return; }
-  void rereadDisplayed();
+  if (shouldApplyDocumentSignal(signal, active.id, active.revision)) {
+    // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
+    if (ownershipRetry) rereadAfterOwnershipRetry = true;
+    else void rereadDisplayed();
+  }
+  if (secondary && shouldApplyDocumentSignal(signal, secondary.draft.id, secondary.draft.revision)) {
+    if (mayRetryEditOwnership(secondary.editBlock)) {
+      if (secondaryOwnershipRetry) rereadAfterSecondaryOwnershipRetry = true;
+      else retrySecondaryOwnership();
+    } else if (secondaryOwnershipRetry) rereadAfterSecondaryOwnershipRetry = true;
+    else void rereadSecondary();
+  }
 });
 function reconcileSignals(): void {
   if (document.visibilityState !== 'visible') return;
@@ -2000,9 +2237,14 @@ function reconcileSignals(): void {
   // Readers: single-flight reread+acquire. Owners/viewers: still reread so missed signals surface.
   if (mayRetryEditOwnership(editBlock)) retryOwnership();
   else void rereadDisplayed();
+  if (secondary && dualDocumentSplit()) {
+    if (mayRetryEditOwnership(secondary.editBlock)) retrySecondaryOwnership();
+    else void rereadSecondary();
+  }
 }
 // Focusing the text is the clearest sign the user wants to edit here; it never steals a held lock.
 field.addEventListener('focus', retryOwnership);
+companionField.addEventListener('focus', retrySecondaryOwnership);
 window.addEventListener('focus', reconcileSignals);
 document.addEventListener('visibilitychange', reconcileSignals);
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
@@ -2142,42 +2384,81 @@ importFile.addEventListener('change', async () => {
   }
 });
 
-if (!viewMode) window.addEventListener('pagehide', () => { savePending(); clearTimeout(saveTimer); void persist(); });
+if (!viewMode) window.addEventListener('pagehide', () => {
+  savePending();
+  flushSecondaryOnUnload();
+  clearTimeout(saveTimer);
+  void persist();
+});
 let allowUpdateReload = false;
 let privateReloadChoice: { id: string; generation: number } | undefined;
+let privateReloadChoiceB: { id: string; generation: number } | undefined;
 async function prepareUpdateReload(): Promise<boolean> {
   if (transitioning || deleting || field.disabled) return false;
   privateReloadChoice = undefined;
-  if (workspace.dirty() && !autosave.checked) {
+  privateReloadChoiceB = undefined;
+  const secondaryDirty = !!secondary?.dirty;
+  if ((workspace.dirty() || secondaryDirty) && !autosave.checked) {
     const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#update-reload')! });
-    if (discard) privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
+    if (discard) {
+      privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
+      if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
+    }
     return discard;
   }
   savePending();
+  savePendingSecondary();
   if (workspace.dirty()) await persist();
-  if (!workspace.dirty()) return true;
+  if (secondary?.dirty) await persistSecondary();
+  if (!workspace.dirty() && !secondary?.dirty) return true;
   savePending();
+  savePendingSecondary();
   const pending = readPending();
-  return !!pending && sameContent(pending, snapshot());
+  const pendingB = readPendingB();
+  const primaryOk = !workspace.dirty() || (!!pending && sameContent(pending, snapshot()));
+  const secondaryOk = !secondary?.dirty || (!!pendingB && secondary && sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)));
+  return primaryOk && secondaryOk;
 }
 function reloadAfterUpdate(): void {
   if (transitioning || deleting || field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
-  if (workspace.dirty()) {
+  if (workspace.dirty() || secondary?.dirty) {
     if (!autosave.checked) {
-      if (privateReloadChoice?.id !== active.id || privateReloadChoice.generation !== workspace.contentRevision()) throw new Error('Private edits changed');
+      if (workspace.dirty() && (privateReloadChoice?.id !== active.id || privateReloadChoice.generation !== workspace.contentRevision())) {
+        throw new Error('Private edits changed');
+      }
+      if (secondary?.dirty && (privateReloadChoiceB?.id !== secondary.draft.id || privateReloadChoiceB.generation !== secondary.contentRevision)) {
+        throw new Error('Private edits changed');
+      }
     } else {
       savePending();
+      savePendingSecondary();
       const pending = readPending();
-      if (!pending || !sameContent(pending, snapshot())) throw new Error('Reload backup unavailable');
+      const pendingB = readPendingB();
+      if (workspace.dirty() && (!pending || !sameContent(pending, snapshot()))) throw new Error('Reload backup unavailable');
+      if (secondary?.dirty && (!pendingB || !sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)))) {
+        throw new Error('Reload backup unavailable');
+      }
     }
   }
   allowUpdateReload = true;
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
 if (!viewMode) window.addEventListener('beforeunload', event => {
-  if (workspace.dirty()) { savePending(); clearTimeout(saveTimer); void persist(); if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; } }
+  if (workspace.dirty() || secondary?.dirty) {
+    savePending();
+    flushSecondaryOnUnload();
+    clearTimeout(saveTimer);
+    void persist();
+    if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; }
+  }
 });
-if (!viewMode) document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(saveTimer); void persist(); } });
+if (!viewMode) document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    clearTimeout(saveTimer);
+    void persist();
+    flushSecondaryOnUnload();
+  }
+});
 updateStats();
 
 setupResetSettings({ actions: [

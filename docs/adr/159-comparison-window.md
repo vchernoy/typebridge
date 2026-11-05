@@ -427,7 +427,8 @@ Shipped in this PR: companion document picker can open a **different** saved doc
 - **`BoundSession` / registry** (`src/view/bound-session.ts`): primary stays the existing main pipeline; optional `session-2` binds `#editor-b` + `#draft-title-b` with its own dirty/save timer, ownership handle and history.
 - **Picker:** `#pane-b-drafts` lists saved documents. Choosing the primary’s id releases the secondary and restores S3 live mirror + **Live view · Read-only**. Choosing another id acquires that document’s Web Lock/fence, loads into pane B as editable, and stops mirroring.
 - **Routing:** Undo/Convert/Replace/Find follow the active pane’s session when dual-document; same-document companion remains mutation-refused.
-- **Not in S4:** full extraction of primary persist out of `main.ts`, dual pending-reload keys, Edit in this pane (S5), CommandGeneration on every delayed toolbar command, New/Import targeting pane B.
+- **Unload / backup:** pane B uses `typebridge.pendingDraft.paneB.v1`, a secondary recovery journal, and the same `pagehide` / `beforeunload` / visibility flush paths as the primary. Cross-window signals reread and retry ownership for the secondary session too.
+- **Not in S4:** full extraction of primary persist out of `main.ts`, Edit in this pane (S5), CommandGeneration on every delayed toolbar command, New/Import targeting pane B.
 
 ## Implementation notes for later PRs
 

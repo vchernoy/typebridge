@@ -85,3 +85,58 @@ test('primary switching to the companion document promotes pane B edits', async 
   await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
   expect(secondId).toBeTruthy();
 });
+
+test('promoting a dirty companion still autosaves after the cancelled timer', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Gamma body', 'Gamma');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Delta body', 'Delta');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  // Keep the secondary 300ms timer from committing before promotion clears it.
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs = 60_000;
+  });
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' dirty');
+  await selectDocument(page, firstId);
+  await expect(page.locator('#editor')).toHaveValue('Gamma body dirty');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const docs = await readStoredDocs(page);
+  const gamma = docs.find(d => d.title === 'Gamma');
+  expect(gamma?.text).toBe('Gamma body dirty');
+});
+
+test('pane B pending snapshot restores after reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Echo body', 'Echo');
+  const echoRevision = (await readStoredDocs(page)).find(d => d.id === firstId)!.revision;
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Foxtrot body', 'Foxtrot');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs = 60_000;
+  });
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' pending');
+  // Simulate the unload backup while the delayed secondary save is still in flight.
+  await page.evaluate(({ id, revision }) => {
+    const text = (document.querySelector('#editor-b') as HTMLTextAreaElement).value;
+    const title = (document.querySelector('#draft-title-b') as HTMLInputElement).value;
+    sessionStorage.setItem('typebridge.pendingDraft.paneB.v1', JSON.stringify({
+      id, title, text, revision, updatedAt: Date.now(),
+    }));
+  }, { id: firstId, revision: echoRevision });
+  await page.reload();
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveValue('Echo body pending');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+});
