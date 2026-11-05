@@ -2683,11 +2683,16 @@ async function initializeDrafts(): Promise<void> {
     const restorePending = !!pending && (!committed || !sameContent(pending, committed));
     // A new host window must not inherit main's drafts[0] — that steals ownership and
     // makes "Saved" text disappear when the primary window still owns the document.
-    const openFresh = embedded && !!windowId && windowId !== 'main' && !selected && !restorePending;
+    // Also: session may already hold a never-saved blank id from rememberActive(); if that
+    // id is not in IndexedDB yet, keep a fresh document instead of falling through to drafts[0].
+    const listed = selected ? drafts.find(d => d.id === selected) : undefined;
+    const openFresh = embedded && !!windowId && windowId !== 'main' && !listed && !restorePending;
     let chosen = restorePending
       ? pending!
-      : drafts.find(d => d.id === selected)
-        ?? (openFresh ? { ...newDraft(), revision: 0 } : drafts[0])
+      : listed
+        ?? (openFresh
+          ? { ...newDraft(), ...(selected && isDocumentId(selected) ? { id: selected } : {}), revision: 0 }
+          : drafts[0])
         ?? active;
     // First acquirer among cooperating windows edits; the others open this document read-only.
     bootAccess = await acquireFor(chosen.id);
