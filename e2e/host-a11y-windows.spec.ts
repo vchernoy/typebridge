@@ -184,10 +184,11 @@ test('closing the active window marks the remaining window current', async ({ pa
 test('closing the front window activates the highest-z remaining window', async ({ page }) => {
   await openHost(page, 'free');
   await addWindows(page, 2);
-  // Overlap so z-order matters — raise w2 above main, then w3 above both.
-  await page.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor').click();
+  // Tile so move handles are not covered, then raise w2 then w3 for a clear z order.
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+  await page.getByRole('button', { name: /Move window w2/ }).click();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
-  await page.frameLocator('.host-window[data-window-id="w3"] iframe').locator('#editor').click();
+  await page.getByRole('button', { name: /Move window w3/ }).click();
   await expect(page.locator('.host-window[data-window-id="w3"]')).toHaveClass(/is-active/);
 
   const before = await page.evaluate(() => {
@@ -198,7 +199,9 @@ test('closing the front window activates the highest-z remaining window', async 
   });
   const zW2 = before.find(win => win.id === 'w2')?.z ?? 0;
   const zMain = before.find(win => win.id === 'main')?.z ?? 0;
+  const zW3 = before.find(win => win.id === 'w3')?.z ?? 0;
   expect(zW2).toBeGreaterThan(zMain);
+  expect(zW3).toBeGreaterThan(zW2);
 
   await page.locator('.host-window[data-window-id="w3"] .host-window-close').click();
   await expect(page.locator('.host-window')).toHaveCount(2, { timeout: 15_000 });
