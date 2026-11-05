@@ -316,6 +316,20 @@ export class Editor {
     this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
   setEnabled(value: boolean): void { this.enabled = value; this.pending = null; this.lastEditAt = 0; }
+  /**
+   * Adopt the field's current value after an external write (shared Find query, host
+   * title sync, …). Clears pending transliteration and drops local undo/redo so a
+   * sibling's query cannot be undone with stale deltas (#175 step 9).
+   */
+  syncFromField(): void {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.pending = null;
+    this.before = null;
+    this.known = this.capture();
+    this.lastEditAt = 0;
+    this.notifyHistory();
+  }
   clear(): void {
     if (this.viewOnly || !this.field.value) return;
     this.before = this.capture(); this.field.value = ''; this.pending = null;

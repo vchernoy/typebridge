@@ -1,4 +1,8 @@
-/** Search text is tab-scoped; options are separate profile preferences. */
+/**
+ * Find query is shared across all windows in the tab (#175 step 9).
+ * Replace text stays per-window via scopeSessionKey(REPLACE_KEY, windowId).
+ * Match case / Regex are profile preferences in localStorage.
+ */
 export const FIND_KEY = 'typebridge.find.query.v1';
 export const REPLACE_KEY = 'typebridge.find.replace.v1';
 export const CASE_KEY = 'typebridge.find.matchCase.v1';

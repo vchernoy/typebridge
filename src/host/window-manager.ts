@@ -360,6 +360,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         end: number;
       }) => { value: string; start: number; end: number } | null;
       __typebridgeToggleTransliteration?: () => void;
+      __typebridgeOpenFind?: () => void;
     };
 
     let applyingFromIframe = false;
@@ -391,9 +392,18 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     title.addEventListener('keydown', event => {
       // Keep arrow-key window move on the handle; let the input own typing keys.
       event.stopPropagation();
-      if (title.readOnly || event.isComposing) return;
+      if (event.isComposing) return;
       try {
         const hooks = frame.contentWindow as TitleHooks | null;
+        // #175 step 9: Find stays available in read-only windows (Replace does not).
+        // Handle Ctrl/⌘+F before the read-only guard so a read-only title still opens Find.
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
+          && event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          hooks?.__typebridgeOpenFind?.();
+          return;
+        }
+        if (title.readOnly) return;
         // Forward undo/redo to the iframe title Editor (host input has no native history
         // when inserts are applied programmatically).
         if ((event.ctrlKey || event.metaKey) && !event.altKey) {
@@ -417,6 +427,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           && (event.code === 'Space' || event.code === 'F7' || event.code === 'F8' || event.code === 'F9')) {
           hooks?.__typebridgeToggleTransliteration?.();
           event.preventDefault();
+          return;
         }
       } catch { /* Frame mid-navigation. */ }
     });
