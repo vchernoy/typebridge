@@ -8,7 +8,17 @@ import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
 import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
 import { draftOptionLabel } from './editor/draft-list';
-import { UNTITLED_TITLE, autosaveEnabled, newDraft, setActiveDraftId, setAutosaveEnabled } from './editor/drafts';
+import {
+  ACTIVE_DRAFT_KEY_BASE,
+  UNTITLED_TITLE,
+  autosaveEnabled,
+  configureActiveDraftKey,
+  newDraft,
+  readActiveDraftId,
+  setActiveDraftId,
+  setAutosaveEnabled,
+} from './editor/drafts';
+import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
@@ -41,8 +51,9 @@ import { setupSettings } from './ui/settings';
 import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
-import { setupWritingPosition, VIEWER_POSITION_NAMESPACE } from './editor/writing-position';
+import { setupWritingPosition } from './editor/writing-position';
 import { comparisonViewerHref, parseComparisonRoute } from './view/route';
+import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -50,6 +61,13 @@ import { formatDocumentStats } from './editor/document-stats';
 const route = parseComparisonRoute(window.location.search);
 const viewMode = route.kind !== 'ordinary';
 const requestedViewId = route.kind === 'viewer' ? route.documentId : undefined;
+/** #175 step 2: same-tab iframe instances share sessionStorage — scope keys by window id. */
+const windowId = parseWindowId(window.location.search);
+if (windowId) document.documentElement.dataset.windowId = windowId;
+configureActiveDraftKey(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, windowId));
+const findSessionKey = scopeSessionKey(FIND_KEY, windowId);
+const replaceSessionKey = scopeSessionKey(REPLACE_KEY, windowId);
+const updateDismissKey = scopeSessionKey('typebridge.updateNotice.dismissed.v1', windowId);
 // Minted per page load and never read from sessionStorage, which duplicated tabs can clone.
 const instanceId = crypto.randomUUID();
 document.documentElement.dataset.instanceId = instanceId;
@@ -756,6 +774,8 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
       ? companionSearch
       : primarySearch,
     matchSurfaces: [field, companionField],
+    findTextKey: findSessionKey,
+    replaceTextKey: replaceSessionKey,
   },
 );
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
@@ -889,10 +909,11 @@ function updateSaveIndicator(): void {
   saveIndicator.dataset.state = state;
 }
 // Viewers use their own key namespace so they never overwrite an editor's saved offsets.
+// Window id scopes positions when multiple instances share one tab's sessionStorage (#175).
 const writingPosition = setupWritingPosition(
   field,
   () => loadingDraft || field.disabled || viewMissing ? undefined : active.id,
-  viewMode ? VIEWER_POSITION_NAMESPACE : '',
+  writingPositionNamespace(windowId, viewMode),
 );
 // Companion pane keeps an independent scroll/selection namespace (#159 S3).
 const companionWritingPosition = setupWritingPosition(
@@ -900,7 +921,7 @@ const companionWritingPosition = setupWritingPosition(
   () => loadingDraft || viewMissing || !workspace.splitOpen()
     ? undefined
     : (secondary?.draft.id ?? active.id),
-  viewMode ? VIEWER_POSITION_NAMESPACE + 'pane-b:' : 'pane:pane-b:',
+  writingPositionNamespace(windowId, viewMode) + (viewMode ? 'pane-b:' : 'pane:pane-b:'),
 );
 const journalTab = crypto.randomUUID();
 const OWNER_LOCK = 'typebridge-recovery-owner:';
@@ -930,8 +951,8 @@ autosave.checked = true;
 try { autosave.checked = autosaveEnabled(); } catch { /* Keep editing available if preferences are blocked. */ }
 // A tab-scoped emergency snapshot is not the committed draft. It only bridges
 // navigation/reload when the browser aborts an IndexedDB transaction on unload.
-const PENDING_KEY = 'typebridge.pendingDraft.v1';
-const PENDING_KEY_B = 'typebridge.pendingDraft.paneB.v1';
+const PENDING_KEY = scopeSessionKey('typebridge.pendingDraft.v1', windowId);
+const PENDING_KEY_B = scopeSessionKey('typebridge.pendingDraft.paneB.v1', windowId);
 function parsePendingDraft(raw: string | null): StoredDraft | undefined {
   try {
     const value: unknown = JSON.parse(raw ?? 'null');
@@ -2445,7 +2466,7 @@ async function initializeDrafts(): Promise<void> {
     db = await openDraftDatabase(handleDatabaseUpgrade);
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
-    try { selected = sessionStorage.getItem('typebridge.activeDraft.v1'); } catch { /* Optional hint. */ }
+    try { selected = readActiveDraftId(); } catch { /* Optional hint. */ }
     const pending = readPending();
     const committed = pending && drafts.find(d => d.id === pending.id);
     if (pending && committed && sameContent(pending, committed)) clearPending(pending);
@@ -3174,7 +3195,12 @@ setupResetSettings({ actions: [
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
-      .then(registration => watchForUpdates(registration, { prepareReload: prepareUpdateReload, reload: reloadAfterUpdate, cancelReload: () => { allowUpdateReload = false; } }))
+      .then(registration => watchForUpdates(registration, {
+        prepareReload: prepareUpdateReload,
+        reload: reloadAfterUpdate,
+        cancelReload: () => { allowUpdateReload = false; },
+        dismissedKey: updateDismissKey,
+      }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
   });
 }

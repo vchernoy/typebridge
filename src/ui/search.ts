@@ -19,6 +19,9 @@ export function setupSearch(
     getFindTarget?: () => SearchTarget;
     /** Editor surfaces whose edits refresh the open Find match total (active pane may change). */
     matchSurfaces?: HTMLTextAreaElement[];
+    /** sessionStorage keys for Find/Replace text (#175 window scoping). */
+    findTextKey?: string;
+    replaceTextKey?: string;
   } = {},
 ): {
   findInput: HTMLInputElement;
@@ -46,7 +49,9 @@ export function setupSearch(
     if (success) failedSearchKeys.delete(key); else failedSearchKeys.add(key);
     searchStorageWarning.textContent = failedSearchKeys.size ? 'Find settings could not be saved or restored in this browser.' : '';
   }
-  for (const [input, key] of [[findInput, FIND_KEY], [replaceInput, REPLACE_KEY]] as const) {
+  const findTextKey = options.findTextKey ?? FIND_KEY;
+  const replaceTextKey = options.replaceTextKey ?? REPLACE_KEY;
+  for (const [input, key] of [[findInput, findTextKey], [replaceInput, replaceTextKey]] as const) {
     try { input.value = readSearchText(sessionStorage, key); } catch { searchStorageResult(key, false); }
     const save = (): void => {
       try { sessionStorage.setItem(key, input.value); searchStorageResult(key, true); }

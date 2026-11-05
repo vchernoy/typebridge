@@ -3,6 +3,8 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   prepareReload: () => Promise<boolean>;
   reload: () => void;
   cancelReload: () => void;
+  /** sessionStorage key for dismissal (#175 window scoping). */
+  dismissedKey?: string;
 }): void {
   const workerContainer = navigator.serviceWorker;
   const workspace = document.querySelector<HTMLElement>('main > section')!;
@@ -21,7 +23,7 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   dismiss.textContent = 'Not now';
   notice.append(message, reload, dismiss);
   workspace.before(notice);
-  const DISMISSED = 'typebridge.updateNotice.dismissed.v1';
+  const DISMISSED = deps.dismissedKey ?? 'typebridge.updateNotice.dismissed.v1';
   let dismissed = false;
   try { dismissed = sessionStorage.getItem(DISMISSED) === 'yes'; } catch { /* Current-page choice still works. */ }
   let waiting: ServiceWorker | null = null;
