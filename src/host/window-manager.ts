@@ -300,12 +300,17 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     applyAllGeometry();
   };
 
-  /** Cycle to the next host window (DOM/layout order). Raises z-order in free mode. */
-  const cycleFocus = (): void => {
+  /**
+   * Cycle to the next host window (DOM/layout order). Raises z-order in free mode.
+   * `fromId` is the cycle origin when focus is in a window that is not yet active
+   * (host title pointerdown stops shell activation).
+   */
+  const cycleFocus = (fromId?: string): void => {
     if (layouts.length === 0) return;
     // Keep modal focus traps intact (discard / Edit here / private reload).
     if (confirmModalOpen()) return;
-    const index = layouts.findIndex(win => win.id === activeId);
+    const origin = (fromId && layouts.some(win => win.id === fromId)) ? fromId : activeId;
+    const index = layouts.findIndex(win => win.id === origin);
     const next = layouts[(index < 0 ? 0 : index + 1) % layouts.length]!;
     setActive(next.id);
     // In host Focus, setActive only swaps visibility — apply full-viewport geometry
@@ -460,7 +465,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         && !event.isComposing && !event.repeat) {
         event.preventDefault();
         event.stopPropagation();
-        cycleFocus();
+        // Title clicks do not activate the shell — cycle from this window, not stale activeId.
+        cycleFocus(win.id);
         return;
       }
       event.stopPropagation();

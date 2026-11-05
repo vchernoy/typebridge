@@ -94,6 +94,27 @@ test('F6 from the host title cycles windows', async ({ page }) => {
   await expect(page.locator('.host-window[data-window-id="w2"]')).toHaveClass(/is-active/);
 });
 
+test('F6 from an inactive host title cycles relative to that window', async ({ page }) => {
+  await openHost(page, 'free');
+  await addWindows(page, 2);
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await main.locator('#editor').focus();
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
+
+  // Focus w2's title without activating the shell (pointerdown stopPropagation).
+  const w2Title = page.locator('.host-window[data-window-id="w2"] .host-window-title');
+  await expect(w2Title).toBeEditable({ timeout: 15_000 });
+  await w2Title.focus();
+  await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
+
+  // Origin is w2 → next is w3 (not w2, which stale activeId=main would select).
+  await page.keyboard.press('F6');
+  await expect.poll(() => activeWindowId(page)).toBe('w3');
+  await expect(page.locator('.host-window[data-window-id="w3"]')).toHaveClass(/is-active/);
+});
+
 test('F6 in host Focus maximizes the next window', async ({ page }) => {
   await openHost(page, 'free');
   await addWindows(page, 1);
