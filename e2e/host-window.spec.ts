@@ -28,6 +28,14 @@ test('dragging the title bar moves a full-bleed window', async ({ page }) => {
   expect(before).toBeTruthy();
 
   const handle = page.getByRole('button', { name: /Move window main/ });
+  await handle.click();
+  const afterClick = await page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }> };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main');
+  });
+  // Click may raise z-order but must not restore/shrink a full-bleed window.
+  expect(afterClick).toMatchObject({ x: before!.x, y: before!.y, w: before!.w, h: before!.h });
+
   const box = await handle.boundingBox();
   expect(box).toBeTruthy();
   const startX = box!.x + box!.width / 2;

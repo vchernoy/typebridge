@@ -10,6 +10,7 @@ import {
   bringToFront,
   clampRect,
   defaultRectForIndex,
+  isFullscreenRect,
   mintWindowId,
   readHostLayout,
   restoreForMove,
@@ -37,7 +38,15 @@ export type WindowManagerDeps = {
 };
 
 type DragKind =
-  | { type: 'move'; id: string; originX: number; originY: number; start: WindowRect }
+  | {
+    type: 'move';
+    id: string;
+    originX: number;
+    originY: number;
+    start: WindowRect;
+    /** Full-bleed windows restore only after the pointer actually moves. */
+    restoreOnDrag: boolean;
+  }
   | {
     type: 'resize';
     id: string;
@@ -58,9 +67,12 @@ export type WindowManager = {
 
 function viewportOf(root: HTMLElement): ViewportSize {
   const rect = root.getBoundingClientRect();
+  const width = Math.floor(rect.width);
+  const height = Math.floor(rect.height);
+  // Fallback only when the box is unmeasurable — do not invent a larger viewport.
   return {
-    width: Math.max(MIN_FALLBACK, Math.floor(rect.width)),
-    height: Math.max(MIN_FALLBACK, Math.floor(rect.height)),
+    width: width > 0 ? width : MIN_FALLBACK,
+    height: height > 0 ? height : MIN_FALLBACK,
   };
 }
 
@@ -204,14 +216,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
       const view = viewportOf(deps.root);
-      const start = restoreForMove(current, view);
-      if (start.w !== current.w || start.h !== current.h) updateLayout(win.id, start);
       drag = {
         type: 'move',
         id: win.id,
         originX: event.clientX,
         originY: event.clientY,
-        start,
+        start: { x: current.x, y: current.y, w: current.w, h: current.h },
+        restoreOnDrag: isFullscreenRect(current, view),
       };
       moveHandle.setPointerCapture(event.pointerId);
     });
@@ -220,12 +231,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
       const view = viewportOf(deps.root);
-      const base = restoreForMove(current, view);
       const step = event.shiftKey && !event.ctrlKey && !event.metaKey
         ? KEYBOARD_MOVE_STEP_PX * 4
         : KEYBOARD_MOVE_STEP_PX;
       // Ctrl/⌘+Shift+Arrow resizes (avoid Alt+Arrow, which navigates history on Windows/Linux).
       const resize = (event.ctrlKey || event.metaKey) && event.shiftKey;
+      // Restore full-bleed only for real moves — resize keeps the current size.
+      const base = resize ? current : restoreForMove(current, view);
       let next: WindowRect | undefined;
       if (event.key === 'ArrowLeft') {
         next = resize
@@ -285,6 +297,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     const dy = event.clientY - drag.originY;
     const view = viewportOf(deps.root);
     if (drag.type === 'move') {
+      if (drag.restoreOnDrag && (dx !== 0 || dy !== 0)) {
+        drag.start = restoreForMove(drag.start, view);
+        drag.restoreOnDrag = false;
+      }
       updateLayout(drag.id, clampRect({
         x: drag.start.x + dx,
         y: drag.start.y + dy,
@@ -392,7 +408,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         } catch { /* Cross-origin unexpectedly — fall through to prepareClose. */ }
         const ok = await deps.prepareClose(frame);
         if (!ok) return false;
+        // Another close may have finished while we awaited consent — never drop the last window.
+        if (layouts.length <= 1 || !layouts.some(win => win.id === id)) return false;
         deps.commitClose?.(frame);
+      } else if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
+        return false;
       }
       shells.get(id)?.remove();
       shells.delete(id);
