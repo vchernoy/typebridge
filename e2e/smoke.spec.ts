@@ -8,9 +8,11 @@ test('single-pane workspace exposes session and pane hooks', async ({ page }) =>
   const root = page.locator('main.workspace');
   await expect(root).toHaveAttribute('data-session-id', 'session-1');
   await expect(root).toHaveAttribute('data-active-pane', 'pane-a');
-  await expect(root).toHaveAttribute('data-split', 'off');
+  await expect(root).not.toHaveAttribute('data-split');
   await expect(page.locator('#editor')).toHaveAttribute('data-pane-id', 'pane-a');
   await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'editable');
+  await expect(page.locator('#toggle-split')).toHaveCount(0);
+  await expect(page.locator('#editor-b')).toHaveCount(0);
 });
 
 test('editor types transliteration, edits selections and supports history', async ({ page }) => {

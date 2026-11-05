@@ -576,9 +576,7 @@ body.focus-mode .goto-bar,
 body.focus-mode .rules-panel,
 body.focus-mode .shortcut-panel,
 body.focus-mode .hint,
-body.focus-mode label[for="editor"],
-body.focus-mode label[for="editor-b"],
-body.focus-mode .pane-chrome {
+body.focus-mode label[for="editor"] {
   display: none;
 }
 body.focus-mode section {
@@ -613,116 +611,18 @@ body.focus-mode #editor {
   resize: vertical;
   margin: 0 auto;
 }
-body.focus-mode .editor-split[data-split="on"] #editor,
-body.focus-mode .editor-split[data-split="on"] #editor-b {
-  max-width: none;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  resize: none;
-}
-body.focus-mode .editor-split[data-split="on"]:not([data-split-orientation="stacked"]) #editor,
-body.focus-mode .editor-split[data-split="on"]:not([data-split-orientation="stacked"]) #editor-b {
-  height: calc(100dvh - 200px);
-}
-body.focus-mode .editor-split[data-split="on"][data-split-orientation="stacked"] {
-  height: min(calc(100dvh - 140px), 560px);
-}
-body.focus-mode .editor-split[data-split="on"][data-split-orientation="stacked"] #editor,
-body.focus-mode .editor-split[data-split="on"][data-split-orientation="stacked"] #editor-b {
-  height: auto;
-  flex: 1 1 auto;
-}
 body.focus-mode .bottom {
   max-width: 900px;
   margin-inline: auto;
 }
 
-/* In-tab split workspace (#159 S3): optional same-document live companion. */
-.editor-split {
-  --split-ratio: 50%;
-  --split-primary-share: 0.5;
-  --split-divider-size: 12px;
+.editor-shell {
   display: flex;
   flex-direction: column;
-  gap: 0;
   min-width: 0;
   margin-bottom: 18px;
 }
-.editor-split[data-split="on"] {
-  flex-direction: row;
-  align-items: stretch;
-  gap: 0;
-}
-.editor-pane {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-/* Ratio applies to space remaining after the divider so both panes stay usable. */
-.editor-split[data-split="on"] .editor-pane-primary {
-  flex: 0 0 calc((100% - var(--split-divider-size)) * var(--split-primary-share));
-  max-width: none;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-.editor-split[data-split="on"] .editor-pane-companion {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-/* Saved Normal/Focus pixel widths on #editor must not overflow the allocated pane. */
-.editor-split[data-split="on"] #editor {
-  width: 100% !important;
-  max-width: none !important;
-}
-/* Corner grip is single-pane only; split width is controlled by the divider. */
-.editor-split[data-split="on"] ~ #resize-editor {
-  display: none;
-}
-.pane-chrome {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.pane-chrome-primary:not([hidden]) {
-  display: flex;
-}
-.pane-chrome .viewer-badge {
-  position: static;
-}
-.pane-chrome #edit-in-pane-a,
-.pane-chrome #edit-in-pane-b {
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 4px 10px;
-  min-height: 32px;
-}
-.pane-chrome .pane-doc-picker {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 12rem;
-  margin: 0;
-}
-.pane-chrome .pane-doc-picker select {
-  max-width: 100%;
-  font: inherit;
-}
-.pane-chrome #draft-title-b {
-  min-width: 0;
-  max-width: 10rem;
-  flex: 1 1 6rem;
-  font: inherit;
-}
-.pane-chrome .save-indicator {
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -734,103 +634,14 @@ body.focus-mode .bottom {
   white-space: nowrap;
   border: 0;
 }
-.split-divider {
-  flex: 0 0 var(--split-divider-size);
-  align-self: stretch;
-  margin: 0;
-  border: 0;
-  border-radius: 6px;
-  background: var(--border);
-  cursor: col-resize;
-  touch-action: none;
-}
-.split-divider:focus-visible {
-  outline: 2px solid var(--focus-ring, Highlight);
-  outline-offset: 2px;
-}
-.editor-split[data-split-orientation="stacked"] .split-divider {
-  cursor: row-resize;
-}
-/* Stacked orientation needs a definite shell height so percentage shares resolve. */
-.editor-split[data-split="on"][data-split-orientation="stacked"] {
-  flex-direction: column;
-  height: min(75dvh, 640px);
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] #editor,
-.editor-split[data-split="on"][data-split-orientation="stacked"] #editor-b {
-  flex: 1 1 auto;
-  height: auto;
-  min-height: 40px;
-}
-/* Keep the companion textarea usable when the primary takes most of a short stack. */
-.editor-split[data-split="on"][data-split-orientation="stacked"] .editor-pane-companion label[for="editor-b"] {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 6px;
-  margin-bottom: 2px;
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .pane-doc-picker {
-  flex: 1 1 7rem;
-  min-width: 0;
-  margin: 0;
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .pane-doc-picker select {
-  min-height: 32px;
-  width: 100%;
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] #draft-title-b {
-  flex: 1 1 7rem;
-  min-width: 0;
-  margin: 0;
-  min-height: 32px;
-  font-size: 0.95rem;
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .save-indicator,
-.editor-split[data-split="on"][data-split-orientation="stacked"] .pane-chrome .viewer-badge {
-  flex: 0 0 auto;
-  margin: 0;
-}
-.editor-split[data-split="on"][data-split-orientation="stacked"] #split-reset {
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 10px;
-}
-@media (max-width: 640px) {
-  .split-divider {
-    cursor: row-resize;
-  }
-}
-/* Match the resize-grip rule: hybrid mouse+touch devices still need a 44px target. */
-@media (any-pointer: coarse) {
-  .editor-split {
-    --split-divider-size: 44px;
-  }
-}
 
 /* The same minimums for the main editor in Normal and Focus mode (#70). The bottom
    margin keeps the text below clear of the grip's touch target, which extends
    --grip-outset-y below the editor. */
-#editor,
-#editor-b {
+#editor {
   min-width: min(100%, 160px);
   min-height: 96px;
   resize: none;
-}
-/* Companion always fills its pane; primary keeps intrinsic width so the corner grip can grow past the shell (#70). */
-#editor-b {
-  width: 100%;
 }
 /* Drawn corner grip (#70): iOS Safari never shows the native textarea grip.
    The touch target reaches outside the editor so that, inside it, it covers

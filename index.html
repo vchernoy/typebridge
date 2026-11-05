@@ -67,19 +67,11 @@
               <select id="drafts" size="2" aria-label="Documents"></select>
               <div class="doc-actions">
                 <button
-                  id="toggle-split"
-                  type="button"
-                  aria-pressed="false"
-                  title="Show a second pane of this document in this tab. Edits stay local; nothing is sent."
-                >
-                  Split editor
-                </button>
-                <button
                   id="open-comparison"
                   type="button"
                   title="Opens the last saved version in a read-only window. Unsaved typing in this window is not sent."
                 >
-                  Open in comparison window
+                  Open in another window
                 </button>
                 <button id="new-draft" type="button">New document</button>
                 <button id="import-draft" type="button">Import…</button>
@@ -359,43 +351,9 @@
           <p id="edit-here-warning" class="viewer-notice" role="status"></p>
           <button id="edit-here" type="button">Edit here</button>
         </div>
-        <div id="editor-split" class="editor-split" data-split="off" data-split-orientation="side">
-          <div class="editor-pane editor-pane-primary" data-pane-slot="primary">
-            <div class="pane-chrome pane-chrome-primary" hidden>
-              <span id="primary-live-badge" class="viewer-badge" hidden>Live view · Read-only</span>
-              <button id="edit-in-pane-a" type="button" hidden>Edit in this pane</button>
-            </div>
-            <label for="editor">Your text</label>
-            <textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea>
-          </div>
-          <div
-            id="split-divider"
-            class="split-divider"
-            role="separator"
-            aria-orientation="vertical"
-            aria-controls="editor editor-b"
-            aria-valuemin="20"
-            aria-valuemax="80"
-            aria-valuenow="50"
-            aria-label="Resize split panes"
-            tabindex="0"
-            hidden
-          ></div>
-          <div class="editor-pane editor-pane-companion" data-pane-slot="companion" hidden>
-            <div class="pane-chrome">
-              <span id="companion-badge" class="viewer-badge">Live view · Read-only</span>
-              <button id="edit-in-pane-b" type="button" hidden>Edit in this pane</button>
-              <input id="draft-title-b" type="text" aria-label="Document title in other pane" hidden />
-              <label class="pane-doc-picker" for="pane-b-drafts">
-                <span class="visually-hidden">Document in other pane</span>
-                <select id="pane-b-drafts" aria-label="Document in other pane" size="1"></select>
-              </label>
-              <span id="save-indicator-b" class="save-indicator" data-state="saved" hidden>Saved</span>
-              <button id="split-reset" type="button" hidden>Reset split</button>
-            </div>
-            <label for="editor-b">Other pane</label>
-            <textarea id="editor-b" spellcheck="false" readonly tabindex="0"></textarea>
-          </div>
+        <div class="editor-shell">
+          <label for="editor">Your text</label>
+          <textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea>
         </div>
         <button
           id="resize-editor"
