@@ -9,6 +9,8 @@ import { registerEscapeLayer } from './escape-layers';
 export function setupDocumentMenu(deps?: {
   /** Re-render the list when the search query changes (#175 step 8). */
   onSearch?: (query: string) => void;
+  /** Reload the list from storage when the menu opens (documents made in other windows). */
+  onOpen?: () => void;
 }): void {
   const panel = document.querySelector<HTMLElement>('#doc-menu')!;
   const button = document.querySelector<HTMLButtonElement>('#doc-menu-open')!;
@@ -17,6 +19,7 @@ export function setupDocumentMenu(deps?: {
   function open(): void {
     panel.hidden = false;
     button.setAttribute('aria-expanded', 'true');
+    deps?.onOpen?.();
     if (search) {
       search.value = '';
       deps?.onSearch?.('');
@@ -49,7 +52,12 @@ export function setupDocumentMenu(deps?: {
   let pointerPick = false;
   list.addEventListener('pointerdown', () => { pointerPick = true; });
   list.addEventListener('keydown', () => { pointerPick = false; });
-  list.addEventListener('change', () => { if (pointerPick) close(false); pointerPick = false; });
+  list.addEventListener('change', () => {
+    // Close after every other change listener has read the picked value: close()
+    // clears the search, and the re-render resets the list to the current document.
+    if (pointerPick) setTimeout(() => { close(false); }, 0);
+    pointerPick = false;
+  });
   search?.addEventListener('input', () => { deps?.onSearch?.(search.value); });
   search?.addEventListener('keydown', event => {
     if (event.key === 'ArrowDown' || event.key === 'Enter') {
