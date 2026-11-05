@@ -55,6 +55,42 @@ test('pane B can open a different document with independent edits and Undo', asy
   await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
 });
 
+test('unsaved primary stays in the companion picker for live-mirror return', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const savedId = await saveNamed(page, 'Saved companion body', 'SavedCompanion');
+  await documentAction(page, '#new-draft');
+  await openDocuments(page);
+  const primaryId = await page.locator('#drafts').inputValue();
+  await closeDocuments(page);
+  expect(primaryId).not.toBe(savedId);
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(savedId);
+  await expect(page.locator('#editor-b')).toHaveValue('Saved companion body');
+  await expect(page.locator(`#pane-b-drafts option[value="${primaryId}"]`)).toHaveCount(1);
+  await page.locator('#pane-b-drafts').selectOption(primaryId);
+  await expect(page.locator('#companion-badge')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
+});
+
+test('reopening a just-released companion document stays editable', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Lock release body', 'LockRelease');
+  await documentAction(page, '#new-draft');
+  const secondId = await saveNamed(page, 'Primary stay body', 'PrimaryStay');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await page.locator('#pane-b-drafts').selectOption(secondId);
+  await expect(page.locator('#companion-badge')).toBeVisible();
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#editor-b')).toHaveValue('Lock release body');
+});
+
 test('split restore after reload does not crash when split was open', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

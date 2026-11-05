@@ -843,10 +843,16 @@ function renderPaneBDrafts(): void {
   const displayTitle = dualDocumentSplit() && secondary
     ? (secondary.title.value.trim() || UNTITLED_TITLE)
     : (draftTitle.value.trim() || UNTITLED_TITLE);
-  const visible = drafts.some(d => d.id === selectedId) ? drafts : [
-    ...(dualDocumentSplit() && secondary ? [secondary.draft] : [active]),
-    ...drafts,
-  ];
+  // Always surface the in-memory primary (and secondary) when they are not yet in drafts,
+  // so an unsaved New document remains selectable to return to live-mirror mode.
+  const extras: StoredDraft[] = [];
+  if (!drafts.some(d => d.id === active.id)) extras.push(active);
+  const companion = dualDocumentSplit() ? secondary : undefined;
+  if (companion && !drafts.some(d => d.id === companion.draft.id)
+    && !extras.some(d => d.id === companion.draft.id)) {
+    extras.push(companion.draft);
+  }
+  const visible = extras.length ? [...extras, ...drafts] : drafts;
   paneBDrafts.replaceChildren();
   for (const draft of visible) {
     const option = document.createElement('option');
@@ -916,7 +922,10 @@ async function releaseSecondarySession(
   currentJournalSecondary = undefined;
   try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
   clearOwnershipLost(previous.ownership);
-  void previous.ownership?.release();
+  // Await fence/Web Lock cleanup so a quick re-open of the same document does not
+  // observe ifAvailable:true as busy while this tab still holds the lock.
+  if (previous.ownership) await previous.ownership.release();
+  if (!stillWanted()) return 'aborted';
   companionEditor.setReadOnly(true);
   titleEditorB.setReadOnly(true);
   companionField.value = field.value;
@@ -1317,7 +1326,10 @@ function showDraft(): void {
     saveFailed = false; // The editor no longer holds the unsaved text.
     // Mirror before restoring companion offsets (including when split is closed).
     mirrorCompanion(true);
-    companionWritingPosition.restore(active.id);
+    // Dual-document B keeps its own position key; do not apply the primary's offsets.
+    companionWritingPosition.restore(
+      dualDocumentSplit() && secondary ? secondary.draft.id : active.id,
+    );
   } finally { loadingDraft = false; }
   writingPosition.restore(active.id);
   renderDrafts();
