@@ -249,3 +249,27 @@ test('selecting a word then typing replaces that selection after takeover', asyn
   await expect(beta.locator('#editor')).toHaveValue('Shared ! text');
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
 });
+
+test('selection maps onto owner private text that diverged before the range', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta } = await openSharedDocument(page);
+
+  await setAutosave(alpha as unknown as Page, false);
+  await alpha.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.value = `PREFIX ${el.value}`;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(alpha.locator('#save-indicator')).toHaveText('Not saved');
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff text');
+
+  await beta.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.focus();
+    const start = el.value.indexOf('handoff');
+    el.setSelectionRange(start, start + 'handoff'.length);
+  });
+  await beta.locator('#editor').press('!');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  // Offsets measured on the reader text must land on "handoff" in the longer owner snapshot.
+  await expect(beta.locator('#editor')).toHaveValue('PREFIX Shared ! text');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
+});

@@ -284,6 +284,64 @@ export function nextGraphemeBoundary(text: string, offset: number): number {
   return clamped + 1;
 }
 
+function commonPrefixLength(a: string, b: string): number {
+  const limit = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < limit && a.charCodeAt(i) === b.charCodeAt(i)) i += 1;
+  return i;
+}
+
+function commonSuffixLength(a: string, b: string, prefixLength: number): number {
+  const limit = Math.min(a.length - prefixLength, b.length - prefixLength);
+  let i = 0;
+  while (
+    i < limit
+    && a.charCodeAt(a.length - 1 - i) === b.charCodeAt(b.length - 1 - i)
+  ) {
+    i += 1;
+  }
+  return i;
+}
+
+/**
+ * Map a selection measured against `fromText` onto `toText` after a handoff install.
+ * Shared prefix/suffix keep their relative offsets; a selection that touches the
+ * changed middle collapses so the first buffered edit inserts instead of replacing
+ * characters the user never selected.
+ */
+export function mapSelectionAcrossTextChange(
+  fromText: string,
+  toText: string,
+  start: number,
+  end: number,
+): { start: number; end: number } {
+  const a = Math.max(0, Math.min(Math.min(start, end), fromText.length));
+  const b = Math.max(0, Math.min(Math.max(start, end), fromText.length));
+  if (fromText === toText) {
+    const len = toText.length;
+    return { start: Math.min(a, len), end: Math.min(b, len) };
+  }
+
+  const prefix = commonPrefixLength(fromText, toText);
+  const suffix = commonSuffixLength(fromText, toText, prefix);
+  const fromSuffixStart = fromText.length - suffix;
+  const toSuffixStart = toText.length - suffix;
+
+  const mapPoint = (offset: number): number => {
+    if (offset <= prefix) return offset;
+    if (offset >= fromSuffixStart) return toSuffixStart + (offset - fromSuffixStart);
+    return prefix;
+  };
+
+  const entirelyInPrefix = b <= prefix;
+  const entirelyInSuffix = a >= fromSuffixStart;
+  if (entirelyInPrefix || entirelyInSuffix) {
+    return { start: mapPoint(a), end: mapPoint(b) };
+  }
+  // Touches the changed middle — collapse at the seam so we never replace foreign text.
+  return { start: prefix, end: prefix };
+}
+
 /**
  * Range a buffered Backspace/Delete should remove. Non-collapsed selections are
  * replaced as-is; collapsed carets expand by one grapheme (code-point fallback).

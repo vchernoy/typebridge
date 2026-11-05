@@ -23,7 +23,7 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
-import { handoffRefuseGuidance, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
+import { handoffRefuseGuidance, mapSelectionAcrossTextChange, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import type { EditorHistory } from './editor/editor';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
@@ -1852,6 +1852,7 @@ async function takeOverFromHandoff(input: {
   snapshot: HandoffSnapshot | undefined;
   selectionStart: number;
   selectionEnd: number;
+  fromText: string;
   steal: boolean;
 }): Promise<boolean> {
   if (viewMode || !db || transitioning || deleting) return false;
@@ -1920,10 +1921,13 @@ async function takeOverFromHandoff(input: {
       }
     }
     installOwnership(access);
-    const len = field.value.length;
-    const start = Math.max(0, Math.min(input.selectionStart, len));
-    const end = Math.max(0, Math.min(input.selectionEnd, len));
-    field.setSelectionRange(Math.min(start, end), Math.max(start, end));
+    const mapped = mapSelectionAcrossTextChange(
+      input.fromText,
+      field.value,
+      input.selectionStart,
+      input.selectionEnd,
+    );
+    field.setSelectionRange(mapped.start, mapped.end);
     unfreezeEditorsAfterTransition();
     // Only schedule save for non-private takeovers (saved reread / clean yield).
     if (workspace.dirty() && autosave.checked && !input.snapshot?.dirty) {

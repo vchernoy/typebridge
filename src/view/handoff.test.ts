@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bufferInsertFromKeyboard,
   deleteRangeForDirection,
+  mapSelectionAcrossTextChange,
   nextGraphemeBoundary,
   ownerYieldBlock,
   parseHandoffMessage,
@@ -123,6 +124,22 @@ describe('handoff helpers', () => {
     expect(deleteRangeForDirection(combined, 4, 4, 'backward')).toEqual({ start: 2, end: 4 });
     // Non-collapsed selection is replaced as-is.
     expect(deleteRangeForDirection('hello', 1, 4, 'backward')).toEqual({ start: 1, end: 4 });
+  });
+
+  it('maps reader selections onto owner text via shared prefix/suffix', () => {
+    const reader = 'Hello world';
+    const owner = 'Hi there, Hello world';
+    // "world" at 6–11 in the reader maps into the shared suffix.
+    expect(mapSelectionAcrossTextChange(reader, owner, 6, 11)).toEqual({ start: 16, end: 21 });
+    expect(owner.slice(16, 21)).toBe('world');
+
+    // Selection that spans the changed middle collapses (no replace).
+    expect(mapSelectionAcrossTextChange('aaaXXXbbb', 'aaaYYYYbbb', 2, 6)).toEqual({
+      start: 3, end: 3,
+    });
+
+    // Identical texts keep the range.
+    expect(mapSelectionAcrossTextChange(reader, reader, 6, 11)).toEqual({ start: 6, end: 11 });
   });
 
 });
