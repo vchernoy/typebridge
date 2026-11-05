@@ -174,11 +174,12 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       shell.hidden = hostFocus && wid !== activeId;
       const move = shell.querySelector<HTMLElement>('.host-window-move');
       if (move) {
-        move.tabIndex = mode === 'stacked' || hostFocus ? -1 : 0;
+        // Keep the title handle focusable in stacked mode for keyboard height resize.
+        move.tabIndex = hostFocus ? -1 : 0;
         move.setAttribute(
           'aria-label',
           mode === 'stacked'
-            ? `Window ${wid}`
+            ? `Window ${wid} (Ctrl/⌘+Shift+Up/Down to resize height)`
             : `Move window ${wid} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
         );
       }
@@ -370,7 +371,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     });
 
     moveHandle.addEventListener('keydown', event => {
-      if (mode === 'stacked' || hostFocus) return;
+      if (hostFocus) return;
       const current = layouts.find(w => w.id === win.id);
       if (!current) return;
       const view = viewportOf(deps.root);
@@ -379,6 +380,23 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         : KEYBOARD_MOVE_STEP_PX;
       // Ctrl/⌘+Shift+Arrow resizes (avoid Alt+Arrow, which navigates history on Windows/Linux).
       const resize = (event.ctrlKey || event.metaKey) && event.shiftKey;
+      if (mode === 'stacked') {
+        // Stacked: height only — keep the title handle as the keyboard resize surface.
+        if (!resize || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        event.preventDefault();
+        setActive(win.id);
+        const heights = layouts.map(w => w.h);
+        const index = layouts.findIndex(w => w.id === win.id);
+        if (index < 0) return;
+        heights[index] = Math.max(
+          MIN_WINDOW_HEIGHT,
+          current.h + (event.key === 'ArrowDown' ? step : -step),
+        );
+        layouts = stackPhoneWindows(layouts, view, heights);
+        applyAllGeometry();
+        persist();
+        return;
+      }
       // Restore full-bleed only for real moves — resize keeps the current size.
       const base = resize ? current : restoreForMove(current, view);
       let next: WindowRect | undefined;
