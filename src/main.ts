@@ -59,7 +59,7 @@ import { setupWritingPosition } from './editor/writing-position';
 import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { parseEmbedMode } from './view/embed';
-import { notifyPrefsChanged, onPrefsChanged, type PrefName } from './view/prefs-sync';
+import { notifyPrefsChanged, onPrefsChanged, PREFS_EVENT, type PrefName } from './view/prefs-sync';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -3755,6 +3755,8 @@ if (embedded) {
   hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
   hooks.__typebridgeApplyPrefs = (name, origin) => {
     if (origin && origin === `window:${windowId ?? 'main'}`) return;
-    applyPrefs(name);
+    // Re-dispatch locally so every module listener (rules, appearance, …) runs.
+    // main.ts's onPrefsChanged → applyPrefs covers autosave/tabIndent/reset layout.
+    window.dispatchEvent(new CustomEvent(PREFS_EVENT, { detail: { name, origin } }));
   };
 }

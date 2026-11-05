@@ -48,6 +48,26 @@ test('host Settings appearance and typing mode apply to every window', async ({ 
   await expect.poll(async () => second.locator('#enabled').isChecked()).toBe(false);
 });
 
+test('host custom rules apply live in every window without reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+
+  await openHostSettings(page);
+  const mappings = page.getByRole('textbox', { name: 'Transliteration mappings' });
+  await mappings.fill((await mappings.inputValue()).replace(/^w = щ$/m, 'w = в'));
+  await page.getByRole('button', { name: 'Save rules' }).click();
+  await expect(page.locator('#rules-status')).toContainText('Rules saved');
+  await page.locator('#settings-close').click();
+
+  await second.locator('#editor').click();
+  await second.locator('#editor').pressSequentially('w');
+  await expect(second.locator('#editor')).toHaveValue('в');
+});
+
 test('embedded Settings button opens the host panel', async ({ page }) => {
   const main = await openHost(page);
   // Embedded Settings control is visually hidden; the click handler still opens the host panel.
