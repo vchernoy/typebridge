@@ -21,7 +21,8 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | [#40](https://github.com/vchernoy/typebridge/issues/40) | Universal editor | Plain-text preference merged (#42); Reading View remains open |
 | [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
 | [#48](https://github.com/vchernoy/typebridge/issues/48) | Cross-tab saved-version notifications | Saved/renamed/deleted signals for viewers and notice-only editors landed via [#159](https://github.com/vchernoy/typebridge/issues/159) W3; remaining scope (clean-editor refresh, editor list refresh, other preference signals) stays on #48, do not close it automatically |
-| [#159](https://github.com/vchernoy/typebridge/issues/159) | In-tab split workspace + editing ownership | S1–S5b slices on main (S2 persist extraction still partial; S5b = narrow versionchange/discard guards, not every delayed command). S6 packaging (#172): [docs/evidence/159/](evidence/159/) — not full S6 acceptance. Remaining: broader CommandGeneration, New/Import→pane B, real-device/AT, #164 deferred. See [ADR](adr/159-comparison-window.md) |
+| [#159](https://github.com/vchernoy/typebridge/issues/159) | In-tab split (superseded) | Closed / not planned for further S-slices. W1–W4 kept; S2–S5b split on main is historical until removed. See [ADR 159](adr/159-comparison-window.md) |
+| [#175](https://github.com/vchernoy/typebridge/issues/175) | Movable editor windows in one tab | Replaces #159 split. Iframe windows with tab-style editing/ownership; free layout on desktop, stacked on phone. Step 1 ADR: [ADR 175](adr/175-editor-windows.md) |
 
 ## Audit and current reliability follow-ups
 
