@@ -56,7 +56,10 @@ test('host does not reload when private edits change after update consent', asyn
   expect(await prepare).toBe(true);
 
   // Type after consent — generation changes; reload must refuse (host must not navigate).
-  await editor.locator('#editor').pressSequentially(' more');
+  await editor.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.value = `${el.value}!`;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   const outcome = await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#editor-window')!;
     const hooks = frame.contentWindow as Window & { __typebridgeAssertSafeUpdateReload?: () => void };
@@ -69,5 +72,5 @@ test('host does not reload when private edits change after update consent', asyn
   });
   expect(outcome).toContain('Private edits changed');
   await expect(page).toHaveURL(/host\.html/);
-  await expect(editor.locator('#editor')).toHaveValue('Keep this private text more');
+  await expect(editor.locator('#editor')).toHaveValue('Keep this private text!');
 });
