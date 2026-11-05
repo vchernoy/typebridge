@@ -23,6 +23,9 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
+import { handoffRefuseGuidance, mapSelectionAcrossTextChange, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
+import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
+import type { EditorHistory } from './editor/editor';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
 import {
   commandAllowedOnPane,
@@ -1618,6 +1621,10 @@ function showDraft(): void {
   updateSaveIndicator();
 }
 const ownershipNotice = document.querySelector<HTMLElement>('#ownership-notice')!;
+const editHereBar = document.querySelector<HTMLElement>('#edit-here-bar')!;
+const editHereWarning = document.querySelector<HTMLElement>('#edit-here-warning')!;
+const editHereButton = document.querySelector<HTMLButtonElement>('#edit-here')!;
+let focusHandoff: FocusHandoffController | undefined;
 /** Controls that change the displayed document; New, Import and switching stay available. */
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** Reflect ownership + transfer freeze in the editors, controls and guidance (ordinary windows only). */
@@ -1679,8 +1686,8 @@ function loseSecondaryOwnership(held: EditOwnership): void {
   updateSaveIndicatorB();
   syncMutationControls();
 }
-/** Try to own `documentId` without waiting; never steals from a live owner. */
-async function acquireFor(documentId: string): Promise<EditAccess> {
+/** Try to own `documentId` without waiting; pass `steal` only for #175 suspended-owner handoff. */
+async function acquireFor(documentId: string, options: { steal?: boolean } = {}): Promise<EditAccess> {
   // Without storage nothing can be written, so there is nothing to own.
   if (viewMode || !db) return { block: '', generation: storageGeneration };
   const generation = storageGeneration;
@@ -1693,6 +1700,7 @@ async function acquireFor(documentId: string): Promise<EditAccess> {
     const result = await acquireEditOwnership({
       db, locks: webLocks, documentId, instanceId,
       onLost: () => { if (held) handleHeldOwnershipLost(held); },
+      steal: options.steal,
     });
     // E2E: hold the lock briefly before returning so a mid-flight versionchange can be asserted.
     const afterMs = (window as Window & { __typebridgeDelayAfterAcquireMs?: number }).__typebridgeDelayAfterAcquireMs;
@@ -1759,6 +1767,179 @@ function loseOwnership(): void {
   applyEditAccess();
   showSaveState();
 }
+/**
+ * Two-phase #175 handoff park: freeze the UI synchronously, then release the lock
+ * while keeping text/title/history/dirty until the requester confirms takeover.
+ */
+let parkReleaseHandle: EditOwnership | undefined;
+function beginParkFreeze(): void {
+  if (viewMode) return;
+  parkReleaseHandle = ownership;
+  ownership = undefined;
+  editBlock = 'busy';
+  clearTimeout(saveTimer);
+  // Freeze before any await so typing cannot land outside the snapshot.
+  applyEditAccess();
+  showSaveState();
+}
+async function finishParkRelease(): Promise<void> {
+  const previous = parkReleaseHandle;
+  parkReleaseHandle = undefined;
+  await previous?.release();
+}
+/** Confirmed takeover: show last saved text when this window had transferred private edits. */
+async function discardParkedHandoffText(documentId: string): Promise<void> {
+  // Must still be viewing the yielded document — never wipe a different draft after a switch.
+  if (viewMode || active.id !== documentId || !workspace.dirty() || !db) return;
+  try {
+    const fresh = await getStoredDraft(db, documentId);
+    if (fresh) {
+      writingPosition.save();
+      active = fresh;
+      showDraft();
+      workspace.setDirty(false);
+    }
+  } catch { /* Keep the parked snapshot read-only if IndexedDB is unavailable. */ }
+  applyEditAccess();
+  showSaveState();
+}
+/** Failed/timed-out takeover: try to re-acquire while keeping parked text intact. */
+async function recoverParkedHandoffOwnership(documentId: string): Promise<void> {
+  if (viewMode || ownership || active.id !== documentId) return;
+  const access = await acquireFor(documentId);
+  if (access.ownership) {
+    installOwnership(access);
+    announceAction('Editing stayed in this window — the other window could not take over.', { keepConflict: true });
+    if (workspace.dirty() && autosave.checked) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { void persist(); }, 300);
+    }
+    return;
+  }
+  editBlock = access.block || 'lost';
+  applyEditAccess();
+  showSaveState();
+}
+function captureHandoffSnapshot(): HandoffSnapshot {
+  return {
+    text: field.value,
+    title: draftTitle.value.trim() || UNTITLED_TITLE,
+    history: editor.exportHistory(),
+    dirty: workspace.dirty(),
+    revision: active.revision,
+  };
+}
+let editHereReason: HandoffRefuseReason | undefined;
+let editHereDocumentId: string | undefined;
+function hideEditHereBar(): void {
+  editHereBar.hidden = true;
+  editHereWarning.textContent = '';
+  editHereReason = undefined;
+  editHereDocumentId = undefined;
+}
+function showEditHereBar(reason: HandoffRefuseReason): void {
+  editHereReason = reason;
+  editHereDocumentId = active.id;
+  editHereWarning.textContent = handoffRefuseGuidance(reason);
+  editHereBar.hidden = false;
+}
+/**
+ * After a cooperative yield (or steal), become the editing owner.
+ * Same-tab may supply an in-memory snapshot; otherwise reread IndexedDB.
+ */
+async function takeOverFromHandoff(input: {
+  documentId: string;
+  snapshot: HandoffSnapshot | undefined;
+  selectionStart: number;
+  selectionEnd: number;
+  fromText: string;
+  steal: boolean;
+}): Promise<boolean> {
+  if (viewMode || !db || transitioning || deleting) return false;
+  if (active.id !== input.documentId) return false;
+  freezeEditorsForTransition();
+  try {
+    if (active.id !== input.documentId) {
+      unfreezeEditorsAfterTransition();
+      return false;
+    }
+    const access = await acquireFor(input.documentId, { steal: input.steal });
+    if (!access.ownership) {
+      unfreezeEditorsAfterTransition();
+      return false;
+    }
+    if (active.id !== input.documentId) {
+      void access.ownership.release();
+      unfreezeEditorsAfterTransition();
+      return false;
+    }
+    // After consent (before the request), always install the owner's state — never keep
+    // this window's prior dirty text across a successful takeover.
+    if (input.snapshot) {
+      writingPosition.save();
+      active = {
+        ...active,
+        text: input.snapshot.text,
+        title: input.snapshot.title,
+        history: input.snapshot.history as EditorHistory | undefined,
+        revision: input.snapshot.revision,
+      };
+      suppressEditTracking = true;
+      try {
+        field.value = input.snapshot.text;
+        draftTitle.value = input.snapshot.title;
+        syncTitleTooltip();
+        if (input.snapshot.history) editor.restoreHistory(input.snapshot.history as EditorHistory);
+        else editor.restoreHistory(undefined);
+      } finally {
+        suppressEditTracking = false;
+      }
+      workspace.setDirty(input.snapshot.dirty);
+      workspace.setDocumentId(active.id);
+      // Private/unsaved transfer must not silently persist even if this window had Autosave on.
+      if (input.snapshot.dirty && autosave.checked) {
+        autosave.checked = false;
+        updateSaveIndicator();
+      }
+    } else {
+      try {
+        const fresh = await getStoredDraft(db, input.documentId);
+        if (fresh === undefined) {
+          void access.ownership.release();
+          unfreezeEditorsAfterTransition();
+          return false;
+        }
+        if (fresh) {
+          writingPosition.save();
+          active = fresh;
+          showDraft();
+        }
+      } catch {
+        void access.ownership.release();
+        unfreezeEditorsAfterTransition();
+        return false;
+      }
+    }
+    installOwnership(access);
+    const mapped = mapSelectionAcrossTextChange(
+      input.fromText,
+      field.value,
+      input.selectionStart,
+      input.selectionEnd,
+    );
+    field.setSelectionRange(mapped.start, mapped.end);
+    unfreezeEditorsAfterTransition();
+    // Only schedule save for non-private takeovers (saved reread / clean yield).
+    if (workspace.dirty() && autosave.checked && !input.snapshot?.dirty) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { void persist(); }, 300);
+    }
+    return true;
+  } catch {
+    unfreezeEditorsAfterTransition();
+    return false;
+  }
+}
 let ownershipRetry: Promise<void> | undefined;
 /** A BroadcastChannel reread arrived while ownershipRetry held the transition; run after it finishes. */
 let rereadAfterOwnershipRetry = false;
@@ -1771,6 +1952,7 @@ let rereadAfterSecondaryOwnershipRetry = false;
  */
 function retryOwnership(): void {
   const store = db;
+  if (focusHandoff?.pending()) return;
   if (viewMode || !store || !mayRetryEditOwnership(editBlock) || ownershipRetry || transitioning || deleting || field.disabled) return;
   ownershipRetry = (async () => {
     await rereadDisplayed();
@@ -2177,6 +2359,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
+  focusHandoff?.cancel();
   if (id && secondary && id === secondary.draft.id) {
     transitioning = true;
     try {
@@ -2281,6 +2464,7 @@ paneBDrafts.addEventListener('change', () => {
 });
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (readOnlyNow() || transitioning) return;
+  focusHandoff?.cancel();
   clearTimeout(saveTimer);
   const requestedId = active.id;
   if (!await askConfirmChoice({ title: 'Delete document?', message: 'Permanently delete this saved document?', confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
@@ -2953,11 +3137,84 @@ function reconcileSignals(): void {
     else void rereadSecondary();
   }
 }
-// Focusing the text is the clearest sign the user wants to edit here; it never steals a held lock.
-field.addEventListener('focus', retryOwnership);
+// #175 step 4: pointer on a read-only field runs cooperative handoff (steal only via Edit here).
+// Plain retry still runs for visibility/window focus when the lock was freed without a handoff.
+field.addEventListener('focus', () => {
+  if (focusHandoff?.pending()) return;
+  if (editBlock === 'busy' || editBlock === 'lost' || editBlock === 'error') return;
+  retryOwnership();
+});
 companionField.addEventListener('focus', retrySecondaryOwnership);
 window.addEventListener('focus', reconcileSignals);
 document.addEventListener('visibilitychange', reconcileSignals);
+
+if (!viewMode) {
+  focusHandoff = installFocusHandoff({
+    field,
+    windowId,
+    instanceId,
+    getDocumentId: () => active.id,
+    isViewMode: () => viewMode,
+    isOwner: () => !!ownership && editBlock === '',
+    editBlock: () => editBlock,
+    isComposing: () => editor.composing,
+    isTransitioning: () => transitioning || deleting || transferFrozen || !!ownershipRetry,
+    isSaving: () => !!saving,
+    saveFailed: () => saveFailed,
+    isDirty: () => workspace.dirty(),
+    autosaveOn: () => autosave.checked,
+    confirmDiscardDirtyForHandoff: async () => {
+      const discard = await askConfirmChoice({
+        title: 'Discard unsaved changes?',
+        message: editBlock
+          ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).'
+          : 'Copy or export unsaved changes first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).',
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing',
+        returnFocus: field,
+      });
+      if (!discard) return false;
+      // Apply the discard immediately (same as the switch path) so a failed takeover
+      // cannot resurrect the private text the user already agreed to drop.
+      if (db) {
+        try {
+          const fresh = await getStoredDraft(db, active.id);
+          if (fresh) {
+            writingPosition.save();
+            active = fresh;
+            showDraft();
+            workspace.setDirty(false);
+          }
+        } catch { /* Keep editing; takeover will reread under the new fence. */ }
+      }
+      applyEditAccess();
+      showSaveState();
+      return true;
+    },
+    flushSave: async () => { await persist(); },
+    captureSnapshot: captureHandoffSnapshot,
+    beginParkFreeze,
+    finishParkRelease,
+    discardParkedText: discardParkedHandoffText,
+    recoverParkedOwnership: recoverParkedHandoffOwnership,
+    takeOver: takeOverFromHandoff,
+    announce: text => announceAction(text, { keepConflict: true }),
+    showEditHere: showEditHereBar,
+    hideEditHere: hideEditHereBar,
+  });
+  editHereButton.addEventListener('click', () => {
+    if (editHereDocumentId && active.id !== editHereDocumentId) {
+      hideEditHereBar();
+      return;
+    }
+    // Explicit Edit here is consent: steal for unresponsive or cross-tab private warnings.
+    const steal = editHereReason === 'unresponsive'
+      || editHereReason === 'cross-tab-private'
+      || editHereReason === 'private';
+    hideEditHereBar();
+    focusHandoff?.requestHandoff({ steal });
+  });
+}
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
 if (viewMode && !signalChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
 void (viewMode ? initializeViewer() : initializeDrafts());

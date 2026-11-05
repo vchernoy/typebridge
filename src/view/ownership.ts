@@ -87,7 +87,7 @@ export function editBlockGuidance(block: EditBlock, dirty: boolean): string {
   if (block === 'lost') {
     return 'Another TypeBridge window is now editing this document, so this window is read-only.' + unsaved;
   }
-  return 'This document is open for editing in another TypeBridge window, so it is read-only here. You can read, copy and export it, or choose another document. To edit it here, close the other window, then return to this one.' + unsaved;
+  return 'This document is open for editing in another TypeBridge window, so it is read-only here. You can read, copy and export it, or choose another document. Click or tap in the text to edit here when the other window can yield, or close that window first.' + unsaved;
 }
 
 /** Write gate: in-memory fence must match the stored fence for this instance. A released record (no owner) matches nobody. */

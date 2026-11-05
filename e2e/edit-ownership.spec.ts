@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, selectDocument } from './settings-helpers';
+import { documentAction, selectDocument, setAutosave } from './settings-helpers';
 import { claimFenceElsewhere, heldEditLocks, readOwnership, readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 // Single editing owner per document (#159 W4): Web Lock + IndexedDB fence.
@@ -30,7 +30,8 @@ async function nudge(page: Page): Promise<void> {
   await page.locator('#editor').dispatchEvent('focus');
 }
 
-test('two ordinary tabs on one document: only the first can edit', async ({ page, context }) => {
+test('two ordinary tabs on one document: click and type hand off editing', async ({ page, context }) => {
+  test.setTimeout(90_000);
   await openOrdinary(page);
   await expect(role(page)).toHaveAttribute('data-role', 'editor');
   const id = await saveAs(page, 'Первый текст');
@@ -52,25 +53,54 @@ test('two ordinary tabs on one document: only the first can edit', async ({ page
   await expect(other.locator('#export-txt')).toBeEnabled();
   await expect(other.locator('#new-draft')).toBeEnabled();
 
+  // #175 step 4: a clean Autosave-on owner yields on click + type; buffered keys apply.
   await field.click();
-  await other.keyboard.type('privet');
-  await expect(field).toHaveValue('Первый текст');
+  await field.evaluate((el: HTMLTextAreaElement) => {
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
+  await other.keyboard.type('!');
+  await expect(role(other)).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(field).toHaveValue('Первый текст!');
+  await expect(role(page)).toHaveAttribute('data-role', 'reader');
+  await expect(page.locator('#editor')).toHaveValue('Первый текст');
+  const record = await readOwnership(other, id);
+  expect(record?.ownerInstanceId).toBe(await instanceOf(other));
 
-  // The owner keeps editing and the reader follows the saved version.
-  await page.locator('#editor').fill('Второй текст');
-  await expect(page.locator('#save-indicator')).toHaveText('Saved');
-  await expect(field).toHaveValue('Второй текст');
-  await expect(role(other)).toHaveAttribute('data-role', 'reader');
-  const record = await readOwnership(page, id);
-  expect(record?.ownerInstanceId).toBe(await instanceOf(page));
-  expect((await readStoredDocs(page)).map(row => row.text)).toEqual(['Второй текст']);
-
-  // The reader can still start its own document, which it owns.
+  // The former reader can still start its own document, which it owns.
   await documentAction(other, '#new-draft');
   await expect(role(other)).toHaveAttribute('data-role', 'editor');
   await expect(other.locator('#ownership-notice')).toBeHidden();
   await other.locator('#editor').fill('Своё');
   await expect(other.locator('#save-indicator')).toHaveText('Saved');
+});
+
+test('Autosave-off dirty owner refuses cross-tab handoff with Edit here', async ({ page, context }) => {
+  test.setTimeout(90_000);
+  await openOrdinary(page);
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+  const id = await saveAs(page, 'Частный текст');
+  await setAutosave(page, false);
+  await page.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.value = `${el.value} keep`;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+
+  const other = await context.newPage();
+  await openOrdinary(other);
+  await expect(role(other)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#editor')).toHaveValue('Частный текст');
+
+  await other.locator('#editor').click();
+  await other.keyboard.type('!');
+  await expect(other.locator('#edit-here-bar')).toBeVisible({ timeout: 10_000 });
+  await expect(other.locator('#edit-here-warning')).toContainText('unsaved or private');
+  await expect(role(other)).toHaveAttribute('data-role', 'reader');
+  await expect(other.locator('#editor')).toHaveValue('Частный текст');
+  await expect(role(page)).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#editor')).toHaveValue('Частный текст keep');
+  const record = await readOwnership(page, id);
+  expect(record?.ownerInstanceId).toBe(await instanceOf(page));
 });
 
 test('after the owner closes, another window can take over editing', async ({ page, context }) => {
