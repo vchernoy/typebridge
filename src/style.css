@@ -1171,22 +1171,26 @@ body.focus-mode .bottom {
   font: inherit;
 }
 
-/* #175 step 3 host shell: one full-bleed editor iframe; update notice on the host. */
+/* #175 step 3 host shell: notice + editor share the viewport without clipping. */
 html:has(body.host-page),
 body.host-page {
   height: 100%;
   margin: 0;
 }
 body.host-page {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 .host-notice {
   position: relative;
   z-index: 50;
+  flex: 0 0 auto;
 }
 .host-root {
   position: relative;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .host-editor {
   display: block;

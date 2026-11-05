@@ -39,6 +39,27 @@ test('embedded editor does not mount its own update notice', async ({ page }) =>
   await expect(editor.locator('#update-notice')).toHaveCount(0);
 });
 
+test('offline host refresh stays on the host shell', async ({ page, context }) => {
+  const editor = await openHost(page);
+  await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.ready;
+    if (!registration.active) throw new Error('Offline worker did not activate');
+    if (!navigator.serviceWorker.controller) {
+      await new Promise<void>(resolve => navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true }));
+    }
+  });
+  await editor.locator('#editor').fill('Offline host draft');
+  await expect(editor.locator('#save-indicator')).toHaveText('Saved');
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page).toHaveURL(/host\.html/);
+  const frame = page.frameLocator('#editor-window');
+  await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(frame.locator('html')).toHaveAttribute('data-embed', '1');
+  await expect(frame.locator('#editor')).toHaveValue('Offline host draft');
+  await context.setOffline(false);
+});
+
 test('host does not reload when private edits change after update consent', async ({ page }) => {
   const editor = await openHost(page);
   await setAutosave(editor as unknown as Page, false);
