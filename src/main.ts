@@ -59,6 +59,7 @@ import { setupWritingPosition } from './editor/writing-position';
 import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { parseEmbedMode } from './view/embed';
+import { notifyPrefsChanged, onPrefsChanged, PREFS_EVENT, type PrefName } from './view/prefs-sync';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -132,7 +133,7 @@ const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setu
     } catch { /* Cross-origin parent is out of scope. */ }
   },
 });
-setupSettings();
+setupSettings({ embedded });
 setupDocumentMenu();
 setupMoreMenu();
 setupKeyboardShortcuts();
@@ -207,7 +208,8 @@ const splitControls = setupSplitPane({
   primaryPane,
   companionPane,
   resetButton: splitReset,
-  allowOpen: !viewMode,
+  // #175 step 7: host windows replace the in-page split; step 10 deletes it.
+  allowOpen: !viewMode && !embedded,
   onOpenChange: open => {
     // Do not tear down pane B while promotion is flushing/confirming the primary.
     if (!open && transitioning) {
@@ -275,8 +277,9 @@ const splitControls = setupSplitPane({
     })();
   },
 });
-if (viewMode) {
+if (viewMode || embedded) {
   toggleSplit.disabled = true;
+  toggleSplit.hidden = true;
   splitControls.setOpen(false);
 } else {
   toggleSplit.addEventListener('click', () => {
@@ -300,8 +303,10 @@ function preferenceSaved(name: string, saved: boolean): void {
     : `Could not save the ${names.join(' and ')} settings; they may reset on reload.`;
   preferenceWarning.hidden = names.length === 0;
 }
-const appearanceSettings = setupAppearance(preferenceSaved);
-const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved);
+const appearanceSettings = setupAppearance(preferenceSaved, { prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' });
+const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved, {
+  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+});
 
 // One status line carries both save state and action feedback (#52).
 // 'progress' is save state that a later save may replace; 'action' is
@@ -706,9 +711,28 @@ const TAB_INDENT_KEY = 'typebridge.editor.tabIndent.v1';
 const tabIndent = document.querySelector<HTMLInputElement>('#tab-indent')!;
 try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* Keep the default. */ }
 function saveTabIndent(): boolean {
-  try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); return true; } catch { return false; }
+  try {
+    localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off');
+    notifyPrefsChanged({
+      name: 'tabIndent',
+      origin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+    });
+    return true;
+  } catch { return false; }
 }
-tabIndent.addEventListener('change', saveTabIndent);
+let applyingTabIndentRemote = false;
+tabIndent.addEventListener('change', () => {
+  if (applyingTabIndentRemote) return;
+  saveTabIndent();
+});
+function applyTabIndentFromStorage(): void {
+  applyingTabIndentRemote = true;
+  try {
+    try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* keep */ }
+  } finally {
+    applyingTabIndentRemote = false;
+  }
+}
 function handleTabIndent(event: KeyboardEvent, surface: HTMLTextAreaElement, surfaceEditor: Editor): void {
   if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || surface.readOnly || !canMutatePrimary()) return;
   const change = indentEdit(surface.value, surface.selectionStart, surface.selectionEnd, event.shiftKey);
@@ -744,6 +768,7 @@ const typingSettings = setupTransliteration(enabled, editor, {
   syncSearchEditors: () => syncSearchEditors(),
   preferenceSaved,
   extraEditors: () => [companionEditor],
+  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
 });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   // Capture before the await so a focus change cannot redirect fallback selection.
@@ -882,7 +907,10 @@ document.addEventListener('keydown', event => {
 });
 
 
-const resetRules = setupRules(() => [editor, companionEditor, findEditor, replaceEditor, titleEditor, titleEditorB]);
+const resetRules = setupRules(
+  () => [editor, companionEditor, findEditor, replaceEditor, titleEditor, titleEditorB],
+  { prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' },
+);
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
 // One document list, in the ▾ menu; Focus mode shows the same title bar (#104).
@@ -1775,6 +1803,8 @@ function installOwnership(access: EditAccess): void {
   editBlock = next.block;
   if (previous && previous !== ownership) void previous.release();
   applyEditAccess();
+  // #175 step 7: pick up host Autosave changes that arrived while this window was read-only.
+  if (editBlock === '') syncAutosaveCheckboxFromStorage();
 }
 async function takeOwnership(documentId: string): Promise<void> {
   installOwnership(await acquireFor(documentId));
@@ -1922,11 +1952,6 @@ async function takeOverFromHandoff(input: {
       }
       workspace.setDirty(input.snapshot.dirty);
       workspace.setDocumentId(active.id);
-      // Private/unsaved transfer must not silently persist even if this window had Autosave on.
-      if (input.snapshot.dirty && autosave.checked) {
-        autosave.checked = false;
-        updateSaveIndicator();
-      }
     } else {
       try {
         const fresh = await getStoredDraft(db, input.documentId);
@@ -1947,6 +1972,11 @@ async function takeOverFromHandoff(input: {
       }
     }
     installOwnership(access);
+    // Private/unsaved transfer must not silently persist even if shared Autosave is on.
+    if (input.snapshot?.dirty && autosave.checked) {
+      autosave.checked = false;
+      updateSaveIndicator();
+    }
     const mapped = mapSelectionAcrossTextChange(
       input.fromText,
       field.value,
@@ -2231,34 +2261,97 @@ function beginAutosaveToggleGate(): void {
 function endAutosaveToggleGate(): void {
   releaseAutosaveToggleGate?.();
 }
-autosave.addEventListener('change', async () => {
-  if (autosaveControlBlocked() || autosaveToggleActive) return;
+/** Latest host/shared Autosave value dropped while a local toggle was in flight. */
+let pendingRemoteAutosave: boolean | undefined;
+
+/**
+ * Apply an Autosave preference change to this window.
+ * Local Settings uses prompts; host/shared sync applies without the delete-copy dialog (#175 step 7).
+ * Remote sync always updates `autosave.checked` (and clears save timers when turning off), even in
+ * read-only windows, so a later ownership handoff cannot save text the user opted out of storing.
+ */
+async function applyAutosaveChange(
+  enabled: boolean,
+  opts: { promptDeleteSavedCopy: boolean; persistPreference: boolean },
+): Promise<void> {
+  const remote = !opts.persistPreference;
+  if (autosaveToggleActive) {
+    if (remote) {
+      pendingRemoteAutosave = enabled;
+      // Still mirror the checkbox immediately so a mid-toggle handoff sees the shared choice.
+      autosave.checked = enabled;
+      if (!enabled) {
+        clearTimeout(saveTimer);
+        if (secondary) clearTimeout(secondary.saveTimer);
+      }
+    }
+    return;
+  }
+  if (!remote && autosaveControlBlocked()) return;
+  const alreadyMatching = autosave.checked === enabled;
+  // Remote no-op when nothing changed and there is no dirty text left to flush.
+  if (remote && alreadyMatching && !(enabled && workspace.dirty() && !autosaveControlBlocked())) {
+    autosave.checked = enabled;
+    return;
+  }
+  const blocked = autosaveControlBlocked();
   autosaveToggleActive = true;
-  autosave.disabled = true;
+  if (!blocked) autosave.disabled = true;
   beginAutosaveToggleGate();
   try {
-  try { setAutosaveEnabled(autosave.checked); preferenceSaved('autosave', true); }
-  catch { preferenceSaved('autosave', false); }
-  // Always show the accurate save state. Without storage, no save can succeed: keep saying so.
-  const announce = (text: string): void => {
-    // storageProblem, not !db: db is also unset while initialization runs.
-    if (storageProblem) setSaveStatus(riskText(), 'failure');
-    else setSaveStatus(text);
-  };
-  if (autosave.checked) {
-    clearNotices();
-    if (workspace.dirty()) showSaving(); else announce('Autosave on');
-    if (workspace.dirty()) { journalEdit(); void persist(); }
-    if (secondary?.dirty && !secondary.editBlock) {
-      updateSaveIndicatorB();
-      void persistSecondary();
+    autosave.checked = enabled;
+    if (opts.persistPreference) {
+      try {
+        setAutosaveEnabled(enabled);
+        preferenceSaved('autosave', true);
+        notifyPrefsChanged({
+          name: 'autosave',
+          origin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+        });
+      } catch { preferenceSaved('autosave', false); }
     }
-  }
-  else {
+    // Always show the accurate save state. Without storage, no save can succeed: keep saying so.
+    const announce = (text: string): void => {
+      // storageProblem, not !db: db is also unset while initialization runs.
+      if (storageProblem) setSaveStatus(riskText(), 'failure');
+      else setSaveStatus(text);
+    };
+    if (enabled) {
+      // Persist every editable dirty session independently of which pane is active.
+      // A blocked active pane must not skip an editable companion (or vice versa).
+      const primaryCanSave = !viewMode && !transferFrozen && editBlock === '';
+      const secondaryCanSave = !viewMode && !transferFrozen && !!secondary && secondary.editBlock === '';
+      if (!primaryCanSave && !secondaryCanSave) {
+        updateSaveIndicatorB();
+        return;
+      }
+      clearNotices();
+      let flushed = false;
+      if (primaryCanSave && workspace.dirty()) {
+        showSaving();
+        journalEdit();
+        void persist();
+        flushed = true;
+      }
+      if (secondaryCanSave && secondary?.dirty) {
+        updateSaveIndicatorB();
+        void persistSecondary();
+        flushed = true;
+      }
+      if (!flushed) announce('Autosave on');
+      return;
+    }
     clearTimeout(saveTimer);
     if (secondary) {
       clearTimeout(secondary.saveTimer);
       updateSaveIndicatorB();
+    }
+    if (blocked || !opts.promptDeleteSavedCopy) {
+      if (!blocked) clearNotices();
+      updateSaveIndicatorB();
+      if (!blocked) announce(AUTOSAVE_OFF);
+      else showSaveState();
+      return;
     }
     const companionActive = workspace.activePaneId() === SECOND_PANE_ID
       && dualDocumentSplit() && !!secondary && secondary.editBlock === '';
@@ -2369,17 +2462,52 @@ autosave.addEventListener('change', async () => {
     }
     updateSaveIndicatorB();
     announce(AUTOSAVE_OFF);
-  }
   } finally {
     endAutosaveToggleGate();
     autosaveToggleActive = false;
     updateSaveIndicatorB();
     // Match syncAutosaveControl — companion-active sessions can toggle while A is blocked.
     autosave.disabled = autosaveControlBlocked();
-    // Re-focus after re-enabling: the dialog cannot restore while this control
-    // is disabled, and a delete may await before this finally runs (#114 review).
-    autosave.focus({ preventScroll: true });
+    // Re-focus after re-enabling only for local Settings (host owns focus on shared toggles).
+    if (opts.promptDeleteSavedCopy || opts.persistPreference) {
+      if (!embedded) autosave.focus({ preventScroll: true });
+    }
+    const queued = pendingRemoteAutosave;
+    pendingRemoteAutosave = undefined;
+    if (queued !== undefined) {
+      void applyAutosaveChange(queued, { promptDeleteSavedCopy: false, persistPreference: false });
+    }
   }
+}
+
+/** Re-read shared Autosave before this window can save again (handoff / ownership). */
+function syncAutosaveCheckboxFromStorage(): void {
+  try {
+    const next = autosaveEnabled();
+    const changed = autosave.checked !== next;
+    autosave.checked = next;
+    if (!next) {
+      clearTimeout(saveTimer);
+      if (secondary) clearTimeout(secondary.saveTimer);
+      if (changed) showSaveState();
+      return;
+    }
+    // Autosave turned on while we were read-only: flush dirty text now that we can edit.
+    if (changed && workspace.dirty() && !autosaveControlBlocked()) {
+      showSaving();
+      journalEdit();
+      void persist();
+    } else if (changed) {
+      showSaveState();
+    }
+  } catch { /* Keep the current control state. */ }
+}
+
+autosave.addEventListener('change', () => {
+  void applyAutosaveChange(autosave.checked, {
+    promptDeleteSavedCopy: !embedded,
+    persistPreference: true,
+  });
 });
 async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
@@ -3313,8 +3441,12 @@ function openComparisonWindow(href: string): ComparisonOpenResult {
 // window.open must run inside this click, so eligibility uses the in-memory IndexedDB revision
 // rather than an async read; the companion verifies the row itself on load. Document text is
 // never part of the URL, postMessage or sessionStorage.
+if (embedded) {
+  openComparison.hidden = true;
+  openComparison.disabled = true;
+}
 openComparison.addEventListener('click', () => {
-  if (viewMode || field.disabled || transitioning || deleting) return;
+  if (viewMode || embedded || field.disabled || transitioning || deleting) return;
   if (!db || active.revision < 1) {
     void explainNoComparison(!db
       ? 'Browser storage is unavailable, so there is no saved copy to open. Copy or export your text instead. Nothing was changed.'
@@ -3559,11 +3691,35 @@ if (!viewMode) document.addEventListener('visibilitychange', () => {
 });
 updateStats();
 
-setupResetSettings({ actions: [
-  ['appearance', appearanceSettings.reset], ['window layout', windowLayoutSettings.reset],
-  ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
-  ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
-], announce: announceAction });
+if (!embedded) {
+  setupResetSettings({ actions: [
+    ['appearance', appearanceSettings.reset], ['window layout', windowLayoutSettings.reset],
+    ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
+    ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
+  ], announce: announceAction });
+}
+
+function applyAutosaveFromStorage(): void {
+  let next: boolean;
+  try { next = autosaveEnabled(); }
+  catch { return; }
+  void applyAutosaveChange(next, { promptDeleteSavedCopy: false, persistPreference: false });
+}
+
+function applyPrefs(name: PrefName): void {
+  if (name === 'appearance' || name === 'reset') appearanceSettings.applyFromStorage();
+  if (name === 'transliteration' || name === 'shortcut' || name === 'reset') typingSettings.applyFromStorage();
+  if (name === 'tabIndent' || name === 'reset') applyTabIndentFromStorage();
+  if (name === 'autosave' || name === 'reset') applyAutosaveFromStorage();
+  if (name === 'reset') {
+    try { resetOptions(); } catch { /* Find bar may be closed. */ }
+    try { resetLayout(); } catch { /* Layout reset is best-effort. */ }
+  }
+}
+
+onPrefsChanged(detail => {
+  applyPrefs(detail.name);
+}, { skipOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' });
 
 // Host page registers the service worker and shows the update notice once (#175 step 3).
 if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
@@ -3588,6 +3744,8 @@ if (embedded) {
     /** Host calls immediately before removing the iframe after prepareClose succeeds. */
     __typebridgeCommitWindowClose?: () => void;
     __typebridgeSetFocusMode?: (enabled: boolean) => void;
+    /** #175 step 7: host Settings asks every window to apply a shared preference. */
+    __typebridgeApplyPrefs?: (name: PrefName, origin?: string) => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
@@ -3595,4 +3753,20 @@ if (embedded) {
   hooks.__typebridgePrepareWindowClose = prepareWindowClose;
   hooks.__typebridgeCommitWindowClose = commitWindowClose;
   hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
+  hooks.__typebridgeApplyPrefs = (name, origin) => {
+    if (origin && origin === `window:${windowId ?? 'main'}`) return;
+    // Re-dispatch in this window with iframe-local primitives so every module
+    // listener runs (rules, appearance, …). Avoid host-realm detail objects.
+    window.dispatchEvent(new CustomEvent(PREFS_EVENT, {
+      detail: {
+        name: String(name) as PrefName,
+        origin: origin !== undefined ? String(origin) : undefined,
+      },
+    }));
+  };
+  // Catch prefs the host broadcast before this iframe finished booting.
+  syncAutosaveCheckboxFromStorage();
+  try { applyTabIndentFromStorage(); } catch { /* optional */ }
+  try { appearanceSettings.applyFromStorage(); } catch { /* optional */ }
+  try { typingSettings.applyFromStorage(); } catch { /* optional */ }
 }

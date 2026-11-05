@@ -137,8 +137,12 @@ export function restoreForMove(
 }
 
 export function bringToFront(windows: HostWindowLayout[], id: string): HostWindowLayout[] {
-  const maxZ = windows.reduce((m, win) => Math.max(m, win.z), 0);
-  return windows.map(win => (win.id === id ? { ...win, z: maxZ + 1 } : win));
+  // Compact z to 1..n so free-layout activation cannot outgrow the Settings panel stacking layer.
+  const ordered = [...windows].sort((a, b) => a.z - b.z || a.id.localeCompare(b.id));
+  const rest = ordered.filter(win => win.id !== id);
+  const target = windows.find(win => win.id === id);
+  if (!target) return windows;
+  return [...rest, target].map((win, index) => ({ ...win, z: index + 1 }));
 }
 
 /** Cascade with a visible offset when even a grid cannot fit every minimum size. */

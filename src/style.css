@@ -1188,9 +1188,24 @@ body.focus-mode .bottom {
   margin: 0 8px 8px;
   font: inherit;
 }
-/* #175 step 6: Layout preference only applies on the multi-window host. */
-html:not([data-embed="1"]) .settings-host-only {
+/* #175 step 6–7: Layout preference only on the host Settings panel. */
+body:not(.host-page) .settings-host-only {
   display: none;
+}
+
+/* #175 step 7: Settings panel lives on the host; keep embed chrome clean.
+   In-page split / comparison are redundant with host windows (removed in step 10). */
+html[data-embed="1"] #settings-open,
+html[data-embed="1"] #settings-panel,
+html[data-embed="1"] #toggle-split,
+html[data-embed="1"] #open-comparison {
+  display: none !important;
+}
+
+body.host-page .host-settings-panel {
+  position: fixed;
+  /* Above free-layout windows (z compacted to 1..n) and the host notice; below confirm dialogs (1000). */
+  z-index: 900;
 }
 
 /* #175 step 5 host shell: notice + toolbar + free-layout windows. */
@@ -1417,7 +1432,11 @@ body.host-stacked .host-window-resize-sw {
 }
 body.host-focus-mode .host-toolbar [data-host-action="tile-side"],
 body.host-focus-mode .host-toolbar [data-host-action="tile-stack"],
-body.host-focus-mode .host-toolbar [data-host-action="new-window"] {
+body.host-focus-mode .host-toolbar [data-host-action="new-window"],
+body.host-focus-mode .host-toolbar #settings-open {
+  display: none;
+}
+body.host-focus-mode .host-settings-panel {
   display: none;
 }
 body.host-focus-mode .host-window-resize {

@@ -1,6 +1,6 @@
 /**
- * Embedded editor mode for #175 step 3.
- * Host page owns the update notice; the iframe keeps Settings until step 7.
+ * Embedded editor mode for #175 step 3+.
+ * Host page owns the update notice and (step 7) the Settings panel.
  * Pure helpers only — no DOM.
  */
 

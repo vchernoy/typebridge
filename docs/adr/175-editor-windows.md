@@ -57,11 +57,11 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | **0** (done) | Stop/supersede #159 S-slices; pause #174/#164 | Docs/process |
 | **1** (this PR) | This ADR + ARCHITECTURE / UI / ROADMAP | No |
 | **2** | Per-window identity; key sessionStorage by window id; two-instance Playwright “like two tabs” | Yes (shipped) |
-| **3** | Embedded mode + host page; single-window parity; Settings/update notice on host | Yes (this slice: `/host.html`, `?embed=1`, update notice on host; Settings stay in the iframe until step 7; standalone `/` kept for existing e2e) |
+| **3** | Embedded mode + host page; single-window parity; Settings/update notice on host | Yes (this slice: `/host.html`, `?embed=1`, update notice on host; Settings moved to host in step 7; standalone `/` kept for existing e2e) |
 | **4** | Focus handoff (flush, lock, reread, IME/buffer, same-tab unsaved transfer) | Yes (this slice: two-phase park/confirm yield; same-origin in-tab snapshot only; BroadcastChannel always cross-tab; Edit here before steal; no sessionStorage tab token) |
 | **5** | Window manager (desktop free layout) | Yes (this slice: `/host.html` free windows — New/Close, drag, resize, z-order, snap, tile, keyboard move/resize, localStorage layout, cap 4) |
 | **6** | Phone stack, Layout setting, Focus mode | Yes (this slice: Auto/Free/Stacked preference, capability detection, stacked height grip, host Focus maximize) |
-| **7** | Shared settings live across windows | Yes |
+| **7** | Shared settings live across windows | Yes (this slice: one Settings panel on `/host.html`; live apply via prefs-sync + iframe hooks; mode chrome stays per window) |
 | **8** | Title/picker redesign | Yes |
 | **9** | Find/Replace per window | Yes |
 | **10** | Remove in-page split | Yes |

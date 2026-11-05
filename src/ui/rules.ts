@@ -1,20 +1,28 @@
 import { russianPack } from '../core/russian';
 import { effectivePack, exportRules, importRules, loadOverrides, saveOverrides, type Overrides } from '../core/custom-rules';
 import type { Editor } from '../editor/editor';
+import { notifyPrefsChanged, onPrefsChanged } from '../view/prefs-sync';
 
 /**
  * Transliteration rules panel: edit, save, reset, export and import custom mappings, and
  * push the effective rules to every transliterating field. `targets` is read when rules
  * change, so fields created after setup (the draft title) still receive them.
  */
-export function setupRules(targets: () => Editor[]): () => boolean {
+export function setupRules(
+  targets: () => Editor[],
+  options?: { prefsOrigin?: string },
+): () => boolean {
+  const prefsOrigin = options?.prefsOrigin ?? 'editor';
   function applyRules(): void {
-    for (const target of targets()) target.setRules(overrides);
+    for (const target of targets()) {
+      if (target) target.setRules(overrides);
+    }
   }
-  const rulesText = document.querySelector<HTMLTextAreaElement>('#rules-text')!;
-  const rulesStatus = document.querySelector<HTMLElement>('#rules-status')!;
+  const rulesText = document.querySelector<HTMLTextAreaElement>('#rules-text');
+  const rulesStatus = document.querySelector<HTMLElement>('#rules-status');
   let overrides: Overrides = loadOverrides();
   function renderRules(): void {
+    if (!rulesText) return;
     rulesText.value = effectivePack(overrides).mappings.map(rule => rule.input + ' = ' + rule.output).join('\n');
   }
   function parseRules(text: string): Overrides {
@@ -37,29 +45,49 @@ export function setupRules(targets: () => Editor[]): () => boolean {
     }
     return changes;
   }
-  document.querySelector<HTMLButtonElement>('#rules-save')!.addEventListener('click', () => {
+  function reloadFromStorage(announce?: string): void {
+    overrides = loadOverrides();
+    applyRules();
+    renderRules();
+    if (announce && rulesStatus) rulesStatus.textContent = announce;
+  }
+  document.querySelector<HTMLButtonElement>('#rules-save')?.addEventListener('click', () => {
+    if (!rulesText) return;
     try {
       const next = parseRules(rulesText.value);
       saveOverrides(next);
       overrides = next;
       applyRules();
       renderRules();
-      rulesStatus.textContent = 'Rules saved locally';
-    } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules'; }
+      if (rulesStatus) rulesStatus.textContent = 'Rules saved locally';
+      notifyPrefsChanged({ name: 'rules', origin: prefsOrigin });
+    } catch (error) {
+      if (rulesStatus) rulesStatus.textContent = error instanceof Error ? error.message : 'Invalid rules';
+    }
   });
   function resetRules(): boolean {
-    try { saveOverrides({}); overrides = {}; applyRules(); renderRules(); rulesStatus.textContent = 'Default rules restored'; return true; }
-    catch { rulesStatus.textContent = 'Unable to save rules'; return false; }
+    try {
+      saveOverrides({});
+      overrides = {};
+      applyRules();
+      renderRules();
+      if (rulesStatus) rulesStatus.textContent = 'Default rules restored';
+      notifyPrefsChanged({ name: 'rules', origin: prefsOrigin });
+      return true;
+    } catch {
+      if (rulesStatus) rulesStatus.textContent = 'Unable to save rules';
+      return false;
+    }
   }
-  document.querySelector<HTMLButtonElement>('#rules-reset')!.addEventListener('click', resetRules);
-  document.querySelector<HTMLButtonElement>('#rules-export')!.addEventListener('click', () => {
+  document.querySelector<HTMLButtonElement>('#rules-reset')?.addEventListener('click', resetRules);
+  document.querySelector<HTMLButtonElement>('#rules-export')?.addEventListener('click', () => {
     const blob = new Blob([exportRules(overrides)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url; link.download = 'typebridge-rules.json'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  document.querySelector<HTMLInputElement>('#rules-import')!.addEventListener('change', async event => {
+  document.querySelector<HTMLInputElement>('#rules-import')?.addEventListener('change', async event => {
     const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
@@ -67,10 +95,15 @@ export function setupRules(targets: () => Editor[]): () => boolean {
       if (file.size > 65536) throw new Error('Rules file is too large');
       const next = importRules(await file.text());
       saveOverrides(next); overrides = next; applyRules(); renderRules();
-      rulesStatus.textContent = 'Rules imported';
-    } catch (error) { rulesStatus.textContent = error instanceof Error ? error.message : 'Import failed'; }
-    finally { input.value = ''; }
+      if (rulesStatus) rulesStatus.textContent = 'Rules imported';
+      notifyPrefsChanged({ name: 'rules', origin: prefsOrigin });
+    } catch (error) {
+      if (rulesStatus) rulesStatus.textContent = error instanceof Error ? error.message : 'Import failed';
+    } finally { input.value = ''; }
   });
   renderRules();
+  onPrefsChanged(detail => {
+    if (detail.name === 'rules' || detail.name === 'reset') reloadFromStorage();
+  }, { skipOrigin: prefsOrigin });
   return resetRules;
 }

@@ -1,4 +1,21 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type FrameLocator, type Page } from '@playwright/test';
+
+/**
+ * Fill an embedded host-window editor.
+ * Firefox: Playwright's first `fill` into a fresh iframe can no-op, and a real click
+ * can time out when another host window's iframe intercepts pointer events. Setting
+ * the value in-page and dispatching `input` matches what the editor listens for.
+ */
+export async function fillHostEditor(frame: FrameLocator, text: string, selector = '#editor'): Promise<void> {
+  const field = frame.locator(selector);
+  await field.evaluate((el, value) => {
+    const input = el as HTMLTextAreaElement | HTMLInputElement;
+    input.focus();
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, text);
+  await expect(field).toHaveValue(text);
+}
 
 /** Settings live in a side panel (#123); these drive it the way a user would. */
 export async function openSettings(page: Page): Promise<void> {
@@ -43,6 +60,34 @@ export async function setAutosave(
     await expect(dialog).toBeHidden();
     await expect(box).toBeEnabled();
   }
+  await closeSettings(page);
+}
+
+/**
+ * #175 step 7: Autosave lives on the host Settings panel. Turning it off writes the
+ * shared preference; embedded windows apply without the per-window delete dialog.
+ */
+export async function setHostAutosave(page: Page, on: boolean): Promise<void> {
+  await openSettings(page);
+  const box = page.locator('#autosave');
+  if (on) await box.check();
+  else await box.uncheck();
+  await expect.poll(async () => page.evaluate(() => {
+    const raw = localStorage.getItem('typebridge.autosave.v1');
+    return raw !== 'off';
+  })).toBe(on);
+  // Confirm every live editor iframe mirrored the shared preference.
+  await expect.poll(async () => page.evaluate(want => {
+    const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    if (frames.length === 0) return false;
+    return frames.every(frame => {
+      try {
+        return frame.contentDocument?.querySelector<HTMLInputElement>('#autosave')?.checked === want;
+      } catch {
+        return false;
+      }
+    });
+  }, on)).toBe(true);
   await closeSettings(page);
 }
 

@@ -1,11 +1,11 @@
 /**
- * #175 step 5 host page: free-layout editor windows; update notice on the host.
- * Settings stay in the iframe until step 7.
+ * #175 step 5–7 host page: free-layout editor windows, update notice, and Settings.
  */
 import '../style.css';
 import { ACTIVE_DRAFT_KEY_BASE } from '../editor/drafts';
 import { watchForUpdates } from '../ui/update-notice';
 import { scopeSessionKey } from '../view/window-id';
+import { installHostSettings } from './settings';
 import { installWindowManager } from './window-manager';
 
 const root = document.querySelector<HTMLElement>('#host-root')!;
@@ -82,6 +82,11 @@ hostHooks.__typebridgeHostLayoutMode = () => manager.layoutMode();
 hostHooks.__typebridgeHostFocusMode = (enabled, sourceWindowId) => {
   manager.setHostFocusMode(enabled, sourceWindowId);
 };
+
+installHostSettings({
+  frames: editorFrames,
+  exitHostFocus: () => { manager.setHostFocusMode(false); },
+});
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {

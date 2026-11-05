@@ -130,7 +130,8 @@ describe('host layout helpers', () => {
       { id: 'main', x: 0, y: 0, w: 100, h: 100, z: 1 },
       { id: 'w2', x: 0, y: 0, w: 100, h: 100, z: 3 },
     ], 'main');
-    expect(raised.find(w => w.id === 'main')?.z).toBe(4);
+    expect(raised.find(w => w.id === 'main')?.z).toBe(2);
+    expect(raised.find(w => w.id === 'w2')?.z).toBe(1);
     expect(mintWindowId(['main'])).toBe('w2');
     expect(mintWindowId(['main', 'w2', 'w3', 'w4'])).toBe('w5');
     expect(MAX_HOST_WINDOWS).toBe(4);

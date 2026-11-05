@@ -24,14 +24,127 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   </head>
   <body class="host-page">
-    <!-- #175 step 5: host owns update notice + free-layout window chrome. -->
+    <!-- #175 step 5–7: host owns update notice, window chrome, and Settings. -->
     <div id="host-notice" class="host-notice"></div>
     <div id="host-toolbar" class="host-toolbar" role="toolbar" aria-label="Window layout">
       <button type="button" data-host-action="new-window">New window</button>
       <button type="button" data-host-action="tile-side">Tile side by side</button>
       <button type="button" data-host-action="tile-stack">Tile stacked</button>
+      <button
+        id="settings-open"
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="settings-panel"
+      >
+        Settings
+      </button>
     </div>
     <div id="host-root" class="host-root"></div>
+    <aside
+      id="settings-panel"
+      class="settings-panel host-settings-panel"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="settings-title"
+      hidden
+    >
+      <div class="settings-head">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-close" type="button" aria-label="Close settings">×</button>
+      </div>
+      <div class="settings-group shortcut-panel" role="group" aria-labelledby="settings-shortcut-title">
+        <h3 id="settings-shortcut-title">Transliteration shortcut</h3>
+        <p>Choose a shortcut, or disable it. Shortcuts may be reserved by your operating system.</p>
+        <label for="translit-shortcut">Shortcut</label
+        ><select id="translit-shortcut">
+          <option value="default">Default (Ctrl + Shift + Space)</option>
+          <option value="f7">Ctrl/⌘ + Shift + F7</option>
+          <option value="f8">Ctrl/⌘ + Shift + F8</option>
+          <option value="f9">Ctrl/⌘ + Shift + F9</option>
+          <option value="off">Disabled</option></select
+        ><button id="shortcut-reset" type="button">Reset shortcut</button
+        ><span id="shortcut-status" aria-live="polite"></span>
+      </div>
+      <div class="settings-group rules-panel" role="group" aria-labelledby="settings-rules-title">
+        <h3 id="settings-rules-title">Transliteration rules</h3>
+        <p>
+          One rule per line: Latin = Cyrillic. Edit defaults or add rules. Changes affect future typing, not
+          existing text.
+        </p>
+        <label for="rules-text">Mappings</label
+        ><textarea id="rules-text" spellcheck="false" aria-label="Transliteration mappings"></textarea>
+        <div class="actions">
+          <button id="rules-save" type="button">Save rules</button
+          ><button id="rules-reset" type="button">Reset to defaults</button
+          ><button id="rules-export" type="button">Export JSON</button><label for="rules-import">Import JSON</label
+          ><input id="rules-import" type="file" accept=".json,application/json" />
+        </div>
+        <span id="rules-status" aria-live="polite"></span>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-saving-title">
+        <h3 id="settings-saving-title">Saving</h3>
+        <label class="toggle"
+          ><input id="autosave" type="checkbox" checked aria-describedby="autosave-hint" /> Autosave</label
+        >
+        <p id="autosave-hint" class="setting-note">
+          On: saves text in this browser as you type. Off: privacy mode — text and title are not saved and will be
+          lost on reload (including when a phone browser discards a background tab). This choice applies to every
+          window; turning it off here does not offer to delete a saved copy (use Settings on the standalone editor
+          for that).
+        </p>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-editor-title">
+        <h3 id="settings-editor-title">Editor</h3>
+        <label class="toggle"
+          ><input id="tab-indent" type="checkbox" checked aria-describedby="tab-indent-note" /> Tab indents</label
+        >
+        <p id="tab-indent-note" class="setting-note">
+          When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this
+          off, moves focus as usual.
+        </p>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-appearance-title">
+        <h3 id="settings-appearance-title">Appearance</h3>
+        <label for="appearance">Color scheme</label>
+        <select id="appearance" aria-describedby="appearance-hint">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <p id="appearance-hint" class="setting-note">
+          System follows your device. Your choice is saved in this browser.
+        </p>
+        <div class="settings-host-only">
+          <label for="window-layout">Layout</label>
+          <select id="window-layout" aria-describedby="window-layout-hint">
+            <option value="auto">Auto</option>
+            <option value="free">Free windows</option>
+            <option value="stacked">Stacked</option>
+          </select>
+          <p id="window-layout-hint" class="setting-note">
+            Auto picks free windows on a computer pointer and stacked full-width windows on a phone-sized viewport.
+          </p>
+        </div>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-defaults-title">
+        <h3 id="settings-defaults-title">Defaults</h3>
+        <button id="reset-settings" type="button">Reset settings to defaults…</button>
+        <p class="setting-note">Documents and your Autosave privacy choice are kept.</p>
+        <span id="host-settings-status" aria-live="polite"></span>
+      </div>
+      <div id="settings-about-documents" class="settings-group" role="group" aria-labelledby="settings-about-title">
+        <h3 id="settings-about-title" tabindex="-1">About your documents</h3>
+        <p>
+          Saved documents stay in this browser only and are not synced between devices. Undo history is saved with
+          documents. Browser storage can be cleared or evicted; export important work.
+        </p>
+        <p>
+          Resize the editor from its bottom-right corner. After a successful online service-worker installation, the
+          editor can reopen offline on this device.
+        </p>
+      </div>
+    </aside>
     <script type="module" src="/src/host/main.ts"></script>
   </body>
 </html>
