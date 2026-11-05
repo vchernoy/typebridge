@@ -149,6 +149,16 @@ export function setupSearch(
   findInput.addEventListener('input', showMatchCount);
   for (const surface of matchSurfaces) surface.addEventListener('input', showMatchCount);
   for (const input of [matchCase, regexMode]) input.addEventListener('change', showMatchCount);
+  // Sibling host windows share FIND_KEY; pick up live updates without reload (#175 step 9).
+  if (findTextKey === FIND_KEY) {
+    window.addEventListener('storage', event => {
+      if (event.storageArea !== sessionStorage || event.key !== FIND_KEY) return;
+      const next = event.newValue ?? '';
+      if (findInput.value === next) return;
+      findInput.value = next;
+      showMatchCount();
+    });
+  }
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
   document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {

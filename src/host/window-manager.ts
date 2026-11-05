@@ -360,6 +360,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         end: number;
       }) => { value: string; start: number; end: number } | null;
       __typebridgeToggleTransliteration?: () => void;
+      __typebridgeOpenFind?: () => void;
     };
 
     let applyingFromIframe = false;
@@ -417,6 +418,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           && (event.code === 'Space' || event.code === 'F7' || event.code === 'F8' || event.code === 'F9')) {
           hooks?.__typebridgeToggleTransliteration?.();
           event.preventDefault();
+          return;
+        }
+        // #175 step 9: Ctrl/⌘+F from the host title opens Find in this window.
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
+          && event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          hooks?.__typebridgeOpenFind?.();
         }
       } catch { /* Frame mid-navigation. */ }
     });

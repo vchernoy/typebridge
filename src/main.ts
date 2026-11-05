@@ -75,7 +75,8 @@ if (windowId) document.documentElement.dataset.windowId = windowId;
 const embedded = parseEmbedMode(window.location.search);
 if (embedded) document.documentElement.dataset.embed = '1';
 configureActiveDraftKey(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, windowId));
-const findSessionKey = scopeSessionKey(FIND_KEY, windowId);
+// #175 step 9: Find query is shared across windows; Replace text stays per-window.
+const findSessionKey = FIND_KEY;
 const replaceSessionKey = scopeSessionKey(REPLACE_KEY, windowId);
 const updateDismissKey = scopeSessionKey('typebridge.updateNotice.dismissed.v1', windowId);
 // Minted per page load and never read from sessionStorage, which duplicated tabs can clone.
@@ -852,6 +853,11 @@ function openFind(): void {
   leaveFocusPreservingActivePane();
   setBar(gotoBar, gotoOpen, false);
   setBar(findBar, findOpen, true);
+  // Re-read the shared last search so another window's query is visible immediately.
+  try {
+    const shared = sessionStorage.getItem(FIND_KEY);
+    if (shared !== null && findInput.value !== shared) findInput.value = shared;
+  } catch { /* Optional restore. */ }
   showMatchCount();
   findInput.focus();
   findInput.select();
@@ -3820,6 +3826,8 @@ if (embedded) {
       end?: number,
     ) => { value: string; start: number; end: number } | null;
     __typebridgeToggleTransliteration?: () => void;
+    /** #175 step 9: host title bar Ctrl/⌘+F opens this window's Find. */
+    __typebridgeOpenFind?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
@@ -3852,6 +3860,7 @@ if (embedded) {
     enabled.checked = !enabled.checked;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));
   };
+  hooks.__typebridgeOpenFind = openFind;
   hooks.__typebridgeTitleCommit = (value, start, end) => {
     if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
     const next = value.slice(0, 150);
