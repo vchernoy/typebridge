@@ -8,7 +8,7 @@ import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
 import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
-import { draftOptionLabel } from './editor/draft-list';
+import { draftMatchesQuery, draftOptionLabel, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
   UNTITLED_TITLE,
@@ -19,6 +19,7 @@ import {
   setActiveDraftId,
   setAutosaveEnabled,
 } from './editor/drafts';
+import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
@@ -134,7 +135,13 @@ const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setu
   },
 });
 setupSettings({ embedded });
-setupDocumentMenu();
+let docSearchQuery = '';
+setupDocumentMenu({
+  onSearch: query => {
+    docSearchQuery = query;
+    renderDrafts();
+  },
+});
 setupMoreMenu();
 setupKeyboardShortcuts();
 const editor = new Editor(field);
@@ -1094,38 +1101,68 @@ function flushSecondaryOnUnload(): void {
 function rememberActive(): void {
   if (viewMode) return;
   try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ }
-  // Tell the #175 host so layout persistence can record this window's document id.
+  // Tell the #175 host so layout persistence can record this window's document id / title.
   if (embedded && window.parent !== window) {
     try {
       window.parent.postMessage({
         type: 'typebridge-active-draft',
         windowId,
         documentId: active.id,
+        title: draftTitle.value.trim() || UNTITLED_TITLE,
       }, window.location.origin);
     } catch { /* Cross-origin parent — host will probe on unload. */ }
   }
 }
+
+/** #175 step 8: never reuse an existing Untitled document / Untitled document N name. */
+function allocateNewDraft(text = ''): StoredDraft {
+  const titles = drafts.map(draft => draft.title);
+  titles.push(active.title, draftTitle.value.trim() || UNTITLED_TITLE);
+  if (secondary) titles.push(secondary.draft.title, secondary.title.value.trim() || UNTITLED_TITLE);
+  return { ...newDraft(text, nextUntitledTitle(titles)), revision: 0 };
+}
+
+function openDocumentIdsElsewhere(): Set<string> {
+  if (!embedded || window.parent === window) return new Set();
+  try {
+    const host = window.parent as Window & { __typebridgeOpenDocumentIds?: (exceptWindowId?: string) => string[] };
+    const ids = host.__typebridgeOpenDocumentIds?.(windowId ?? undefined) ?? [];
+    return new Set(ids.filter(id => id && id !== active.id));
+  } catch {
+    return new Set();
+  }
+}
+
 function renderDrafts(): void {
-  const visible = viewMissing || drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
+  const visibleBase = viewMissing || drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
   const displayTitle = draftTitle.value.trim() || UNTITLED_TITLE;
+  const elsewhere = openDocumentIdsElsewhere();
+  const visible = visibleBase.filter(draft => draftMatchesQuery({
+    title: draft.id === active.id ? displayTitle : draft.title,
+    text: draft.id === active.id ? field.value : draft.text,
+    query: docSearchQuery,
+  }));
   for (const picker of documentPickers) {
     picker.replaceChildren();
     for (const draft of visible) {
       const option = document.createElement('option');
       option.value = draft.id;
       const isCurrent = draft.id === active.id;
-      option.textContent = draftOptionLabel({
+      option.textContent = draftPickerLabel({
         savedTitle: draft.title,
         displayTitle,
         isCurrent,
         unsaved: isCurrent && workspace.dirty(),
+        text: isCurrent ? field.value : draft.text,
+        updatedAt: isCurrent ? (workspace.dirty() ? Date.now() : draft.updatedAt) : draft.updatedAt,
+        openElsewhere: elsewhere.has(draft.id),
       });
       picker.append(option);
     }
     picker.value = viewMissing ? '' : active.id;
   }
   // Shown as a list inside the document menu: at least two rows, at most eight.
-  draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
+  draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length || 2));
   renderPaneBDrafts();
 }
 function renderPaneBDrafts(): void {
@@ -1673,6 +1710,7 @@ function showDraft(): void {
   renderDrafts();
   updateStats();
   updateSaveIndicator();
+  rememberActive();
 }
 const ownershipNotice = document.querySelector<HTMLElement>('#ownership-notice')!;
 const editHereBar = document.querySelector<HTMLElement>('#edit-here-bar')!;
@@ -2244,7 +2282,11 @@ function syncTitleTooltip(): void {
   draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
 }
 syncTitleTooltip();
-draftTitle.addEventListener('input', () => { syncTitleTooltip(); scheduleSave(true); });
+draftTitle.addEventListener('input', () => {
+  syncTitleTooltip();
+  rememberActive();
+  scheduleSave(true);
+});
 /** While Autosave is toggling (including delete-saved-copy), document switches wait. */
 let autosaveToggleGate: Promise<void> | undefined;
 let releaseAutosaveToggleGate: (() => void) | undefined;
@@ -2573,7 +2615,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
     }
     // Freeze Editor mutation gates (not only DOM readOnly) for the whole acquire/reread window.
     freezeEditorsForTransition();
-    let target = next ?? { ...newDraft(), revision: 0 };
+    let target = next ?? allocateNewDraft();
     const access = await acquireFor(target.id);
     acquired = access.ownership;
     if (acquired && next && db) {
@@ -2648,7 +2690,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     if (deletedRevision >= 1) postSignal('deleted', active.id, deletedRevision);
     clearTimeout(saveTimer);
     writingPosition.save();
-    const replacement: StoredDraft = { ...newDraft(), revision: 0 };
+    const replacement: StoredDraft = allocateNewDraft();
     const access = await acquireFor(replacement.id);
     active = replacement;
     rememberActive();
@@ -3746,6 +3788,9 @@ if (embedded) {
     __typebridgeSetFocusMode?: (enabled: boolean) => void;
     /** #175 step 7: host Settings asks every window to apply a shared preference. */
     __typebridgeApplyPrefs?: (name: PrefName, origin?: string) => void;
+    /** #175 step 8: host title bar rename write-through. */
+    __typebridgeSetTitle?: (title: string) => void;
+    __typebridgeGetTitle?: () => string;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
@@ -3764,9 +3809,20 @@ if (embedded) {
       },
     }));
   };
+  hooks.__typebridgeGetTitle = () => draftTitle.value.trim() || UNTITLED_TITLE;
+  hooks.__typebridgeSetTitle = title => {
+    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return;
+    const next = title.slice(0, 150);
+    if (draftTitle.value === next) return;
+    draftTitle.value = next;
+    syncTitleTooltip();
+    rememberActive();
+    scheduleSave(true);
+  };
   // Catch prefs the host broadcast before this iframe finished booting.
   syncAutosaveCheckboxFromStorage();
   try { applyTabIndentFromStorage(); } catch { /* optional */ }
   try { appearanceSettings.applyFromStorage(); } catch { /* optional */ }
   try { typingSettings.applyFromStorage(); } catch { /* optional */ }
+  rememberActive();
 }

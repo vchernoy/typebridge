@@ -17,7 +17,9 @@ export function activeDraftStorageKey(): string {
   return activeDraftKey;
 }
 
-export function newDraft(text = ''): Draft { return { id: crypto.randomUUID(), title: UNTITLED_TITLE, text, updatedAt: Date.now() }; }
+export function newDraft(text = '', title = UNTITLED_TITLE): Draft {
+  return { id: crypto.randomUUID(), title, text, updatedAt: Date.now() };
+}
 export function autosaveEnabled(): boolean { return localStorage.getItem(ENABLED) !== 'off'; }
 export function setAutosaveEnabled(enabled: boolean): void { localStorage.setItem(ENABLED, enabled ? 'on' : 'off'); }
 export function setActiveDraftId(id: string): void { sessionStorage.setItem(activeDraftKey, id); }

@@ -56,7 +56,7 @@ for (const width of [390, 1280]) {
     // Create a new document from the menu.
     await documentAction(page, '#new-draft');
     await expect(page.locator('#editor')).toHaveValue('');
-    await expect(title).toHaveValue('Untitled document');
+    await expect(title).toHaveValue(/Untitled document( \d+)?/);
     await expect(page.locator('body')).toHaveClass(/focus-mode/);
     await expect(page.locator('#drafts option')).toHaveCount(3);
   });

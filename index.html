@@ -55,7 +55,15 @@
             <span id="save-indicator" class="save-indicator" data-state="unsaved">Not saved</span>
             <span id="viewer-badge" class="viewer-badge" hidden>Saved version · Read-only</span>
             <div id="doc-menu" class="doc-menu" role="dialog" aria-label="Documents" hidden>
-              <label for="drafts" class="menu-label">Documents</label>
+              <label for="doc-search" class="menu-label">Documents</label>
+              <input
+                id="doc-search"
+                type="search"
+                enterkeyhint="search"
+                placeholder="Search documents"
+                aria-label="Search documents"
+                autocomplete="off"
+              />
               <select id="drafts" size="2" aria-label="Documents"></select>
               <div class="doc-actions">
                 <button
