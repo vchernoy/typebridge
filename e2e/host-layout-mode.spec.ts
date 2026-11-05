@@ -88,7 +88,7 @@ test('host Focus mode maximizes the active window and restores on exit', async (
   });
   expect(before).toHaveLength(2);
 
-  await main.locator('#editor').click();
+  await page.getByRole('button', { name: /Move window main/ }).click();
   await main.locator('#focus-mode').click();
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
@@ -177,7 +177,8 @@ test('host Focus restore after reload shows Exit focus in the focused iframe', a
   await expect(page.locator('.host-window')).toHaveCount(2);
   await expect(page.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor'))
     .toBeEnabled({ timeout: 30_000 });
-  await main.locator('#editor').click();
+  // Raise main above w2 before entering Focus (New window leaves w2 on top).
+  await page.getByRole('button', { name: /Move window main/ }).click();
   await main.locator('#focus-mode').click();
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
