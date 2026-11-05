@@ -1,5 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { setHostAutosave } from './settings-helpers';
+import { readStoredDocs } from './storage-helpers';
 
 /** #175 step 7: one host Settings panel; prefs apply live to every window. */
 
@@ -94,6 +95,40 @@ test('host Autosave on persists unsaved text in every window', async ({ page }) 
   await second.locator('#editor').fill('Private again');
   await expect(second.locator('#save-indicator')).toHaveText('Not saved');
   await expect.poll(async () => page.evaluate(() => localStorage.getItem('typebridge.autosave.v1'))).toBe('off');
+});
+
+test('host Autosave off updates a read-only window checkbox', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
+  const main = await openHost(page);
+  await main.locator('#editor').fill('Shared before privacy');
+  await expect(main.locator('#save-indicator')).toHaveText('Saved');
+  await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === 'Shared before privacy')).toBe(true);
+  const docId = (await readStoredDocs(page)).find(row => row.text === 'Shared before privacy')!.id;
+
+  await page.getByRole('button', { name: 'New window' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  const panel = second.locator('#doc-menu');
+  if (await panel.isHidden()) await second.locator('#doc-menu-open').click();
+  await expect(panel).toBeVisible();
+  await second.locator('#drafts').selectOption(docId);
+  await expect(second.locator('html')).toHaveAttribute('data-role', 'reader');
+  await expect(second.locator('#editor')).toHaveJSProperty('readOnly', true);
+  if (await panel.isVisible()) await second.locator('#doc-menu-open').click();
+  await expect(panel).toBeHidden();
+
+  // Privacy: even while blocked, the shared Autosave choice must flip locally.
+  await setHostAutosave(page, false);
+  await expect.poll(async () => page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="w2"] iframe')?.contentDocument;
+    return doc?.querySelector<HTMLInputElement>('#autosave')?.checked ?? true;
+  }), { timeout: 15_000 }).toBe(false);
+  await expect.poll(async () => page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="main"] iframe')?.contentDocument;
+    return doc?.querySelector<HTMLInputElement>('#autosave')?.checked ?? true;
+  })).toBe(false);
 });
 
 test('Reset settings exits host Focus mode', async ({ page }) => {

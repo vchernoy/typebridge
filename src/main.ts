@@ -1801,6 +1801,8 @@ function installOwnership(access: EditAccess): void {
   editBlock = next.block;
   if (previous && previous !== ownership) void previous.release();
   applyEditAccess();
+  // #175 step 7: pick up host Autosave changes that arrived while this window was read-only.
+  if (editBlock === '') syncAutosaveCheckboxFromStorage();
 }
 async function takeOwnership(documentId: string): Promise<void> {
   installOwnership(await acquireFor(documentId));
@@ -1948,11 +1950,6 @@ async function takeOverFromHandoff(input: {
       }
       workspace.setDirty(input.snapshot.dirty);
       workspace.setDocumentId(active.id);
-      // Private/unsaved transfer must not silently persist even if this window had Autosave on.
-      if (input.snapshot.dirty && autosave.checked) {
-        autosave.checked = false;
-        updateSaveIndicator();
-      }
     } else {
       try {
         const fresh = await getStoredDraft(db, input.documentId);
@@ -1973,6 +1970,11 @@ async function takeOverFromHandoff(input: {
       }
     }
     installOwnership(access);
+    // Private/unsaved transfer must not silently persist even if shared Autosave is on.
+    if (input.snapshot?.dirty && autosave.checked) {
+      autosave.checked = false;
+      updateSaveIndicator();
+    }
     const mapped = mapSelectionAcrossTextChange(
       input.fromText,
       field.value,
@@ -2257,20 +2259,42 @@ function beginAutosaveToggleGate(): void {
 function endAutosaveToggleGate(): void {
   releaseAutosaveToggleGate?.();
 }
+/** Latest host/shared Autosave value dropped while a local toggle was in flight. */
+let pendingRemoteAutosave: boolean | undefined;
+
 /**
  * Apply an Autosave preference change to this window.
  * Local Settings uses prompts; host/shared sync applies without the delete-copy dialog (#175 step 7).
+ * Remote sync always updates `autosave.checked` (and clears save timers when turning off), even in
+ * read-only windows, so a later ownership handoff cannot save text the user opted out of storing.
  */
 async function applyAutosaveChange(
   enabled: boolean,
   opts: { promptDeleteSavedCopy: boolean; persistPreference: boolean },
 ): Promise<void> {
-  if (autosaveControlBlocked() || autosaveToggleActive) return;
+  const remote = !opts.persistPreference;
+  if (autosaveToggleActive) {
+    if (remote) {
+      pendingRemoteAutosave = enabled;
+      // Still mirror the checkbox immediately so a mid-toggle handoff sees the shared choice.
+      autosave.checked = enabled;
+      if (!enabled) {
+        clearTimeout(saveTimer);
+        if (secondary) clearTimeout(secondary.saveTimer);
+      }
+    }
+    return;
+  }
+  if (!remote && autosaveControlBlocked()) return;
   const alreadyMatching = autosave.checked === enabled;
   // Remote no-op when nothing changed and there is no dirty text left to flush.
-  if (!opts.persistPreference && alreadyMatching && !(enabled && workspace.dirty())) return;
+  if (remote && alreadyMatching && !(enabled && workspace.dirty() && !autosaveControlBlocked())) {
+    autosave.checked = enabled;
+    return;
+  }
+  const blocked = autosaveControlBlocked();
   autosaveToggleActive = true;
-  autosave.disabled = true;
+  if (!blocked) autosave.disabled = true;
   beginAutosaveToggleGate();
   try {
     autosave.checked = enabled;
@@ -2291,6 +2315,11 @@ async function applyAutosaveChange(
       else setSaveStatus(text);
     };
     if (enabled) {
+      if (blocked) {
+        // Preference is mirrored; persist when this window can mutate again.
+        updateSaveIndicatorB();
+        return;
+      }
       clearNotices();
       if (workspace.dirty()) showSaving(); else announce('Autosave on');
       if (workspace.dirty()) { journalEdit(); void persist(); }
@@ -2305,10 +2334,11 @@ async function applyAutosaveChange(
       clearTimeout(secondary.saveTimer);
       updateSaveIndicatorB();
     }
-    if (!opts.promptDeleteSavedCopy) {
-      clearNotices();
+    if (blocked || !opts.promptDeleteSavedCopy) {
+      if (!blocked) clearNotices();
       updateSaveIndicatorB();
-      announce(AUTOSAVE_OFF);
+      if (!blocked) announce(AUTOSAVE_OFF);
+      else showSaveState();
       return;
     }
     const companionActive = workspace.activePaneId() === SECOND_PANE_ID
@@ -2430,7 +2460,26 @@ async function applyAutosaveChange(
     if (opts.promptDeleteSavedCopy || opts.persistPreference) {
       if (!embedded) autosave.focus({ preventScroll: true });
     }
+    const queued = pendingRemoteAutosave;
+    pendingRemoteAutosave = undefined;
+    if (queued !== undefined) {
+      void applyAutosaveChange(queued, { promptDeleteSavedCopy: false, persistPreference: false });
+    }
   }
+}
+
+/** Re-read shared Autosave before this window can save again (handoff / ownership). */
+function syncAutosaveCheckboxFromStorage(): void {
+  try {
+    const next = autosaveEnabled();
+    if (autosave.checked === next) return;
+    autosave.checked = next;
+    if (!next) {
+      clearTimeout(saveTimer);
+      if (secondary) clearTimeout(secondary.saveTimer);
+    }
+    showSaveState();
+  } catch { /* Keep the current control state. */ }
 }
 
 autosave.addEventListener('change', () => {
