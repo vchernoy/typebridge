@@ -2100,8 +2100,6 @@ async function initializeDrafts(): Promise<void> {
     renderDrafts();
   } finally {
     draftsInitialized = true;
-    restoreFocusMode();
-    writingPosition.restore(active.id);
     updateStats();
     // Keep primary+companion disabled until pending-B restore finishes so it cannot
     // overwrite edits the user makes in a ready UI.
@@ -2115,6 +2113,9 @@ async function initializeDrafts(): Promise<void> {
     draftTitle.disabled = false;
     paneBDrafts.disabled = false;
     applyEditAccess();
+    // Focus mode must restore after the textarea is enabled — focus() is a no-op while disabled.
+    restoreFocusMode();
+    writingPosition.restore(active.id);
     renderPaneBDrafts();
     void renderRecovery();
     finishInitialization();
