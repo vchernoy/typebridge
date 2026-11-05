@@ -16,6 +16,8 @@ export function setupSearch(
   options: {
     canMutate?: () => boolean;
     getFindTarget?: () => SearchTarget;
+    /** Editor surfaces whose edits refresh the open Find match total (active pane may change). */
+    matchSurfaces?: HTMLTextAreaElement[];
   } = {},
 ): {
   findInput: HTMLInputElement;
@@ -28,6 +30,7 @@ export function setupSearch(
   const field = primary.field;
   const canMutate = options.canMutate ?? (() => true);
   const getFindTarget = options.getFindTarget ?? (() => primary);
+  const matchSurfaces = options.matchSurfaces ?? [field];
   const findInput = document.querySelector<HTMLInputElement>('#find-text')!;
   const replaceInput = document.querySelector<HTMLInputElement>('#replace-text')!;
   const matchCase = document.querySelector<HTMLInputElement>('#match-case')!;
@@ -97,7 +100,7 @@ export function setupSearch(
   } | undefined;
   function resetSearchPosition(): void { lastZeroWidthMatch = undefined; }
   // Caret moves and edits are caught by the position and text checks in findNext.
-  field.addEventListener('input', resetSearchPosition);
+  for (const surface of matchSurfaces) surface.addEventListener('input', resetSearchPosition);
   function findNext(backwards = false): void {
     const target = getFindTarget();
     const found = matches(target.field.value);
@@ -137,7 +140,8 @@ export function setupSearch(
     findStatus.textContent = !findInput.value ? '' : found.length
       ? `${found.length} match${found.length === 1 ? '' : 'es'}` : 'No matches';
   }
-  for (const input of [findInput, field]) input.addEventListener('input', showMatchCount);
+  findInput.addEventListener('input', showMatchCount);
+  for (const surface of matchSurfaces) surface.addEventListener('input', showMatchCount);
   for (const input of [matchCase, regexMode]) input.addEventListener('change', showMatchCount);
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));

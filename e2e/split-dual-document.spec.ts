@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, selectDocument, setAutosave } from './settings-helpers';
+import { documentAction, openFind, selectDocument, setAutosave } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 
 async function openSplit(page: Page): Promise<void> {
@@ -157,6 +157,25 @@ test('Autosave-off pane B asks before discarding on close split', async ({ page 
   await discard.getByRole('button', { name: 'Keep editing' }).click();
   await expect(page.locator('#editor-b')).toBeVisible();
   await expect(page.locator('#editor-b')).toHaveValue('Hotel body private');
+});
+
+test('Find match totals refresh when editing the active companion', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'alpha alpha', 'Papa');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'beta only', 'Quebec');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').focus();
+  await openFind(page);
+  await page.locator('#find-text').fill('alpha');
+  await expect(page.locator('#find-status')).toHaveText('2 matches');
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' alpha');
+  await expect(page.locator('#find-status')).toHaveText('3 matches');
 });
 
 test('Copy uses the active pane document', async ({ page, context }) => {

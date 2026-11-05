@@ -132,6 +132,8 @@ function syncCompanionChrome(): void {
 const resizeGrip = document.querySelector<HTMLButtonElement>('#resize-editor')!;
 /** Filled after mutation chrome exists; split open/close runs before those listeners are wired. */
 const paneChrome = { syncMutations: (): void => {} };
+/** Bumped on open/close so a detached close cannot tear down a reopened secondary. */
+let splitCloseGeneration = 0;
 const splitControls = setupSplitPane({
   shell: editorSplit,
   divider: splitDivider,
@@ -147,18 +149,23 @@ const splitControls = setupSplitPane({
     resizeGrip.hidden = open;
     resizeGrip.tabIndex = open ? -1 : 0;
     if (open) {
+      splitCloseGeneration++;
       mirrorCompanion();
       syncCompanionChrome();
       if (draftsInitialized) renderPaneBDrafts();
       paneChrome.syncMutations();
       return;
     }
+    const closeGeneration = ++splitCloseGeneration;
+    const stillClosing = (): boolean => closeGeneration === splitCloseGeneration && !workspace.splitOpen();
     void (async () => {
-      if (!(await releaseSecondarySession())) {
+      const released = await releaseSecondarySession(stillClosing);
+      if (released === 'cancelled') {
         // Keep the split open when the user cancels discarding pane B.
         splitControls.setOpen(true);
         return;
       }
+      if (released === 'aborted' || !stillClosing()) return;
       workspace.setActivePane(PRIMARY_PANE_ID);
       syncCompanionChrome();
       paneChrome.syncMutations();
@@ -512,6 +519,7 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
   {
     canMutate: canMutatePrimary,
     getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionSearch : primarySearch,
+    matchSurfaces: [field, companionField],
   },
 );
 const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
@@ -829,21 +837,26 @@ function updateSaveIndicatorB(): void {
   saveIndicatorB.dataset.state = state;
 }
 /**
- * Flush or confirm-discard the secondary session. Returns false if the user cancelled.
+ * Flush or confirm-discard the secondary session.
+ * `stillWanted` abort checks let a reopen win over a detached close.
  */
-async function releaseSecondarySession(): Promise<boolean> {
+async function releaseSecondarySession(
+  stillWanted: () => boolean = () => true,
+): Promise<'released' | 'cancelled' | 'aborted'> {
   if (!secondary) {
     companionEditor.setReadOnly(true);
     titleEditorB.setReadOnly(true);
     syncCompanionChrome();
-    return true;
+    return 'released';
   }
   clearTimeout(secondary.saveTimer);
   if (secondary.saving) await secondary.saving;
-  if (!secondary) return true;
+  if (!stillWanted()) return 'aborted';
+  if (!secondary) return 'released';
   while (secondary.dirty && autosave.checked && !secondary.editBlock) {
     const result = await persistSecondary();
     if (!result.saved && secondary.saveFailed) break;
+    if (!stillWanted()) return 'aborted';
   }
   if (secondary.dirty && (!autosave.checked || secondary.editBlock || secondary.saveFailed)) {
     if (!await askConfirmChoice({
@@ -856,12 +869,14 @@ async function releaseSecondarySession(): Promise<boolean> {
       returnFocus: companionField,
     })) {
       renderPaneBDrafts();
-      return false;
+      return 'cancelled';
     }
   }
+  if (!stillWanted()) return 'aborted';
+  if (!secondary) return 'released';
   const previous = secondary;
   secondary = undefined;
-  sessionRegistry?.setSecondary(undefined);
+  sessionRegistry.setSecondary(undefined);
   currentJournalSecondary = undefined;
   try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
   void previous.ownership?.release();
@@ -872,7 +887,7 @@ async function releaseSecondarySession(): Promise<boolean> {
   syncCompanionChrome();
   mirrorCompanion(true);
   syncMutationControls();
-  return true;
+  return 'released';
 }
 /**
  * When the primary opens the document already editable in pane B, promote B's
@@ -916,7 +931,7 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
   const promotedBlock = secondary.editBlock;
   secondary.ownership = undefined;
   secondary = undefined;
-  sessionRegistry?.setSecondary(undefined);
+  sessionRegistry.setSecondary(undefined);
   if (ownership) void ownership.release();
   ownership = promotedOwnership;
   editBlock = promotedBlock;
@@ -1049,7 +1064,7 @@ async function openCompanionDocument(id: string): Promise<void> {
     if (companionOpenInFlight) await companionOpenInFlight.catch(() => undefined);
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
     if (id === active.id) {
-      if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
+      if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
       if (generation !== companionOpenGeneration) return;
       mirrorCompanion(true);
       companionWritingPosition.restore(active.id);
@@ -1061,19 +1076,34 @@ async function openCompanionDocument(id: string): Promise<void> {
       ...(secondary ? [{ sessionId: secondary.sessionId, documentId: secondary.draft.id }] : []),
     ]);
     if (represented === 'session-1') {
-      if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
+      if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
       return;
     }
     if (secondary?.draft.id === id) return;
     const next = await getStoredDraft(db!, id);
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    // Primary may have switched to this document while we awaited storage.
+    if (active.id === id) {
+      if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
+      if (generation !== companionOpenGeneration) return;
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
+      return;
+    }
     if (!next || next.revision < 1) {
       announceAction('Could not open that document in the other pane.');
       renderPaneBDrafts();
       return;
     }
-    if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
+    if ((await releaseSecondarySession()) === 'cancelled') { renderPaneBDrafts(); return; }
     if (generation !== companionOpenGeneration || !workspace.splitOpen()) return;
+    if (active.id === id) {
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
+      return;
+    }
     const access = await acquireFor(next.id, held => {
       if (!secondary || secondary.ownership !== held) return;
       secondary.ownership = undefined;
@@ -1084,15 +1114,25 @@ async function openCompanionDocument(id: string): Promise<void> {
       updateSaveIndicatorB();
       syncMutationControls();
     });
-    if (generation !== companionOpenGeneration || !workspace.splitOpen()) {
+    if (generation !== companionOpenGeneration || !workspace.splitOpen() || active.id === id) {
       void access.ownership?.release();
+      if (active.id === id && generation === companionOpenGeneration && workspace.splitOpen()) {
+        mirrorCompanion(true);
+        companionWritingPosition.restore(active.id);
+        renderPaneBDrafts();
+      }
       return;
     }
     let target = next;
     if (access.ownership && db) {
       const fresh = await getStoredDraft(db, next.id);
-      if (generation !== companionOpenGeneration || !workspace.splitOpen()) {
+      if (generation !== companionOpenGeneration || !workspace.splitOpen() || active.id === id) {
         void access.ownership.release();
+        if (active.id === id && generation === companionOpenGeneration && workspace.splitOpen()) {
+          mirrorCompanion(true);
+          companionWritingPosition.restore(active.id);
+          renderPaneBDrafts();
+        }
         return;
       }
       if (!fresh) {
@@ -1101,6 +1141,13 @@ async function openCompanionDocument(id: string): Promise<void> {
         return;
       }
       target = fresh;
+    }
+    if (active.id === target.id) {
+      void access.ownership?.release();
+      mirrorCompanion(true);
+      companionWritingPosition.restore(active.id);
+      renderPaneBDrafts();
+      return;
     }
     companionWritingPosition.save();
     loadingDraft = true;
@@ -1128,7 +1175,7 @@ async function openCompanionDocument(id: string): Promise<void> {
       companionEditor.setReadOnly(true);
       titleEditorB.setReadOnly(true);
     }
-    sessionRegistry?.setSecondary(secondary);
+    sessionRegistry.setSecondary(secondary);
     companionWritingPosition.restore(target.id);
     updateSaveIndicatorB();
     syncCompanionChrome();
