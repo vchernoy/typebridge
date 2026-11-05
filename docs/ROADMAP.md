@@ -22,7 +22,7 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
 | [#48](https://github.com/vchernoy/typebridge/issues/48) | Cross-tab saved-version notifications | Saved/renamed/deleted signals for viewers and notice-only editors landed via [#159](https://github.com/vchernoy/typebridge/issues/159) W3; remaining scope (clean-editor refresh, editor list refresh, other preference signals) stays on #48, do not close it automatically |
 | [#159](https://github.com/vchernoy/typebridge/issues/159) | In-tab split (superseded) | Closed / not planned for further S-slices. W1–W4 kept; S2–S5b split on main is historical until removed. See [ADR 159](adr/159-comparison-window.md) |
-| [#175](https://github.com/vchernoy/typebridge/issues/175) | Movable editor windows in one tab | Replaces #159 split. Iframe windows with tab-style editing/ownership; free layout on desktop, stacked on phone. Step 1 ADR + step 2 window-id sessionStorage: [ADR 175](adr/175-editor-windows.md) |
+| [#175](https://github.com/vchernoy/typebridge/issues/175) | Movable editor windows in one tab | Replaces #159 split. Iframe windows with tab-style editing/ownership; free layout on desktop, stacked on phone. Steps 1–3: ADR, window-id sessionStorage, host page (`/host.html`) + embed mode: [ADR 175](adr/175-editor-windows.md) |
 
 ## Audit and current reliability follow-ups
 

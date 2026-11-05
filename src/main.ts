@@ -54,6 +54,7 @@ import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 import { comparisonViewerHref, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
+import { parseEmbedMode } from './view/embed';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -64,6 +65,9 @@ const requestedViewId = route.kind === 'viewer' ? route.documentId : undefined;
 /** #175 step 2: same-tab iframe instances share sessionStorage — scope keys by window id. */
 const windowId = parseWindowId(window.location.search);
 if (windowId) document.documentElement.dataset.windowId = windowId;
+/** #175 step 3: host page owns Settings panel + update notice; editor runs embedded. */
+const embedded = parseEmbedMode(window.location.search);
+if (embedded) document.documentElement.dataset.embed = '1';
 configureActiveDraftKey(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, windowId));
 const findSessionKey = scopeSessionKey(FIND_KEY, windowId);
 const replaceSessionKey = scopeSessionKey(REPLACE_KEY, windowId);
@@ -3193,7 +3197,8 @@ setupResetSettings({ actions: [
   ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
 ], announce: announceAction });
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// Host page registers the service worker and shows the update notice once (#175 step 3).
+if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(registration => watchForUpdates(registration, {
@@ -3204,4 +3209,14 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
   });
+}
+if (embedded) {
+  const hooks = window as Window & {
+    __typebridgePrepareUpdateReload?: () => Promise<boolean>;
+    __typebridgeReloadAfterUpdate?: () => void;
+    __typebridgeCancelUpdateReload?: () => void;
+  };
+  hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
+  hooks.__typebridgeReloadAfterUpdate = reloadAfterUpdate;
+  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; };
 }

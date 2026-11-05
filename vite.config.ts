@@ -66,4 +66,12 @@ self.addEventListener('fetch', event => {
 export default defineConfig({
   base: BASE,
   plugins: [offlineServiceWorker()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        host: 'host.html',
+      },
+    },
+  },
 });

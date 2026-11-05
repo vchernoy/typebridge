@@ -5,9 +5,13 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   cancelReload: () => void;
   /** sessionStorage key for dismissal (#175 window scoping). */
   dismissedKey?: string;
+  /**
+   * Where to mount the notice (#175 host page). When omitted, insert before
+   * `main > section` as in the standalone editor.
+   */
+  mount?: HTMLElement;
 }): void {
   const workerContainer = navigator.serviceWorker;
-  const workspace = document.querySelector<HTMLElement>('main > section')!;
   const notice = document.createElement('div');
   notice.id = 'update-notice';
   notice.className = 'update-notice';
@@ -22,7 +26,11 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   dismiss.type = 'button';
   dismiss.textContent = 'Not now';
   notice.append(message, reload, dismiss);
-  workspace.before(notice);
+  // Surface frozen while preparing an update reload (editor section or host shell).
+  const workspace = deps.mount
+    ?? document.querySelector<HTMLElement>('main > section')!;
+  if (deps.mount) deps.mount.prepend(notice);
+  else workspace.before(notice);
   const DISMISSED = deps.dismissedKey ?? 'typebridge.updateNotice.dismissed.v1';
   let dismissed = false;
   try { dismissed = sessionStorage.getItem(DISMISSED) === 'yes'; } catch { /* Current-page choice still works. */ }
