@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, openFind, selectDocument, setAutosave } from './settings-helpers';
+import { closeDocuments, documentAction, openDocuments, openFind, selectDocument, setAutosave } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 
 async function openSplit(page: Page): Promise<void> {
@@ -115,6 +115,7 @@ test('pane B pagehide writes a pending snapshot that restores after reload', asy
   await expect(page.locator('#editor')).toBeEnabled();
   await setAutosave(page, true);
   const firstId = await saveNamed(page, 'Echo body', 'Echo');
+  const echoRevision = (await readStoredDocs(page)).find(d => d.id === firstId)!.revision;
   await documentAction(page, '#new-draft');
   await saveNamed(page, 'Foxtrot body', 'Foxtrot');
   await openSplit(page);
@@ -130,11 +131,79 @@ test('pane B pagehide writes a pending snapshot that restores after reload', asy
     return sessionStorage.getItem('typebridge.pendingDraft.paneB.v1');
   });
   expect(pending).toContain('Echo body pending');
+  await page.addInitScript(() => {
+    (window as Window & { __typebridgeDelayPendingSecondaryMs?: number }).__typebridgeDelayPendingSecondaryMs = 1200;
+  });
   await page.reload();
-  await expect(page.locator('#editor')).toBeEnabled();
+  // Boot keeps controls disabled until pending-B restore finishes.
+  await expect(page.locator('#editor')).toBeDisabled();
+  await expect(page.locator('#pane-b-drafts')).toBeDisabled();
+  await expect(page.locator('#editor')).toBeEnabled({ timeout: 8_000 });
   await expect(page.locator('#editor-b')).toBeVisible();
   await expect(page.locator('#editor-b')).toHaveValue('Echo body pending');
   await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+  expect(echoRevision).toBeGreaterThanOrEqual(1);
+});
+
+test('cancelling promotion reschedules pane B autosave', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Romeo body', 'Romeo');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Sierra body', 'Sierra');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    (window as unknown as { restorePut: () => void }).restorePut = () => { IDBObjectStore.prototype.put = put; };
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  });
+  await page.locator('#editor').press('End');
+  await page.locator('#editor').pressSequentially(' boom');
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' dirty');
+  await openDocuments(page);
+  await page.locator('#drafts').selectOption(firstId);
+  const discard = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+  await expect(discard).toBeVisible();
+  await discard.getByRole('button', { name: 'Keep editing' }).click();
+  await closeDocuments(page);
+  await expect(page.locator('#editor-b')).toHaveValue('Romeo body dirty');
+  await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+});
+
+test('ownership loss after promoting pane B freezes the primary immediately', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Tango body', 'Tango');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Uniform body', 'Uniform');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' kept');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+  await selectDocument(page, firstId);
+  await expect(page.locator('#editor')).toHaveValue('Tango body kept');
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
+  const stealer = await context.newPage();
+  await stealer.goto('/icon-192.png');
+  await stealer.evaluate(name => new Promise<void>(resolve => {
+    void navigator.locks.request(name, { steal: true }, () => {
+      resolve();
+      return new Promise(() => undefined);
+    });
+  }), `typebridge-edit-owner:${firstId}`);
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'reader');
+  await expect(page.locator('#editor')).toHaveJSProperty('readOnly', true);
+  await expect(page.locator('#ownership-notice')).toBeVisible();
+  await expect(page.locator('#editor')).toHaveValue('Tango body kept');
 });
 
 test('Autosave-off pane B asks before discarding on close split', async ({ page }) => {
