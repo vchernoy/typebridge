@@ -34,6 +34,10 @@ export function setupKeyboardShortcuts(): void {
       ['Next / previous match in Find', `${label('nextMatch')} / ${label('previousMatch')}`],
       ['Resize grip', 'arrow keys'],
     ];
+    // #175 step 11: host window cycle is only meaningful inside an embedded editor.
+    if (document.documentElement.dataset.embed === '1') {
+      rows.push(['Next editor window', 'F6']);
+    }
     const content = document.createElement('div');
     const list = document.createElement('dl');
     list.className = 'shortcut-list';
