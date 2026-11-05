@@ -549,3 +549,51 @@ test('conflict-copy creation syncs workspace document identity', async ({ page }
   expect(afterId).not.toBe(beforeId);
   await expect.poll(async () => (await readStoredDocs(page)).some(row => row.id === afterId && row.text === 'local conflict edit')).toBe(true);
 });
+
+test('Delete after session-identity bump during confirm is cancelled (#159 S5c)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await page.locator('#editor').fill('keep this document');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const before = await readStoredDocs(page);
+  expect(before).toHaveLength(1);
+  await documentAction(page, '#delete-draft');
+  const dialog = page.getByRole('dialog', { name: 'Delete document?' });
+  await expect(dialog).toBeVisible();
+  await page.evaluate(() => {
+    const bump = (window as Window & { __typebridgeBumpSessionGeneration?: () => number }).__typebridgeBumpSessionGeneration;
+    if (!bump) throw new Error('missing session bump hook');
+    bump();
+  });
+  await dialog.getByRole('button', { name: 'Delete document' }).click();
+  await expect(page.locator('#status')).toContainText('Delete cancelled');
+  await expect.poll(async () => (await readStoredDocs(page)).length).toBe(1);
+  await expect(page.locator('#editor')).toHaveValue('keep this document');
+});
+
+test('Import after session-identity bump during confirm is cancelled (#159 S5c)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await page.locator('#editor').fill('stay put');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const before = await readStoredDocs(page);
+  expect(before).toHaveLength(1);
+  await page.locator('#import-file').setInputFiles({
+    name: 'incoming.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('Should not import'),
+  });
+  const dialog = page.getByRole('dialog', { name: 'Import document?' });
+  await expect(dialog).toBeVisible();
+  await page.evaluate(() => {
+    const bump = (window as Window & { __typebridgeBumpSessionGeneration?: () => number }).__typebridgeBumpSessionGeneration;
+    if (!bump) throw new Error('missing session bump hook');
+    bump();
+  });
+  await dialog.getByRole('button', { name: 'Import document' }).click();
+  await expect(page.locator('#status')).toContainText('Import cancelled');
+  await expect.poll(async () => (await readStoredDocs(page)).length).toBe(1);
+  await expect(page.locator('#editor')).toHaveValue('stay put');
+});

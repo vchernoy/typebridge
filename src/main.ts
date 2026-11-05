@@ -90,6 +90,9 @@ const workspace = createSinglePaneWorkspace({
   paneSurface: field,
   companionSurface: companionField,
 });
+// E2E hook: bump session identity while a confirm dialog is open (#159 S5c).
+(window as Window & { __typebridgeBumpSessionGeneration?: () => number }).__typebridgeBumpSessionGeneration =
+  () => workspace.bumpSessionGeneration();
 
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
@@ -1110,6 +1113,11 @@ async function releaseSecondarySession(
     if (!stillWanted()) return 'aborted';
   }
   if (secondary.dirty && (!autosave.checked || secondary.editBlock || secondary.saveFailed)) {
+    const discardToken = {
+      id: secondary.draft.id,
+      contentRevision: secondary.contentRevision,
+      sessionGeneration: secondary.sessionGeneration,
+    };
     if (!await askConfirmChoice({
       title: 'Discard unsaved changes in the other pane?',
       message: secondary.editBlock
@@ -1119,6 +1127,15 @@ async function releaseSecondarySession(
       cancelLabel: 'Keep editing',
       returnFocus: companionField,
     })) {
+      renderPaneBDrafts();
+      return 'cancelled';
+    }
+    // Stale confirm must not drop a pane that changed identity or content during the dialog.
+    if (!secondary
+      || secondary.draft.id !== discardToken.id
+      || secondary.contentRevision !== discardToken.contentRevision
+      || secondary.sessionGeneration !== discardToken.sessionGeneration) {
+      announceAction('Discard cancelled — the other pane changed while the dialog was open.');
       renderPaneBDrafts();
       return 'cancelled';
     }
@@ -1185,6 +1202,8 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
     const result = await persist();
     if (secondary !== promoting) return abortPromote();
     if (!result.saved && saveFailed) {
+      const persistToken = workspace.capturePersistGeneration();
+      const contentAtPrompt = workspace.contentRevision();
       if (!await askConfirmChoice({
         title: 'Discard unsaved changes?',
         message: 'Copy or export unsaved changes first to keep them.',
@@ -1192,11 +1211,20 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
         cancelLabel: 'Keep editing',
         returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
       })) return abortPromote();
+      if (!sessionPersistStillCurrent(persistToken, {
+        sessionId: workspace.sessionId,
+        sessionGeneration: workspace.sessionGeneration(),
+      }) || workspace.contentRevision() !== contentAtPrompt) {
+        announceAction('Discard cancelled — the document changed while the dialog was open.');
+        return abortPromote();
+      }
       if (secondary !== promoting) return abortPromote();
       break;
     }
   }
   if (workspace.dirty() && (!autosave.checked || editBlock)) {
+    const persistToken = workspace.capturePersistGeneration();
+    const contentAtPrompt = workspace.contentRevision();
     if (!await askConfirmChoice({
       title: 'Discard unsaved changes?',
       message: editBlock
@@ -1206,6 +1234,13 @@ async function promoteSecondaryToPrimary(): Promise<boolean> {
       cancelLabel: 'Keep editing',
       returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
     })) return abortPromote();
+    if (!sessionPersistStillCurrent(persistToken, {
+      sessionId: workspace.sessionId,
+      sessionGeneration: workspace.sessionGeneration(),
+    }) || workspace.contentRevision() !== contentAtPrompt) {
+      announceAction('Discard cancelled — the document changed while the dialog was open.');
+      return abortPromote();
+    }
     if (secondary !== promoting) return abortPromote();
   }
   if (secondary !== promoting) return abortPromote();
@@ -2258,7 +2293,17 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   if (readOnlyNow() || transitioning) return;
   clearTimeout(saveTimer);
   const requestedId = active.id;
+  const persistToken = workspace.capturePersistGeneration();
   if (!await askConfirmChoice({ title: 'Delete document?', message: 'Permanently delete this saved document?', confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
+    if (workspace.dirty() && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
+    return;
+  }
+  // Modal confirm can still race programmatic session identity changes (tests / future hooks).
+  if (!sessionPersistStillCurrent(persistToken, {
+    sessionId: workspace.sessionId,
+    sessionGeneration: workspace.sessionGeneration(),
+  }) || active.id !== requestedId) {
+    announceAction('Delete cancelled — the document changed while the dialog was open.');
     if (workspace.dirty() && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
     return;
   }
@@ -3072,7 +3117,15 @@ importFile.addEventListener('change', async () => {
       title = parsed.draft.title;
       text = parsed.draft.text;
     } else if (!/\.txt$/i.test(file.name)) throw new Error('Choose a .txt or .typebridge.json file');
+    const persistToken = workspace.capturePersistGeneration();
     if (!await askConfirmChoice({ title: 'Import document?', message: 'Import as a new document? Your current document will be kept.', confirmLabel: 'Import document', cancelLabel: 'Cancel import', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) return;
+    if (!sessionPersistStillCurrent(persistToken, {
+      sessionId: workspace.sessionId,
+      sessionGeneration: workspace.sessionGeneration(),
+    })) {
+      announceAction('Import cancelled — the document changed while the dialog was open.');
+      return;
+    }
     const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported document' };
     // Save even when autosave is off: importing is an explicit save action.
     if (!db) throw new Error('browser storage cannot be used');
@@ -3104,12 +3157,29 @@ async function prepareUpdateReload(): Promise<boolean> {
   privateReloadChoiceB = undefined;
   const secondaryDirty = !!secondary?.dirty;
   if ((workspace.dirty() || secondaryDirty) && !autosave.checked) {
+    const persistToken = workspace.capturePersistGeneration();
+    const contentAtPrompt = workspace.contentRevision();
+    const primaryId = active.id;
+    const secondaryAtPrompt = secondary
+      ? { id: secondary.draft.id, contentRevision: secondary.contentRevision }
+      : undefined;
     const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#update-reload')! });
-    if (discard) {
-      privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
-      if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
+    if (!discard) return false;
+    if (!sessionPersistStillCurrent(persistToken, {
+      sessionId: workspace.sessionId,
+      sessionGeneration: workspace.sessionGeneration(),
+    }) || workspace.contentRevision() !== contentAtPrompt || active.id !== primaryId
+      || (!!secondaryAtPrompt !== !!secondary)
+      || (secondary && secondaryAtPrompt && (
+        secondary.draft.id !== secondaryAtPrompt.id
+        || secondary.contentRevision !== secondaryAtPrompt.contentRevision
+      ))) {
+      announceAction('Reload cancelled — a document changed while the dialog was open.');
+      return false;
     }
-    return discard;
+    privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
+    if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
+    return true;
   }
   savePending();
   savePendingSecondary();
