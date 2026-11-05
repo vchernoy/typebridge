@@ -110,14 +110,9 @@ test('same-tab Autosave-off handoff carries unsaved text in memory', async ({ pa
   test.setTimeout(90_000);
   const { alpha, beta, docId } = await openSharedDocument(page);
 
+  // Turn Autosave off only in alpha after both windows are open — beta keeps its
+  // startup Autosave-on checkbox; the receiver must still not persist private text.
   await setAutosave(alpha as unknown as Page, false);
-  // Beta is read-only so its Autosave control is disabled; reload so it reads the shared preference.
-  await reloadFrame(page, '#win-beta');
-  await waitReady(beta);
-  await openDocMenu(beta);
-  await beta.locator('#drafts').selectOption(docId);
-  await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
-
   await alpha.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
     el.value = `${el.value} private`;
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -128,7 +123,59 @@ test('same-tab Autosave-off handoff carries unsaved text in memory', async ({ pa
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
   await expect(beta.locator('#editor')).toHaveValue('Shared handoff text private');
   await expect(beta.locator('#save-indicator')).toHaveText('Not saved');
-  // Transfer must not write the private text for the handoff itself.
+  await page.waitForTimeout(500);
   const after = await readStoredDocs(page);
   expect(after.find(row => row.id === docId)?.text).toBe('Shared handoff text');
+});
+
+test('switching documents during a pending handoff cancels takeover', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta, docId } = await openSharedDocument(page);
+
+  await page.locator('#win-beta').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1_500;
+  });
+
+  await beta.locator('#editor').click();
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader', { timeout: 5_000 });
+
+  await openDocMenu(beta);
+  await beta.locator('#new-draft').click();
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('');
+  // Shared document must not receive beta's editing role after the cancel.
+  await expect.poll(async () => {
+    const docs = await readStoredDocs(page);
+    return docs.find(row => row.id === docId)?.text;
+  }).toBe('Shared handoff text');
+});
+
+test('keys typed during delayed acquire are all kept', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { beta } = await openSharedDocument(page);
+
+  await page.locator('#win-beta').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800;
+  });
+
+  await beta.locator('#editor').click();
+  // Digits are not transliterated — asserts buffering through acquire without mode toggles.
+  await beta.locator('#editor').pressSequentially('123');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff text123');
+});
+
+test('Кириллица transliterates keys buffered during handoff', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { beta } = await openSharedDocument(page);
+
+  await expect(beta.getByRole('switch', { name: 'Кириллица' })).toBeChecked();
+  await page.locator('#win-beta').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800;
+  });
+
+  await beta.locator('#editor').click();
+  await beta.locator('#editor').pressSequentially('privet');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff textпривет');
 });
