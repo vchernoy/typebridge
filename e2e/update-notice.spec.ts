@@ -99,6 +99,30 @@ for (const discard of [false, true]) {
   });
 }
 
+test('privacy update reload after content bump during confirm is cancelled (#159 S5c)', async ({ page }) => {
+  await waitingUpdate(page);
+  await page.goto('/');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Saved before privacy');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await setAutosave(page, false);
+  await editor.fill('Private unsaved edit');
+  await page.locator('#update-reload').click();
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await expect(dialog).toBeVisible();
+  await page.evaluate(() => {
+    const bump = (window as Window & { __typebridgeBumpContentRevision?: () => number }).__typebridgeBumpContentRevision;
+    if (!bump) throw new Error('missing content bump hook');
+    bump();
+  });
+  await dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click();
+  await expect(page.locator('#status')).toContainText('Reload cancelled');
+  await expect(editor).toHaveValue('Private unsaved edit');
+  await expect(page.locator('#update-reload')).toBeEnabled();
+  expect(await page.evaluate(() => sessionStorage.getItem('test.update.activated'))).toBeNull();
+});
+
 test('failed save and failed reload backup block update reload (#137 U9)', async ({ page }) => {
   await waitingUpdate(page);
   await page.goto('/');

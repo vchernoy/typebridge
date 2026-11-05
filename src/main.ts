@@ -90,9 +90,6 @@ const workspace = createSinglePaneWorkspace({
   paneSurface: field,
   companionSurface: companionField,
 });
-// E2E hook: bump session identity while a confirm dialog is open (#159 S5c).
-(window as Window & { __typebridgeBumpSessionGeneration?: () => number }).__typebridgeBumpSessionGeneration =
-  () => workspace.bumpSessionGeneration();
 
 // Escape layers must listen before Focus so editor Escape closes Settings/Find first (#132).
 installEscapeLayers();
@@ -126,6 +123,21 @@ if (viewMode) {
 let secondary: BoundSession | undefined;
 /** Guard: setupSplitPane may reopen before draft locals exist. */
 let draftsInitialized = false;
+
+// E2E hooks: mutate generations while a confirm dialog is open (#159 S5c).
+type S5cTestHooks = {
+  __typebridgeBumpSessionGeneration?: () => number;
+  __typebridgeBumpContentRevision?: () => number;
+  __typebridgeBumpSecondaryContentRevision?: () => number | undefined;
+};
+const s5cHooks = window as Window & S5cTestHooks;
+s5cHooks.__typebridgeBumpSessionGeneration = () => workspace.bumpSessionGeneration();
+s5cHooks.__typebridgeBumpContentRevision = () => workspace.bumpContentRevision();
+s5cHooks.__typebridgeBumpSecondaryContentRevision = () => {
+  if (!secondary) return undefined;
+  secondary.contentRevision += 1;
+  return secondary.contentRevision;
+};
 
 function dualDocumentSplit(): boolean {
   return !!secondary && secondary.draft.id !== active.id && workspace.splitOpen();

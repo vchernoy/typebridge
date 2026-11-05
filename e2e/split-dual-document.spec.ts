@@ -382,6 +382,67 @@ test('Autosave-off pane B asks before discarding on close split', async ({ page 
   await expect(page.locator('#editor-b')).toHaveValue('Hotel body private');
 });
 
+test('companion discard after content bump during confirm is cancelled (#159 S5c)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Hotel body', 'HotelKeep');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'India body', 'IndiaKeep');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await setAutosave(page, false, 'keep');
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' private');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Not saved');
+  await documentAction(page, '#toggle-split');
+  const discard = page.getByRole('dialog', { name: 'Discard unsaved changes in the other pane?' });
+  await expect(discard).toBeVisible();
+  await page.evaluate(() => {
+    const bump = (window as Window & { __typebridgeBumpSecondaryContentRevision?: () => number | undefined })
+      .__typebridgeBumpSecondaryContentRevision;
+    if (!bump || bump() === undefined) throw new Error('missing secondary content bump hook');
+  });
+  await discard.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.locator('#status')).toContainText('Discard cancelled');
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveValue('Hotel body private');
+});
+
+test('promote discard after content bump during confirm is cancelled (#159 S5c)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Alpha original', 'AlphaPromote');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Beta original', 'BetaPromote');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await expect(page.locator('#editor-b')).toHaveValue('Alpha original');
+  await setAutosave(page, false, 'keep');
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor').focus();
+  await page.locator('#editor').press('End');
+  await page.locator('#editor').pressSequentially(' private');
+  await expect(page.locator('#editor')).toHaveValue('Beta original private');
+  await expect(page.locator('#drafts')).toContainText(/unsaved/i);
+  // Avoid selectDocument's closeDocuments wait while the promote confirm is open.
+  await openDocuments(page);
+  await page.locator('#drafts').selectOption(firstId);
+  const discard = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+  await expect(discard).toBeVisible();
+  await page.evaluate(() => {
+    const bump = (window as Window & { __typebridgeBumpContentRevision?: () => number }).__typebridgeBumpContentRevision;
+    if (!bump) throw new Error('missing content bump hook');
+    bump();
+  });
+  await discard.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.locator('#status')).toContainText('Discard cancelled');
+  await expect(page.locator('#editor')).toHaveValue('Beta original private');
+  await expect(page.locator('#editor-b')).toHaveValue('Alpha original');
+});
+
 test('closing split retargets Replace away from pane B during teardown', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();

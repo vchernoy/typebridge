@@ -466,7 +466,7 @@ Shipped in this PR: broader post-confirm session-token revalidation for delayed 
 - **Companion discard (`releaseSecondarySession`):** revalidate secondary id + contentRevision + sessionGeneration after confirm.
 - **Promote-to-primary discard prompts:** same primary persist/content checks as `switchDraft`.
 - **Privacy update reload:** revalidate primary (+ secondary when present) before arming discard-and-reload.
-- **E2E hook:** `__typebridgeBumpSessionGeneration` for confirm-race coverage.
+- **E2E hooks:** `__typebridgeBumpSessionGeneration`, `__typebridgeBumpContentRevision`, `__typebridgeBumpSecondaryContentRevision` cover Delete/Import, companion discard, promote discard, and privacy update-reload stale confirms.
 - **Still deferred:** full primary DocumentSession extraction (S2); New/Import targeting pane B; any remaining delayed paths beyond this slice; real-device/IME/AT (S6).
 
 ## S6 implementation notes
