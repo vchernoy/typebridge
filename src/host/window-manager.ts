@@ -669,6 +669,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         applyAllGeometry();
         applyModeChrome();
         syncEmbeddedFocusChrome(true);
+        persist();
         return;
       }
       if (!hostFocus) return;
