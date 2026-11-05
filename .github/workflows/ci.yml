@@ -90,6 +90,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # capture-ui.mjs builds the base worktree itself but serves the "after" pages from ./dist.
+      - name: Build head revision
+        run: npm run build
       - name: Capture before and after UI
         env:
           VISUAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
