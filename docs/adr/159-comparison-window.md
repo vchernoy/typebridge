@@ -1,6 +1,6 @@
 # ADR: Split workspace and editing ownership (#159)
 
-Status: **Clarified goal — two document panes in one browser tab** (maintainer, Nov 2026). **W1–W4 foundation preserved** (routing, separate-window read-only companion, saved-version signals, per-document Web Lock + fence). **S1–S5b on main as merged slices** — S1 ADR; S2 workspace shell (**partial** — primary persist still in `main.ts`); S3 same-doc live split; S4 dual-document panes; S5a local Edit in this pane; S5b versionchange-B parity + switch-discard generation guard (not every delayed toolbar path). **S6 evidence packaging** (#172) records automated matrix limits in [`docs/evidence/159/`](../evidence/159/) — **not** full S6 acceptance (no real-device/IME/AT/production smoke). **Cross-window Edit here (old W5/W6) deferred** — PR [#164](https://github.com/vchernoy/typebridge/pull/164) is draft and must not merge for that goal; its branch and review history (including the stale requester/`viewGeneration` finding) stay recorded. Revised sequential plan **S1–S6** below. Does **not** close #159, #48, #40, #37 or #7.
+Status: **Clarified goal — two document panes in one browser tab** (maintainer, Nov 2026). **W1–W4 foundation preserved** (routing, separate-window read-only companion, saved-version signals, per-document Web Lock + fence). **S1–S5b on main as merged slices** — S1 ADR; S2 workspace shell (**partial** — primary persist still in `main.ts`); S3 same-doc live split; S4 dual-document panes; S5a local Edit in this pane; S5b versionchange-B parity + switch-discard generation guard (not every delayed toolbar path). **S5c (this PR)** adds broader Delete/Import/companion/promote/reload confirm revalidation — still not full S5 / not every delayed path. **S6 evidence packaging** (#172) records automated matrix limits in [`docs/evidence/159/`](../evidence/159/) — **not** full S6 acceptance (no real-device/IME/AT/production smoke). **Cross-window Edit here (old W5/W6) deferred** — PR [#164](https://github.com/vchernoy/typebridge/pull/164) is draft and must not merge for that goal; its branch and review history (including the stale requester/`viewGeneration` finding) stay recorded. Revised sequential plan **S1–S6** below. Does **not** close #159, #48, #40, #37 or #7.
 
 ## Context (audit of current code — post W1–W4)
 
@@ -312,7 +312,8 @@ Status: This saved document is no longer available.
 | **S3** (done #167) | Split MVP: editable + same-doc live RO pane | Live mirror, no duplicate saves, divider a11y |
 | **S4** (done #169) | Two different editable documents | Independent sessions, locks, Undo, switch/close; dual unload/pending/reconcile |
 | **S5a** (done #170) | Local Edit in this pane | Transfer, IME/transition/open-busy guards, close parking |
-| **S5b** (partial #171) | Lifecycle hardening (narrow) | Versionchange B parity; switch-discard `sessionPersistStillCurrent` revalidation. Broader delayed-command `CommandGeneration` coverage still open |
+| **S5b** (partial #171) | Lifecycle hardening (narrow) | Versionchange B parity; switch-discard `sessionPersistStillCurrent` revalidation. Broader delayed-command coverage continued in S5c |
+| **S5c** (this PR) | Broader delayed-command guards | Delete/Import/companion-discard/promote-discard/update-reload revalidate session tokens after confirm — not full S5 / not S2 done |
 | **S6** (partial #172) | Verification packaging | Split Playwright matrix note + layout screenshots + explicit non-claims. Full S6 (real device/IME/AT/production) still open |
 
 Playwright: Chromium, Firefox, WebKit. Multi-page tests remain for W2–W4 cross-window behavior; S3–S5 add in-tab multi-pane coverage. Real devices / IME / AT = manual evidence only.
@@ -448,7 +449,18 @@ Shipped in #171: **narrow** lifecycle hardening after S5a — not full S5 comple
 - **B save indicator / blocked-B clear:** interrupted autosave and storage-upgrade paths from #171.
 - **Switch discard:** revalidates `sessionPersistStillCurrent` + content revision after the discard dialog so a mid-dialog document-identity change cannot silently drop the wrong session.
 - **Not claimed in #171:** generation guards on every remaining delayed toolbar/document path (Clear already guarded in S5a; broader Convert/Replace/Import/Delete/etc. revalidation remains open).
-- **Still deferred:** full primary DocumentSession extraction (S2); New/Import targeting pane B; real-device/IME/AT (S6).
+- **Still deferred after S5b:** full primary DocumentSession extraction (S2); New/Import targeting pane B; real-device/IME/AT (S6). S5c covers a subset of the delayed-command gap.
+
+## S5c implementation notes
+
+Shipped in this PR: broader post-confirm session-token revalidation for delayed document commands — **not** full S5 completion and **not** S2 extraction.
+
+- **Delete document / Import:** capture `SessionPersistGeneration` before confirm; cancel with status if session identity changed mid-dialog.
+- **Companion discard (`releaseSecondarySession`):** revalidate secondary id + contentRevision + sessionGeneration after confirm.
+- **Promote-to-primary discard prompts:** same primary persist/content checks as `switchDraft`.
+- **Privacy update reload:** revalidate primary (+ secondary when present) before arming discard-and-reload.
+- **E2E hooks:** `__typebridgeBumpSessionGeneration`, `__typebridgeBumpContentRevision`, `__typebridgeBumpSecondaryContentRevision` cover Delete/Import, companion discard, promote discard, and privacy update-reload stale confirms.
+- **Still deferred:** full primary DocumentSession extraction (S2); New/Import targeting pane B; any remaining delayed paths beyond this slice; real-device/IME/AT (S6).
 
 ## S6 implementation notes
 
@@ -458,7 +470,7 @@ Merged in #172 as **evidence packaging only** — not full S6 acceptance. No int
 - **Screenshots:** light/dark desktop (1280×800) and narrow stacked (390×844) under [`docs/evidence/159/`](../evidence/159/); capture helper `scripts/capture-159-evidence.mjs` (synthetic Chromium viewports).
 - **Docs:** ADR/ROADMAP/ARCHITECTURE/UI pointed at evidence; wording must not imply S2 or full S5 completion.
 - **Explicit non-claims:** no real phone/tablet, production Pages smoke, real IME, or screen-reader session. See the evidence README. Do not mark #11 / production-verified shipping from CI alone.
-- **Remaining on #159:** broader delayed-command guards; S2 primary pipeline extraction; New/Import → pane B; full S6 manual evidence; deferred #164; carry-forwards (#48 list refresh, W4 BFCache notes) unless separately verified.
+- **Remaining on #159:** S2 primary pipeline extraction; New/Import → pane B; full S6 manual evidence; deferred #164; carry-forwards (#48 list refresh, W4 BFCache notes) unless separately verified. S5c addresses the Delete/Import/companion/promote/reload confirm subset of delayed-command guards.
 
 ## Implementation notes for later work
 
