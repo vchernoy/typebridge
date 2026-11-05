@@ -699,3 +699,42 @@ test('pane B follows foreign saves and can reclaim ownership', async ({ page, co
   }).toBe(false);
   await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
 });
+
+test('storage upgrade keeps pane B editable in memory for copy/export', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await setAutosave(page, true);
+  const primaryId = await saveNamed(page, 'Primary body', 'Primary');
+  await documentAction(page, '#new-draft');
+  const companionId = await saveNamed(page, 'Companion body', 'Companion');
+  expect(primaryId).not.toBe(companionId);
+
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(primaryId);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#draft-title-b')).toHaveValue('Primary');
+  await page.locator('#editor-b').evaluate(el => {
+    const node = el as HTMLTextAreaElement;
+    const end = node.value.length;
+    node.setSelectionRange(end, end);
+  });
+  await page.locator('#editor-b').pressSequentially(' unsaved');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saving…');
+
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      IDBObjectStore.prototype.put = put;
+      const db = this.transaction.db;
+      const result = put.apply(this, args);
+      db.onversionchange?.call(db, new IDBVersionChangeEvent('versionchange', { oldVersion: 2, newVersion: 3 }));
+      return result;
+    };
+  });
+  await page.locator('#editor').pressSequentially('!');
+  await expect(page.locator('#status')).toContainText('Storage was upgraded in another tab');
+  await expect(page.locator('#editor')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await expect(page.locator('#editor-b')).toHaveValue('Primary body unsaved');
+});

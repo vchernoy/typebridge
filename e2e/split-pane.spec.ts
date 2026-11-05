@@ -341,6 +341,26 @@ test('closing split after ownership loss still parks history on the primary', as
   await expect(page.locator('#editor')).toHaveAttribute('data-pane-role', 'readonly');
 });
 
+test('Clear after Edit in this pane during confirm is cancelled', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('switch', { name: 'Кириллица' }).uncheck();
+  await page.locator('#editor').fill('do not clear');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.locator('#more-open').click();
+  await page.locator('#clear').click();
+  const dialog = page.getByRole('dialog', { name: 'Clear text?' });
+  await expect(dialog).toBeVisible();
+  // Confirm makes the workspace inert; dispatch click so the transfer still runs.
+  await page.locator('#edit-in-pane-b').dispatchEvent('click');
+  await expect(page.locator('#editor-b')).toHaveAttribute('data-pane-role', 'editable');
+  await dialog.getByRole('button', { name: 'Clear text' }).click();
+  await expect(page.locator('#status')).toContainText('Clear cancelled');
+  await expect(page.locator('#editor-b')).toHaveValue('do not clear');
+  await expect(page.locator('#editor')).toHaveValue('do not clear');
+});
+
 test('Edit in this pane on a clean saved document does not mark dirty or commit', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
