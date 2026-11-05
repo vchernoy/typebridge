@@ -1,16 +1,21 @@
 /**
  * Same-tab focus handoff protocol for #175 step 4.
  * Metadata may travel on BroadcastChannel; unsaved text/title/history never does —
- * same-tab transfer uses in-memory postMessage / same-origin frame calls only.
+ * same-tab transfer uses in-memory same-origin frame calls only.
+ *
+ * Same-tab vs cross-tab is decided by the transport: a direct frame call is same-tab;
+ * every BroadcastChannel message is cross-tab (sessionStorage tokens are not used —
+ * duplicate tabs clone them).
  */
 
 import { isDocumentId } from './route';
 import { isWindowId, type WindowId } from './window-id';
 
 export const HANDOFF_CHANNEL = 'typebridge-handoff.v1';
-export const TAB_TOKEN_KEY = 'typebridge.tabToken.v1';
-/** How long a requester waits for a cooperative yield before stealing a suspended lock. */
+/** How long a requester waits for a cooperative yield before offering Edit here (no auto-steal). */
 export const HANDOFF_YIELD_TIMEOUT_MS = 2_000;
+/** How long a parked owner waits for takeover confirmation before recovering its text. */
+export const HANDOFF_CONFIRM_TIMEOUT_MS = 5_000;
 
 export type HandoffSnapshot = {
   text: string;
@@ -23,7 +28,6 @@ export type HandoffSnapshot = {
 export type HandoffRequestMessage = {
   v: 1;
   type: 'handoff-request';
-  tabToken: string;
   documentId: string;
   fromWindowId: WindowId | '';
   fromInstanceId: string;
@@ -34,24 +38,29 @@ export type HandoffRequestMessage = {
 export type HandoffReleasedMessage = {
   v: 1;
   type: 'handoff-released';
-  tabToken: string;
   documentId: string;
   toInstanceId: string;
   requestId: string;
   at: number;
-  /** Present only on same-tab in-memory routes — never set on BroadcastChannel. */
-  snapshot?: HandoffSnapshot;
 };
 
 export type HandoffRefusedMessage = {
   v: 1;
   type: 'handoff-refused';
-  tabToken: string;
   documentId: string;
   toInstanceId: string;
   requestId: string;
   at: number;
   reason: HandoffRefuseReason;
+};
+
+export type HandoffCompleteMessage = {
+  v: 1;
+  type: 'handoff-complete';
+  documentId: string;
+  requestId: string;
+  ok: boolean;
+  at: number;
 };
 
 export type HandoffRefuseReason =
@@ -60,12 +69,17 @@ export type HandoffRefuseReason =
   | 'private'
   | 'saving'
   | 'save-failed'
-  | 'cross-tab-private';
+  | 'cross-tab-private'
+  | 'unresponsive';
 
-export type HandoffMessage = HandoffRequestMessage | HandoffReleasedMessage | HandoffRefusedMessage;
+export type HandoffMessage =
+  | HandoffRequestMessage
+  | HandoffReleasedMessage
+  | HandoffRefusedMessage
+  | HandoffCompleteMessage;
 
 const REFUSE_REASONS = new Set<HandoffRefuseReason>([
-  'ime', 'busy', 'private', 'saving', 'save-failed', 'cross-tab-private',
+  'ime', 'busy', 'private', 'saving', 'save-failed', 'cross-tab-private', 'unresponsive',
 ]);
 
 function isFiniteNumber(value: unknown): value is number {
@@ -78,7 +92,6 @@ export function parseHandoffMessage(value: unknown): HandoffMessage | undefined 
   const record = value as Record<string, unknown>;
   if (record.v !== 1) return undefined;
   if (typeof record.type !== 'string') return undefined;
-  if (typeof record.tabToken !== 'string' || !record.tabToken) return undefined;
   if (typeof record.documentId !== 'string' || !isDocumentId(record.documentId)) return undefined;
   if (typeof record.requestId !== 'string' || !record.requestId) return undefined;
   if (!isFiniteNumber(record.at)) return undefined;
@@ -90,7 +103,6 @@ export function parseHandoffMessage(value: unknown): HandoffMessage | undefined 
     return {
       v: 1,
       type: 'handoff-request',
-      tabToken: record.tabToken,
       documentId: record.documentId,
       fromWindowId: (fromWindowId || '') as WindowId | '',
       fromInstanceId: record.fromInstanceId,
@@ -104,13 +116,10 @@ export function parseHandoffMessage(value: unknown): HandoffMessage | undefined 
     return {
       v: 1,
       type: 'handoff-released',
-      tabToken: record.tabToken,
       documentId: record.documentId,
       toInstanceId: record.toInstanceId,
       requestId: record.requestId,
       at: record.at,
-      // snapshot is never accepted from untrusted BroadcastChannel parsing callers —
-      // they must strip it; same-origin frame calls may attach it after parse.
     };
   }
 
@@ -122,7 +131,6 @@ export function parseHandoffMessage(value: unknown): HandoffMessage | undefined 
     return {
       v: 1,
       type: 'handoff-refused',
-      tabToken: record.tabToken,
       documentId: record.documentId,
       toInstanceId: record.toInstanceId,
       requestId: record.requestId,
@@ -131,34 +139,22 @@ export function parseHandoffMessage(value: unknown): HandoffMessage | undefined 
     };
   }
 
+  if (record.type === 'handoff-complete') {
+    if (typeof record.ok !== 'boolean') return undefined;
+    return {
+      v: 1,
+      type: 'handoff-complete',
+      documentId: record.documentId,
+      requestId: record.requestId,
+      ok: record.ok,
+      at: record.at,
+    };
+  }
+
   return undefined;
 }
 
-/** Strip any accidental text payload before BroadcastChannel.postMessage. */
-export function metadataOnlyHandoff(message: HandoffMessage): HandoffMessage {
-  if (message.type !== 'handoff-released') return message;
-  const { snapshot: _ignored, ...meta } = message;
-  return meta;
-}
-
-/** Shared by every same-origin iframe in this tab (sessionStorage is per-tab). */
-export function ensureTabToken(storage: Storage = sessionStorage): string {
-  try {
-    const existing = storage.getItem(TAB_TOKEN_KEY);
-    if (existing && /^[a-z0-9-]{8,64}$/i.test(existing)) return existing;
-    const token = crypto.randomUUID();
-    storage.setItem(TAB_TOKEN_KEY, token);
-    return token;
-  } catch {
-    return crypto.randomUUID();
-  }
-}
-
-export function sameTab(a: string, b: string): boolean {
-  return a.length > 0 && a === b;
-}
-
-/** Owner-side gate for automatic same-tab yield (no dialog). */
+/** Owner-side gate. `allowPrivateTransfer` is true only for same-origin (same-tab) frame calls. */
 export function ownerYieldBlock(input: {
   isOwner: boolean;
   composing: boolean;
@@ -167,7 +163,7 @@ export function ownerYieldBlock(input: {
   saveFailed: boolean;
   dirty: boolean;
   autosaveOn: boolean;
-  sameTab: boolean;
+  allowPrivateTransfer: boolean;
 }): HandoffRefuseReason | '' {
   if (!input.isOwner) return 'busy';
   if (input.transitioning) return 'busy';
@@ -175,7 +171,7 @@ export function ownerYieldBlock(input: {
   if (input.saving) return 'saving';
   if (input.saveFailed) return 'save-failed';
   // Cross-tab must never receive private/unsaved text; refuse so requester shows Edit here.
-  if (input.dirty && !input.autosaveOn && !input.sameTab) return 'cross-tab-private';
+  if (input.dirty && !input.autosaveOn && !input.allowPrivateTransfer) return 'cross-tab-private';
   return '';
 }
 
@@ -192,6 +188,8 @@ export function handoffRefuseGuidance(reason: HandoffRefuseReason): string {
     case 'private':
     case 'cross-tab-private':
       return 'The editing window still has unsaved or private changes. Use Edit here after finishing or exporting there, or continue in that window.';
+    case 'unresponsive':
+      return 'The other window did not respond. Taking over may leave its unsaved changes behind.';
   }
 }
 
@@ -217,6 +215,7 @@ export type FocusHandoffHooks = {
     documentId: string;
     fromInstanceId: string;
     requestId: string;
-    tabToken: string;
   }) => Promise<SameOriginYieldResult>;
+  /** Requester confirms takeover so the parked owner can discard or recover its text. */
+  __typebridgeHandoffComplete?: (requestId: string, ok: boolean) => void;
 };

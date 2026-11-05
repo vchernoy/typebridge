@@ -62,6 +62,50 @@ test('same-tab click into read-only window takes editing without dropping keys',
   expect(docs.filter(row => row.text.startsWith('Shared handoff text')).length).toBe(1);
 });
 
+test('failed takeover keeps the owner private text (two-phase park)', async ({ page, context }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta, docId } = await openSharedDocument(page);
+
+  await setAutosave(alpha as unknown as Page, false);
+  await reloadFrame(page, '#win-beta');
+  await waitReady(beta);
+  await openDocMenu(beta);
+  await beta.locator('#drafts').selectOption(docId);
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
+
+  await alpha.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.value = `${el.value} keep-me`;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(alpha.locator('#save-indicator')).toHaveText('Not saved');
+
+  // Delay beta's acquire so we can grab the lock after alpha parks but before beta claims it.
+  await page.locator('#win-beta').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1_000;
+  });
+
+  const lockName = `typebridge-edit-owner:${docId}`;
+  const holder = await context.newPage();
+  await holder.goto('/icon-192.png');
+
+  await beta.locator('#editor').click();
+  // Alpha parks (reader) but must still show its private text until confirmation.
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader', { timeout: 5_000 });
+  await expect(alpha.locator('#editor')).toHaveValue('Shared handoff text keep-me');
+
+  await holder.evaluate(name => new Promise<void>((resolve, reject) => {
+    void navigator.locks.request(name, { ifAvailable: true }, lock => {
+      if (!lock) { reject(new Error('lock not free after park')); return; }
+      resolve();
+      return new Promise(() => undefined);
+    });
+  }), lockName);
+
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader', { timeout: 10_000 });
+  await expect(alpha.locator('#editor')).toHaveValue('Shared handoff text keep-me');
+  await holder.close();
+});
+
 test('same-tab Autosave-off handoff carries unsaved text in memory', async ({ page }) => {
   test.setTimeout(90_000);
   const { alpha, beta, docId } = await openSharedDocument(page);

@@ -23,7 +23,7 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
-import { ensureTabToken, handoffRefuseGuidance, type HandoffSnapshot } from './view/handoff';
+import { handoffRefuseGuidance, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import type { EditorHistory } from './editor/editor';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID, SECOND_PANE_ID } from './view/workspace';
@@ -1767,27 +1767,49 @@ function loseOwnership(): void {
   applyEditAccess();
   showSaveState();
 }
-/** Voluntary #175 handoff release: become reader and show last saved text when unsaved was transferred. */
-async function releaseOwnershipForHandoff(): Promise<void> {
+/**
+ * Two-phase #175 handoff park: release the lock and become read-only while keeping
+ * text/title/history/dirty until the requester confirms takeover.
+ */
+async function parkOwnershipForHandoff(): Promise<void> {
   if (viewMode) return;
   const previous = ownership;
-  const wasDirty = workspace.dirty();
-  const docId = active.id;
   ownership = undefined;
   editBlock = 'busy';
   clearTimeout(saveTimer);
   await previous?.release();
-  if (wasDirty && db) {
-    try {
-      const fresh = await getStoredDraft(db, docId);
-      if (fresh) {
-        writingPosition.save();
-        active = fresh;
-        showDraft();
-        workspace.setDirty(false);
-      }
-    } catch { /* Keep the local snapshot read-only if IndexedDB is unavailable. */ }
+  applyEditAccess();
+  showSaveState();
+}
+/** Confirmed takeover: show last saved text when this window had transferred private edits. */
+async function discardParkedHandoffText(): Promise<void> {
+  if (viewMode || !workspace.dirty() || !db) return;
+  try {
+    const fresh = await getStoredDraft(db, active.id);
+    if (fresh) {
+      writingPosition.save();
+      active = fresh;
+      showDraft();
+      workspace.setDirty(false);
+    }
+  } catch { /* Keep the parked snapshot read-only if IndexedDB is unavailable. */ }
+  applyEditAccess();
+  showSaveState();
+}
+/** Failed/timed-out takeover: try to re-acquire while keeping parked text intact. */
+async function recoverParkedHandoffOwnership(): Promise<void> {
+  if (viewMode || ownership) return;
+  const access = await acquireFor(active.id);
+  if (access.ownership) {
+    installOwnership(access);
+    announceAction('Editing stayed in this window — the other window could not take over.', { keepConflict: true });
+    if (workspace.dirty() && autosave.checked) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { void persist(); }, 300);
+    }
+    return;
   }
+  editBlock = access.block || 'lost';
   applyEditAccess();
   showSaveState();
 }
@@ -1800,11 +1822,14 @@ function captureHandoffSnapshot(): HandoffSnapshot {
     revision: active.revision,
   };
 }
+let editHereReason: HandoffRefuseReason | undefined;
 function hideEditHereBar(): void {
   editHereBar.hidden = true;
   editHereWarning.textContent = '';
+  editHereReason = undefined;
 }
-function showEditHereBar(reason: Parameters<typeof handoffRefuseGuidance>[0]): void {
+function showEditHereBar(reason: HandoffRefuseReason): void {
+  editHereReason = reason;
   editHereWarning.textContent = handoffRefuseGuidance(reason);
   editHereBar.hidden = false;
 }
@@ -3069,7 +3094,7 @@ function reconcileSignals(): void {
     else void rereadSecondary();
   }
 }
-// #175 step 4: pointer/focus on a read-only field runs cooperative handoff (may steal suspended owners).
+// #175 step 4: pointer on a read-only field runs cooperative handoff (steal only via Edit here).
 // Plain retry still runs for visibility/window focus when the lock was freed without a handoff.
 field.addEventListener('focus', () => {
   if (focusHandoff?.pending()) return;
@@ -3081,12 +3106,10 @@ window.addEventListener('focus', reconcileSignals);
 document.addEventListener('visibilitychange', reconcileSignals);
 
 if (!viewMode) {
-  const tabToken = ensureTabToken();
   focusHandoff = installFocusHandoff({
     field,
     windowId,
     instanceId,
-    tabToken,
     getDocumentId: () => active.id,
     isViewMode: () => viewMode,
     isOwner: () => !!ownership && editBlock === '',
@@ -3099,17 +3122,19 @@ if (!viewMode) {
     autosaveOn: () => autosave.checked,
     flushSave: async () => { await persist(); },
     captureSnapshot: captureHandoffSnapshot,
-    releaseOwnership: releaseOwnershipForHandoff,
+    parkOwnership: parkOwnershipForHandoff,
+    discardParkedText: discardParkedHandoffText,
+    recoverParkedOwnership: recoverParkedHandoffOwnership,
     takeOver: takeOverFromHandoff,
     announce: text => announceAction(text, { keepConflict: true }),
     showEditHere: showEditHereBar,
     hideEditHere: hideEditHereBar,
   });
   editHereButton.addEventListener('click', () => {
+    const steal = editHereReason === 'unresponsive';
     hideEditHereBar();
-    // Explicit Edit here: request again (cross-tab private may still refuse until the owner yields).
-    field.focus();
-    field.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    // Explicit Edit here: retry cooperative yield, or steal only after an unresponsive timeout.
+    focusHandoff?.requestHandoff({ steal });
   });
 }
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.

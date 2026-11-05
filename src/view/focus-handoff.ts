@@ -1,17 +1,20 @@
 /**
- * #175 step 4: pointer/focus into a read-only window’s text triggers cooperative
- * same-tab handoff (in-memory snapshot) or cross-tab release / Edit here / steal.
+ * #175 step 4: pointer into a read-only window’s text triggers cooperative
+ * same-tab handoff (in-memory snapshot) or cross-tab release / Edit here.
+ *
+ * Two-phase yield: the owner parks (releases the lock, keeps text) until the
+ * requester confirms takeover — never discard private text before success.
+ * BroadcastChannel is always cross-tab; snapshots travel only on same-origin
+ * frame calls. Steal requires an explicit Edit here after an unresponsive timeout.
  */
 import {
   HANDOFF_CHANNEL,
+  HANDOFF_CONFIRM_TIMEOUT_MS,
   HANDOFF_YIELD_TIMEOUT_MS,
   bufferInsertFromKeyboard,
-  ensureTabToken,
   handoffRefuseGuidance,
-  metadataOnlyHandoff,
   ownerYieldBlock,
   parseHandoffMessage,
-  sameTab,
   type BufferedInsert,
   type FocusHandoffHooks,
   type HandoffMessage,
@@ -26,7 +29,6 @@ export type FocusHandoffDeps = {
   field: HTMLTextAreaElement;
   windowId: WindowId | undefined;
   instanceId: string;
-  tabToken?: string;
   channel?: BroadcastChannel | null;
   getDocumentId: () => string;
   isViewMode: () => boolean;
@@ -41,7 +43,15 @@ export type FocusHandoffDeps = {
   /** Flush Autosave when on; no-op when off. */
   flushSave: () => Promise<void>;
   captureSnapshot: () => HandoffSnapshot;
-  releaseOwnership: () => Promise<void>;
+  /**
+   * Release the lock and become read-only while **keeping** text/title/history/dirty.
+   * Text is discarded only after a successful takeover confirmation.
+   */
+  parkOwnership: () => Promise<void>;
+  /** After confirmed takeover: replace parked dirty text with last saved from IndexedDB. */
+  discardParkedText: () => Promise<void>;
+  /** After failed/timed-out takeover: try to re-acquire while keeping parked text. */
+  recoverParkedOwnership: () => Promise<void>;
   /**
    * Become owner after a cooperative release. `snapshot` is set only for same-tab
    * unsaved/private transfer; otherwise reread IndexedDB under the new fence.
@@ -58,10 +68,10 @@ export type FocusHandoffDeps = {
 
 export type FocusHandoffController = {
   dispose: () => void;
-  /** Owner hook used by peer same-origin frames. */
   hooks: FocusHandoffHooks;
-  /** True while this window is mid handoff as requester. */
   pending: () => boolean;
+  /** Start a handoff from user intent (pointer or Edit here). */
+  requestHandoff: (options?: { steal?: boolean }) => void;
 };
 
 function openChannel(existing: BroadcastChannel | null | undefined): BroadcastChannel | null {
@@ -105,7 +115,6 @@ async function requestSameOriginYield(
     documentId: string;
     fromInstanceId: string;
     requestId: string;
-    tabToken: string;
   },
 ): Promise<SameOriginYieldResult | undefined> {
   for (const peer of peerFrames()) {
@@ -121,26 +130,46 @@ async function requestSameOriginYield(
   return undefined;
 }
 
+function notifyPeersComplete(requestId: string, ok: boolean): void {
+  for (const peer of peerFrames()) {
+    try {
+      (peer as Window & FocusHandoffHooks).__typebridgeHandoffComplete?.(requestId, ok);
+    } catch {
+      /* Peer gone. */
+    }
+  }
+}
+
 export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffController {
-  const tabToken = deps.tabToken ?? ensureTabToken();
   const channel = openChannel(deps.channel);
   let disposed = false;
   let pending = false;
   let pendingRequestId = '';
   let pendingCaret = 0;
   let buffer: BufferedInsert[] = [];
-  let stealTimer: ReturnType<typeof setTimeout> | undefined;
+  let yieldTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Owner-side parked yield awaiting requester confirmation. */
+  let parkedRequestId = '';
+  let parkedDocumentId = '';
+  let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
   const postMeta = (message: HandoffMessage): void => {
-    try { channel?.postMessage(metadataOnlyHandoff(message)); } catch { /* Channel may be closed. */ }
+    try { channel?.postMessage(message); } catch { /* Channel may be closed. */ }
   };
 
   const clearPending = (): void => {
     pending = false;
     pendingRequestId = '';
     buffer = [];
-    clearTimeout(stealTimer);
-    stealTimer = undefined;
+    clearTimeout(yieldTimer);
+    yieldTimer = undefined;
+  };
+
+  const clearParked = (): void => {
+    parkedRequestId = '';
+    parkedDocumentId = '';
+    clearTimeout(confirmTimer);
+    confirmTimer = undefined;
   };
 
   const applyBuffer = (): void => {
@@ -159,11 +188,21 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     field.dispatchEvent(new Event('input', { bubbles: true }));
   };
 
+  const confirmParked = (requestId: string, ok: boolean): void => {
+    if (!parkedRequestId || parkedRequestId !== requestId) return;
+    clearParked();
+    void (async () => {
+      if (ok) await deps.discardParkedText();
+      else await deps.recoverParkedOwnership();
+    })();
+  };
+
   const finishTakeover = async (
     snapshot: HandoffSnapshot | undefined,
     steal: boolean,
+    requestId: string,
+    notifySameOrigin: boolean,
   ): Promise<void> => {
-    // Let the click update selection when the browser will; then read a stable caret.
     await new Promise<void>(resolve => {
       requestAnimationFrame(() => {
         pendingCaret = readHandoffCaret(deps.field);
@@ -175,6 +214,15 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     clearPending();
     buffer = inserts;
     const ok = await deps.takeOver({ snapshot, caret, steal });
+    if (notifySameOrigin) notifyPeersComplete(requestId, ok);
+    postMeta({
+      v: 1,
+      type: 'handoff-complete',
+      documentId: deps.getDocumentId(),
+      requestId,
+      ok,
+      at: Date.now(),
+    });
     if (ok) {
       applyBuffer();
       deps.hideEditHere?.();
@@ -184,14 +232,14 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     }
   };
 
-  const startRequest = async (caret: number): Promise<void> => {
+  const startRequest = async (options: { steal?: boolean } = {}): Promise<void> => {
     if (disposed || pending || deps.isViewMode()) return;
     const block = deps.editBlock();
     if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
     if (deps.field.disabled) return;
 
     pending = true;
-    pendingCaret = caret;
+    pendingCaret = readHandoffCaret(deps.field);
     pendingRequestId = crypto.randomUUID();
     buffer = [];
     deps.hideEditHere?.();
@@ -201,14 +249,18 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       documentId,
       fromInstanceId: deps.instanceId,
       requestId: pendingRequestId,
-      tabToken,
     };
+
+    if (options.steal) {
+      await finishTakeover(undefined, true, request.requestId, false);
+      return;
+    }
 
     // Prefer same-origin in-tab yield (may carry unsaved text in memory).
     const local = await requestSameOriginYield(request);
     if (!pending || pendingRequestId !== request.requestId) return;
     if (local?.status === 'released') {
-      await finishTakeover(local.snapshot, false);
+      await finishTakeover(local.snapshot, false, request.requestId, true);
       return;
     }
     if (local?.status === 'refused') {
@@ -221,11 +273,10 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       return;
     }
 
-    // Cross-tab / no peer owner found: metadata-only BroadcastChannel request.
+    // Cross-tab / no peer owner: metadata-only BroadcastChannel (never same-tab).
     postMeta({
       v: 1,
       type: 'handoff-request',
-      tabToken,
       documentId,
       fromWindowId: deps.windowId ?? '',
       fromInstanceId: deps.instanceId,
@@ -233,21 +284,33 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       at: Date.now(),
     });
 
-    stealTimer = setTimeout(() => {
-      void (async () => {
-        if (!pending || pendingRequestId !== request.requestId) return;
-        await finishTakeover(undefined, true);
-      })();
+    yieldTimer = setTimeout(() => {
+      if (!pending || pendingRequestId !== request.requestId) return;
+      clearPending();
+      // Never auto-steal — ask the user; unsaved text in an old/suspended tab must not vanish silently.
+      deps.showEditHere('unresponsive');
     }, HANDOFF_YIELD_TIMEOUT_MS);
   };
 
-  const yieldFor = async (request: {
-    documentId: string;
-    fromInstanceId: string;
-    requestId: string;
-    tabToken: string;
-  }): Promise<SameOriginYieldResult> => {
-    const isSameTab = sameTab(tabToken, request.tabToken);
+  const beginParked = (requestId: string, documentId: string): void => {
+    clearParked();
+    parkedRequestId = requestId;
+    parkedDocumentId = documentId;
+    confirmTimer = setTimeout(() => {
+      if (parkedRequestId !== requestId) return;
+      clearParked();
+      void deps.recoverParkedOwnership();
+    }, HANDOFF_CONFIRM_TIMEOUT_MS);
+  };
+
+  const yieldFor = async (
+    request: {
+      documentId: string;
+      fromInstanceId: string;
+      requestId: string;
+    },
+    allowPrivateTransfer: boolean,
+  ): Promise<SameOriginYieldResult> => {
     const block = ownerYieldBlock({
       isOwner: deps.isOwner() && deps.getDocumentId() === request.documentId,
       composing: deps.isComposing(),
@@ -256,11 +319,10 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       saveFailed: deps.saveFailed(),
       dirty: deps.isDirty(),
       autosaveOn: deps.autosaveOn(),
-      sameTab: isSameTab,
+      allowPrivateTransfer,
     });
     if (block) return { status: 'refused', reason: block };
 
-    // Flush Autosave so IndexedDB holds the latest committed text for a clean handoff.
     if (deps.autosaveOn() && deps.isDirty()) {
       await deps.flushSave();
       const afterFlush = ownerYieldBlock({
@@ -271,21 +333,21 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
         saveFailed: deps.saveFailed(),
         dirty: deps.isDirty(),
         autosaveOn: deps.autosaveOn(),
-        sameTab: isSameTab,
+        allowPrivateTransfer,
       });
       if (afterFlush) return { status: 'refused', reason: afterFlush };
     }
 
     const dirty = deps.isDirty();
-    // Same-tab may pass unsaved text in memory; never attach a snapshot for cross-tab.
-    const snapshot = isSameTab && dirty ? deps.captureSnapshot() : undefined;
-    await deps.releaseOwnership();
+    // Snapshots only on the same-origin path — never for BroadcastChannel.
+    const snapshot = allowPrivateTransfer && dirty ? deps.captureSnapshot() : undefined;
+    await deps.parkOwnership();
+    beginParked(request.requestId, request.documentId);
 
-    if (!isSameTab) {
+    if (!allowPrivateTransfer) {
       postMeta({
         v: 1,
         type: 'handoff-released',
-        tabToken,
         documentId: request.documentId,
         toInstanceId: request.fromInstanceId,
         requestId: request.requestId,
@@ -299,21 +361,25 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     const message = parseHandoffMessage(event.data);
     if (!message) return;
 
+    if (message.type === 'handoff-complete') {
+      if (message.documentId === parkedDocumentId) confirmParked(message.requestId, message.ok);
+      return;
+    }
+
     if (message.type === 'handoff-request') {
       if (message.fromInstanceId === deps.instanceId) return;
       if (!deps.isOwner() || deps.getDocumentId() !== message.documentId) return;
+      // BroadcastChannel is always cross-tab — never allow private transfer.
       void (async () => {
         const result = await yieldFor({
           documentId: message.documentId,
           fromInstanceId: message.fromInstanceId,
           requestId: message.requestId,
-          tabToken: message.tabToken,
-        });
+        }, false);
         if (result.status === 'refused') {
           postMeta({
             v: 1,
             type: 'handoff-refused',
-            tabToken,
             documentId: message.documentId,
             toInstanceId: message.fromInstanceId,
             requestId: message.requestId,
@@ -321,7 +387,6 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
             reason: result.reason,
           });
         }
-        // released is posted inside yieldFor for cross-tab; same-tab uses frame call.
       })();
       return;
     }
@@ -329,13 +394,16 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     if (!pending) return;
     if (message.requestId !== pendingRequestId) return;
     if (message.type === 'handoff-released' && message.toInstanceId === deps.instanceId) {
-      // BroadcastChannel must never carry snapshot — always reread IndexedDB.
-      void finishTakeover(undefined, false);
+      void finishTakeover(undefined, false, message.requestId, false);
       return;
     }
     if (message.type === 'handoff-refused' && message.toInstanceId === deps.instanceId) {
       clearPending();
-      if (message.reason === 'cross-tab-private' || message.reason === 'private') {
+      if (
+        message.reason === 'cross-tab-private'
+        || message.reason === 'private'
+        || message.reason === 'unresponsive'
+      ) {
         deps.showEditHere(message.reason);
       } else {
         deps.announce(handoffRefuseGuidance(message.reason));
@@ -347,20 +415,12 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
     if (deps.isViewMode()) return;
     const block = deps.editBlock();
     if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
-    void startRequest(readHandoffCaret(deps.field));
+    void startRequest();
   };
 
   const onClick = (): void => {
     if (!pending) return;
     pendingCaret = readHandoffCaret(deps.field);
-  };
-
-  const onFocus = (): void => {
-    if (deps.isViewMode()) return;
-    const block = deps.editBlock();
-    if (block !== 'busy' && block !== 'lost' && block !== 'error') return;
-    if (pending) return;
-    void startRequest(deps.field.selectionStart);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -395,7 +455,6 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
 
   deps.field.addEventListener('pointerdown', onPointerDown);
   deps.field.addEventListener('click', onClick);
-  deps.field.addEventListener('focus', onFocus);
   deps.field.addEventListener('keydown', onKeyDown);
   deps.field.addEventListener('beforeinput', onBeforeInput);
   deps.field.addEventListener('paste', onPaste);
@@ -404,21 +463,28 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   const hooks: FocusHandoffHooks = {
     __typebridgeOwnsDocument: (documentId: string) =>
       deps.isOwner() && deps.getDocumentId() === documentId,
-    __typebridgeYieldForHandoff: yieldFor,
+    // Direct frame call ⇒ same-tab ⇒ private transfer allowed.
+    __typebridgeYieldForHandoff: request => yieldFor(request, true),
+    __typebridgeHandoffComplete: confirmParked,
   };
   const win = window as Window & FocusHandoffHooks;
   win.__typebridgeOwnsDocument = hooks.__typebridgeOwnsDocument;
   win.__typebridgeYieldForHandoff = hooks.__typebridgeYieldForHandoff;
+  win.__typebridgeHandoffComplete = hooks.__typebridgeHandoffComplete;
 
   return {
     hooks,
     pending: () => pending,
+    requestHandoff: (options) => { void startRequest(options); },
     dispose: () => {
       disposed = true;
       clearPending();
+      if (parkedRequestId) {
+        clearParked();
+        void deps.recoverParkedOwnership();
+      }
       deps.field.removeEventListener('pointerdown', onPointerDown);
       deps.field.removeEventListener('click', onClick);
-      deps.field.removeEventListener('focus', onFocus);
       deps.field.removeEventListener('keydown', onKeyDown);
       deps.field.removeEventListener('beforeinput', onBeforeInput);
       deps.field.removeEventListener('paste', onPaste);
@@ -429,6 +495,9 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
       }
       if (win.__typebridgeYieldForHandoff === hooks.__typebridgeYieldForHandoff) {
         delete win.__typebridgeYieldForHandoff;
+      }
+      if (win.__typebridgeHandoffComplete === hooks.__typebridgeHandoffComplete) {
+        delete win.__typebridgeHandoffComplete;
       }
     },
   };

@@ -1,57 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import {
   bufferInsertFromKeyboard,
-  ensureTabToken,
-  metadataOnlyHandoff,
   ownerYieldBlock,
   parseHandoffMessage,
-  sameTab,
-  TAB_TOKEN_KEY,
 } from './handoff';
 
 describe('handoff helpers', () => {
-  it('mints and reuses a tab token in sessionStorage', () => {
-    const memory = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => memory.get(key) ?? null,
-      setItem: (key: string, value: string) => { memory.set(key, value); },
-      removeItem: (key: string) => { memory.delete(key); },
-    } as Storage;
-    const first = ensureTabToken(storage);
-    expect(first.length).toBeGreaterThan(7);
-    expect(ensureTabToken(storage)).toBe(first);
-    expect(memory.get(TAB_TOKEN_KEY)).toBe(first);
-  });
-
-  it('detects same-tab tokens', () => {
-    expect(sameTab('abc', 'abc')).toBe(true);
-    expect(sameTab('abc', 'xyz')).toBe(false);
-    expect(sameTab('', '')).toBe(false);
-  });
-
-  it('parses handoff messages and strips snapshots for BroadcastChannel', () => {
+  it('parses handoff messages without accepting snapshots on the channel', () => {
     const released = parseHandoffMessage({
       v: 1,
       type: 'handoff-released',
-      tabToken: 't',
       documentId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
       toInstanceId: 'i',
       requestId: 'r',
       at: 1,
       snapshot: { text: 'secret', title: 't', dirty: true, revision: 1 },
     });
-    expect(released?.type).toBe('handoff-released');
-    if (released?.type === 'handoff-released') {
-      expect(released.snapshot).toBeUndefined();
-      expect(metadataOnlyHandoff({
-        ...released,
-        snapshot: { text: 'secret', title: 't', dirty: true, revision: 1 },
-      })).not.toHaveProperty('snapshot');
-    }
+    expect(released).toEqual({
+      v: 1,
+      type: 'handoff-released',
+      documentId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      toInstanceId: 'i',
+      requestId: 'r',
+      at: 1,
+    });
     expect(parseHandoffMessage({ type: 'handoff-request' })).toBeUndefined();
+    expect(parseHandoffMessage({
+      v: 1,
+      type: 'handoff-complete',
+      documentId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      requestId: 'r',
+      ok: true,
+      at: 1,
+    })?.type).toBe('handoff-complete');
   });
 
-  it('blocks cross-tab private yield but allows same-tab', () => {
+  it('blocks cross-tab private yield but allows same-origin private transfer', () => {
     expect(ownerYieldBlock({
       isOwner: true,
       composing: false,
@@ -60,7 +44,7 @@ describe('handoff helpers', () => {
       saveFailed: false,
       dirty: true,
       autosaveOn: false,
-      sameTab: true,
+      allowPrivateTransfer: true,
     })).toBe('');
     expect(ownerYieldBlock({
       isOwner: true,
@@ -70,7 +54,7 @@ describe('handoff helpers', () => {
       saveFailed: false,
       dirty: true,
       autosaveOn: false,
-      sameTab: false,
+      allowPrivateTransfer: false,
     })).toBe('cross-tab-private');
     expect(ownerYieldBlock({
       isOwner: true,
@@ -80,7 +64,7 @@ describe('handoff helpers', () => {
       saveFailed: false,
       dirty: false,
       autosaveOn: true,
-      sameTab: true,
+      allowPrivateTransfer: true,
     })).toBe('ime');
   });
 
