@@ -73,6 +73,66 @@ test('Settings Layout Stacked forces a scrollable full-width phone stack', async
   expect(after.find(win => win.id === 'w2')!.h).toBe(beforeSecond);
 });
 
+test('stacked south grip pointer-drag resizes only the target window', async ({ page }) => {
+  // Two windows; shrink main first so its south grip stays in the 390×844 viewport.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const main = await openHost(page);
+  await openEmbeddedSettings(main);
+  await main.locator('#window-layout').selectOption('stacked');
+  await expect(page.locator('body')).toHaveClass(/host-stacked/);
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+
+  // Main often inherits a near-full free-layout height; shrink via the title handle.
+  await page.locator('.host-window[data-window-id="main"] .host-window-move').evaluate(el => {
+    for (let i = 0; i < 40; i++) {
+      el.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowUp',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }));
+    }
+  });
+  await expect.poll(async () => page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; h: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main')?.h ?? 0;
+  })).toBeLessThanOrEqual(300);
+
+  const before = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; h: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  const mainH = before.find(win => win.id === 'main')!.h;
+  const secondH = before.find(win => win.id === 'w2')!.h;
+
+  await page.locator('#host-root').evaluate(el => { el.scrollTop = 0; });
+  const handle = page.locator('.host-window[data-window-id="main"] .host-window-resize-s');
+  const box = await handle.boundingBox();
+  expect(box).toBeTruthy();
+  // Keep the drag inside the viewport (Firefox mis-hits when the target is off-screen).
+  expect(box!.y + box!.height + 100).toBeLessThan(844);
+  const cx = box!.x + box!.width / 2;
+  const cy = box!.y + box!.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy + 80, { steps: 8 });
+  await page.mouse.up();
+
+  const after = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; h: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  expect(after.find(win => win.id === 'main')!.h).toBeGreaterThan(mainH + 40);
+  expect(after.find(win => win.id === 'w2')!.h).toBe(secondH);
+});
+
 test('host Focus mode maximizes the active window and restores on exit', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
