@@ -1219,8 +1219,8 @@ body.host-page {
   padding: 0.35rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--surface);
-  color: inherit;
+  background: var(--button-background);
+  color: var(--button-text);
   cursor: pointer;
 }
 .host-toolbar button:disabled {
