@@ -348,6 +348,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     type TitleHooks = Window & {
       __typebridgeGetTitle?: () => string;
       __typebridgeSetTitle?: (value: string) => void;
+      __typebridgeTitleCommit?: (value: string) => { value: string; start: number; end: number } | null;
       __typebridgeTitleEdit?: (payload: {
         inputType: string;
         data: string | null;
@@ -358,6 +359,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     };
 
     let applyingFromIframe = false;
+    let hostTitleComposing = false;
     const applyHostTitleResult = (result: { value: string; start: number; end: number }): void => {
       applyingFromIframe = true;
       title.value = result.value;
@@ -368,29 +370,57 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
     title.addEventListener('pointerdown', event => { event.stopPropagation(); syncTitleEditable(); });
     title.addEventListener('focus', () => { syncTitleEditable(); });
+    title.addEventListener('compositionstart', () => { hostTitleComposing = true; });
+    title.addEventListener('compositionend', () => {
+      hostTitleComposing = false;
+      if (title.readOnly) return;
+      try {
+        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(title.value);
+        if (result) applyHostTitleResult(result);
+        else applyChromeMeta(title.value);
+      } catch { applyChromeMeta(title.value); }
+    });
     title.addEventListener('keydown', event => {
       // Keep arrow-key window move on the handle; let the input own typing keys.
       event.stopPropagation();
-      if (title.readOnly) return;
-      // Forward the transliteration mode shortcut into the iframe (listener is document-local there).
-      if (!event.isComposing && event.shiftKey && !event.altKey && !event.repeat
-        && ((event.ctrlKey && !event.metaKey) || (event.metaKey && !event.ctrlKey))
-        && (event.code === 'Space' || event.code === 'F7' || event.code === 'F8' || event.code === 'F9')) {
-        try {
-          (frame.contentWindow as TitleHooks | null)?.__typebridgeToggleTransliteration?.();
+      if (title.readOnly || event.isComposing) return;
+      try {
+        const hooks = frame.contentWindow as TitleHooks | null;
+        // Forward undo/redo to the iframe title Editor (host input has no native history
+        // when inserts are applied programmatically).
+        if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+          const key = event.key.toLowerCase();
+          if (key === 'z' || key === 'y') {
+            const redo = key === 'y' || (key === 'z' && event.shiftKey);
+            event.preventDefault();
+            const result = hooks?.__typebridgeTitleEdit?.({
+              inputType: redo ? 'historyRedo' : 'historyUndo',
+              data: null,
+              start: title.selectionStart ?? 0,
+              end: title.selectionEnd ?? 0,
+            });
+            if (result) applyHostTitleResult(result);
+            return;
+          }
+        }
+        // Forward the transliteration mode shortcut into the iframe (listener is document-local there).
+        if (event.shiftKey && !event.altKey && !event.repeat
+          && ((event.ctrlKey && !event.metaKey) || (event.metaKey && !event.ctrlKey))
+          && (event.code === 'Space' || event.code === 'F7' || event.code === 'F8' || event.code === 'F9')) {
+          hooks?.__typebridgeToggleTransliteration?.();
           event.preventDefault();
-        } catch { /* Frame mid-navigation. */ }
-      }
+        }
+      } catch { /* Frame mid-navigation. */ }
     });
     // Route insert typing through the iframe title Editor (transliteration). Let
-    // deletes/clear run natively on the host input, then write through on `input`
-    // so Playwright fill('') and Backspace work on Firefox too.
+    // deletes/clear/IME composition run natively on the host input, then write through.
     title.addEventListener('beforeinput', event => {
       syncTitleEditable();
       if (title.readOnly) {
         event.preventDefault();
         return;
       }
+      if (hostTitleComposing || event.inputType.includes('Composition')) return;
       const insert = event.inputType === 'insertText'
         || event.inputType === 'insertFromPaste'
         || event.inputType === 'insertReplacementText'
@@ -418,7 +448,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       } catch { /* Frame mid-navigation. */ }
     });
     title.addEventListener('input', () => {
-      if (applyingFromIframe) return;
+      if (applyingFromIframe || hostTitleComposing) return;
       syncTitleEditable();
       if (title.readOnly) {
         try {

@@ -3809,6 +3809,8 @@ if (embedded) {
       start: number;
       end: number;
     }) => { value: string; start: number; end: number } | null;
+    /** Host title IME compositionend — records one undoable edit in the title Editor. */
+    __typebridgeTitleCommit?: (value: string) => { value: string; start: number; end: number } | null;
     __typebridgeToggleTransliteration?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
@@ -3841,6 +3843,23 @@ if (embedded) {
   hooks.__typebridgeToggleTransliteration = () => {
     enabled.checked = !enabled.checked;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  hooks.__typebridgeTitleCommit = value => {
+    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
+    const next = value.slice(0, 150);
+    if (draftTitle.value !== next) {
+      draftTitle.value = next;
+      // Dispatch input so titleEditor records a single undoable composition.
+      draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    syncTitleTooltip();
+    rememberActive();
+    scheduleSave(true);
+    return {
+      value: draftTitle.value,
+      start: draftTitle.selectionStart ?? draftTitle.value.length,
+      end: draftTitle.selectionEnd ?? draftTitle.value.length,
+    };
   };
   hooks.__typebridgeTitleEdit = payload => {
     if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;

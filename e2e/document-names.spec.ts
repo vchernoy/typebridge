@@ -111,4 +111,6 @@ test('host title bar renames the document in place (#175 step 8)', async ({ page
   await hostTitle.pressSequentially('privet');
   await expect(hostTitle).toHaveValue('привет');
   await expect.poll(async () => frame.locator('#draft-title').inputValue()).toBe('привет');
+  await hostTitle.press('Control+z');
+  await expect(hostTitle).not.toHaveValue('привет');
 });
