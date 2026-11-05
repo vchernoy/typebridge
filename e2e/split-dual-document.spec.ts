@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, setAutosave } from './settings-helpers';
+import { documentAction, selectDocument, setAutosave } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 
 async function openSplit(page: Page): Promise<void> {
@@ -53,4 +53,35 @@ test('pane B can open a different document with independent edits and Undo', asy
   await expect(page.locator('#companion-badge')).toBeVisible();
   await expect(page.locator('#editor-b')).toHaveValue('Document B body');
   await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
+});
+
+test('split restore after reload does not crash when split was open', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('persist split open');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openSplit(page);
+  await page.reload();
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('#editor')).toHaveValue('persist split open');
+});
+
+test('primary switching to the companion document promotes pane B edits', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const firstId = await saveNamed(page, 'Alpha original', 'Alpha');
+  await documentAction(page, '#new-draft');
+  const secondId = await saveNamed(page, 'Beta original', 'Beta');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' edited');
+  await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
+  await selectDocument(page, firstId);
+  await expect(page.locator('#editor')).toHaveValue('Alpha original edited');
+  await expect(page.locator('#companion-badge')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', true);
+  expect(secondId).toBeTruthy();
 });

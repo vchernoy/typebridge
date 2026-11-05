@@ -104,6 +104,8 @@ if (viewMode) {
 /** Second independent document session when pane B shows a different document (#159 S4). */
 let secondary: BoundSession | undefined;
 let sessionRegistry: ReturnType<typeof createSessionRegistry> | undefined;
+/** Guard: setupSplitPane may reopen before draft locals exist. */
+let draftsInitialized = false;
 
 function dualDocumentSplit(): boolean {
   return !!secondary && secondary.draft.id !== active.id && workspace.splitOpen();
@@ -148,13 +150,20 @@ const splitControls = setupSplitPane({
     if (open) {
       mirrorCompanion();
       syncCompanionChrome();
-      renderPaneBDrafts();
-    } else {
-      void releaseSecondarySession();
+      if (draftsInitialized) renderPaneBDrafts();
+      paneChrome.syncMutations();
+      return;
+    }
+    void (async () => {
+      if (!(await releaseSecondarySession())) {
+        // Keep the split open when the user cancels discarding pane B.
+        splitControls.setOpen(true);
+        return;
+      }
       workspace.setActivePane(PRIMARY_PANE_ID);
       syncCompanionChrome();
-    }
-    paneChrome.syncMutations();
+      paneChrome.syncMutations();
+    })();
   },
 });
 if (viewMode) {
@@ -468,7 +477,11 @@ field.addEventListener('select', updateCaretPosition);
 companionField.addEventListener('keyup', updateCaretPosition);
 companionField.addEventListener('click', updateCaretPosition);
 companionField.addEventListener('select', updateCaretPosition);
-const typingSettings = setupTransliteration(enabled, editor, { syncSearchEditors: () => syncSearchEditors(), preferenceSaved });
+const typingSettings = setupTransliteration(enabled, editor, {
+  syncSearchEditors: () => syncSearchEditors(),
+  preferenceSaved,
+  extraEditors: () => [companionEditor],
+});
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(field.value); announceAction('Copied'); }
   catch { field.focus(); field.select(); announceAction('Copy unavailable. Text selected; use your device’s copy command.'); }
@@ -728,7 +741,7 @@ function renderDrafts(): void {
   renderPaneBDrafts();
 }
 function renderPaneBDrafts(): void {
-  if (viewMode) return;
+  if (viewMode || !draftsInitialized) return;
   const selectedId = dualDocumentSplit() && secondary ? secondary.draft.id : active.id;
   const displayTitle = dualDocumentSplit() && secondary
     ? (secondary.title.value.trim() || UNTITLED_TITLE)
@@ -762,16 +775,34 @@ function updateSaveIndicatorB(): void {
   if (saveIndicatorB.textContent !== label) saveIndicatorB.textContent = label;
   saveIndicatorB.dataset.state = state;
 }
-async function releaseSecondarySession(): Promise<void> {
+/**
+ * Flush or confirm-discard the secondary session. Returns false if the user cancelled.
+ */
+async function releaseSecondarySession(): Promise<boolean> {
   if (!secondary) {
     companionEditor.setReadOnly(true);
     titleEditorB.setReadOnly(true);
     syncCompanionChrome();
-    return;
+    return true;
   }
   clearTimeout(secondary.saveTimer);
-  if (secondary.dirty && autosave.checked && !secondary.editBlock) {
-    await persistSecondary();
+  while (secondary.dirty && autosave.checked && !secondary.editBlock) {
+    const result = await persistSecondary();
+    if (!result.saved && secondary.saveFailed) break;
+  }
+  if (secondary.dirty && (!autosave.checked || secondary.editBlock || secondary.saveFailed)) {
+    if (!await askConfirmChoice({
+      title: 'Discard unsaved changes in the other pane?',
+      message: secondary.editBlock
+        ? 'Another window is editing that document, so this pane cannot save these changes. Copy or export them first to keep them.'
+        : 'Copy or export unsaved changes in the other pane first to keep them.',
+      confirmLabel: 'Discard changes',
+      cancelLabel: 'Keep editing',
+      returnFocus: companionField,
+    })) {
+      renderPaneBDrafts();
+      return false;
+    }
   }
   const previous = secondary;
   secondary = undefined;
@@ -784,6 +815,78 @@ async function releaseSecondarySession(): Promise<void> {
   syncCompanionChrome();
   mirrorCompanion(true);
   syncMutationControls();
+  return true;
+}
+/**
+ * When the primary opens the document already editable in pane B, promote B's
+ * in-memory session (text/title/history/ownership) instead of re-acquiring and mirroring.
+ */
+async function promoteSecondaryToPrimary(): Promise<boolean> {
+  if (!secondary) return true;
+  clearTimeout(secondary.saveTimer);
+  // Flush the document being left in the primary pane first.
+  while (workspace.dirty() && autosave.checked && !editBlock) {
+    const result = await persist();
+    if (!result.saved && saveFailed) {
+      if (!await askConfirmChoice({
+        title: 'Discard unsaved changes?',
+        message: 'Copy or export unsaved changes first to keep them.',
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing',
+        returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
+      })) return false;
+      break;
+    }
+  }
+  if (workspace.dirty() && (!autosave.checked || editBlock)) {
+    if (!await askConfirmChoice({
+      title: 'Discard unsaved changes?',
+      message: editBlock
+        ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them.'
+        : 'Copy or export unsaved changes first to keep them.',
+      confirmLabel: 'Discard changes',
+      cancelLabel: 'Keep editing',
+      returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
+    })) return false;
+  }
+  writingPosition.save();
+  companionWritingPosition.save();
+  const promoted = snapshotBoundSession(secondary, UNTITLED_TITLE);
+  const promotedDirty = secondary.dirty;
+  const promotedOwnership = secondary.ownership;
+  const promotedBlock = secondary.editBlock;
+  secondary.ownership = undefined;
+  secondary = undefined;
+  sessionRegistry?.setSecondary(undefined);
+  if (ownership) void ownership.release();
+  ownership = promotedOwnership;
+  editBlock = promotedBlock;
+  active = promoted;
+  workspace.setDocumentId(promoted.id);
+  workspace.bumpSessionGeneration();
+  workspace.setDirty(promotedDirty);
+  loadingDraft = true;
+  try {
+    editor.load(promoted.text);
+    if (promoted.history) editor.restoreHistory(promoted.history);
+    draftTitle.value = promoted.title;
+    syncTitleTooltip();
+  } finally {
+    loadingDraft = false;
+  }
+  rememberActive();
+  companionEditor.setReadOnly(true);
+  titleEditorB.setReadOnly(true);
+  draftTitleB.value = '';
+  syncCompanionChrome();
+  mirrorCompanion(true);
+  companionWritingPosition.restore(promoted.id);
+  writingPosition.restore(promoted.id);
+  applyEditAccess();
+  showSaveState();
+  renderDrafts();
+  syncMutationControls();
+  return true;
 }
 async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }> {
   if (!secondary || viewMode) return { saved: true, conflict: false };
@@ -860,7 +963,7 @@ function scheduleSaveSecondary(fromTitle = false): void {
 async function openCompanionDocument(id: string): Promise<void> {
   if (viewMode || !workspace.splitOpen() || !db) return;
   if (id === active.id) {
-    await releaseSecondarySession();
+    if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
     mirrorCompanion(true);
     companionWritingPosition.restore(active.id);
     renderPaneBDrafts();
@@ -871,7 +974,7 @@ async function openCompanionDocument(id: string): Promise<void> {
     ...(secondary ? [{ sessionId: secondary.sessionId, documentId: secondary.draft.id }] : []),
   ]);
   if (represented === 'session-1') {
-    await releaseSecondarySession();
+    if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
     return;
   }
   if (secondary?.draft.id === id) return;
@@ -881,7 +984,7 @@ async function openCompanionDocument(id: string): Promise<void> {
     renderPaneBDrafts();
     return;
   }
-  await releaseSecondarySession();
+  if (!(await releaseSecondarySession())) { renderPaneBDrafts(); return; }
   const access = await acquireFor(next.id);
   let target = next;
   if (access.ownership && db) {
@@ -1336,6 +1439,17 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
+  if (id && secondary && id === secondary.draft.id) {
+    transitioning = true;
+    try {
+      if (!(await promoteSecondaryToPrimary())) return { opened: false, conflict: false };
+      return { opened: true, conflict: false };
+    } finally {
+      transitioning = false;
+      unfreezeEditorsAfterTransition();
+      renderDrafts();
+    }
+  }
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
   let flushConflict = false;
@@ -1630,10 +1744,12 @@ async function initializeDrafts(): Promise<void> {
     renderDrafts();
   } finally {
     field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
+    draftsInitialized = true;
     restoreFocusMode();
     writingPosition.restore(active.id);
     updateStats();
     applyEditAccess();
+    renderPaneBDrafts();
     void renderRecovery();
     finishInitialization();
   }

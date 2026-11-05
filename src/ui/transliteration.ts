@@ -9,13 +9,19 @@ import type { Editor } from '../editor/editor';
 export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, deps: {
   syncSearchEditors: () => void;
   preferenceSaved: (name: string, saved: boolean) => void;
+  /** Additional editors that follow the global Latin/Cyrillic mode (#159 S4). */
+  extraEditors?: () => Editor[];
 }): { reset: () => boolean } {
-  const { syncSearchEditors, preferenceSaved } = deps;
+  const { syncSearchEditors, preferenceSaved, extraEditors } = deps;
+  function syncEditorModes(): void {
+    editor.setEnabled(enabled.checked);
+    for (const extra of extraEditors?.() ?? []) extra.setEnabled(enabled.checked);
+  }
   // Plain-text writing is a first-class mode. Remember the choice per browser.
   const TRANSLITERATION_KEY = 'typebridge.transliteration.enabled.v1';
   try { enabled.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; }
   catch { /* Storage may be unavailable; keep the default enabled mode. */ }
-  editor.setEnabled(enabled.checked);
+  syncEditorModes();
   const shortcutSelect = document.querySelector<HTMLSelectElement>('#translit-shortcut')!;
   const shortcutLabel = document.querySelector<HTMLElement>('#shortcut-label')!;
   const modeAnnouncement = document.querySelector<HTMLElement>('#mode-announcement')!;
@@ -51,7 +57,7 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
     if (usesCommand ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
     if (event.code !== transliterationBinding(shortcut, usesCommand)?.key) return;
     if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;
-    if (!['editor', 'find-text', 'replace-text', 'draft-title'].includes(event.target.id)) return;
+    if (!['editor', 'editor-b', 'find-text', 'replace-text', 'draft-title', 'draft-title-b'].includes(event.target.id)) return;
     event.preventDefault();
     enabled.checked = !enabled.checked;
     enabled.dispatchEvent(new Event('change', { bubbles: true }));
@@ -68,7 +74,7 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
   cyrillicSide?.addEventListener('click', event => { event.preventDefault(); choose(true); enabled.focus(); });
   let modeSaved = true;
   enabled.addEventListener('change', () => {
-    editor.setEnabled(enabled.checked);
+    syncEditorModes();
     syncSearchEditors();
     modeAnnouncement.textContent = enabled.checked ? 'Transliteration on' : 'Transliteration off';
     // Editing continues even when browser storage is blocked.
