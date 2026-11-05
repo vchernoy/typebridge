@@ -383,10 +383,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       shells.delete(id);
       frames.delete(id);
       layouts = layouts.filter(win => win.id !== id);
-      // Drop Find / active-document / writing-position keys for this window.
-      // Never delete pendingDraft backups here — prepareClose clears them only after
-      // a clean close or explicit discard; keeping them avoids silent data loss if
-      // a dirty window somehow closed with a matching session backup still present.
+      // Drop scoped session keys after the iframe is gone. prepareClose only returns
+      // true for a clean close or an explicit discard, so pendingDraft is safe to
+      // remove here — and doing it *after* unload beats a pagehide that recreates it.
       try {
         const marker = `::w:${id}`;
         const writingMarker = `w:${id}.`;
@@ -394,10 +393,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         for (let i = 0; i < sessionStorage.length; i++) {
           const key = sessionStorage.key(i);
           if (!key) continue;
-          if (key.includes('typebridge.pendingDraft')) continue;
           if (key.includes(marker) || key.includes(writingMarker)) remove.push(key);
         }
         for (const key of remove) sessionStorage.removeItem(key);
+        sessionStorage.removeItem(`typebridge.pendingDraft.v1${marker}`);
+        sessionStorage.removeItem(`typebridge.pendingDraft.paneB.v1${marker}`);
       } catch { /* Blocked sessionStorage — layout still closes. */ }
       syncToolbar();
       persist();

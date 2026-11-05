@@ -246,6 +246,73 @@ test('clicking a background editor raises its window', async ({ page }) => {
   expect(secondZ).toBeGreaterThan(mainZ);
 });
 
+test('discarded close after save failure does not revive text under a reused id', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const secondShell = page.locator('.host-window[data-window-id="w2"]');
+  const second = secondShell.frameLocator('iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await second.locator('#editor').fill('Discarded after failed save');
+  await expect(second.locator('#save-indicator')).toHaveText('Save failed');
+
+  await secondShell.locator('.host-window-close').click();
+  const dialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(1);
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
+
+  await page.getByRole('button', { name: 'New window' }).click();
+  const revived = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(revived.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(revived.locator('#editor')).toHaveValue('');
+});
+
+test('resize keeps the dragged size instead of snapping to a half', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openHost(page);
+  const before = await page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; w: number; h: number }> };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main');
+  });
+  expect(before).toBeTruthy();
+
+  const handle = page.locator('.host-window[data-window-id="main"] .host-window-resize-se');
+  const box = await handle.boundingBox();
+  expect(box).toBeTruthy();
+  const startX = box!.x + box!.width / 2;
+  const startY = box!.y + box!.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX - 160, startY - 120);
+  await page.mouse.up();
+
+  const after = await page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }> };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main');
+  });
+  expect(after).toBeTruthy();
+  expect(after!.w).toBeLessThan(before!.w - 80);
+  expect(after!.h).toBeLessThan(before!.h - 60);
+  // Must not have jumped to a half or quarter of the host.
+  const host = await page.locator('#host-root').boundingBox();
+  expect(host).toBeTruthy();
+  expect(after!.w).not.toBeCloseTo(host!.width / 2, 0);
+  expect(after!.h).not.toBeCloseTo(host!.height / 2, 0);
+});
+
 test('closing a dirty Autosave-off window asks before removing it', async ({ page }) => {
   test.setTimeout(90_000);
   const editor = await openHost(page);
