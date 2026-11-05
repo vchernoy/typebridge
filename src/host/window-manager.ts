@@ -381,7 +381,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       shells.delete(id);
       frames.delete(id);
       layouts = layouts.filter(win => win.id !== id);
-      // Drop this window's scoped session keys so a reused id cannot revive stale state.
+      // Drop Find / active-document / writing-position keys for this window.
+      // Never delete pendingDraft backups here — prepareClose clears them only after
+      // a clean close or explicit discard; keeping them avoids silent data loss if
+      // a dirty window somehow closed with a matching session backup still present.
       try {
         const marker = `::w:${id}`;
         const writingMarker = `w:${id}.`;
@@ -389,6 +392,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         for (let i = 0; i < sessionStorage.length; i++) {
           const key = sessionStorage.key(i);
           if (!key) continue;
+          if (key.includes('typebridge.pendingDraft')) continue;
           if (key.includes(marker) || key.includes(writingMarker)) remove.push(key);
         }
         for (const key of remove) sessionStorage.removeItem(key);

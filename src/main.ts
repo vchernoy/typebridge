@@ -3392,6 +3392,11 @@ function updateReloadReturnFocus(): HTMLElement {
   } catch { /* Cross-origin parent. */ }
   return field;
 }
+function clearPendingBackups(): void {
+  try { sessionStorage.removeItem(PENDING_KEY); } catch { /* Optional backup. */ }
+  try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
+}
+
 async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
   if (transitioning || deleting || field.disabled) return false;
   privateReloadChoice = undefined;
@@ -3408,6 +3413,7 @@ async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolea
     if (discard) {
       privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
       if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
+      if (kind === 'close') clearPendingBackups();
     }
     return discard;
   }
@@ -3415,14 +3421,28 @@ async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolea
   savePendingSecondary();
   if (workspace.dirty()) await persist();
   if (secondary?.dirty) await persistSecondary();
-  if (!workspace.dirty() && !secondary?.dirty) return true;
+  if (!workspace.dirty() && !secondary?.dirty) {
+    clearPendingBackups();
+    return true;
+  }
   savePending();
   savePendingSecondary();
   const pending = readPending();
   const pendingB = readPendingB();
   const primaryOk = !workspace.dirty() || (!!pending && sameContent(pending, snapshot()));
   const secondaryOk = !secondary?.dirty || (!!pendingB && secondary && sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)));
-  return primaryOk && secondaryOk;
+  if (kind === 'reload') return primaryOk && secondaryOk;
+  // Close: a session backup is not enough — closing removes the iframe and must not
+  // silently destroy the only copy after a failed save. Ask for explicit discard.
+  const discard = await askConfirmChoice({
+    title: 'Close and discard unsaved changes?',
+    message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
+    confirmLabel: 'Discard changes and close',
+    cancelLabel: 'Keep editing',
+    returnFocus: updateReloadReturnFocus(),
+  });
+  if (discard) clearPendingBackups();
+  return discard;
 }
 async function prepareUpdateReload(): Promise<boolean> {
   return prepareLeaveWithUnsaved('reload');

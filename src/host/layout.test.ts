@@ -10,6 +10,7 @@ import {
   snapRect,
   tileSideBySide,
   tileStacked,
+  windowsOverlap,
 } from './layout';
 
 describe('host layout helpers', () => {
@@ -32,10 +33,48 @@ describe('host layout helpers', () => {
     const side = tileSideBySide(windows, viewport);
     expect(side[0]).toMatchObject({ x: 0, y: 0, w: 500, h: 800 });
     expect(side[1]).toMatchObject({ x: 500, y: 0, w: 500, h: 800 });
+    expect(windowsOverlap(side)).toBe(false);
 
     const stacked = tileStacked(windows, viewport);
     expect(stacked[0]).toMatchObject({ x: 0, y: 0, w: 1000, h: 400 });
     expect(stacked[1]).toMatchObject({ x: 0, y: 400, w: 1000, h: 400 });
+    expect(windowsOverlap(stacked)).toBe(false);
+  });
+
+  it('falls back to a non-overlapping grid when four side-by-side tiles cannot fit', () => {
+    const windows = [1, 2, 3, 4].map(n => ({
+      id: n === 1 ? 'main' : `w${n}`,
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      z: n,
+    }));
+    const view = { width: 1024, height: 700 };
+    const tiled = tileSideBySide(windows, view);
+    expect(tiled).toHaveLength(4);
+    expect(windowsOverlap(tiled)).toBe(false);
+    expect(tiled.every(win => win.w >= MIN_WINDOW_WIDTH && win.h >= MIN_WINDOW_HEIGHT)).toBe(true);
+    // 2×2 grid: two distinct x and two distinct y positions.
+    expect(new Set(tiled.map(win => win.x)).size).toBe(2);
+    expect(new Set(tiled.map(win => win.y)).size).toBe(2);
+  });
+
+  it('falls back to a non-overlapping grid for three windows in an 800px-wide host', () => {
+    const windows = [1, 2, 3].map(n => ({
+      id: n === 1 ? 'main' : `w${n}`,
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      z: n,
+    }));
+    const view = { width: 800, height: 700 };
+    // 3 × MIN_WINDOW_WIDTH = 840 > 800 → grid, not one row.
+    const tiled = tileSideBySide(windows, view);
+    expect(tiled).toHaveLength(3);
+    expect(windowsOverlap(tiled)).toBe(false);
+    expect(tiled.every(win => win.w >= MIN_WINDOW_WIDTH && win.h >= MIN_WINDOW_HEIGHT)).toBe(true);
   });
 
   it('snaps to a left half near the left edge', () => {

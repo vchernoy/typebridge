@@ -65,9 +65,64 @@ export function bringToFront(windows: HostWindowLayout[], id: string): HostWindo
   return windows.map(win => (win.id === id ? { ...win, z: maxZ + 1 } : win));
 }
 
+/** Cascade with a visible offset when even a grid cannot fit every minimum size. */
+export function cascadeWindows(windows: HostWindowLayout[], viewport: ViewportSize): HostWindowLayout[] {
+  const offset = 28;
+  return windows.map((win, index) => {
+    const x = Math.min(index * offset, Math.max(0, viewport.width - MIN_WINDOW_WIDTH));
+    const y = Math.min(index * offset, Math.max(0, viewport.height - MIN_WINDOW_HEIGHT));
+    return {
+      ...win,
+      ...clampRect({
+        x,
+        y,
+        w: Math.max(MIN_WINDOW_WIDTH, Math.min(640, viewport.width - x)),
+        h: Math.max(MIN_WINDOW_HEIGHT, Math.min(480, viewport.height - y)),
+      }, viewport),
+    };
+  });
+}
+
+/** Non-overlapping grid (e.g. 2×2 for four). Falls back to cascade when mins cannot fit. */
+export function tileGrid(windows: HostWindowLayout[], viewport: ViewportSize): HostWindowLayout[] {
+  if (windows.length === 0) return [];
+  const count = windows.length;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
+  const rows = Math.max(1, Math.ceil(count / cols));
+  if (cols * MIN_WINDOW_WIDTH > viewport.width || rows * MIN_WINDOW_HEIGHT > viewport.height) {
+    return cascadeWindows(windows, viewport);
+  }
+  const cellW = Math.floor(viewport.width / cols);
+  const cellH = Math.floor(viewport.height / rows);
+  return windows.map((win, index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const x = col * cellW;
+    const y = row * cellH;
+    const w = col === cols - 1 ? viewport.width - x : cellW;
+    const h = row === rows - 1 ? viewport.height - y : cellH;
+    return { ...win, ...clampRect({ x, y, w, h }, viewport) };
+  });
+}
+
+function rectanglesOverlap(a: WindowRect, b: WindowRect): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/** True when any pair of windows shares interior area (used by tests). */
+export function windowsOverlap(windows: HostWindowLayout[]): boolean {
+  for (let i = 0; i < windows.length; i++) {
+    for (let j = i + 1; j < windows.length; j++) {
+      if (rectanglesOverlap(windows[i], windows[j])) return true;
+    }
+  }
+  return false;
+}
+
 export function tileSideBySide(windows: HostWindowLayout[], viewport: ViewportSize): HostWindowLayout[] {
   if (windows.length === 0) return [];
   const count = windows.length;
+  if (count * MIN_WINDOW_WIDTH > viewport.width) return tileGrid(windows, viewport);
   const w = Math.max(MIN_WINDOW_WIDTH, Math.floor(viewport.width / count));
   return windows.map((_, index) => clampRect({
     x: index * w,
@@ -80,6 +135,7 @@ export function tileSideBySide(windows: HostWindowLayout[], viewport: ViewportSi
 export function tileStacked(windows: HostWindowLayout[], viewport: ViewportSize): HostWindowLayout[] {
   if (windows.length === 0) return [];
   const count = windows.length;
+  if (count * MIN_WINDOW_HEIGHT > viewport.height) return tileGrid(windows, viewport);
   const h = Math.max(MIN_WINDOW_HEIGHT, Math.floor(viewport.height / count));
   return windows.map((_, index) => clampRect({
     x: 0,
@@ -96,7 +152,8 @@ export function tileStacked(windows: HostWindowLayout[], viewport: ViewportSize)
 export function snapRect(rect: WindowRect, viewport: ViewportSize, threshold = SNAP_THRESHOLD_PX): WindowRect {
   const halfW = viewport.width / 2;
   const halfH = viewport.height / 2;
-  let { x, y, w, h } = rect;
+  let { x, y } = rect;
+  const { w, h } = rect;
 
   const nearLeft = Math.abs(x) <= threshold;
   const nearRight = Math.abs(x + w - viewport.width) <= threshold;
