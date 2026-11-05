@@ -70,6 +70,10 @@ type DragKind =
 
 export type WindowManager = {
   windows: () => HostWindowLayout[];
+  /** Document ids currently open in host windows (optionally excluding one window). */
+  openDocumentIds: (exceptWindowId?: string) => string[];
+  /** Live on-screen titles across windows (for distinct Untitled defaults). */
+  openTitles: (exceptWindowId?: string) => string[];
   addWindow: () => string | undefined;
   closeWindow: (id: string) => Promise<boolean>;
   tileSideBySide: () => void;
@@ -176,11 +180,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (move) {
         // Keep the title handle focusable in stacked mode for keyboard height resize.
         move.tabIndex = hostFocus ? -1 : 0;
+        const titleInput = shell.querySelector<HTMLInputElement>('.host-window-title');
+        const label = (titleInput?.value.trim() || titleInput?.title || 'Untitled document');
         move.setAttribute(
           'aria-label',
           mode === 'stacked'
-            ? `Window ${wid} (Ctrl/⌘+Shift+Up/Down to resize height)`
-            : `Move window ${wid} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+            ? `Move window ${wid}: ${label} (Ctrl/⌘+Shift+Up/Down to resize height)`
+            : `Move window ${wid}: ${label} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
         );
       }
     }
@@ -272,10 +278,16 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       `Move window ${win.id} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
     );
 
-    const title = document.createElement('span');
+    // #175 step 8: document title lives on the host chrome; rename write-through to the iframe.
+    // Keep the title input a sibling of the move handle (not inside the button).
+    const title = document.createElement('input');
+    title.type = 'text';
     title.className = 'host-window-title';
-    title.textContent = win.id === 'main' ? 'TypeBridge' : `Window ${win.id}`;
-    moveHandle.append(title);
+    title.value = 'Untitled document';
+    title.setAttribute('aria-label', 'Document title');
+    title.spellcheck = false;
+    // Locked until the iframe mounts an editable #draft-title (avoids lost renames).
+    title.readOnly = true;
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -284,13 +296,204 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     closeBtn.setAttribute('aria-label', `Close window ${win.id}`);
     closeBtn.textContent = '×';
 
-    titleBar.append(moveHandle, closeBtn);
+    titleBar.append(moveHandle, title, closeBtn);
 
     const frame = document.createElement('iframe');
     frame.className = 'host-editor';
     frame.dataset.windowId = win.id;
-    frame.title = `TypeBridge editor ${win.id}`;
+    frame.title = 'TypeBridge editor';
     frame.allow = 'clipboard-read; clipboard-write';
+
+    const displayTitle = (raw: string): string => raw.trim() || 'Untitled document';
+
+    const applyMoveAria = (label: string): void => {
+      moveHandle.setAttribute(
+        'aria-label',
+        mode === 'stacked'
+          ? `Move window ${win.id}: ${label} (Ctrl/⌘+Shift+Up/Down to resize height)`
+          : `Move window ${win.id}: ${label} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+      );
+    };
+
+    /** Update chrome metadata without rewriting the input while the user is typing. */
+    const applyChromeMeta = (raw: string): void => {
+      const label = displayTitle(raw);
+      title.title = label;
+      shell.setAttribute('aria-label', label);
+      frame.title = label;
+      applyMoveAria(label);
+      closeBtn.setAttribute('aria-label', `Close ${label}`);
+    };
+
+    const applyChromeTitle = (next: string): void => {
+      const label = displayTitle(next);
+      if (document.activeElement !== title && title.value !== label) title.value = label;
+      applyChromeMeta(title.value);
+    };
+
+    const syncTitleEditable = (): void => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const draft = doc.querySelector<HTMLInputElement>('#draft-title');
+        // Stay locked until the iframe title exists (and is editable).
+        if (!draft) {
+          title.readOnly = true;
+          return;
+        }
+        title.readOnly = draft.readOnly || draft.disabled;
+      } catch { /* Cross-origin or mid-navigation — keep current state. */ }
+    };
+
+    type TitleHooks = Window & {
+      __typebridgeGetTitle?: () => string;
+      __typebridgeSetTitle?: (value: string) => void;
+      __typebridgeTitleCommit?: (
+        value: string,
+        start?: number,
+        end?: number,
+      ) => { value: string; start: number; end: number } | null;
+      __typebridgeTitleEdit?: (payload: {
+        inputType: string;
+        data: string | null;
+        start: number;
+        end: number;
+      }) => { value: string; start: number; end: number } | null;
+      __typebridgeToggleTransliteration?: () => void;
+    };
+
+    let applyingFromIframe = false;
+    let hostTitleComposing = false;
+    const applyHostTitleResult = (result: { value: string; start: number; end: number }): void => {
+      applyingFromIframe = true;
+      title.value = result.value;
+      try { title.setSelectionRange(result.start, result.end); } catch { /* Input type may reject. */ }
+      applyingFromIframe = false;
+      applyChromeMeta(title.value);
+    };
+
+    title.addEventListener('pointerdown', event => { event.stopPropagation(); syncTitleEditable(); });
+    title.addEventListener('focus', () => { syncTitleEditable(); });
+    title.addEventListener('compositionstart', () => { hostTitleComposing = true; });
+    title.addEventListener('compositionend', () => {
+      hostTitleComposing = false;
+      if (title.readOnly) return;
+      try {
+        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(
+          title.value,
+          title.selectionStart ?? title.value.length,
+          title.selectionEnd ?? title.value.length,
+        );
+        if (result) applyHostTitleResult(result);
+        else applyChromeMeta(title.value);
+      } catch { applyChromeMeta(title.value); }
+    });
+    title.addEventListener('keydown', event => {
+      // Keep arrow-key window move on the handle; let the input own typing keys.
+      event.stopPropagation();
+      if (title.readOnly || event.isComposing) return;
+      try {
+        const hooks = frame.contentWindow as TitleHooks | null;
+        // Forward undo/redo to the iframe title Editor (host input has no native history
+        // when inserts are applied programmatically).
+        if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+          const key = event.key.toLowerCase();
+          if (key === 'z' || key === 'y') {
+            const redo = key === 'y' || (key === 'z' && event.shiftKey);
+            event.preventDefault();
+            const result = hooks?.__typebridgeTitleEdit?.({
+              inputType: redo ? 'historyRedo' : 'historyUndo',
+              data: null,
+              start: title.selectionStart ?? 0,
+              end: title.selectionEnd ?? 0,
+            });
+            if (result) applyHostTitleResult(result);
+            return;
+          }
+        }
+        // Forward the transliteration mode shortcut into the iframe (listener is document-local there).
+        if (event.shiftKey && !event.altKey && !event.repeat
+          && ((event.ctrlKey && !event.metaKey) || (event.metaKey && !event.ctrlKey))
+          && (event.code === 'Space' || event.code === 'F7' || event.code === 'F8' || event.code === 'F9')) {
+          hooks?.__typebridgeToggleTransliteration?.();
+          event.preventDefault();
+        }
+      } catch { /* Frame mid-navigation. */ }
+    });
+    // Route insert typing through the iframe title Editor (transliteration). Let
+    // deletes/clear/IME composition run natively on the host input, then write through.
+    title.addEventListener('beforeinput', event => {
+      syncTitleEditable();
+      if (title.readOnly) {
+        event.preventDefault();
+        return;
+      }
+      if (hostTitleComposing || event.inputType.includes('Composition')) return;
+      const insert = event.inputType === 'insertText'
+        || event.inputType === 'insertFromPaste'
+        || event.inputType === 'insertReplacementText'
+        || event.inputType === 'insertFromDrop';
+      if (!insert) return;
+      event.preventDefault();
+      try {
+        const hooks = frame.contentWindow as TitleHooks | null;
+        const result = hooks?.__typebridgeTitleEdit?.({
+          inputType: event.inputType === 'insertReplacementText' ? 'insertText' : event.inputType,
+          data: event.data,
+          start: title.selectionStart ?? 0,
+          end: title.selectionEnd ?? 0,
+        });
+        if (result) applyHostTitleResult(result);
+        else {
+          const authoritative = hooks?.__typebridgeGetTitle?.();
+          if (authoritative !== undefined) {
+            applyingFromIframe = true;
+            title.value = authoritative;
+            applyingFromIframe = false;
+            applyChromeMeta(title.value);
+          }
+        }
+      } catch { /* Frame mid-navigation. */ }
+    });
+    title.addEventListener('input', () => {
+      if (applyingFromIframe || hostTitleComposing) return;
+      syncTitleEditable();
+      if (title.readOnly) {
+        try {
+          const hooks = frame.contentWindow as TitleHooks | null;
+          const authoritative = hooks?.__typebridgeGetTitle?.();
+          if (authoritative !== undefined) title.value = authoritative;
+        } catch { /* Frame mid-navigation. */ }
+        applyChromeMeta(title.value);
+        return;
+      }
+      // Deletes, fill(), and other non-intercepted edits: commit through the title
+      // Editor so undo history stays in sync (setTitle alone skips Editor deltas).
+      if (title.value.length > 150) title.value = title.value.slice(0, 150);
+      applyChromeMeta(title.value);
+      try {
+        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(
+          title.value,
+          title.selectionStart ?? title.value.length,
+          title.selectionEnd ?? title.value.length,
+        );
+        if (result) applyHostTitleResult(result);
+      } catch { /* Frame mid-navigation. */ }
+    });
+    title.addEventListener('blur', () => {
+      if (title.readOnly) {
+        applyChromeMeta(title.value);
+        return;
+      }
+      const label = displayTitle(title.value);
+      if (title.value !== label) {
+        title.value = label;
+        try {
+          (frame.contentWindow as TitleHooks | null)?.__typebridgeSetTitle?.(label);
+        } catch { /* Frame mid-navigation. */ }
+      }
+      applyChromeMeta(label);
+    });
 
     const handles: Array<[string, string]> = [
       ['n', 'top'],
@@ -322,26 +525,31 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     // Iframe pointer/focus events do not bubble to the shell. Wire same-origin
     // content so clicking or focusing the editor still raises the window.
     const activateFromIframe = (): void => { setActive(win.id); };
+    applyChromeTitle(title.value);
     const wireFrame = (): void => {
       try {
         const doc = frame.contentDocument;
         if (!doc) return;
         doc.addEventListener('pointerdown', activateFromIframe);
         doc.addEventListener('focusin', activateFromIframe);
-        if (!hostFocus) return;
         // Hooks register at the end of the editor boot — retry briefly after load.
+        // Keep refreshing title editability after hooks appear: draft init may still
+        // hold the iframe title read-only for a few frames (ownership acquire).
         let attempts = 0;
-        const syncFocus = (): void => {
+        const syncHooks = (): void => {
           const hooks = frame.contentWindow as (Window & {
             __typebridgeSetFocusMode?: (on: boolean) => void;
+            __typebridgeGetTitle?: () => string;
           }) | null;
-          if (hooks?.__typebridgeSetFocusMode) {
-            hooks.__typebridgeSetFocusMode(win.id === activeId);
-            return;
-          }
-          if (attempts++ < 40) window.setTimeout(syncFocus, 50);
+          if (hooks?.__typebridgeGetTitle) applyChromeTitle(hooks.__typebridgeGetTitle());
+          syncTitleEditable();
+          if (hostFocus) hooks?.__typebridgeSetFocusMode?.(win.id === activeId);
+          const hooksReady = !!hooks?.__typebridgeGetTitle && (!hostFocus || !!hooks.__typebridgeSetFocusMode);
+          const titleReady = !title.readOnly;
+          if ((hooksReady && titleReady) || attempts++ >= 80) return;
+          window.setTimeout(syncHooks, 50);
         };
-        syncFocus();
+        syncHooks();
       } catch { /* Unexpected cross-origin — chrome-only activation remains. */ }
     };
     frame.addEventListener('load', wireFrame);
@@ -596,6 +804,33 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   const api: WindowManager = {
     windows: () => layouts.slice(),
+    openDocumentIds: (exceptWindowId?: string) => {
+      const ids: string[] = [];
+      for (const win of layouts) {
+        if (exceptWindowId && win.id === exceptWindowId) continue;
+        if (win.documentId) ids.push(win.documentId);
+      }
+      return ids;
+    },
+    openTitles: (exceptWindowId?: string) => {
+      const titles: string[] = [];
+      for (const win of layouts) {
+        if (exceptWindowId && win.id === exceptWindowId) continue;
+        const shell = shells.get(win.id);
+        const input = shell?.querySelector<HTMLInputElement>('.host-window-title');
+        const fromChrome = input?.value.trim();
+        if (fromChrome) {
+          titles.push(fromChrome);
+          continue;
+        }
+        try {
+          const hooks = frames.get(win.id)?.contentWindow as (Window & { __typebridgeGetTitle?: () => string }) | null;
+          const fromFrame = hooks?.__typebridgeGetTitle?.()?.trim();
+          if (fromFrame) titles.push(fromFrame);
+        } catch { /* Mid-navigation. */ }
+      }
+      return titles;
+    },
     addWindow: () => {
       if (hostFocus || layouts.length >= MAX_HOST_WINDOWS) return undefined;
       const view = viewportOf(deps.root);
@@ -750,9 +985,14 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const onHostHidden = (): void => {
     if (document.visibilityState === 'hidden') onPersistDocumentIds();
   };
-  const onActiveDraftMessage = (event: MessageEvent): void => {
+    const onActiveDraftMessage = (event: MessageEvent): void => {
     if (event.origin !== window.location.origin) return;
-    const data = event.data as { type?: string; windowId?: string; documentId?: string } | null;
+    const data = event.data as {
+      type?: string;
+      windowId?: string;
+      documentId?: string;
+      title?: string;
+    } | null;
     if (!data || data.type !== 'typebridge-active-draft') return;
     if (typeof data.windowId !== 'string' || typeof data.documentId !== 'string' || !data.documentId) return;
     if (!layouts.some(win => win.id === data.windowId)) return;
@@ -763,6 +1003,28 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       preFocusLayouts = preFocusLayouts.map(win => (
         win.id === data.windowId ? { ...win, documentId: data.documentId } : win
       ));
+    }
+    if (typeof data.title === 'string') {
+      const shell = shells.get(data.windowId);
+      const titleInput = shell?.querySelector<HTMLInputElement>('.host-window-title');
+      const frame = frames.get(data.windowId);
+      if (titleInput && frame && shell) {
+        const label = data.title.trim() || 'Untitled document';
+        if (document.activeElement !== titleInput) {
+          titleInput.value = label;
+        }
+        titleInput.title = label;
+        shell.setAttribute('aria-label', label);
+        frame.title = label;
+        const move = shell.querySelector<HTMLElement>('.host-window-move');
+        move?.setAttribute(
+          'aria-label',
+          mode === 'stacked'
+            ? `Move window ${data.windowId}: ${label} (Ctrl/⌘+Shift+Up/Down to resize height)`
+            : `Move window ${data.windowId}: ${label} (arrow keys; Ctrl/⌘+Shift+arrows to resize)`,
+        );
+        shell.querySelector('.host-window-close')?.setAttribute('aria-label', `Close ${label}`);
+      }
     }
     // Use Focus-aware persist so maximized geometry / focusWindowId stay correct.
     persist();

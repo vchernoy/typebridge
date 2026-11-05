@@ -1193,13 +1193,27 @@ body:not(.host-page) .settings-host-only {
   display: none;
 }
 
-/* #175 step 7: Settings panel lives on the host; keep embed chrome clean.
+/* #175 step 7–8: Settings + document title live on the host; keep embed chrome clean.
    In-page split / comparison are redundant with host windows (removed in step 10). */
 html[data-embed="1"] #settings-open,
 html[data-embed="1"] #settings-panel,
 html[data-embed="1"] #toggle-split,
-html[data-embed="1"] #open-comparison {
+html[data-embed="1"] #open-comparison,
+html[data-embed="1"] .brand,
+html[data-embed="1"] #draft-title {
   display: none !important;
+}
+
+.doc-menu #doc-search {
+  width: 100%;
+  min-height: 40px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
 }
 
 body.host-page .host-settings-panel {
@@ -1285,13 +1299,19 @@ body.host-page {
   background: color-mix(in srgb, var(--accent) 16%, var(--background));
 }
 .host-window-move {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 0 1.5rem;
+  align-self: stretch;
   display: flex;
   align-items: center;
-  padding: 0.15rem 0.35rem;
+  justify-content: center;
   cursor: grab;
   border-radius: 4px;
+  /* Drag grip: three short bars, not a second title string. */
+  background:
+    linear-gradient(currentColor, currentColor) center 35% / 0.7rem 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center 50% / 0.7rem 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center 65% / 0.7rem 2px no-repeat;
+  opacity: 0.55;
 }
 .host-window-move:active {
   cursor: grabbing;
@@ -1299,14 +1319,30 @@ body.host-page {
 .host-window-move:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+  opacity: 1;
 }
 .host-window-title {
   flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0.15rem 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-size: 0.85rem;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.host-window-title:hover {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+.host-window-title:focus {
+  border-color: var(--control-border);
+  outline: none;
 }
 .host-window-close {
   flex: 0 0 auto;

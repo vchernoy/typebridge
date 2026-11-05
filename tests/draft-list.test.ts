@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest';
-import { draftOptionLabel } from '../src/editor/draft-list';
+import {
+  draftEditedLabel,
+  draftMatchesQuery,
+  draftOptionLabel,
+  draftPickerLabel,
+  draftTextPreview,
+} from '../src/editor/draft-list';
 
 test('current saved draft shows the on-screen title with a current marker', () => {
   expect(draftOptionLabel({
@@ -26,4 +32,22 @@ test('other drafts keep their saved titles', () => {
     isCurrent: false,
     unsaved: true,
   })).toBe('Other');
+});
+
+test('picker rows add preview, edited time and open-elsewhere mark (#175 step 8)', () => {
+  expect(draftPickerLabel({
+    savedTitle: 'Notes',
+    displayTitle: 'Notes',
+    isCurrent: false,
+    unsaved: false,
+    text: 'Hello   world from the body',
+    updatedAt: Date.now() - 120_000,
+    openElsewhere: true,
+  })).toMatch(/^Notes · open in another window · Hello world from the body · 2 min ago$/);
+
+  expect(draftTextPreview('')).toBe('');
+  expect(draftTextPreview('a'.repeat(60)).endsWith('…')).toBe(true);
+  expect(draftEditedLabel(Date.now())).toBe('Just now');
+  expect(draftMatchesQuery({ title: 'Letter', text: 'privet', query: 'PRI' })).toBe(true);
+  expect(draftMatchesQuery({ title: 'Letter', text: 'privet', query: 'xyz' })).toBe(false);
 });

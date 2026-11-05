@@ -42,13 +42,15 @@ test('host Settings appearance and typing mode apply to every window', async ({ 
   await page.locator('#settings-close').click();
   await expect(page.locator('#settings-panel')).toBeHidden();
 
-  // Mode switch stays in window chrome and syncs across windows, including titles.
+  // Mode switch stays in window chrome and syncs across windows, including host titles.
   await main.locator('.mode-switch .mode-side').first().click();
   await expect(main.locator('#enabled')).not.toBeChecked();
   await expect.poll(async () => second.locator('#enabled').isChecked()).toBe(false);
-  await fillHostEditor(second, '', '#draft-title');
-  await second.locator('#draft-title').pressSequentially('w');
-  await expect(second.locator('#draft-title')).toHaveValue('w');
+  const secondTitle = page.locator('.host-window[data-window-id="w2"] .host-window-title');
+  await secondTitle.fill('w');
+  await expect(secondTitle).toHaveValue('w');
+  // Latin mode: host title write-through must not transliterate the typed Latin letter.
+  await expect.poll(async () => second.locator('#draft-title').inputValue()).toBe('w');
 });
 
 test('host custom rules apply live in every window without reload', async ({ page }) => {

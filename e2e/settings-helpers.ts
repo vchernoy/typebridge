@@ -120,7 +120,21 @@ export async function closeDocuments(page: Page): Promise<void> {
 /** Open the menu, pick a document (by value or { label }), and close the menu. */
 export async function selectDocument(page: Page, value: string | { label: string }): Promise<void> {
   await openDocuments(page);
-  await page.locator('#drafts').selectOption(value);
+  if (typeof value === 'string') {
+    await page.locator('#drafts').selectOption(value);
+  } else {
+    // #175 step 8 labels include preview/time; match the title prefix.
+    const prefix = value.label;
+    const optionValue = await page.locator('#drafts option').evaluateAll((options, want) => {
+      const match = options.find(option => {
+        const text = option.textContent ?? '';
+        return text === want || text.startsWith(`${want} (`) || text.startsWith(`${want} ·`);
+      });
+      return match?.getAttribute('value') ?? '';
+    }, prefix);
+    if (!optionValue) throw new Error(`Document option not found for ${prefix}`);
+    await page.locator('#drafts').selectOption(optionValue);
+  }
   await closeDocuments(page);
 }
 

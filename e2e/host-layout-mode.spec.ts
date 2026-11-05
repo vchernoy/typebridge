@@ -59,7 +59,7 @@ test('Settings Layout Stacked forces a scrollable full-width phone stack', async
   expect(await handle.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(24);
 
   // Keyboard height resize (pointer drag + overflow scroll is flaky in Firefox).
-  const title = page.getByRole('button', { name: /Window main/ });
+  const title = page.getByRole('button', { name: /Move window main/ });
   await title.focus();
   await page.keyboard.press('Control+Shift+ArrowDown');
   await page.keyboard.press('Control+Shift+ArrowDown');

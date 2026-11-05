@@ -62,7 +62,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | **5** | Window manager (desktop free layout) | Yes (this slice: `/host.html` free windows — New/Close, drag, resize, z-order, snap, tile, keyboard move/resize, localStorage layout, cap 4) |
 | **6** | Phone stack, Layout setting, Focus mode | Yes (this slice: Auto/Free/Stacked preference, capability detection, stacked height grip, host Focus maximize) |
 | **7** | Shared settings live across windows | Yes (this slice: one Settings panel on `/host.html`; live apply via prefs-sync + iframe hooks; mode chrome stays per window) |
-| **8** | Title/picker redesign | Yes |
+| **8** | Title/picker redesign | Yes (this slice: host title-bar rename; picker search/preview/time/open-elsewhere; numbered Untitled defaults) |
 | **9** | Find/Replace per window | Yes |
 | **10** | Remove in-page split | Yes |
 | **11** | Verification, screenshots, honest device/AT limits | Docs + tests |

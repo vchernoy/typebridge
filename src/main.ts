@@ -8,7 +8,7 @@ import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
 import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
-import { draftOptionLabel } from './editor/draft-list';
+import { draftMatchesQuery, draftOptionLabel, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
   UNTITLED_TITLE,
@@ -19,6 +19,7 @@ import {
   setActiveDraftId,
   setAutosaveEnabled,
 } from './editor/drafts';
+import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
@@ -134,7 +135,13 @@ const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setu
   },
 });
 setupSettings({ embedded });
-setupDocumentMenu();
+let docSearchQuery = '';
+setupDocumentMenu({
+  onSearch: query => {
+    docSearchQuery = query;
+    renderDrafts();
+  },
+});
 setupMoreMenu();
 setupKeyboardShortcuts();
 const editor = new Editor(field);
@@ -1094,38 +1101,79 @@ function flushSecondaryOnUnload(): void {
 function rememberActive(): void {
   if (viewMode) return;
   try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ }
-  // Tell the #175 host so layout persistence can record this window's document id.
+  // Tell the #175 host so layout persistence can record this window's document id / title.
   if (embedded && window.parent !== window) {
     try {
+      // Post the raw field value (may be empty while renaming). The host applies
+      // the Untitled fallback for chrome metadata without clobbering in-progress edits.
       window.parent.postMessage({
         type: 'typebridge-active-draft',
         windowId,
         documentId: active.id,
+        title: draftTitle.value,
       }, window.location.origin);
     } catch { /* Cross-origin parent — host will probe on unload. */ }
   }
 }
+
+/** #175 step 8: never reuse an existing Untitled document / Untitled document N name. */
+function allocateNewDraft(text = ''): StoredDraft {
+  const titles = drafts.map(draft => draft.title);
+  titles.push(active.title, draftTitle.value.trim() || UNTITLED_TITLE);
+  if (secondary) titles.push(secondary.draft.title, secondary.title.value.trim() || UNTITLED_TITLE);
+  // Other host windows may hold unsaved Untitled titles not yet in IndexedDB.
+  if (embedded && window.parent !== window) {
+    try {
+      const host = window.parent as Window & { __typebridgeOpenTitles?: (exceptWindowId?: string) => string[] };
+      titles.push(...(host.__typebridgeOpenTitles?.(windowId ?? undefined) ?? []));
+    } catch { /* Parent unavailable. */ }
+  }
+  return { ...newDraft(text, nextUntitledTitle(titles)), revision: 0 };
+}
+
+function openDocumentIdsElsewhere(): Set<string> {
+  if (!embedded || window.parent === window) return new Set();
+  try {
+    const host = window.parent as Window & { __typebridgeOpenDocumentIds?: (exceptWindowId?: string) => string[] };
+    // exceptWindowId already omits this window; keep ids open in *other* windows,
+    // including the active document when it is duplicated (#175 step 8).
+    const ids = host.__typebridgeOpenDocumentIds?.(windowId ?? undefined) ?? [];
+    return new Set(ids.filter(id => !!id));
+  } catch {
+    return new Set();
+  }
+}
+
 function renderDrafts(): void {
-  const visible = viewMissing || drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
+  const visibleBase = viewMissing || drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
   const displayTitle = draftTitle.value.trim() || UNTITLED_TITLE;
+  const elsewhere = openDocumentIdsElsewhere();
+  const visible = visibleBase.filter(draft => draftMatchesQuery({
+    title: draft.id === active.id ? displayTitle : draft.title,
+    text: draft.id === active.id ? field.value : draft.text,
+    query: docSearchQuery,
+  }));
   for (const picker of documentPickers) {
     picker.replaceChildren();
     for (const draft of visible) {
       const option = document.createElement('option');
       option.value = draft.id;
       const isCurrent = draft.id === active.id;
-      option.textContent = draftOptionLabel({
+      option.textContent = draftPickerLabel({
         savedTitle: draft.title,
         displayTitle,
         isCurrent,
         unsaved: isCurrent && workspace.dirty(),
+        text: isCurrent ? field.value : draft.text,
+        updatedAt: isCurrent ? (workspace.dirty() ? Date.now() : draft.updatedAt) : draft.updatedAt,
+        openElsewhere: elsewhere.has(draft.id),
       });
       picker.append(option);
     }
     picker.value = viewMissing ? '' : active.id;
   }
   // Shown as a list inside the document menu: at least two rows, at most eight.
-  draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length));
+  draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length || 2));
   renderPaneBDrafts();
 }
 function renderPaneBDrafts(): void {
@@ -1673,6 +1721,7 @@ function showDraft(): void {
   renderDrafts();
   updateStats();
   updateSaveIndicator();
+  rememberActive();
 }
 const ownershipNotice = document.querySelector<HTMLElement>('#ownership-notice')!;
 const editHereBar = document.querySelector<HTMLElement>('#edit-here-bar')!;
@@ -2244,7 +2293,11 @@ function syncTitleTooltip(): void {
   draftTitle.title = draftTitle.value.trim() || UNTITLED_TITLE;
 }
 syncTitleTooltip();
-draftTitle.addEventListener('input', () => { syncTitleTooltip(); scheduleSave(true); });
+draftTitle.addEventListener('input', () => {
+  syncTitleTooltip();
+  rememberActive();
+  scheduleSave(true);
+});
 /** While Autosave is toggling (including delete-saved-copy), document switches wait. */
 let autosaveToggleGate: Promise<void> | undefined;
 let releaseAutosaveToggleGate: (() => void) | undefined;
@@ -2573,7 +2626,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
     }
     // Freeze Editor mutation gates (not only DOM readOnly) for the whole acquire/reread window.
     freezeEditorsForTransition();
-    let target = next ?? { ...newDraft(), revision: 0 };
+    let target = next ?? allocateNewDraft();
     const access = await acquireFor(target.id);
     acquired = access.ownership;
     if (acquired && next && db) {
@@ -2648,7 +2701,7 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
     if (deletedRevision >= 1) postSignal('deleted', active.id, deletedRevision);
     clearTimeout(saveTimer);
     writingPosition.save();
-    const replacement: StoredDraft = { ...newDraft(), revision: 0 };
+    const replacement: StoredDraft = allocateNewDraft();
     const access = await acquireFor(replacement.id);
     active = replacement;
     rememberActive();
@@ -2830,7 +2883,11 @@ async function initializeDrafts(): Promise<void> {
       ? pending!
       : listed
         ?? (openFresh
-          ? { ...newDraft(), ...(selected && isDocumentId(selected) ? { id: selected } : {}), revision: 0 }
+          ? (() => {
+              // Distinct Untitled defaults across host windows (#175 step 8).
+              const fresh = allocateNewDraft();
+              return selected && isDocumentId(selected) ? { ...fresh, id: selected } : fresh;
+            })()
           : drafts[0])
         ?? active;
     // First acquirer among cooperating windows edits; the others open this document read-only.
@@ -3746,6 +3803,23 @@ if (embedded) {
     __typebridgeSetFocusMode?: (enabled: boolean) => void;
     /** #175 step 7: host Settings asks every window to apply a shared preference. */
     __typebridgeApplyPrefs?: (name: PrefName, origin?: string) => void;
+    /** #175 step 8: host title bar rename write-through. */
+    __typebridgeSetTitle?: (title: string) => void;
+    __typebridgeGetTitle?: () => string;
+    /** Host title beforeinput — runs through the title Editor (transliteration). */
+    __typebridgeTitleEdit?: (payload: {
+      inputType: string;
+      data: string | null;
+      start: number;
+      end: number;
+    }) => { value: string; start: number; end: number } | null;
+    /** Host title IME/delete commit — records one undoable edit in the title Editor. */
+    __typebridgeTitleCommit?: (
+      value: string,
+      start?: number,
+      end?: number,
+    ) => { value: string; start: number; end: number } | null;
+    __typebridgeToggleTransliteration?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
@@ -3764,9 +3838,97 @@ if (embedded) {
       },
     }));
   };
+  hooks.__typebridgeGetTitle = () => draftTitle.value.trim() || UNTITLED_TITLE;
+  hooks.__typebridgeSetTitle = title => {
+    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return;
+    const next = title.slice(0, 150);
+    if (draftTitle.value === next) return;
+    draftTitle.value = next;
+    syncTitleTooltip();
+    rememberActive();
+    scheduleSave(true);
+  };
+  hooks.__typebridgeToggleTransliteration = () => {
+    enabled.checked = !enabled.checked;
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  hooks.__typebridgeTitleCommit = (value, start, end) => {
+    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
+    const next = value.slice(0, 150);
+    if (draftTitle.value !== next) {
+      draftTitle.value = next;
+      // Dispatch input so titleEditor records a single undoable edit.
+      draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const caret = Math.max(0, Math.min(start ?? next.length, next.length));
+    const caretEnd = Math.max(caret, Math.min(end ?? caret, next.length));
+    syncTitleTooltip();
+    rememberActive();
+    scheduleSave(true);
+    return { value: draftTitle.value, start: caret, end: caretEnd };
+  };
+  hooks.__typebridgeTitleEdit = payload => {
+    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
+    const length = draftTitle.value.length;
+    const start = Math.max(0, Math.min(payload.start, length));
+    const end = Math.max(start, Math.min(payload.end, length));
+    // Do not focus the hidden embed #draft-title — that steals caret from the host
+    // title bar (especially on Firefox) and drops later keystrokes.
+    try { draftTitle.setSelectionRange(start, end); } catch { /* Not focused. */ }
+    const event = new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: payload.inputType,
+      data: payload.data ?? undefined,
+    });
+    draftTitle.dispatchEvent(event);
+    if (!event.defaultPrevented) {
+      if (payload.inputType === 'insertText' && payload.data) {
+        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+      } else if (
+        (payload.inputType === 'insertFromPaste' || payload.inputType === 'insertFromDrop')
+        && payload.data
+      ) {
+        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+      } else if (payload.inputType === 'deleteContentBackward') {
+        if (start === end && start > 0) draftTitle.setRangeText('', start - 1, start, 'end');
+        else draftTitle.setRangeText('', start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+      } else if (payload.inputType === 'deleteContentForward') {
+        if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, start + 1, 'end');
+        else draftTitle.setRangeText('', start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+      } else if (payload.inputType === 'deleteByCut') {
+        draftTitle.setRangeText('', start, end, 'end');
+        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+      } else if (payload.inputType === 'historyUndo') {
+        titleEditor.undo();
+      } else if (payload.inputType === 'historyRedo') {
+        titleEditor.redo();
+      }
+      if (draftTitle.value.length > 150) {
+        draftTitle.value = draftTitle.value.slice(0, 150);
+        draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    syncTitleTooltip();
+    rememberActive();
+    return {
+      value: draftTitle.value,
+      start: draftTitle.selectionStart ?? 0,
+      end: draftTitle.selectionEnd ?? 0,
+    };
+  };
   // Catch prefs the host broadcast before this iframe finished booting.
   syncAutosaveCheckboxFromStorage();
   try { applyTabIndentFromStorage(); } catch { /* optional */ }
   try { appearanceSettings.applyFromStorage(); } catch { /* optional */ }
   try { typingSettings.applyFromStorage(); } catch { /* optional */ }
+  // Do not rememberActive() here: initializeDrafts() still needs the prior
+  // session/?doc= selection. Publishing the temporary blank id early would
+  // overwrite it and leave secondary host windows blank after reload (#175 s8).
 }
