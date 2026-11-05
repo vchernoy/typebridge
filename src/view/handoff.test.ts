@@ -158,4 +158,18 @@ describe('handoff helpers', () => {
     expect(mapSelectionAcrossTextChange(reader, reader, 6, 11)).toEqual({ start: 6, end: 11 });
   });
 
+  it('snaps mapping seams off surrogate pairs and combining sequences', () => {
+    // 😀 and 😁 share a high surrogate; a raw UTF-16 prefix of 1 must snap to 0.
+    expect(mapSelectionAcrossTextChange('😀x', '😁x', 0, 2)).toEqual({ start: 0, end: 0 });
+    expect(mapSelectionAcrossTextChange('😀x', '😁x', 2, 2)).toEqual({ start: 2, end: 2 });
+
+    // Combining и + U+0306 vs precomposed й — never land between base and mark.
+    const combined = 'и\u0306';
+    const precomposed = 'й';
+    expect(mapSelectionAcrossTextChange(combined, precomposed, 0, 2)).toEqual({ start: 0, end: 0 });
+    expect(mapSelectionAcrossTextChange(combined + 'z', precomposed + 'z', 2, 2)).toEqual({
+      start: 1, end: 1,
+    });
+  });
+
 });

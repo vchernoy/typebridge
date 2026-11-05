@@ -328,11 +328,50 @@ function commonSuffixLength(a: string, b: string, prefixLength: number): number 
   return i;
 }
 
+/** True when `offset` is the start of a grapheme (or the string edge). */
+function isGraphemeBoundary(text: string, offset: number): boolean {
+  if (offset <= 0 || offset >= text.length) return true;
+  const prev = previousGraphemeBoundary(text, offset);
+  return nextGraphemeBoundary(text, prev) === offset;
+}
+
+/** Pull a shared UTF-16 seam back so it is a grapheme boundary in both strings. */
+function snapSharedPrefixSeam(a: string, b: string, offset: number): number {
+  let o = Math.max(0, Math.min(offset, a.length, b.length));
+  while (o > 0 && (!isGraphemeBoundary(a, o) || !isGraphemeBoundary(b, o))) {
+    const back = Math.min(previousGraphemeBoundary(a, o), previousGraphemeBoundary(b, o));
+    if (back >= o) return 0;
+    o = back;
+  }
+  return o;
+}
+
+/** Shrink a shared suffix until both suffix-start seams sit on grapheme boundaries. */
+function snapSharedSuffixLength(a: string, b: string, prefix: number, suffix: number): number {
+  let s = Math.max(0, suffix);
+  while (s > 0) {
+    const aStart = a.length - s;
+    const bStart = b.length - s;
+    if (aStart < prefix || bStart < prefix) {
+      return Math.max(0, Math.min(a.length - prefix, b.length - prefix));
+    }
+    if (isGraphemeBoundary(a, aStart) && isGraphemeBoundary(b, bStart)) return s;
+    const advance = Math.max(
+      nextGraphemeBoundary(a, aStart) - aStart,
+      nextGraphemeBoundary(b, bStart) - bStart,
+    );
+    if (advance <= 0) return 0;
+    s -= advance;
+  }
+  return 0;
+}
+
 /**
  * Map a selection measured against `fromText` onto `toText` after a handoff install.
  * Shared prefix/suffix keep their relative offsets; a selection that touches the
  * changed middle collapses so the first buffered edit inserts instead of replacing
- * characters the user never selected.
+ * characters the user never selected. Prefix/suffix seams are snapped to grapheme
+ * boundaries so surrogate pairs and combining sequences are never split.
  */
 export function mapSelectionAcrossTextChange(
   fromText: string,
@@ -347,8 +386,13 @@ export function mapSelectionAcrossTextChange(
     return { start: Math.min(a, len), end: Math.min(b, len) };
   }
 
-  const prefix = commonPrefixLength(fromText, toText);
-  const suffix = commonSuffixLength(fromText, toText, prefix);
+  const prefix = snapSharedPrefixSeam(fromText, toText, commonPrefixLength(fromText, toText));
+  const suffix = snapSharedSuffixLength(
+    fromText,
+    toText,
+    prefix,
+    commonSuffixLength(fromText, toText, prefix),
+  );
   const fromSuffixStart = fromText.length - suffix;
   const toSuffixStart = toText.length - suffix;
 
