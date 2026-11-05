@@ -55,7 +55,7 @@ import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
-import { comparisonViewerHref, parseComparisonRoute } from './view/route';
+import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { parseEmbedMode } from './view/embed';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
@@ -1016,8 +1016,10 @@ function journalEditSecondary(): void {
 function sameContent(a: StoredDraft, b: StoredDraft): boolean {
   return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
 }
+/** Set when the user confirms discarding this window so unload must not recreate backups. */
+let suppressPendingBackup = false;
 function savePending(): void {
-  if (viewMode || !workspace.dirty() || !autosave.checked || deleting) return;
+  if (suppressPendingBackup || viewMode || !workspace.dirty() || !autosave.checked || deleting) return;
   try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
   catch {
     // Keep any conflict notice and the current risk; only replace the primary.
@@ -1026,7 +1028,7 @@ function savePending(): void {
   }
 }
 function savePendingSecondary(): void {
-  if (viewMode || !secondary?.dirty || !autosave.checked) return;
+  if (suppressPendingBackup || viewMode || !secondary?.dirty || !autosave.checked) return;
   try { sessionStorage.setItem(PENDING_KEY_B, JSON.stringify(snapshotBoundSession(secondary, UNTITLED_TITLE))); }
   catch {
     setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure');
@@ -1050,7 +1052,20 @@ function flushSecondaryOnUnload(): void {
   clearTimeout(secondary.saveTimer);
   void persistSecondary();
 }
-function rememberActive(): void { if (viewMode) return; try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ } }
+function rememberActive(): void {
+  if (viewMode) return;
+  try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ }
+  // Tell the #175 host so layout persistence can record this window's document id.
+  if (embedded && window.parent !== window) {
+    try {
+      window.parent.postMessage({
+        type: 'typebridge-active-draft',
+        windowId,
+        documentId: active.id,
+      }, window.location.origin);
+    } catch { /* Cross-origin parent — host will probe on unload. */ }
+  }
+}
 function renderDrafts(): void {
   const visible = viewMissing || drafts.some(d => d.id === active.id) ? drafts : [active, ...drafts];
   const displayTitle = draftTitle.value.trim() || UNTITLED_TITLE;
@@ -2655,11 +2670,30 @@ async function initializeDrafts(): Promise<void> {
     drafts = await listStoredDrafts(db);
     let selected: string | null = null;
     try { selected = readActiveDraftId(); } catch { /* Optional hint. */ }
+    // #175 host restores each window with ?doc= when session hints are cold (fresh tab).
+    if (!selected) {
+      try {
+        const doc = new URLSearchParams(window.location.search).get('doc');
+        if (doc && isDocumentId(doc)) selected = doc;
+      } catch { /* Malformed search — fall through. */ }
+    }
     const pending = readPending();
     const committed = pending && drafts.find(d => d.id === pending.id);
     if (pending && committed && sameContent(pending, committed)) clearPending(pending);
     const restorePending = !!pending && (!committed || !sameContent(pending, committed));
-    let chosen = restorePending ? pending! : drafts.find(d => d.id === selected) ?? drafts[0] ?? active;
+    // A new host window must not inherit main's drafts[0] — that steals ownership and
+    // makes "Saved" text disappear when the primary window still owns the document.
+    // Also: session may already hold a never-saved blank id from rememberActive(); if that
+    // id is not in IndexedDB yet, keep a fresh document instead of falling through to drafts[0].
+    const listed = selected ? drafts.find(d => d.id === selected) : undefined;
+    const openFresh = embedded && !!windowId && windowId !== 'main' && !listed && !restorePending;
+    let chosen = restorePending
+      ? pending!
+      : listed
+        ?? (openFresh
+          ? { ...newDraft(), ...(selected && isDocumentId(selected) ? { id: selected } : {}), revision: 0 }
+          : drafts[0])
+        ?? active;
     // First acquirer among cooperating windows edits; the others open this document read-only.
     bootAccess = await acquireFor(chosen.id);
     // The list was read before this window owned the document; reread under the fence.
@@ -3373,6 +3407,7 @@ importFile.addEventListener('change', async () => {
 });
 
 if (!viewMode) window.addEventListener('pagehide', () => {
+  if (suppressPendingBackup) return;
   savePending();
   flushSecondaryOnUnload();
   clearTimeout(saveTimer);
@@ -3392,13 +3427,33 @@ function updateReloadReturnFocus(): HTMLElement {
   } catch { /* Cross-origin parent. */ }
   return field;
 }
-async function prepareUpdateReload(): Promise<boolean> {
+function clearPendingBackups(): void {
+  try { sessionStorage.removeItem(PENDING_KEY); } catch { /* Optional backup. */ }
+  try { sessionStorage.removeItem(PENDING_KEY_B); } catch { /* Optional backup. */ }
+}
+
+/**
+ * Host calls this immediately before removing the iframe. Arming suppress here — not during
+ * prepare — keeps reload/close consent cancellable without disabling backups for the session.
+ */
+function commitWindowClose(): void {
+  suppressPendingBackup = true;
+  clearPendingBackups();
+}
+
+async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
   if (transitioning || deleting || field.disabled) return false;
   privateReloadChoice = undefined;
   privateReloadChoiceB = undefined;
   const secondaryDirty = !!secondary?.dirty;
   if ((workspace.dirty() || secondaryDirty) && !autosave.checked) {
-    const discard = await askConfirmChoice({ title: 'Reload without saving?', message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.', confirmLabel: 'Discard changes and reload', cancelLabel: 'Keep editing', returnFocus: updateReloadReturnFocus() });
+    const discard = await askConfirmChoice({
+      title: kind === 'close' ? 'Close without saving?' : 'Reload without saving?',
+      message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
+      confirmLabel: kind === 'close' ? 'Discard changes and close' : 'Discard changes and reload',
+      cancelLabel: 'Keep editing',
+      returnFocus: updateReloadReturnFocus(),
+    });
     if (discard) {
       privateReloadChoice = { id: active.id, generation: workspace.contentRevision() };
       if (secondary) privateReloadChoiceB = { id: secondary.draft.id, generation: secondary.contentRevision };
@@ -3416,7 +3471,22 @@ async function prepareUpdateReload(): Promise<boolean> {
   const pendingB = readPendingB();
   const primaryOk = !workspace.dirty() || (!!pending && sameContent(pending, snapshot()));
   const secondaryOk = !secondary?.dirty || (!!pendingB && secondary && sameContent(pendingB, snapshotBoundSession(secondary, UNTITLED_TITLE)));
-  return primaryOk && secondaryOk;
+  if (kind === 'reload') return primaryOk && secondaryOk;
+  // Close: a session backup is not enough — closing removes the iframe and must not
+  // silently destroy the only copy after a failed save. Ask for explicit discard.
+  return askConfirmChoice({
+    title: 'Close and discard unsaved changes?',
+    message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
+    confirmLabel: 'Discard changes and close',
+    cancelLabel: 'Keep editing',
+    returnFocus: updateReloadReturnFocus(),
+  });
+}
+async function prepareUpdateReload(): Promise<boolean> {
+  return prepareLeaveWithUnsaved('reload');
+}
+async function prepareWindowClose(): Promise<boolean> {
+  return prepareLeaveWithUnsaved('close');
 }
 /** Validate and arm reload; throws to abort. Does not navigate (host reloads the top page). */
 function assertSafeToReloadAfterUpdate(): void {
@@ -3447,6 +3517,7 @@ function reloadAfterUpdate(): void {
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
 if (!viewMode) window.addEventListener('beforeunload', event => {
+  if (suppressPendingBackup) return;
   if (workspace.dirty() || secondary?.dirty) {
     savePending();
     flushSecondaryOnUnload();
@@ -3456,6 +3527,7 @@ if (!viewMode) window.addEventListener('beforeunload', event => {
   }
 });
 if (!viewMode) document.addEventListener('visibilitychange', () => {
+  if (suppressPendingBackup) return;
   if (document.visibilityState === 'hidden') {
     clearTimeout(saveTimer);
     void persist();
@@ -3476,7 +3548,7 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
       .then(registration => watchForUpdates(registration, {
         prepareReload: prepareUpdateReload,
         reload: reloadAfterUpdate,
-        cancelReload: () => { allowUpdateReload = false; },
+        cancelReload: () => { allowUpdateReload = false; suppressPendingBackup = false; },
         dismissedKey: updateDismissKey,
       }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
@@ -3487,8 +3559,14 @@ if (embedded) {
     __typebridgePrepareUpdateReload?: () => Promise<boolean>;
     __typebridgeAssertSafeUpdateReload?: () => void;
     __typebridgeCancelUpdateReload?: () => void;
+    /** Host window manager asks before removing this iframe (#175 step 5). */
+    __typebridgePrepareWindowClose?: () => Promise<boolean>;
+    /** Host calls immediately before removing the iframe after prepareClose succeeds. */
+    __typebridgeCommitWindowClose?: () => void;
   };
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
-  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; };
+  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; suppressPendingBackup = false; };
+  hooks.__typebridgePrepareWindowClose = prepareWindowClose;
+  hooks.__typebridgeCommitWindowClose = commitWindowClose;
 }

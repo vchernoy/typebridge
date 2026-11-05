@@ -1188,7 +1188,7 @@ body.focus-mode .bottom {
   font: inherit;
 }
 
-/* #175 step 3 host shell: notice + editor share the viewport without clipping. */
+/* #175 step 5 host shell: notice + toolbar + free-layout windows. */
 html:has(body.host-page),
 body.host-page {
   height: 100%;
@@ -1198,22 +1198,177 @@ body.host-page {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--background);
 }
 .host-notice {
   position: relative;
   z-index: 50;
   flex: 0 0 auto;
 }
+.host-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  flex: 0 0 auto;
+}
+.host-toolbar button {
+  font: inherit;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+}
+.host-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .host-root {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--background) 70%, transparent), transparent 40%),
+    var(--background);
 }
-.host-editor {
-  display: block;
-  width: 100%;
-  height: 100%;
+.host-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 280px;
+  min-height: 200px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 12%, transparent);
+  overflow: hidden;
+}
+.host-window.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 4px 18px color-mix(in srgb, #000 18%, transparent);
+}
+.host-window-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.35rem 0.25rem 0.35rem;
+  user-select: none;
+  background: color-mix(in srgb, var(--background) 85%, var(--accent) 8%);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.host-window.is-active .host-window-titlebar {
+  background: color-mix(in srgb, var(--accent) 16%, var(--background));
+}
+.host-window-move {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0.15rem 0.35rem;
+  cursor: grab;
+  border-radius: 4px;
+}
+.host-window-move:active {
+  cursor: grabbing;
+}
+.host-window-move:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.host-window-title {
+  flex: 1 1 auto;
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-window-close {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
   border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.host-window-close:hover {
+  background: color-mix(in srgb, #000 8%, transparent);
+}
+.host-window .host-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--surface);
+}
+.host-window-resize {
+  position: absolute;
+  z-index: 2;
+}
+.host-window-resize-n {
+  top: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.host-window-resize-s {
+  bottom: -3px;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.host-window-resize-e {
+  right: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.host-window-resize-w {
+  left: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.host-window-resize-ne {
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+.host-window-resize-nw {
+  top: -4px;
+  left: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+.host-window-resize-se {
+  bottom: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+.host-window-resize-sw {
+  bottom: -4px;
+  left: -4px;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
 }
 body.host-page .update-notice {
   position: relative;
