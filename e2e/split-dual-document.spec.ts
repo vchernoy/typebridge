@@ -301,6 +301,34 @@ test('Autosave-off pane B asks before discarding on close split', async ({ page 
   await expect(page.locator('#editor-b')).toHaveValue('Hotel body private');
 });
 
+test('closing split retargets Replace away from pane B during teardown', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'alpha only in B', 'ReplaceTeardown');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'primary stay', 'PrimaryStayReplace');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').focus();
+  await openFind(page);
+  await page.locator('#find-text').fill('alpha');
+  await page.locator('#replace-text').fill('omega');
+  await expect(page.locator('#find-status')).toHaveText('1 match');
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs = 60_000;
+  });
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially('!');
+  await documentAction(page, '#toggle-split');
+  await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-a');
+  await page.locator('#replace-all').click();
+  // Replace must target the primary (no match) — not the hidden companion still holding "alpha".
+  await expect(page.locator('#editor')).toHaveValue('primary stay');
+  await expect(page.locator('#editor-b')).toHaveValue('alpha only in B!');
+});
+
 test('Find match totals refresh when editing the active companion', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
@@ -522,6 +550,37 @@ test('pending pane B restores after its saved row was deleted', async ({ page })
   await expect(page.locator('#editor-b')).toHaveValue('Orphan body orphaned');
   await expect(page.locator('#save-indicator-b')).toHaveText('Saved');
   await expect.poll(async () => (await readStoredDocs(page)).some(d => d.text === 'Orphan body orphaned')).toBe(true);
+});
+
+test('pending pane B restores when IndexedDB is unavailable on reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Offline B body', 'OfflineB');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Offline A body', 'OfflineA');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#enabled').uncheck();
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeDelayPersistSecondaryMs?: number }).__typebridgeDelayPersistSecondaryMs = 60_000;
+  });
+  await page.locator('#editor-b').press('End');
+  await page.locator('#editor-b').pressSequentially(' kept');
+  const pending = await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    return sessionStorage.getItem('typebridge.pendingDraft.paneB.v1');
+  });
+  expect(pending).toContain('Offline B body kept');
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+  });
+  await page.reload();
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(page.locator('#editor-b')).toBeVisible();
+  await expect(page.locator('#editor-b')).toHaveValue('Offline B body kept');
+  await expect(page.locator('#status')).toContainText('Recovered unsaved text in the other pane');
+  await expect(page.locator('#status')).toContainText('storage is unavailable');
 });
 
 test('pane B follows foreign saves and can reclaim ownership', async ({ page, context }) => {

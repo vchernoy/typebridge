@@ -165,6 +165,11 @@ const splitControls = setupSplitPane({
     }
     const closeGeneration = ++splitCloseGeneration;
     const stillClosing = (): boolean => closeGeneration === splitCloseGeneration && !workspace.splitOpen();
+    // Retarget shared commands off the companion before awaiting teardown; otherwise
+    // Replace/Copy can still target the hidden pane-B field while dualDocumentSplit is false.
+    const previousPane = workspace.activePaneId();
+    workspace.setActivePane(PRIMARY_PANE_ID);
+    paneChrome.syncMutations();
     void (async () => {
       // Initial closed restore runs before titleEditorB / draft locals exist.
       if (!draftsInitialized) return;
@@ -172,10 +177,13 @@ const splitControls = setupSplitPane({
       if (released === 'cancelled') {
         // Keep the split open when the user cancels discarding pane B.
         splitControls.setOpen(true);
+        if (secondary && previousPane === SECOND_PANE_ID) {
+          workspace.setActivePane(SECOND_PANE_ID);
+          paneChrome.syncMutations();
+        }
         return;
       }
       if (released === 'aborted' || !stillClosing()) return;
-      workspace.setActivePane(PRIMARY_PANE_ID);
       syncCompanionChrome();
       paneChrome.syncMutations();
     })();
@@ -558,7 +566,9 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
   enabled,
   {
     canMutate: canMutatePrimary,
-    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID ? companionSearch : primarySearch,
+    getFindTarget: () => workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit()
+      ? companionSearch
+      : primarySearch,
     matchSurfaces: [field, companionField],
   },
 );
@@ -2219,16 +2229,14 @@ async function initializeDrafts(): Promise<void> {
 }
 
 /**
- * Install a pane-B session from a pending snapshot when its IndexedDB row is gone.
- * Keeps the unsaved text reachable for copy/export/recovery even without a backing document.
+ * Install a recovery-only pane-B session from a pending snapshot (no ownership / optional no DB).
+ * Keeps the unsaved text reachable for copy/export even when storage is unavailable.
  */
-async function installOrphanPendingSecondary(pending: StoredDraft): Promise<boolean> {
-  if (viewMode || !db || pending.id === active.id) return false;
-  if ((await releaseSecondarySession()) === 'cancelled') return false;
-  if (pending.id === active.id || !workspace.splitOpen()) return false;
-  const access = await acquireFor(pending.id);
+function installRecoveryOnlySecondary(pending: StoredDraft, access?: EditAccess): boolean {
+  if (viewMode || pending.id === active.id) return false;
+  if (!workspace.splitOpen()) splitControls.setOpen(true);
   if (pending.id === active.id || !workspace.splitOpen()) {
-    void access.ownership?.release();
+    void access?.ownership?.release();
     return false;
   }
   companionWritingPosition.save();
@@ -2251,14 +2259,16 @@ async function installOrphanPendingSecondary(pending: StoredDraft): Promise<bool
     field: companionField,
     title: draftTitleB,
   });
-  secondary.ownership = access.ownership;
-  secondary.editBlock = access.block;
+  secondary.ownership = access?.ownership;
+  secondary.editBlock = access?.block ?? '';
   secondary.dirty = true;
   secondary.contentRevision = 1;
-  bindOwnershipLost(access.ownership, () => {
-    if (access.ownership) loseSecondaryOwnership(access.ownership);
-  });
-  if (access.block) {
+  if (access?.ownership) {
+    bindOwnershipLost(access.ownership, () => {
+      if (access.ownership) loseSecondaryOwnership(access.ownership);
+    });
+  }
+  if (access?.block) {
     companionEditor.setReadOnly(true);
     titleEditorB.setReadOnly(true);
   }
@@ -2271,14 +2281,37 @@ async function installOrphanPendingSecondary(pending: StoredDraft): Promise<bool
   return true;
 }
 
+/**
+ * Install a pane-B session from a pending snapshot when its IndexedDB row is gone.
+ * Keeps the unsaved text reachable for copy/export/recovery even without a backing document.
+ */
+async function installOrphanPendingSecondary(pending: StoredDraft): Promise<boolean> {
+  if (viewMode || !db || pending.id === active.id) return false;
+  if ((await releaseSecondarySession()) === 'cancelled') return false;
+  if (pending.id === active.id || !workspace.splitOpen()) return false;
+  const access = await acquireFor(pending.id);
+  return installRecoveryOnlySecondary(pending, access);
+}
+
 /** Restore a pane-B reload snapshot after the primary session is live. */
 async function restorePendingSecondary(): Promise<void> {
-  if (viewMode || !db) return;
+  if (viewMode) return;
   const pending = readPendingB();
   if (!pending) return;
+  // Same document as primary cannot be a second editable session; keep recovery journal only.
+  if (pending.id === active.id) return;
   bootRestoringSecondary = true;
   paneBDrafts.disabled = true;
   try {
+    if (!db) {
+      if (installRecoveryOnlySecondary(pending)) {
+        setSaveStatus(
+          'Recovered unsaved text in the other pane; browser storage is unavailable. Copy or export it.',
+          'failure',
+        );
+      }
+      return;
+    }
     // E2E may delay the IDB read so a concurrent open can race the restore.
     const delayMs = (window as Window & { __typebridgeDelayPendingSecondaryMs?: number }).__typebridgeDelayPendingSecondaryMs;
     if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -2289,8 +2322,6 @@ async function restorePendingSecondary(): Promise<void> {
       clearPendingSecondary(pending);
       return;
     }
-    // Same document as primary cannot be a second editable session; keep recovery journal only.
-    if (pending.id === active.id) return;
     if (!workspace.splitOpen()) splitControls.setOpen(true);
     const generationBeforeOpen = companionOpenGeneration;
     let openedExisting = false;
