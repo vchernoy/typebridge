@@ -226,18 +226,25 @@ export function parseHostLayout(raw: unknown): HostLayoutState | undefined {
   return { version: 1, windows };
 }
 
-export function readHostLayout(storage: Storage | undefined = localStorage): HostLayoutState | undefined {
-  if (!storage) return undefined;
+/** Resolve localStorage without throwing when the getter itself is blocked. */
+function defaultStorage(): Storage | undefined {
+  try { return localStorage; } catch { return undefined; }
+}
+
+export function readHostLayout(storage?: Storage): HostLayoutState | undefined {
+  const store = storage ?? defaultStorage();
+  if (!store) return undefined;
   try {
-    return parseHostLayout(JSON.parse(storage.getItem(HOST_WINDOWS_KEY) ?? 'null'));
+    return parseHostLayout(JSON.parse(store.getItem(HOST_WINDOWS_KEY) ?? 'null'));
   } catch {
     return undefined;
   }
 }
 
 /** Persist layout. Never writes document text. Returns false when storage rejects the write. */
-export function writeHostLayout(state: HostLayoutState, storage: Storage | undefined = localStorage): boolean {
-  if (!storage) return false;
+export function writeHostLayout(state: HostLayoutState, storage?: Storage): boolean {
+  const store = storage ?? defaultStorage();
+  if (!store) return false;
   try {
     const payload: HostLayoutState = {
       version: 1,
@@ -251,7 +258,7 @@ export function writeHostLayout(state: HostLayoutState, storage: Storage | undef
         ...(win.documentId ? { documentId: win.documentId } : {}),
       })),
     };
-    storage.setItem(HOST_WINDOWS_KEY, JSON.stringify(payload));
+    store.setItem(HOST_WINDOWS_KEY, JSON.stringify(payload));
     return true;
   } catch {
     return false;

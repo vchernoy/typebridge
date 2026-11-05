@@ -7,10 +7,12 @@ import {
   clampRect,
   mintWindowId,
   parseHostLayout,
+  readHostLayout,
   snapRect,
   tileSideBySide,
   tileStacked,
   windowsOverlap,
+  writeHostLayout,
 } from './layout';
 
 describe('host layout helpers', () => {
@@ -91,6 +93,13 @@ describe('host layout helpers', () => {
     expect(mintWindowId(['main'])).toBe('w2');
     expect(mintWindowId(['main', 'w2', 'w3', 'w4'])).toBe('w5');
     expect(MAX_HOST_WINDOWS).toBe(4);
+  });
+
+  it('tolerates an explicit undefined storage without touching localStorage defaults', () => {
+    expect(readHostLayout(undefined)).toBeUndefined();
+    expect(writeHostLayout({ version: 1, windows: [
+      { id: 'main', x: 0, y: 0, w: 300, h: 220, z: 1 },
+    ] }, undefined)).toBe(false);
   });
 
   it('parses persisted layout without accepting text payloads', () => {

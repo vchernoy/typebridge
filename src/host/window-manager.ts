@@ -423,6 +423,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', onResize);
+      rootObserver?.disconnect();
       for (const shell of shells.values()) shell.remove();
       shells.clear();
       frames.clear();
@@ -440,6 +441,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('resize', onResize);
+  // Update notice / toolbar reflow change host-root without a window resize.
+  const rootObserver = typeof ResizeObserver !== 'undefined'
+    ? new ResizeObserver(() => { onResize(); })
+    : undefined;
+  rootObserver?.observe(deps.root);
 
   boot();
   return api;
