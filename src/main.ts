@@ -3907,8 +3907,10 @@ if (embedded) {
         draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
       } else if (payload.inputType === 'historyUndo') {
         titleEditor.undo();
+        try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
       } else if (payload.inputType === 'historyRedo') {
         titleEditor.redo();
+        try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
       }
       if (draftTitle.value.length > 150) {
         draftTitle.value = draftTitle.value.slice(0, 150);

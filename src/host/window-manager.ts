@@ -370,6 +370,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       try { title.setSelectionRange(result.start, result.end); } catch { /* Input type may reject. */ }
       applyingFromIframe = false;
       applyChromeMeta(title.value);
+      // titleEditor.undo/redo focuses the hidden iframe field; keep caret in the host title.
+      if (document.activeElement !== title) title.focus({ preventScroll: true });
     };
 
     title.addEventListener('pointerdown', event => { event.stopPropagation(); syncTitleEditable(); });
@@ -489,7 +491,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (title.value !== label) {
         title.value = label;
         try {
-          (frame.contentWindow as TitleHooks | null)?.__typebridgeSetTitle?.(label);
+          // Record normalization in titleEditor undo history (setTitle skips deltas).
+          (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(label, label.length, label.length);
         } catch { /* Frame mid-navigation. */ }
       }
       applyChromeMeta(label);
