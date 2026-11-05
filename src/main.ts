@@ -445,12 +445,12 @@ function updateCaretPosition(): void {
 field.addEventListener('focus', () => {
   workspace.setActivePane(PRIMARY_PANE_ID);
   syncMutationControls();
-  updateCaretPosition();
+  updateStats();
 });
 companionField.addEventListener('focus', () => {
   workspace.setActivePane(SECOND_PANE_ID);
   syncMutationControls();
-  updateCaretPosition();
+  updateStats();
 });
 // Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
 // "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
@@ -462,21 +462,31 @@ function saveTabIndent(): boolean {
   try { localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off'); return true; } catch { return false; }
 }
 tabIndent.addEventListener('change', saveTabIndent);
-field.addEventListener('keydown', event => {
-  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || field.readOnly || !canMutatePrimary()) return;
-  const change = indentEdit(field.value, field.selectionStart, field.selectionEnd, event.shiftKey);
+function handleTabIndent(event: KeyboardEvent, surface: HTMLTextAreaElement, surfaceEditor: Editor): void {
+  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || surface.readOnly || !canMutatePrimary()) return;
+  const change = indentEdit(surface.value, surface.selectionStart, surface.selectionEnd, event.shiftKey);
   // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
   if (!change && event.shiftKey) return;
   event.preventDefault();
   if (!change) return;
-  editor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
+  surfaceEditor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
+}
+field.addEventListener('keydown', event => { handleTabIndent(event, field, editor); });
+companionField.addEventListener('keydown', event => {
+  if (!dualDocumentSplit()) return;
+  handleTabIndent(event, companionField, companionEditor);
 });
 function updateStats(): void {
-  count.textContent = formatDocumentStats(field.value);
+  const surface = workspace.activePaneId() === SECOND_PANE_ID && dualDocumentSplit()
+    ? companionField
+    : field;
+  count.textContent = formatDocumentStats(surface.value);
   updateCaretPosition();
 }
 field.addEventListener('input', updateStats);
 field.addEventListener('historychange', updateStats);
+companionField.addEventListener('input', updateStats);
+companionField.addEventListener('historychange', updateStats);
 field.addEventListener('keyup', updateCaretPosition);
 field.addEventListener('click', updateCaretPosition);
 field.addEventListener('select', updateCaretPosition);
@@ -1036,8 +1046,11 @@ async function persistSecondary(): Promise<{ saved: boolean; conflict: boolean }
       return { saved: !session.dirty, conflict: createdConflict };
     } catch (error) {
       if (error instanceof EditOwnershipLostError) {
+        const lost = session.ownership;
         session.ownership = undefined;
         session.editBlock = 'lost';
+        clearOwnershipLost(lost);
+        void lost?.release();
         companionEditor.setReadOnly(true);
         titleEditorB.setReadOnly(true);
         updateSaveIndicatorB();
@@ -1285,6 +1298,8 @@ function loseSecondaryOwnership(held: EditOwnership): void {
   secondary.ownership = undefined;
   secondary.editBlock = 'lost';
   clearTimeout(secondary.saveTimer);
+  clearOwnershipLost(held);
+  void held.release();
   companionEditor.setReadOnly(true);
   titleEditorB.setReadOnly(true);
   updateSaveIndicatorB();
@@ -2448,12 +2463,26 @@ function downloadText(filename: string, content: string, mime: string): void {
 function safeFilename(title: string): string {
   return (title.trim().split('').map(char => char.charCodeAt(0) < 32 || '/\\\\:*?"<>|'.includes(char) ? '-' : char).join('').slice(0, 80) || 'document');
 }
+function exportSurface(): { title: string; text: string } {
+  if (dualDocumentSplit() && workspace.activePaneId() === SECOND_PANE_ID && secondary) {
+    return {
+      title: draftTitleB.value.trim() || UNTITLED_TITLE,
+      text: companionField.value,
+    };
+  }
+  return {
+    title: draftTitle.value.trim() || UNTITLED_TITLE,
+    text: field.value,
+  };
+}
 document.querySelector<HTMLButtonElement>('#export-txt')!.addEventListener('click', () => {
-  downloadText(safeFilename(draftTitle.value) + '.txt', field.value, 'text/plain;charset=utf-8');
+  const { title, text } = exportSurface();
+  downloadText(safeFilename(title) + '.txt', text, 'text/plain;charset=utf-8');
   announceAction('Text exported');
 });
 document.querySelector<HTMLButtonElement>('#export-json')!.addEventListener('click', () => {
-  const draft = { title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
+  const { title, text } = exportSurface();
+  const draft = { title, text };
   downloadText(safeFilename(draft.title) + '.typebridge.json', JSON.stringify({ format: 'typebridge-draft', version: 1, draft }, null, 2), 'application/json;charset=utf-8');
   announceAction('Document exported');
 });

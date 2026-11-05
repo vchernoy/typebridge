@@ -247,8 +247,7 @@ test('Find match totals refresh when editing the active companion', async ({ pag
   await expect(page.locator('#find-status')).toHaveText('3 matches');
 });
 
-test('Copy uses the active pane document', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+test('Copy uses the active pane document', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#editor')).toBeEnabled();
   await setAutosave(page, true);
@@ -257,17 +256,67 @@ test('Copy uses the active pane document', async ({ page, context }) => {
   await saveNamed(page, 'Kilo only in A', 'Kilo');
   await openSplit(page);
   await page.locator('#pane-b-drafts').selectOption(firstId);
+  // Stub clipboard so Chromium/Firefox/WebKit share one assertion path.
+  await page.evaluate(() => {
+    const copied: string[] = [];
+    (window as Window & { __typebridgeCopied?: string[] }).__typebridgeCopied = copied;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text: string) => { copied.push(text); } },
+    });
+  });
   await page.locator('#editor-b').focus();
   await expect(page.locator('main.workspace')).toHaveAttribute('data-active-pane', 'pane-b');
   await page.locator('#copy').click();
   await expect(page.locator('#status')).toContainText('Copied');
-  const fromB = await page.evaluate(() => navigator.clipboard.readText());
-  expect(fromB).toBe('Juliet only in B');
+  expect(await page.evaluate(() => (window as Window & { __typebridgeCopied?: string[] }).__typebridgeCopied?.at(-1))).toBe('Juliet only in B');
   await page.locator('#editor').focus();
   await page.locator('#copy').click();
   await expect(page.locator('#status')).toContainText('Copied');
-  const fromA = await page.evaluate(() => navigator.clipboard.readText());
-  expect(fromA).toBe('Kilo only in A');
+  expect(await page.evaluate(() => (window as Window & { __typebridgeCopied?: string[] }).__typebridgeCopied?.at(-1))).toBe('Kilo only in A');
+});
+
+test('Export downloads the active companion document', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'Export me from B', 'ExportB');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'Keep me in A', 'ExportA');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await page.locator('#editor-b').focus();
+  const downloadPromise = page.waitForEvent('download');
+  await documentAction(page, '#export-txt');
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/ExportB\.txt$/);
+  const stream = await download.createReadStream();
+  expect(stream).toBeTruthy();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+  expect(Buffer.concat(chunks).toString('utf8')).toBe('Export me from B');
+});
+
+test('Tab indents the active companion when Tab indents is on', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await setAutosave(page, true);
+  const firstId = await saveNamed(page, 'line', 'TabB');
+  await documentAction(page, '#new-draft');
+  await saveNamed(page, 'primary', 'TabA');
+  await openSplit(page);
+  await page.locator('#pane-b-drafts').selectOption(firstId);
+  await expect(page.locator('#companion-badge')).toBeHidden();
+  await expect(page.locator('#editor-b')).toHaveJSProperty('readOnly', false);
+  await page.locator('#enabled').uncheck();
+  await page.locator('#editor-b').focus();
+  await page.locator('#editor-b').evaluate(el => {
+    const area = el as HTMLTextAreaElement;
+    area.setSelectionRange(0, 0);
+  });
+  await page.keyboard.press('Tab');
+  await expect(page.locator('#editor-b')).toHaveValue('    line');
+  await expect(page.locator('#editor')).toHaveValue('primary');
 });
 
 test('Copy fallback selects the active companion when clipboard is refused', async ({ page }) => {
