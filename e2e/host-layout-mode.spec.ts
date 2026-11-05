@@ -78,10 +78,12 @@ test('Settings Layout Stacked forces a scrollable full-width phone stack', async
 test('stacked south grip pointer-drag resizes only the target window', async ({ page }) => {
   // Two windows; shrink main first so its south grip stays in the 390×844 viewport.
   await page.setViewportSize({ width: 390, height: 844 });
-  const main = await openHost(page);
-  await openEmbeddedSettings(main);
-  await main.locator('#window-layout').selectOption('stacked');
+  await openHost(page);
+  await openHostSettings(page);
+  await page.locator('#window-layout').selectOption('stacked');
   await expect(page.locator('body')).toHaveClass(/host-stacked/);
+  await page.locator('#settings-close').click();
+  await expect(page.locator('#settings-panel')).toBeHidden();
   await page.getByRole('button', { name: 'New window' }).click();
   await expect(page.locator('.host-window')).toHaveCount(2);
 

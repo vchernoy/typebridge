@@ -65,14 +65,17 @@ export function installHostSettings(deps: {
   }
 
   function saveShortcut(value: TransliterationShortcut): boolean {
-    shortcut = value;
+    const previous = shortcut;
     shortcutSelect.value = value;
     try {
       localStorage.setItem(SHORTCUT_KEY, value);
+      shortcut = value;
       if (shortcutStatus) shortcutStatus.textContent = 'Shortcut saved';
       broadcast('shortcut');
       return true;
     } catch {
+      shortcut = previous;
+      shortcutSelect.value = previous;
       if (shortcutStatus) shortcutStatus.textContent = 'Shortcut could not be saved';
       return false;
     }
