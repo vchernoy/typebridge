@@ -18,8 +18,8 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 6. **Unsaved / Autosave-off / failed-save text.**
    - **Within one tab:** handoff **may** pass unsaved text to the new window **in memory** (direct same-origin call or `postMessage`). Never stored for that transfer, never put in a URL, never BroadcastChannel’d.
    - **Across tabs:** unsaved/private text is **never** sent. The other window shows **Edit here** with a warning instead of taking over silently. This replaces #164’s cross-window request protocol for the new product goal.
-7. **Layout — computer.** Free windows: drag title bar, resize edges/corner, z-order, snap halves/quarters, tile side-by-side or stacked, keyboard move/resize. Cap **4** windows. Persist layout (positions, sizes, document ids — **never text**) in localStorage.
-8. **Layout — phone.** Stacked full-width; each keeps the existing corner height grip. Detect with capabilities (viewport width + `(any-pointer: fine)` / `(hover: hover)`), not user-agent. **Settings → Layout: Auto / Free windows / Stacked** overrides misdetection.
+7. **Layout — computer.** Free windows: drag title bar, resize edges/corner, z-order, snap halves/quarters, tile side-by-side or stacked, keyboard move/resize. Focus mode maximizes the active window. Cap **4** windows. Persist layout (positions, sizes, document ids — **never text**) in localStorage.
+8. **Layout — phone.** Stacked full-width; each keeps the existing corner height grip. Detect with capabilities (viewport width + `(any-pointer: fine)` / `(hover: hover)`), not user-agent. **Settings → Layout: Auto / Free windows / Stacked** overrides misdetection. Focus mode shows only the active window.
 9. **Shared across windows (page-level).** Settings, keyboard shortcuts, transliteration rules, appearance, Latin/Кириллица mode. One Settings panel on the host page; changes apply to every window immediately.
 10. **Per window.** Selected document, title, caret/selection/scroll, window size/position, Find/Replace UI (Replace only when that window is editing). Ctrl/⌘+F opens Find in the focused window, pre-filled with the last search text (**shared**). “Search all documents” is later/out of scope.
 11. **sessionStorage is shared by iframes in one tab.** Today’s tab-scoped keys (`activeDraft`, pending backups, Find text, writing position, update-notice dismissal, recovery journal tab id, …) must be keyed by a **window id** (e.g. `?window=<id>`) so instances do not clobber each other.
@@ -68,7 +68,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 ## Merge / PR notes
 
 - PRs use `Refs #175`. Avoid GitHub closing keywords next to issue numbers in descriptions.
-- Merging follows CONTRIBUTING: maintainer merges, or an agent the maintainer explicitly asked to merge **that** PR. There is **no** standing merge authorization on #175 unless the maintainer adds one on the issue.
+- Merging follows CONTRIBUTING, plus the maintainer's **standing merge authorization** for #175 PRs. Its conditions (linked issue, no conflict, final-head CI green on all engines, independent review with no open P0/P1, remaining P2/P3 recorded) are kept in the [#175](https://github.com/vchernoy/typebridge/issues/175) body under "Notes for implementers"; that issue is the source of truth.
 
 ## Relation to ADR 159
 
