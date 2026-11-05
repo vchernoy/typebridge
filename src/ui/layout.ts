@@ -164,6 +164,9 @@ export function setupLayout(
   function restoreFocusMode(): void {
     // Called after the draft is loaded and the textarea is enabled. Do not write
     // the preference or Normal-mode size while restoring it.
+    // #175 step 6: embedded editors leave Focus restore to the host so every
+    // iframe does not race to maximize itself after reload.
+    if (document.documentElement.dataset.embed === '1') return;
     try { if (localStorage.getItem(FOCUS_KEY) === 'on') applyFocusMode(true); }
     catch { /* Start in Normal mode when storage is unavailable. */ }
   }

@@ -111,14 +111,17 @@ describe('host layout helpers', () => {
     expect(centred.y + centred.h / 2).toBeCloseTo(300, 0);
   });
 
-  it('stacks phone windows full-width and preserves requested heights when they fit', () => {
+  it('stacks phone windows full-width with independent heights that may exceed the viewport', () => {
     const windows = [
       { id: 'main', x: 10, y: 10, w: 100, h: 100, z: 1 },
       { id: 'w2', x: 20, y: 20, w: 100, h: 100, z: 2 },
+      { id: 'w3', x: 30, y: 30, w: 100, h: 100, z: 3 },
     ];
-    const stacked = stackPhoneWindows(windows, viewport, [300, 500]);
-    expect(stacked[0]).toMatchObject({ x: 0, y: 0, w: 1000, h: 300 });
-    expect(stacked[1]).toMatchObject({ x: 0, y: 300, w: 1000, h: 500 });
+    const stacked = stackPhoneWindows(windows, { width: 390, height: 640 }, [300, 300, 300]);
+    expect(stacked[0]).toMatchObject({ x: 0, y: 0, w: 390, h: 300 });
+    expect(stacked[1]).toMatchObject({ x: 0, y: 300, w: 390, h: 300 });
+    expect(stacked[2]).toMatchObject({ x: 0, y: 600, w: 390, h: 300 });
+    expect(stacked[2].y + stacked[2].h).toBeGreaterThan(640);
     expect(windowsOverlap(stacked)).toBe(false);
   });
 

@@ -27,6 +27,8 @@ export type HostWindowLayout = {
 export type HostLayoutState = {
   version: 1;
   windows: HostWindowLayout[];
+  /** #175 step 6: which window Focus mode maximizes (never text). */
+  focusWindowId?: string;
 };
 
 export type ViewportSize = { width: number; height: number };
@@ -220,8 +222,9 @@ export function tileStacked(windows: HostWindowLayout[], viewport: ViewportSize)
 }
 
 /**
- * Phone stack: full-width columns. When `heights` is provided (same length), use them
- * (clamped) and give leftover space to the last window; otherwise split equally.
+ * Phone stack: full-width scrolling list. Each window keeps its own height
+ * (at least MIN_WINDOW_HEIGHT; not capped to the viewport). Later windows are
+ * pushed down — the host scrolls when the stack exceeds the viewport.
  */
 export function stackPhoneWindows(
   windows: HostWindowLayout[],
@@ -229,38 +232,18 @@ export function stackPhoneWindows(
   heights?: number[],
 ): HostWindowLayout[] {
   if (windows.length === 0) return [];
-  const count = windows.length;
-  if (count * MIN_WINDOW_HEIGHT > viewport.height) return tileGrid(windows, viewport);
-
-  let nextHeights: number[];
-  if (heights && heights.length === count) {
-    nextHeights = heights.map(h => Math.max(MIN_WINDOW_HEIGHT, Math.floor(h)));
-    const used = nextHeights.reduce((sum, h) => sum + h, 0);
-    if (used > viewport.height) {
-      // Shrink from the bottom until we fit, never below the minimum.
-      let overflow = used - viewport.height;
-      for (let i = count - 1; i >= 0 && overflow > 0; i--) {
-        const reducible = nextHeights[i] - MIN_WINDOW_HEIGHT;
-        const take = Math.min(reducible, overflow);
-        nextHeights[i] -= take;
-        overflow -= take;
-      }
-    } else if (used < viewport.height) {
-      nextHeights[count - 1] += viewport.height - used;
-    }
-  } else {
-    const h = Math.max(MIN_WINDOW_HEIGHT, Math.floor(viewport.height / count));
-    nextHeights = windows.map((_, index) => (
-      index === count - 1 ? viewport.height - h * (count - 1) : h
-    ));
-  }
-
+  const width = Math.max(MIN_WINDOW_WIDTH, Math.floor(viewport.width));
+  const defaultHeight = Math.max(
+    MIN_WINDOW_HEIGHT,
+    Math.min(420, Math.max(MIN_WINDOW_HEIGHT, Math.floor(viewport.height * 0.55) || MIN_WINDOW_HEIGHT)),
+  );
   let y = 0;
   return windows.map((win, index) => {
-    const h = nextHeights[index];
-    const rect = clampRect({ x: 0, y, w: viewport.width, h }, viewport);
-    y += rect.h;
-    return { ...win, ...rect };
+    const requested = heights?.[index] ?? (win.h >= MIN_WINDOW_HEIGHT ? win.h : defaultHeight);
+    const h = Math.max(MIN_WINDOW_HEIGHT, Math.floor(requested));
+    const next = { ...win, x: 0, y, w: width, h };
+    y += h;
+    return next;
   });
 }
 
@@ -342,7 +325,12 @@ export function parseHostLayout(raw: unknown): HostLayoutState | undefined {
     if (windows.length >= MAX_HOST_WINDOWS) break;
   }
   if (windows.length === 0) return undefined;
-  return { version: 1, windows };
+  const focusWindowId = typeof (record as { focusWindowId?: unknown }).focusWindowId === 'string'
+    && isHostWindowId((record as { focusWindowId: string }).focusWindowId)
+    && windows.some(win => win.id === (record as { focusWindowId: string }).focusWindowId)
+    ? (record as { focusWindowId: string }).focusWindowId
+    : undefined;
+  return { version: 1, windows, ...(focusWindowId ? { focusWindowId } : {}) };
 }
 
 /** Resolve localStorage without throwing when the getter itself is blocked. */
@@ -376,6 +364,9 @@ export function writeHostLayout(state: HostLayoutState, storage?: Storage): bool
         z: win.z,
         ...(win.documentId ? { documentId: win.documentId } : {}),
       })),
+      ...(state.focusWindowId && state.windows.some(win => win.id === state.focusWindowId)
+        ? { focusWindowId: state.focusWindowId }
+        : {}),
     };
     store.setItem(HOST_WINDOWS_KEY, JSON.stringify(payload));
     return true;

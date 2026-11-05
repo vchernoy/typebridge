@@ -15,12 +15,9 @@ async function openEmbeddedSettings(frame: FrameLocator): Promise<void> {
   await expect(panel).toBeVisible();
 }
 
-test('Settings Layout Stacked forces full-width phone stack on a wide host', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+test('Settings Layout Stacked forces a scrollable full-width phone stack', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const main = await openHost(page);
-  await page.getByRole('button', { name: 'New window' }).click();
-  await expect(page.locator('.host-window')).toHaveCount(2);
-
   await openEmbeddedSettings(main);
   await main.locator('#window-layout').selectOption('stacked');
   await expect.poll(() => page.evaluate(() => {
@@ -29,16 +26,48 @@ test('Settings Layout Stacked forces full-width phone stack on a wide host', asy
   })).toBe('stacked');
   await expect(page.locator('body')).toHaveClass(/host-stacked/);
 
+  await page.getByRole('button', { name: 'New window' }).click();
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(3);
+
   const boxes = await page.evaluate(() => {
     const hooks = window as Window & {
       __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }>;
     };
     return hooks.__typebridgeHostWindows?.() ?? [];
   });
-  expect(boxes).toHaveLength(2);
+  expect(boxes).toHaveLength(3);
   expect(boxes.every(win => win.x === 0)).toBe(true);
   expect(boxes[0].w).toBe(boxes[1].w);
   expect(boxes[0].y + boxes[0].h).toBe(boxes[1].y);
+  expect(boxes[1].y + boxes[1].h).toBe(boxes[2].y);
+  const stackHeight = boxes[2].y + boxes[2].h;
+  expect(stackHeight).toBeGreaterThan(844);
+
+  const root = page.locator('#host-root');
+  await expect.poll(async () => root.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+  await root.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect(page.locator('.host-window').nth(2)).toBeInViewport();
+
+  const beforeSecond = boxes[1].h;
+  await root.evaluate(el => { el.scrollTop = 0; });
+  const handle = page.locator('.host-window[data-window-id="main"] .host-window-resize-s');
+  await handle.scrollIntoViewIfNeeded();
+  const box = await handle.boundingBox();
+  expect(box).toBeTruthy();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2 + 120, { steps: 8 });
+  await page.mouse.up();
+
+  const after = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; h: number }>;
+    };
+    return hooks.__typebridgeHostWindows?.() ?? [];
+  });
+  expect(after.find(win => win.id === 'main')!.h).toBeGreaterThan(boxes[0].h);
+  expect(after.find(win => win.id === 'w2')!.h).toBe(beforeSecond);
 });
 
 test('host Focus mode maximizes the active window and restores on exit', async ({ page }) => {

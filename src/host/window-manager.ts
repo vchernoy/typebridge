@@ -111,15 +111,23 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   let activeId = 'main';
 
   const persist = (): void => {
-    const next = layouts.map(win => {
+    // While Focus maximizes a window, keep persisting the pre-Focus geometry so reload
+    // can restore the prior free/stacked arrangement (and which window was focused).
+    const base = hostFocus && preFocusLayouts ? preFocusLayouts : layouts;
+    const next = base.map(win => {
       const frame = frames.get(win.id);
       // Prefer a live probe; if the iframe is already gone (host unload), keep the last known id.
       const probed = frame && deps.readDocumentId ? deps.readDocumentId(frame) : undefined;
       const documentId = probed ?? win.documentId;
       return documentId ? { ...win, documentId } : { ...win, documentId: undefined };
     });
-    layouts = next;
-    writeHostLayout({ version: 1, windows: layouts }, storage);
+    if (hostFocus && preFocusLayouts) preFocusLayouts = next;
+    else layouts = next;
+    writeHostLayout({
+      version: 1,
+      windows: next,
+      ...(hostFocus ? { focusWindowId: activeId } : {}),
+    }, storage);
   };
 
   const applyShellGeometry = (win: HostWindowLayout): void => {
@@ -464,15 +472,21 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     syncToolbar();
   };
 
+  let pendingFocusId: string | undefined;
+
   const boot = (): void => {
     const view = viewportOf(deps.root);
     const saved = readHostLayout(storage);
     if (saved?.windows.length) {
       mountWindows(saved.windows.map((win, index) => ({
         ...win,
-        ...clampRect(win, view),
+        // Stacked heights may exceed the viewport (scrollable list); only clamp in free mode.
+        ...(effectiveLayoutMode(readLayoutModePreference(storage), detectLayoutCapabilities()) === 'stacked'
+          ? { x: 0, w: Math.max(MIN_WINDOW_WIDTH, view.width), h: Math.max(MIN_WINDOW_HEIGHT, win.h) }
+          : clampRect(win, view)),
         z: win.z || index + 1,
       })));
+      pendingFocusId = saved.focusWindowId;
       return;
     }
     const primary: HostWindowLayout = {
@@ -626,7 +640,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         });
       }
       preFocusLayouts = undefined;
-      if (mode === 'stacked') enterStacked();
+      if (mode === 'stacked') restackPreservingHeights();
       else {
         const view = viewportOf(deps.root);
         layouts = layouts.map(win => ({ ...win, ...clampRect(win, view) }));
@@ -712,5 +726,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   boot();
   refreshMode();
+  if (pendingFocusId && layouts.some(win => win.id === pendingFocusId)) {
+    api.setHostFocusMode(true, pendingFocusId);
+  }
   return api;
 }

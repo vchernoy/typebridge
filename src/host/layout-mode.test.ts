@@ -17,17 +17,37 @@ describe('layout mode preference', () => {
   });
 
   it('reads and writes preference without storing auto', () => {
-    const storage = new Map<string, string>() as unknown as Storage;
-    Object.assign(storage, {
-      getItem: (key: string) => (storage as unknown as Map<string, string>).get(key) ?? null,
-      setItem: (key: string, value: string) => { (storage as unknown as Map<string, string>).set(key, value); },
-      removeItem: (key: string) => { (storage as unknown as Map<string, string>).delete(key); },
-    });
+    const map = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => { map.set(key, value); },
+      removeItem: (key: string) => { map.delete(key); },
+    } as Storage;
     expect(readLayoutModePreference(storage)).toBe('auto');
     expect(writeLayoutModePreference('free', storage)).toBe(true);
     expect(storage.getItem(HOST_LAYOUT_MODE_KEY)).toBe('free');
     expect(writeLayoutModePreference('auto', storage)).toBe(true);
     expect(storage.getItem(HOST_LAYOUT_MODE_KEY)).toBeNull();
+  });
+
+  it('defaults to localStorage when storage is omitted', () => {
+    const map = new Map<string, string>();
+    const fake = {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => { map.set(key, value); },
+      removeItem: (key: string) => { map.delete(key); },
+    } as Storage;
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: fake });
+    try {
+      expect(writeLayoutModePreference('stacked')).toBe(true);
+      expect(readLayoutModePreference()).toBe('stacked');
+      expect(writeLayoutModePreference('auto')).toBe(true);
+      expect(fake.getItem(HOST_LAYOUT_MODE_KEY)).toBeNull();
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
+      else delete (globalThis as { localStorage?: Storage }).localStorage;
+    }
   });
 });
 

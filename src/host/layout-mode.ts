@@ -15,10 +15,16 @@ export function layoutModePreference(value: unknown): LayoutModePreference {
   return value === 'free' || value === 'stacked' || value === 'auto' ? value : 'auto';
 }
 
+/** Resolve localStorage without throwing when the getter itself is blocked. */
+function defaultStorage(): Storage | undefined {
+  try { return localStorage; } catch { return undefined; }
+}
+
 export function readLayoutModePreference(storage?: Storage | null): LayoutModePreference {
-  if (!storage) return 'auto';
+  const store = storage === undefined ? defaultStorage() : storage;
+  if (!store) return 'auto';
   try {
-    return layoutModePreference(storage.getItem(HOST_LAYOUT_MODE_KEY));
+    return layoutModePreference(store.getItem(HOST_LAYOUT_MODE_KEY));
   } catch {
     return 'auto';
   }
@@ -28,10 +34,11 @@ export function writeLayoutModePreference(
   preference: LayoutModePreference,
   storage?: Storage | null,
 ): boolean {
-  if (!storage) return false;
+  const store = storage === undefined ? defaultStorage() : storage;
+  if (!store) return false;
   try {
-    if (preference === 'auto') storage.removeItem(HOST_LAYOUT_MODE_KEY);
-    else storage.setItem(HOST_LAYOUT_MODE_KEY, preference);
+    if (preference === 'auto') store.removeItem(HOST_LAYOUT_MODE_KEY);
+    else store.setItem(HOST_LAYOUT_MODE_KEY, preference);
     return true;
   } catch {
     return false;
