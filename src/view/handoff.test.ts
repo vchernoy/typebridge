@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bufferInsertFromBeforeInput,
   bufferInsertFromKeyboard,
   deleteRangeForDirection,
   mapSelectionAcrossTextChange,
@@ -102,6 +103,21 @@ describe('handoff helpers', () => {
     expect(bufferInsertFromKeyboard(key({ key: 'Tab' }))).toBeUndefined();
     expect(bufferInsertFromKeyboard(key({ key: 'a', ctrlKey: true }))).toBeUndefined();
     expect(bufferInsertFromKeyboard(key({ key: 'Shift' }))).toBeUndefined();
+  });
+
+  it('buffers virtual-keyboard deletes from beforeinput', () => {
+    expect(bufferInsertFromBeforeInput({
+      inputType: 'deleteContentBackward', data: null, isComposing: false,
+    })).toEqual({ kind: 'delete', direction: 'backward' });
+    expect(bufferInsertFromBeforeInput({
+      inputType: 'deleteContentForward', data: null, isComposing: false,
+    })).toEqual({ kind: 'delete', direction: 'forward' });
+    expect(bufferInsertFromBeforeInput({
+      inputType: 'insertText', data: 'a', isComposing: false,
+    })).toEqual({ kind: 'type', text: 'a' });
+    expect(bufferInsertFromBeforeInput({
+      inputType: 'deleteContentBackward', data: null, isComposing: true,
+    })).toBeUndefined();
   });
 
   it('steps collapsed deletes by grapheme (emoji, flag, combining mark)', () => {

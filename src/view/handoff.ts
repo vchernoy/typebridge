@@ -223,6 +223,31 @@ export function bufferInsertFromKeyboard(event: KeyboardEvent): BufferedInsert |
   return undefined;
 }
 
+/**
+ * Virtual keyboards often emit Backspace/Delete only as `beforeinput` without a
+ * prior `keydown`. Translate those (and insert) input types into buffer items.
+ */
+export function bufferInsertFromBeforeInput(event: Pick<InputEvent, 'inputType' | 'data' | 'isComposing'>): BufferedInsert | undefined {
+  if (event.isComposing) return undefined;
+  if (event.inputType === 'deleteContentBackward') {
+    return { kind: 'delete', direction: 'backward' };
+  }
+  if (event.inputType === 'deleteContentForward') {
+    return { kind: 'delete', direction: 'forward' };
+  }
+  if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') {
+    return { kind: 'break', text: '\n' };
+  }
+  const data = event.data;
+  if (typeof data === 'string' && data.length > 0) {
+    return {
+      kind: event.inputType === 'insertFromPaste' ? 'paste' : 'type',
+      text: data,
+    };
+  }
+  return undefined;
+}
+
 function isHighSurrogate(code: number): boolean {
   return code >= 0xd800 && code <= 0xdbff;
 }

@@ -11,6 +11,7 @@ import {
   HANDOFF_CHANNEL,
   HANDOFF_CONFIRM_TIMEOUT_MS,
   HANDOFF_YIELD_TIMEOUT_MS,
+  bufferInsertFromBeforeInput,
   bufferInsertFromKeyboard,
   handoffRefuseGuidance,
   ownerYieldBlock,
@@ -95,9 +96,9 @@ function openChannel(existing: BroadcastChannel | null | undefined): BroadcastCh
 }
 
 /**
- * Read-only textareas often keep selection at 0–0 on click; default to a collapsed
- * end caret so buffered keys append. Otherwise carry both endpoints so the first
- * buffered insert/delete can replace a pre-handoff selection.
+ * Carry both selection endpoints so the first buffered insert/delete can replace
+ * a pre-handoff range. A collapsed 0–0 caret is preserved (Home / click at start);
+ * do not rewrite it to the end — that stole intentional start carets.
  */
 function readHandoffSelection(field: HTMLTextAreaElement): { start: number; end: number } {
   const start = field.selectionStart;
@@ -107,10 +108,6 @@ function readHandoffSelection(field: HTMLTextAreaElement): { start: number; end:
     return { start: len, end: len };
   }
   const endVal = typeof end === 'number' ? end : start;
-  if (field.readOnly && start === 0 && endVal === 0 && field.value.length > 0) {
-    const len = field.value.length;
-    return { start: len, end: len };
-  }
   return { start, end: endVal };
 }
 
@@ -537,13 +534,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   };
 
   const onBeforeInput = (event: InputEvent): void => {
-    if (event.isComposing) return;
-    const data = event.data;
-    const insert: BufferedInsert | undefined = typeof data === 'string' && data.length > 0
-      ? { kind: event.inputType === 'insertFromPaste' ? 'paste' : 'type', text: data }
-      : (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph')
-        ? { kind: 'break', text: '\n' }
-        : undefined;
+    const insert = bufferInsertFromBeforeInput(event);
     if (pending) {
       event.preventDefault();
       if (insert) buffer.push(insert);

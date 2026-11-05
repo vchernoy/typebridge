@@ -20,6 +20,14 @@ async function reloadFrame(page: Page, iframeSelector: string): Promise<void> {
   });
 }
 
+/** Place a collapsed caret without starting handoff by itself (caller clicks/types). */
+async function placeCaret(frame: FrameLocator, where: 'start' | 'end'): Promise<void> {
+  await frame.locator('#editor').evaluate((el: HTMLTextAreaElement, at: 'start' | 'end') => {
+    const pos = at === 'start' ? 0 : el.value.length;
+    el.setSelectionRange(pos, pos);
+  }, where);
+}
+
 async function openSharedDocument(page: Page): Promise<{ alpha: FrameLocator; beta: FrameLocator; docId: string }> {
   await page.goto('/window-identity-harness.html');
   const alpha = page.frameLocator('#win-alpha');
@@ -47,6 +55,7 @@ test('same-tab click into read-only window takes editing without dropping keys',
 
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
   await beta.locator('#editor').click();
+  await placeCaret(beta, 'end');
   // Type immediately during handoff — buffered keys must apply.
   await beta.locator('#editor').pressSequentially('!');
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
@@ -159,6 +168,7 @@ test('keys typed during delayed acquire are all kept', async ({ page }) => {
   });
 
   await beta.locator('#editor').click();
+  await placeCaret(beta, 'end');
   // Digits are not transliterated — asserts buffering through acquire without mode toggles.
   await beta.locator('#editor').pressSequentially('123');
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
@@ -174,6 +184,7 @@ test('Backspace during delayed acquire is buffered with surrounding keys', async
   });
 
   await beta.locator('#editor').click();
+  await placeCaret(beta, 'end');
   await beta.locator('#editor').press('1');
   await beta.locator('#editor').press('2');
   await beta.locator('#editor').press('Backspace');
@@ -192,6 +203,7 @@ test('Кириллица transliterates keys buffered during handoff', async ({ 
   });
 
   await beta.locator('#editor').click();
+  await placeCaret(beta, 'end');
   await beta.locator('#editor').pressSequentially('privet');
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
   await expect(beta.locator('#editor')).toHaveValue('Shared handoff textпривет');
@@ -202,11 +214,24 @@ test('keyboard typing into a focused read-only field starts handoff', async ({ p
   const { alpha, beta } = await openSharedDocument(page);
 
   await beta.locator('#editor').focus();
+  await placeCaret(beta, 'end');
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
   // First key starts handoff (not plain focus); "!" is not transliterated.
   await beta.locator('#editor').press('!');
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
   await expect(beta.locator('#editor')).toHaveValue('Shared handoff text!');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
+});
+
+test('collapsed caret at offset zero is preserved across takeover', async ({ page }) => {
+  test.setTimeout(90_000);
+  const { alpha, beta } = await openSharedDocument(page);
+
+  await beta.locator('#editor').focus();
+  await placeCaret(beta, 'start');
+  await beta.locator('#editor').press('!');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveValue('!Shared handoff text');
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
 });
 
