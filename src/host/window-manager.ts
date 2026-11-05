@@ -212,6 +212,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       return;
     }
     if (mode === 'stacked' && previous !== 'stacked') enterStacked();
+    else if (mode === 'free' && previous === 'stacked') {
+      // Scrollable stack may place windows below the free-mode viewport — tile so all remain reachable.
+      layouts = tileSideBySide(layouts, viewportOf(deps.root));
+      applyAllGeometry();
+    }
     applyModeChrome();
     persist();
   };
@@ -709,7 +714,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     layouts = layouts.map(win => (
       win.id === data.windowId ? { ...win, documentId: data.documentId } : win
     ));
-    writeHostLayout({ version: 1, windows: layouts }, storage);
+    if (preFocusLayouts) {
+      preFocusLayouts = preFocusLayouts.map(win => (
+        win.id === data.windowId ? { ...win, documentId: data.documentId } : win
+      ));
+    }
+    // Use Focus-aware persist so maximized geometry / focusWindowId stay correct.
+    persist();
   };
   const onLayoutModeEvent = (event: Event): void => {
     const detail = (event as CustomEvent<{ preference?: LayoutModePreference }>).detail;

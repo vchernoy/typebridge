@@ -121,6 +121,45 @@ test('host Focus mode maximizes the active window and restores on exit', async (
   });
 });
 
+test('leaving Stacked for Free keeps every window reachable in the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const main = await openHost(page);
+  await openEmbeddedSettings(main);
+  await main.locator('#window-layout').selectOption('stacked');
+  await expect.poll(() => page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostLayoutMode?: () => string };
+    return hooks.__typebridgeHostLayoutMode?.();
+  })).toBe('stacked');
+  await page.getByRole('button', { name: 'New window' }).click();
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(3);
+
+  await main.locator('#window-layout').selectOption('free');
+  await expect.poll(() => page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostLayoutMode?: () => string };
+    return hooks.__typebridgeHostLayoutMode?.();
+  })).toBe('free');
+  await expect(page.locator('body')).not.toHaveClass(/host-stacked/);
+
+  const boxes = await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }>;
+    };
+    const root = document.querySelector('#host-root')!.getBoundingClientRect();
+    return {
+      view: { width: Math.floor(root.width), height: Math.floor(root.height) },
+      windows: hooks.__typebridgeHostWindows?.() ?? [],
+    };
+  });
+  expect(boxes.windows).toHaveLength(3);
+  for (const win of boxes.windows) {
+    expect(win.x).toBeGreaterThanOrEqual(0);
+    expect(win.y).toBeGreaterThanOrEqual(0);
+    expect(win.x + win.w).toBeLessThanOrEqual(boxes.view.width + 1);
+    expect(win.y + win.h).toBeLessThanOrEqual(boxes.view.height + 1);
+  }
+});
+
 test('host Focus restore after reload shows Exit focus in the focused iframe', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
