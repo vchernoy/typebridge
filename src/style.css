@@ -1135,10 +1135,12 @@ body.host-page {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  padding: 0.15rem 0.25rem;
-  border: 1px solid transparent;
+  padding: 0.15rem 0.35rem;
+  /* Looks like a field so renaming is discoverable without hover (touch screens). */
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   border-radius: 4px;
-  background: transparent;
+  background: color-mix(in srgb, var(--surface, Canvas) 70%, transparent);
+  cursor: text;
   color: inherit;
   font: inherit;
   font-size: 0.85rem;
@@ -1153,6 +1155,27 @@ body.host-page {
 .host-window-title:focus {
   border-color: var(--control-border);
   outline: none;
+}
+.host-window-rename {
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.host-window-rename:hover {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+.host-window-rename:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .host-window-close {
   flex: 0 0 auto;
