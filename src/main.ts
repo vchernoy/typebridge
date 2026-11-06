@@ -893,11 +893,134 @@ let focusHandoff: FocusHandoffController | undefined;
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** A control clicked in a quiet reader; it runs once this window can edit that document. */
 let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
+/** A title edit typed or pasted while editing moved here; replayed once it arrives. */
+type TitleOp = { inputType: string; data: string | null };
+/** A held title edit with the selection it was made at, in the (unchanged) field's coordinates. */
+type HeldTitleOp = TitleOp & { start: number; end: number };
+/** Title edits held during a takeover, tied to their document (#197). */
+let titleBuffer: { documentId: string; baseValue: string; ops: HeldTitleOp[]; fromHost: boolean } | undefined;
+/** Start of the user-perceived character before `pos` (emoji, combining marks, surrogate pairs). */
+function previousCharacterBoundary(text: string, pos: number): number {
+  const Segmenter = (Intl as typeof Intl & { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  if (Segmenter) {
+    let boundary = 0;
+    for (const { index } of new Segmenter(undefined, { granularity: 'grapheme' }).segment(text.slice(0, pos))) boundary = index;
+    return boundary;
+  }
+  const low = text.charCodeAt(pos - 1);
+  const high = text.charCodeAt(pos - 2);
+  return pos >= 2 && low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff ? pos - 2 : pos - 1;
+}
+/** End of the user-perceived character starting at `pos`. */
+function nextCharacterBoundary(text: string, pos: number): number {
+  const Segmenter = (Intl as typeof Intl & { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  if (Segmenter) {
+    const first = new Segmenter(undefined, { granularity: 'grapheme' }).segment(text.slice(pos))[Symbol.iterator]().next();
+    return first.done ? pos : pos + first.value.segment.length;
+  }
+  const high = text.charCodeAt(pos);
+  const low = text.charCodeAt(pos + 1);
+  return high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff ? pos + 2 : pos + 1;
+}
+/** One title edit through the title Editor (transliteration, undo); host title bar and held edits. */
+function applyTitleEdit(payload: { inputType: string; data: string | null; start: number; end: number }): { value: string; start: number; end: number } | null {
+  if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
+  const length = draftTitle.value.length;
+  const start = Math.max(0, Math.min(payload.start, length));
+  const end = Math.max(start, Math.min(payload.end, length));
+  // Do not focus the hidden embed #draft-title — that steals caret from the host
+  // title bar (especially on Firefox) and drops later keystrokes.
+  try { draftTitle.setSelectionRange(start, end); } catch { /* Not focused. */ }
+  const event = new InputEvent('beforeinput', {
+    bubbles: true,
+    cancelable: true,
+    inputType: payload.inputType,
+    data: payload.data ?? undefined,
+  });
+  draftTitle.dispatchEvent(event);
+  if (!event.defaultPrevented) {
+    if (payload.inputType === 'insertText' && payload.data) {
+      const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+      draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+    } else if (
+      (payload.inputType === 'insertFromPaste' || payload.inputType === 'insertFromDrop')
+      && payload.data
+    ) {
+      const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+      draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+    } else if (payload.inputType === 'deleteContentBackward') {
+      if (start === end && start > 0) draftTitle.setRangeText('', previousCharacterBoundary(draftTitle.value, start), start, 'end');
+      else draftTitle.setRangeText('', start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+    } else if (payload.inputType === 'deleteContentForward') {
+      if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, nextCharacterBoundary(draftTitle.value, start), 'end');
+      else draftTitle.setRangeText('', start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+    } else if (payload.inputType === 'deleteByCut') {
+      draftTitle.setRangeText('', start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+    } else if (payload.inputType === 'historyUndo') {
+      titleEditor.undo();
+      try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
+    } else if (payload.inputType === 'historyRedo') {
+      titleEditor.redo();
+      try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
+    }
+    if (draftTitle.value.length > 150) {
+      draftTitle.value = draftTitle.value.slice(0, 150);
+      draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+  syncTitleTooltip();
+  rememberActive();
+  return {
+    value: draftTitle.value,
+    start: draftTitle.selectionStart ?? 0,
+    end: draftTitle.selectionEnd ?? 0,
+  };
+}
+/** Apply held title edits through the title Editor (transliteration, undo) at the user's caret. */
+function replayTitleBuffer(): void {
+  const held = titleBuffer;
+  titleBuffer = undefined;
+  if (!held || held.documentId !== active.id || draftTitle.readOnly) return;
+  const edit = applyTitleEdit;
+  // A newer title may have arrived with the takeover: keep it and add the edits at its end.
+  const changed = draftTitle.value !== held.baseValue;
+  // The field showed the old title while edits were held, so each edit's selection is in
+  // old-title coordinates. Map it past earlier held edits: shifts made at or before a
+  // position move it along (End, 1, Home, 2 on "Имя" gives "2Имя1").
+  const shifts: { at: number; by: number }[] = [];
+  const mapPos = (pos: number): number => pos + shifts.reduce((sum, shift) => sum + (shift.at <= pos ? shift.by : 0), 0);
+  let start = draftTitle.value.length;
+  let end = start;
+  let previous: HeldTitleOp | undefined;
+  for (const op of held.ops) {
+    const sameSpot = previous && previous.start === op.start && previous.end === op.end;
+    if (!changed && !sameSpot) {
+      start = mapPos(op.start);
+      end = Math.max(start, mapPos(op.end));
+    }
+    const before = draftTitle.value.length;
+    const result = edit({ inputType: op.inputType, data: op.data, start, end });
+    if (!result) break;
+    if (!changed) shifts.push({ at: op.start, by: result.value.length - before });
+    ({ start, end } = result);
+    previous = op;
+  }
+  // Leave focus where the user put it; only place the caret if the title still has it.
+  if (!held.fromHost && document.activeElement === draftTitle) {
+    try { draftTitle.setSelectionRange(start, end); } catch { /* Not focusable. */ }
+  }
+}
 /** Rename… started while read-only: select the (possibly newer) title once editable. */
 let selectTitleWhenEditable = false;
 /** Editing moved to this window: show the normal save state and finish a pending control. */
 function onEditableHere(): void {
   showSaveState();
+  replayTitleBuffer();
   if (selectTitleWhenEditable) {
     selectTitleWhenEditable = false;
     if (document.activeElement === draftTitle) draftTitle.select();
@@ -1548,6 +1671,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
   replayButton = undefined;
+  titleBuffer = undefined;
   focusHandoff?.cancel();
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
@@ -2191,6 +2315,10 @@ if (!viewMode) {
       if (text === EDITABLE_HERE) onEditableHere();
       else {
         replayButton = undefined;
+        if (titleBuffer) {
+          titleBuffer = undefined;
+          announceAction('Your title change was not applied.', { keepConflict: true });
+        }
         announceAction(text, { keepConflict: true });
       }
     },
@@ -2205,16 +2333,54 @@ if (!viewMode) {
     if (focusHandoff?.pending()) return;
     focusHandoff?.requestHandoff();
   };
+  /**
+   * Hold a title edit made while this window cannot edit yet, and start the takeover.
+   * Returns false when the title is editable (the edit should run normally).
+   */
+  const bufferTitleEdit = (op: TitleOp, start: number, end: number, fromHost: boolean): boolean => {
+    if (!draftTitle.readOnly || !quietReader()) return false;
+    if (!titleBuffer || titleBuffer.documentId !== active.id) {
+      titleBuffer = { documentId: active.id, baseValue: draftTitle.value, ops: [], fromHost };
+    }
+    titleBuffer.ops.push({ ...op, start, end });
+    // Typed edits replace the selection themselves; do not reselect afterwards.
+    selectTitleWhenEditable = false;
+    requestEditHere();
+    return true;
+  };
+  /** The title edit a key stands for, if any (printable, Backspace, Delete; no shortcuts). */
+  const titleOpForKey = (event: KeyboardEvent): TitleOp | undefined => {
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return undefined;
+    if (event.key.length === 1) return { inputType: 'insertText', data: event.key };
+    if (event.key === 'Backspace') return { inputType: 'deleteContentBackward', data: null };
+    if (event.key === 'Delete') return { inputType: 'deleteContentForward', data: null };
+    return undefined;
+  };
   draftTitle.addEventListener('pointerdown', requestEditHere);
   draftTitle.addEventListener('beforeinput', requestEditHere);
-  draftTitle.addEventListener('paste', requestEditHere);
-  // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
-  draftTitle.addEventListener('keydown', event => {
-    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') requestEditHere();
+  draftTitle.addEventListener('paste', event => {
+    const text = event.clipboardData?.getData('text/plain') ?? '';
+    if (text && bufferTitleEdit({ inputType: 'insertFromPaste', data: text },
+      draftTitle.selectionStart ?? draftTitle.value.length, draftTitle.selectionEnd ?? draftTitle.value.length, false)) {
+      event.preventDefault();
+    } else requestEditHere();
   });
-  // Host title bar (#175 step 8) edits this window's title: let it start a takeover too.
-  (window as Window & { __typebridgeRequestEdit?: () => void }).__typebridgeRequestEdit = requestEditHere;
+  // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
+  // The key itself is held and applied once editing arrives, so nothing typed is lost (#197).
+  draftTitle.addEventListener('keydown', event => {
+    const op = titleOpForKey(event);
+    if (!op) return;
+    if (bufferTitleEdit(op, draftTitle.selectionStart ?? draftTitle.value.length,
+      draftTitle.selectionEnd ?? draftTitle.value.length, false)) event.preventDefault();
+  });
+  // Host title bar (#175 step 8) edits this window's title: let it start a takeover too,
+  // and hold what was typed there the same way.
+  const titleHooks = window as Window & {
+    __typebridgeRequestEdit?: () => void;
+    __typebridgeBufferTitleEdit?: (op: TitleOp, start: number, end: number) => boolean;
+  };
+  titleHooks.__typebridgeRequestEdit = requestEditHere;
+  titleHooks.__typebridgeBufferTitleEdit = (op, start, end) => bufferTitleEdit(op, start, end, true);
   const replayAfterTakeover = new Set(['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
   document.addEventListener('click', event => {
     const button = (event.target as Element | null)?.closest?.('button');
@@ -2624,64 +2790,7 @@ if (embedded) {
     scheduleSave(true);
     return { value: draftTitle.value, start: caret, end: caretEnd };
   };
-  hooks.__typebridgeTitleEdit = payload => {
-    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
-    const length = draftTitle.value.length;
-    const start = Math.max(0, Math.min(payload.start, length));
-    const end = Math.max(start, Math.min(payload.end, length));
-    // Do not focus the hidden embed #draft-title — that steals caret from the host
-    // title bar (especially on Firefox) and drops later keystrokes.
-    try { draftTitle.setSelectionRange(start, end); } catch { /* Not focused. */ }
-    const event = new InputEvent('beforeinput', {
-      bubbles: true,
-      cancelable: true,
-      inputType: payload.inputType,
-      data: payload.data ?? undefined,
-    });
-    draftTitle.dispatchEvent(event);
-    if (!event.defaultPrevented) {
-      if (payload.inputType === 'insertText' && payload.data) {
-        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
-        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
-      } else if (
-        (payload.inputType === 'insertFromPaste' || payload.inputType === 'insertFromDrop')
-        && payload.data
-      ) {
-        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
-        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
-      } else if (payload.inputType === 'deleteContentBackward') {
-        if (start === end && start > 0) draftTitle.setRangeText('', start - 1, start, 'end');
-        else draftTitle.setRangeText('', start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
-      } else if (payload.inputType === 'deleteContentForward') {
-        if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, start + 1, 'end');
-        else draftTitle.setRangeText('', start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
-      } else if (payload.inputType === 'deleteByCut') {
-        draftTitle.setRangeText('', start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
-      } else if (payload.inputType === 'historyUndo') {
-        titleEditor.undo();
-        try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
-      } else if (payload.inputType === 'historyRedo') {
-        titleEditor.redo();
-        try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
-      }
-      if (draftTitle.value.length > 150) {
-        draftTitle.value = draftTitle.value.slice(0, 150);
-        draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }
-    syncTitleTooltip();
-    rememberActive();
-    return {
-      value: draftTitle.value,
-      start: draftTitle.selectionStart ?? 0,
-      end: draftTitle.selectionEnd ?? 0,
-    };
-  };
+  hooks.__typebridgeTitleEdit = applyTitleEdit;
   // Catch prefs the host broadcast before this iframe finished booting.
   syncAutosaveCheckboxFromStorage();
   try { applyTabIndentFromStorage(); } catch { /* optional */ }
