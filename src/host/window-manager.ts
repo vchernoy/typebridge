@@ -83,6 +83,8 @@ export type WindowManager = {
   setHostFocusMode: (enabled: boolean, sourceWindowId?: string) => void;
   /** #175 step 11: F6 — activate the next window and focus its editor (or title). */
   cycleFocus: () => void;
+  /** Focus a window's title for renaming (Documents → Rename… in that window). */
+  renameWindow: (id: string) => void;
   dispose: () => void;
 };
 
@@ -107,6 +109,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   let layouts: HostWindowLayout[] = [];
   const shells = new Map<string, HTMLElement>();
+  /** Per-window "start renaming" actions (title bar ✎ and the Documents menu). */
+  const renameHandlers = new Map<string, () => void>();
   const frames = new Map<string, HTMLIFrameElement>();
   let drag: DragKind | undefined;
   let disposed = false;
@@ -390,7 +394,15 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     closeBtn.setAttribute('aria-label', `Close window ${win.id}`);
     closeBtn.textContent = '×';
 
-    titleBar.append(moveHandle, title, closeBtn);
+    // A visible way to rename: the title is a text field, but this makes it obvious.
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.className = 'host-window-rename';
+    renameBtn.setAttribute('aria-label', 'Rename document');
+    renameBtn.title = 'Rename document';
+    renameBtn.textContent = '✎';
+
+    titleBar.append(moveHandle, title, renameBtn, closeBtn);
 
     const frame = document.createElement('iframe');
     frame.className = 'host-editor';
@@ -472,6 +484,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     // A window whose document another window is editing looks editable: clicking or
     // typing in its title takes over editing there, then the title unlocks (quiet reader).
     let unlockTimer: ReturnType<typeof setInterval> | undefined;
+    /** Rename (✎ or Documents → Rename…) asked for the whole name selected once it unlocks. */
+    let selectAllOnUnlock = false;
     const requestEditFromTitle = (): void => {
       syncTitleEditable();
       if (!title.readOnly) return;
@@ -485,6 +499,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         syncTitleEditable();
         if (!title.readOnly) {
           clearInterval(unlockTimer);
+          const selectAll = selectAllOnUnlock;
+          selectAllOnUnlock = false;
           // The takeover may carry a newer (even unsaved) title from the other window;
           // show it before any edit here, so a later commit cannot overwrite it.
           try {
@@ -497,10 +513,23 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
               applyChromeMeta(title.value);
             }
           } catch { /* Frame mid-navigation. */ }
+          // Rename replaces the name: select it again after a newer title arrived.
+          if (selectAll && document.activeElement === title) title.select();
         } else if (++tries > 40) clearInterval(unlockTimer);
       }, 50);
     };
     title.addEventListener('pointerdown', event => { event.stopPropagation(); requestEditFromTitle(); });
+    const startRename = (): void => {
+      setActive(win.id);
+      title.focus();
+      title.select();
+      syncTitleEditable();
+      selectAllOnUnlock = title.readOnly;
+      requestEditFromTitle();
+    };
+    renameBtn.addEventListener('pointerdown', event => { event.stopPropagation(); });
+    renameBtn.addEventListener('click', event => { event.stopPropagation(); startRename(); });
+    renameHandlers.set(win.id, startRename);
     title.addEventListener('focus', () => { syncTitleEditable(); });
     title.addEventListener('paste', () => { if (title.readOnly) requestEditFromTitle(); });
     // Plain focus (Tab, F6) must not take over editing; typing into the title does.
@@ -635,6 +664,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       } catch { /* Frame mid-navigation. */ }
     });
     title.addEventListener('blur', () => {
+      selectAllOnUnlock = false;
       if (title.readOnly) {
         applyChromeMeta(title.value);
         return;
@@ -1038,6 +1068,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       }
       shells.get(id)?.remove();
       shells.delete(id);
+      renameHandlers.delete(id);
       frames.delete(id);
       layouts = layouts.filter(win => win.id !== id);
       if (preFocusLayouts) {
@@ -1098,6 +1129,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     layoutMode: () => mode,
     refreshLayoutMode: () => { refreshMode(); },
     cycleFocus: () => { cycleFocus(); },
+    renameWindow: id => { renameHandlers.get(id)?.(); },
     setHostFocusMode: (enabled, sourceWindowId) => {
       if (enabled) {
         if (sourceWindowId && layouts.some(win => win.id === sourceWindowId)) {

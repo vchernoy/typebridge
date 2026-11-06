@@ -893,9 +893,15 @@ let focusHandoff: FocusHandoffController | undefined;
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** A control clicked in a quiet reader; it runs once this window can edit that document. */
 let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
+/** Rename… started while read-only: select the (possibly newer) title once editable. */
+let selectTitleWhenEditable = false;
 /** Editing moved to this window: show the normal save state and finish a pending control. */
 function onEditableHere(): void {
   showSaveState();
+  if (selectTitleWhenEditable) {
+    selectTitleWhenEditable = false;
+    if (document.activeElement === draftTitle) draftTitle.select();
+  }
   const pendingAction = replayButton;
   replayButton = undefined;
   if (!pendingAction || pendingAction.documentId !== active.id || readOnlyNow()) return;
@@ -1630,6 +1636,22 @@ document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click
 for (const picker of documentPickers) {
   picker.addEventListener('change', () => { void (viewMode ? viewerOpen(picker.value) : switchDraft(picker.value)); });
 }
+draftTitle.addEventListener('blur', () => { selectTitleWhenEditable = false; });
+// Documents → Rename…: in a host window the title lives in the window's title bar.
+document.querySelector<HTMLButtonElement>('#rename-draft')!.addEventListener('click', () => {
+  if (viewMode) return;
+  if (embedded && windowId && window.parent !== window) {
+    try {
+      const host = window.parent as Window & { __typebridgeHostRename?: (id: string) => void };
+      if (host.__typebridgeHostRename) { host.__typebridgeHostRename(windowId); return; }
+    } catch { /* Cross-origin parent is out of scope. */ }
+  }
+  draftTitle.focus();
+  draftTitle.select();
+  // If editing must move here first, the takeover reloads the title: select it again then.
+  selectTitleWhenEditable = draftTitle.readOnly;
+  (window as Window & { __typebridgeRequestEdit?: () => void }).__typebridgeRequestEdit?.();
+});
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (readOnlyNow() || transitioning) return;
   focusHandoff?.cancel();
@@ -1896,7 +1918,7 @@ const viewerNotice = document.querySelector<HTMLElement>('#viewer-notice')!;
 const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
 const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
 const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
-const VIEWER_DISABLED_CONTROLS = ['new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
+const VIEWER_DISABLED_CONTROLS = ['rename-draft', 'new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
   'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** Controls that only make sense while a saved document is shown. */
 const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];

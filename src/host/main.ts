@@ -77,6 +77,7 @@ const hostHooks = window as Window & {
   __typebridgeHostLayoutMode?: () => ReturnType<typeof manager.layoutMode>;
   __typebridgeHostFocusMode?: (enabled: boolean, sourceWindowId?: string) => void;
   __typebridgeHostCycleFocus?: () => void;
+  __typebridgeHostRename?: (windowId: string) => void;
   __typebridgeOpenDocumentIds?: (exceptWindowId?: string) => string[];
   __typebridgeOpenTitles?: (exceptWindowId?: string) => string[];
 };
@@ -86,6 +87,7 @@ hostHooks.__typebridgeHostFocusMode = (enabled, sourceWindowId) => {
   manager.setHostFocusMode(enabled, sourceWindowId);
 };
 hostHooks.__typebridgeHostCycleFocus = () => { manager.cycleFocus(); };
+hostHooks.__typebridgeHostRename = windowId => { manager.renameWindow(windowId); };
 hostHooks.__typebridgeOpenDocumentIds = exceptWindowId => manager.openDocumentIds(exceptWindowId);
 hostHooks.__typebridgeOpenTitles = exceptWindowId => manager.openTitles(exceptWindowId);
 
