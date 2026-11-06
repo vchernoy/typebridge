@@ -59,7 +59,9 @@ test('two iframe windows isolate session hints and share document ownership', as
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
   await expect(beta.locator('#editor')).toHaveValue('Alpha document');
   await expect(beta.locator('#editor')).toHaveJSProperty('readOnly', true);
-  await expect(beta.locator('#ownership-notice')).toBeVisible();
+  // Quiet reader: no visible read-only notice; the next edit gesture takes over.
+  await expect(beta.locator('#ownership-notice')).toBeHidden();
+  await expect(beta.locator('#save-indicator')).toHaveText('Saved');
 
   await openDocMenu(beta);
   await beta.locator('#new-draft').click();

@@ -42,7 +42,7 @@ test('host windows share the last Find query; Replace stays per window', async (
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:w2'))).toBe('second-replace');
 });
 
-test('read-only host window keeps Find but disables Replace', async ({ page }) => {
+test('host window that is not editing keeps Find, and Replace takes over editing', async ({ page }) => {
   test.setTimeout(90_000);
   const main = await openHost(page);
   await fillHostEditor(main, 'shared body for find');
@@ -69,10 +69,14 @@ test('read-only host window keeps Find but disables Replace', async ({ page }) =
   await expect(second.locator('#find-text')).toBeFocused();
   await second.locator('#find-text').fill('shared');
   await expect(second.locator('#find-status')).toContainText(/match/i);
-  await expect(second.locator('#replace-one')).toBeDisabled();
-  await expect(second.locator('#replace-all')).toBeDisabled();
-  await second.locator('#replace-one').click({ force: true });
-  await expect(second.locator('#editor')).toHaveValue('shared body for find');
+  // Any window may edit: Replace stays enabled, takes over editing, then replaces.
+  await expect(second.locator('#replace-one')).toBeEnabled();
+  await expect(second.locator('#replace-all')).toBeEnabled();
+  await second.locator('#replace-text').fill('общий');
+  await second.locator('#replace-all').click();
+  await expect(second.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(second.locator('#editor')).toHaveValue('общий body for find');
+  await expect(main.locator('#editor')).toHaveValue('общий body for find', { timeout: 10_000 });
 });
 
 test('Ctrl+F from the host title opens Find in that window', async ({ page }) => {

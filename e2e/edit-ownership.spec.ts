@@ -6,7 +6,6 @@ import { claimFenceElsewhere, heldEditLocks, readOwnership, readStoredDocs, writ
 
 const role = (page: Page) => page.locator('html');
 const instanceOf = (page: Page) => page.locator('html').getAttribute('data-instance-id');
-const BUSY = 'This document is open for editing in another TypeBridge window, so it is read-only here.';
 const LOST = 'Another TypeBridge window is now editing this document, so this window is read-only.';
 const UNSAVED_HERE = 'Your unsaved changes here were not saved; copy or export them to keep them.';
 
@@ -43,11 +42,15 @@ test('two ordinary tabs on one document: click and type hand off editing', async
   await expect(field).toHaveValue('Первый текст');
   await expect(field).toHaveJSProperty('readOnly', true);
   await expect(other.locator('#draft-title')).toHaveJSProperty('readOnly', true);
-  await expect(other.locator('#ownership-notice')).toBeVisible();
-  await expect(other.locator('#ownership-notice')).toContainText(BUSY);
-  await expect(other.locator('#save-indicator')).toHaveText('Read-only');
-  await expect(other.locator('#status')).toHaveText('Read-only here — another window is editing this document.');
-  for (const control of ['#delete-draft', '#clear', '#convert-cyrillic', '#undo', '#autosave']) {
+  // A clean reader looks like a normal editor: no Read-only badge, notice or status.
+  await expect(other.locator('#ownership-notice')).toBeHidden();
+  await expect(other.locator('#save-indicator')).toHaveText('Saved');
+  await expect(other.locator('#status')).toHaveText('Saved locally');
+  // Document-changing controls stay enabled; using one takes over editing first.
+  for (const control of ['#delete-draft', '#clear', '#convert-cyrillic']) {
+    await expect(other.locator(control)).toBeEnabled();
+  }
+  for (const control of ['#undo', '#autosave']) {
     await expect(other.locator(control)).toBeDisabled();
   }
   await expect(other.locator('#export-txt')).toBeEnabled();
@@ -113,7 +116,7 @@ test('after the owner closes, another window can take over editing', async ({ pa
   await page.close();
   await expect.poll(async () => { await nudge(other); return role(other).getAttribute('data-role'); }).toBe('editor');
   await expect(other.locator('#ownership-notice')).toBeHidden();
-  await expect(other.locator('#status')).toContainText('You can edit this document in this window now.');
+  await expect(other.locator('#status')).toContainText('Saved locally');
   await other.locator('#editor').fill('Исходник, продолжение');
   await expect(other.locator('#save-indicator')).toHaveText('Saved');
   const rows = await readStoredDocs(other);
@@ -270,7 +273,6 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
   }).toBe(true);
   await expect(other.locator('#version-notice')).toContainText('deleted in another window');
   await expect(role(other)).toHaveAttribute('data-role', 'reader');
-  await expect(other.locator('#ownership-notice')).toBeVisible();
   await expect(other.locator('#status')).not.toContainText('You can edit this document in this window now.');
   expect((await readOwnership(other, id))?.ownerInstanceId ?? '').not.toBe(await instanceOf(other));
   expect((await readStoredDocs(other)).map(row => row.id)).not.toContain(id);

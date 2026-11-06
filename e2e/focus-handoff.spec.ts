@@ -44,6 +44,9 @@ async function openSharedDocument(page: Page): Promise<{ alpha: FrameLocator; be
   await waitReady(beta);
   await openDocMenu(beta);
   await beta.locator('#drafts').selectOption(docId);
+  // selectOption is a keyboard-style pick, so the menu stays open; close it like a user.
+  await beta.locator('#drafts').press('Escape');
+  await expect(beta.locator('#doc-menu')).toBeHidden();
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
   await expect(beta.locator('#editor')).toHaveJSProperty('readOnly', true);
   return { alpha, beta, docId };
@@ -80,6 +83,7 @@ test('failed takeover keeps the owner private text (two-phase park)', async ({ p
   await waitReady(beta);
   await openDocMenu(beta);
   await beta.locator('#drafts').selectOption(docId);
+  await beta.locator('#drafts').press('Escape');
   await expect(beta.locator('html')).toHaveAttribute('data-role', 'reader');
 
   await alpha.locator('#editor').evaluate((el: HTMLTextAreaElement) => {

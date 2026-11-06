@@ -469,8 +469,45 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (document.activeElement !== title) title.focus({ preventScroll: true });
     };
 
-    title.addEventListener('pointerdown', event => { event.stopPropagation(); syncTitleEditable(); });
+    // A window whose document another window is editing looks editable: clicking or
+    // typing in its title takes over editing there, then the title unlocks (quiet reader).
+    let unlockTimer: ReturnType<typeof setInterval> | undefined;
+    const requestEditFromTitle = (): void => {
+      syncTitleEditable();
+      if (!title.readOnly) return;
+      try {
+        (frame.contentWindow as (Window & { __typebridgeRequestEdit?: () => void }) | null)
+          ?.__typebridgeRequestEdit?.();
+      } catch { /* Frame mid-navigation. */ }
+      clearInterval(unlockTimer);
+      let tries = 0;
+      unlockTimer = setInterval(() => {
+        syncTitleEditable();
+        if (!title.readOnly) {
+          clearInterval(unlockTimer);
+          // The takeover may carry a newer (even unsaved) title from the other window;
+          // show it before any edit here, so a later commit cannot overwrite it.
+          try {
+            const authoritative = (frame.contentWindow as TitleHooks | null)?.__typebridgeGetTitle?.();
+            if (authoritative !== undefined && authoritative !== title.value) {
+              applyingFromIframe = true;
+              title.value = authoritative;
+              applyingFromIframe = false;
+              title.setSelectionRange(authoritative.length, authoritative.length);
+              applyChromeMeta(title.value);
+            }
+          } catch { /* Frame mid-navigation. */ }
+        } else if (++tries > 40) clearInterval(unlockTimer);
+      }, 50);
+    };
+    title.addEventListener('pointerdown', event => { event.stopPropagation(); requestEditFromTitle(); });
     title.addEventListener('focus', () => { syncTitleEditable(); });
+    title.addEventListener('paste', () => { if (title.readOnly) requestEditFromTitle(); });
+    // Plain focus (Tab, F6) must not take over editing; typing into the title does.
+    title.addEventListener('keydown', event => {
+      if (!title.readOnly || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') requestEditFromTitle();
+    });
     title.addEventListener('compositionstart', () => { hostTitleComposing = true; });
     title.addEventListener('compositionend', () => {
       hostTitleComposing = false;

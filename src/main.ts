@@ -140,6 +140,12 @@ const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'f
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
 const readOnlyNow = (): boolean => viewMode || editBlock !== '' || transferFrozen;
+/**
+ * A clean window whose document another window or tab is editing. It looks like a normal
+ * editor: no Read-only badge or notice; clicking, typing or using a control takes over
+ * editing (focus handoff). Unsaved text here, Edit here warnings and real errors still show.
+ */
+const quietReader = (): boolean => !viewMode && editBlock === 'busy' && !workspace.dirty();
 // Do not delete pendingDraft/activeDraft on viewer boot: same-tab navigation from an editor
 // writes those keys on pagehide for reload restore, and wiping them here would discard that
 // backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
@@ -219,6 +225,8 @@ const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. 
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
 const NOT_OWNER_UNSAVED = 'Changes here are not saved — another window is editing this document. Copy or export them.';
 const READ_ONLY_HERE = 'Read-only here — another window is editing this document.';
+/** Handoff success text from focus-handoff.ts; shown quietly as the normal save state. */
+const EDITABLE_HERE = 'You can edit this document in this window now.';
 const READ_ONLY_UNSUPPORTED = 'Read-only — this browser cannot coordinate editing between windows.';
 let statusKind: StatusKind = 'progress';
 let statusMessage: StatusMessage = { conflict: '', primary: '', risk: '', draftListRefreshFailed: false };
@@ -348,6 +356,7 @@ function showSaveState(): void {
   else setSaveStatus(autosave.checked ? 'Saved locally' : AUTOSAVE_OFF);
 }
 function readOnlyStatus(): string {
+  if (quietReader()) return autosave.checked ? 'Saved locally' : AUTOSAVE_OFF;
   if (editBlock === 'unsupported') return READ_ONLY_UNSUPPORTED;
   if (editBlock === 'error') return 'Read-only — this window could not confirm it may edit this document.';
   return READ_ONLY_HERE;
@@ -418,8 +427,10 @@ function syncMutationControls(): void {
   const target = activeEditableSession();
   undo.disabled = blocked || !target.canUndo;
   redo.disabled = blocked || !target.canRedo;
+  // A quiet reader keeps these enabled; the click takes over editing, then runs.
+  const controlsBlocked = blocked && !(quietReader() && !transferFrozen);
   for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
-    document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
+    document.querySelector<HTMLButtonElement>('#' + id)!.disabled = controlsBlocked;
   }
   syncAutosaveControl();
 }
@@ -684,6 +695,7 @@ const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
   const state = storageProblem || saveFailed ? 'failed'
+    : quietReader() ? (!autosave.checked || !db ? 'unsaved' : 'saved')
     : editBlock ? (workspace.dirty() ? 'unsaved' : 'readonly')
     : !autosave.checked || !db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
   const label = { failed: 'Save failed', readonly: 'Read-only', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[state];
@@ -879,6 +891,17 @@ const editHereButton = document.querySelector<HTMLButtonElement>('#edit-here')!;
 let focusHandoff: FocusHandoffController | undefined;
 /** Controls that change the displayed document; New, Import and switching stay available. */
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
+/** A control clicked in a quiet reader; it runs once this window can edit that document. */
+let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
+/** Editing moved to this window: show the normal save state and finish a pending control. */
+function onEditableHere(): void {
+  showSaveState();
+  const pendingAction = replayButton;
+  replayButton = undefined;
+  if (!pendingAction || pendingAction.documentId !== active.id || readOnlyNow()) return;
+  const { button } = pendingAction;
+  if (button.isConnected && !button.disabled) button.click();
+}
 /** Reflect ownership + transfer freeze in the editors, controls and guidance (ordinary windows only). */
 function applyEditAccess(): void {
   if (viewMode) return;
@@ -888,10 +911,12 @@ function applyEditAccess(): void {
   workspace.setPaneRole(blocked ? 'readonly' : 'editable');
   if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
   if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
-  for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = blocked;
+  // A quiet reader keeps its controls enabled; a click takes over editing first (below).
+  const controlsBlocked = blocked && !(quietReader() && !transferFrozen);
+  for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = controlsBlocked;
   document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
   // Temporary transfer freeze must not announce "another window is editing".
-  const guidance = transferFrozen ? '' : editBlockGuidance(editBlock, workspace.dirty());
+  const guidance = transferFrozen || quietReader() ? '' : editBlockGuidance(editBlock, workspace.dirty());
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
   syncHistory();
@@ -1196,7 +1221,7 @@ function retryOwnership(): void {
       showDraft();
     }
     installOwnership(access);
-    announceAction('You can edit this document in this window now.', { keepConflict: true });
+    onEditableHere();
     if (workspace.dirty() && autosave.checked) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { void persist(); }, 300); }
   })().finally(() => {
     ownershipRetry = undefined;
@@ -1516,6 +1541,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
+  replayButton = undefined;
   focusHandoff?.cancel();
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
@@ -2043,7 +2069,8 @@ async function rereadDisplayed(): Promise<void> {
       active = stored;
       showDraft();
       applyEditAccess();
-      setSaveStatus('Updated to the latest saved version. ' + readOnlyStatus());
+      if (quietReader()) showSaveState();
+      else setSaveStatus('Updated to the latest saved version. ' + readOnlyStatus());
     }
     scheduleListRefresh();
   } else if (action === 'missing') {
@@ -2138,10 +2165,43 @@ if (!viewMode) {
     discardParkedText: discardParkedHandoffText,
     recoverParkedOwnership: recoverParkedHandoffOwnership,
     takeOver: takeOverFromHandoff,
-    announce: text => announceAction(text, { keepConflict: true }),
+    announce: text => {
+      if (text === EDITABLE_HERE) onEditableHere();
+      else {
+        replayButton = undefined;
+        announceAction(text, { keepConflict: true });
+      }
+    },
     showEditHere: showEditHereBar,
     hideEditHere: hideEditHereBar,
   });
+  // A quiet reader takes over editing from any edit gesture, not only the text field:
+  // the title and document-changing controls. Plain focus (Tab, F6, programmatic) does
+  // not take over; the text field starts a takeover on pointer or typing (focus-handoff).
+  const requestEditHere = (): void => {
+    if (!quietReader() || transitioning || deleting || transferFrozen) return;
+    if (focusHandoff?.pending()) return;
+    focusHandoff?.requestHandoff();
+  };
+  draftTitle.addEventListener('pointerdown', requestEditHere);
+  draftTitle.addEventListener('beforeinput', requestEditHere);
+  draftTitle.addEventListener('paste', requestEditHere);
+  // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
+  draftTitle.addEventListener('keydown', event => {
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') requestEditHere();
+  });
+  // Host title bar (#175 step 8) edits this window's title: let it start a takeover too.
+  (window as Window & { __typebridgeRequestEdit?: () => void }).__typebridgeRequestEdit = requestEditHere;
+  const replayAfterTakeover = new Set(['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
+  document.addEventListener('click', event => {
+    const button = (event.target as Element | null)?.closest?.('button');
+    if (!button || !replayAfterTakeover.has(button.id) || !quietReader()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    replayButton = { button, documentId: active.id };
+    requestEditHere();
+  }, true);
   editHereButton.addEventListener('click', () => {
     if (editHereDocumentId && active.id !== editHereDocumentId) {
       hideEditHereBar();
