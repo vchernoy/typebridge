@@ -899,6 +899,29 @@ type TitleOp = { inputType: string; data: string | null };
 type HeldTitleOp = TitleOp & { start: number; end: number };
 /** Title edits held during a takeover, tied to their document (#197). */
 let titleBuffer: { documentId: string; baseValue: string; ops: HeldTitleOp[]; fromHost: boolean } | undefined;
+/** Start of the user-perceived character before `pos` (emoji, combining marks, surrogate pairs). */
+function previousCharacterBoundary(text: string, pos: number): number {
+  const Segmenter = (Intl as typeof Intl & { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  if (Segmenter) {
+    let boundary = 0;
+    for (const { index } of new Segmenter(undefined, { granularity: 'grapheme' }).segment(text.slice(0, pos))) boundary = index;
+    return boundary;
+  }
+  const low = text.charCodeAt(pos - 1);
+  const high = text.charCodeAt(pos - 2);
+  return pos >= 2 && low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff ? pos - 2 : pos - 1;
+}
+/** End of the user-perceived character starting at `pos`. */
+function nextCharacterBoundary(text: string, pos: number): number {
+  const Segmenter = (Intl as typeof Intl & { Segmenter?: typeof Intl.Segmenter }).Segmenter;
+  if (Segmenter) {
+    const first = new Segmenter(undefined, { granularity: 'grapheme' }).segment(text.slice(pos))[Symbol.iterator]().next();
+    return first.done ? pos : pos + first.value.segment.length;
+  }
+  const high = text.charCodeAt(pos);
+  const low = text.charCodeAt(pos + 1);
+  return high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff ? pos + 2 : pos + 1;
+}
 /** One title edit through the title Editor (transliteration, undo); host title bar and held edits. */
 function applyTitleEdit(payload: { inputType: string; data: string | null; start: number; end: number }): { value: string; start: number; end: number } | null {
   if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
@@ -928,11 +951,11 @@ function applyTitleEdit(payload: { inputType: string; data: string | null; start
       draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
       draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
     } else if (payload.inputType === 'deleteContentBackward') {
-      if (start === end && start > 0) draftTitle.setRangeText('', start - 1, start, 'end');
+      if (start === end && start > 0) draftTitle.setRangeText('', previousCharacterBoundary(draftTitle.value, start), start, 'end');
       else draftTitle.setRangeText('', start, end, 'end');
       draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
     } else if (payload.inputType === 'deleteContentForward') {
-      if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, start + 1, 'end');
+      if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, nextCharacterBoundary(draftTitle.value, start), 'end');
       else draftTitle.setRangeText('', start, end, 'end');
       draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
     } else if (payload.inputType === 'deleteByCut') {
@@ -987,15 +1010,21 @@ function replayTitleBuffer(): void {
     ({ start, end } = result);
     previous = op;
   }
-  if (!held.fromHost) {
-    draftTitle.focus();
+  // Leave focus where the user put it; only place the caret if the title still has it.
+  if (!held.fromHost && document.activeElement === draftTitle) {
     try { draftTitle.setSelectionRange(start, end); } catch { /* Not focusable. */ }
   }
 }
+/** Rename… started while read-only: select the (possibly newer) title once editable. */
+let selectTitleWhenEditable = false;
 /** Editing moved to this window: show the normal save state and finish a pending control. */
 function onEditableHere(): void {
   showSaveState();
   replayTitleBuffer();
+  if (selectTitleWhenEditable) {
+    selectTitleWhenEditable = false;
+    if (document.activeElement === draftTitle) draftTitle.select();
+  }
   const pendingAction = replayButton;
   replayButton = undefined;
   if (!pendingAction || pendingAction.documentId !== active.id || readOnlyNow()) return;
@@ -1731,6 +1760,7 @@ document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click
 for (const picker of documentPickers) {
   picker.addEventListener('change', () => { void (viewMode ? viewerOpen(picker.value) : switchDraft(picker.value)); });
 }
+draftTitle.addEventListener('blur', () => { selectTitleWhenEditable = false; });
 // Documents → Rename…: in a host window the title lives in the window's title bar.
 document.querySelector<HTMLButtonElement>('#rename-draft')!.addEventListener('click', () => {
   if (viewMode) return;
@@ -1742,6 +1772,8 @@ document.querySelector<HTMLButtonElement>('#rename-draft')!.addEventListener('cl
   }
   draftTitle.focus();
   draftTitle.select();
+  // If editing must move here first, the takeover reloads the title: select it again then.
+  selectTitleWhenEditable = draftTitle.readOnly;
   (window as Window & { __typebridgeRequestEdit?: () => void }).__typebridgeRequestEdit?.();
 });
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
@@ -2311,6 +2343,8 @@ if (!viewMode) {
       titleBuffer = { documentId: active.id, baseValue: draftTitle.value, ops: [], fromHost };
     }
     titleBuffer.ops.push({ ...op, start, end });
+    // Typed edits replace the selection themselves; do not reselect afterwards.
+    selectTitleWhenEditable = false;
     requestEditHere();
     return true;
   };

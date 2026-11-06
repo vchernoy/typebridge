@@ -51,6 +51,36 @@ test('caret moves between held title keys are kept', async ({ page, context }) =
   await expect(title).toHaveValue('2Имя13');
 });
 
+test('moving to the text during a slow takeover keeps focus there', async ({ page, context }) => {
+  const other = await savedReaderPair(page, context);
+  const title = other.locator('#draft-title');
+  await title.focus();
+  await title.press('End');
+  await title.press('1');
+  await other.locator('#editor').focus();
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(title).toHaveValue('Имя1');
+  await expect(other.locator('#editor')).toBeFocused();
+});
+
+test('a held Backspace after an emoji removes the whole character', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.getByRole('textbox', { name: 'Document title' }).fill('Имя😀');
+  await page.locator('#editor').fill('тело');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const other = await context.newPage();
+  await other.goto('/');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
+  await other.evaluate(() => { (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800; });
+  const title = other.locator('#draft-title');
+  await title.focus();
+  await title.evaluate((el: HTMLInputElement) => el.setSelectionRange(el.value.length, el.value.length));
+  await title.press('Backspace');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(title).toHaveValue('Имя');
+});
+
 test('a paste into a reader title is applied after the takeover', async ({ page, context }) => {
   const other = await savedReaderPair(page, context);
   const title = other.locator('#draft-title');
