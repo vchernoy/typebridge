@@ -38,3 +38,34 @@ test('Documents → Rename… focuses the title on the standalone page', async (
   await page.keyboard.type('Novoe');
   await expect(title).toHaveValue('Новое');
 });
+
+test('Rename in a window that is not editing selects the whole name once it can edit', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
+  await page.goto('/host.html');
+  const a = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(a.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await a.locator('#editor').fill('общий');
+  await expect(a.locator('#save-indicator')).toHaveText('Saved');
+  await page.getByRole('button', { name: 'New window' }).click();
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+  const b = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(b.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await b.getByRole('button', { name: 'Documents', exact: true }).click();
+  const value = await b.locator('#drafts option', { hasText: 'общий' }).getAttribute('value');
+  await b.locator('#drafts').dispatchEvent('pointerdown');
+  await b.locator('#drafts').selectOption(value!);
+  await expect(b.locator('html')).toHaveAttribute('data-role', 'reader');
+
+  // The editing window renames without saving yet, so the takeover carries a newer title.
+  const aTitle = page.locator('.host-window[data-window-id="main"] .host-window-title');
+  await expect(aTitle).toBeEditable({ timeout: 15_000 });
+  await aTitle.fill('Свежее');
+  const bTitle = page.locator('.host-window[data-window-id="w2"] .host-window-title');
+  await page.locator('.host-window[data-window-id="w2"]').getByRole('button', { name: 'Rename document' }).click();
+  await expect(b.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(bTitle).toBeEditable();
+  await expect(bTitle).toHaveValue('Свежее');
+  await expect.poll(() => bTitle.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd]))
+    .toEqual([0, 'Свежее'.length]);
+});
