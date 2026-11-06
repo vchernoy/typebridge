@@ -895,8 +895,10 @@ const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin'
 let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
 /** A title edit typed or pasted while editing moved here; replayed once it arrives. */
 type TitleOp = { inputType: string; data: string | null };
+/** A held title edit with the selection it was made at, in the (unchanged) field's coordinates. */
+type HeldTitleOp = TitleOp & { start: number; end: number };
 /** Title edits held during a takeover, tied to their document (#197). */
-let titleBuffer: { documentId: string; baseValue: string; start: number; end: number; ops: TitleOp[]; fromHost: boolean } | undefined;
+let titleBuffer: { documentId: string; baseValue: string; ops: HeldTitleOp[]; fromHost: boolean } | undefined;
 /** One title edit through the title Editor (transliteration, undo); host title bar and held edits. */
 function applyTitleEdit(payload: { inputType: string; data: string | null; start: number; end: number }): { value: string; start: number; end: number } | null {
   if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
@@ -964,12 +966,26 @@ function replayTitleBuffer(): void {
   const edit = applyTitleEdit;
   // A newer title may have arrived with the takeover: keep it and add the edits at its end.
   const changed = draftTitle.value !== held.baseValue;
-  let start = changed ? draftTitle.value.length : held.start;
-  let end = changed ? draftTitle.value.length : held.end;
+  // The field showed the old title while edits were held, so each edit's selection is in
+  // old-title coordinates. Map it past earlier held edits: shifts made at or before a
+  // position move it along (End, 1, Home, 2 on "Имя" gives "2Имя1").
+  const shifts: { at: number; by: number }[] = [];
+  const mapPos = (pos: number): number => pos + shifts.reduce((sum, shift) => sum + (shift.at <= pos ? shift.by : 0), 0);
+  let start = draftTitle.value.length;
+  let end = start;
+  let previous: HeldTitleOp | undefined;
   for (const op of held.ops) {
-    const result = edit({ ...op, start, end });
+    const sameSpot = previous && previous.start === op.start && previous.end === op.end;
+    if (!changed && !sameSpot) {
+      start = mapPos(op.start);
+      end = Math.max(start, mapPos(op.end));
+    }
+    const before = draftTitle.value.length;
+    const result = edit({ inputType: op.inputType, data: op.data, start, end });
     if (!result) break;
+    if (!changed) shifts.push({ at: op.start, by: result.value.length - before });
     ({ start, end } = result);
+    previous = op;
   }
   if (!held.fromHost) {
     draftTitle.focus();
@@ -2292,9 +2308,9 @@ if (!viewMode) {
   const bufferTitleEdit = (op: TitleOp, start: number, end: number, fromHost: boolean): boolean => {
     if (!draftTitle.readOnly || !quietReader()) return false;
     if (!titleBuffer || titleBuffer.documentId !== active.id) {
-      titleBuffer = { documentId: active.id, baseValue: draftTitle.value, start, end, ops: [], fromHost };
+      titleBuffer = { documentId: active.id, baseValue: draftTitle.value, ops: [], fromHost };
     }
-    titleBuffer.ops.push(op);
+    titleBuffer.ops.push({ ...op, start, end });
     requestEditHere();
     return true;
   };

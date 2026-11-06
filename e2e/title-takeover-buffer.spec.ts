@@ -36,6 +36,21 @@ test('keys typed into a reader title during a slow takeover are all kept', async
   await expect(page.locator('#draft-title')).toHaveValue('Имяаб', { timeout: 10_000 });
 });
 
+test('caret moves between held title keys are kept', async ({ page, context }) => {
+  const other = await savedReaderPair(page, context);
+  const title = other.locator('#draft-title');
+  await title.focus();
+  const caretAt = (pos: number) => title.evaluate((el: HTMLInputElement, at: number) => el.setSelectionRange(at, at), pos);
+  await caretAt(3);
+  await title.press('1');
+  await caretAt(0);
+  await title.press('2');
+  await caretAt(3);
+  await title.press('3');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(title).toHaveValue('2Имя13');
+});
+
 test('a paste into a reader title is applied after the takeover', async ({ page, context }) => {
   const other = await savedReaderPair(page, context);
   const title = other.locator('#draft-title');
