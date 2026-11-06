@@ -484,6 +484,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     // A window whose document another window is editing looks editable: clicking or
     // typing in its title takes over editing there, then the title unlocks (quiet reader).
     let unlockTimer: ReturnType<typeof setInterval> | undefined;
+    /** Rename (✎ or Documents → Rename…) asked for the whole name selected once it unlocks. */
+    let selectAllOnUnlock = false;
     const requestEditFromTitle = (): void => {
       syncTitleEditable();
       if (!title.readOnly) return;
@@ -497,6 +499,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         syncTitleEditable();
         if (!title.readOnly) {
           clearInterval(unlockTimer);
+          const selectAll = selectAllOnUnlock;
+          selectAllOnUnlock = false;
           // The takeover may carry a newer (even unsaved) title from the other window;
           // show it before any edit here, so a later commit cannot overwrite it.
           try {
@@ -509,6 +513,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
               applyChromeMeta(title.value);
             }
           } catch { /* Frame mid-navigation. */ }
+          // Rename replaces the name: select it again after a newer title arrived.
+          if (selectAll && document.activeElement === title) title.select();
         } else if (++tries > 40) clearInterval(unlockTimer);
       }, 50);
     };
@@ -517,6 +523,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       setActive(win.id);
       title.focus();
       title.select();
+      syncTitleEditable();
+      selectAllOnUnlock = title.readOnly;
       requestEditFromTitle();
     };
     renameBtn.addEventListener('pointerdown', event => { event.stopPropagation(); });
@@ -656,6 +664,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       } catch { /* Frame mid-navigation. */ }
     });
     title.addEventListener('blur', () => {
+      selectAllOnUnlock = false;
       if (title.readOnly) {
         applyChromeMeta(title.value);
         return;
