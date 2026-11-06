@@ -96,3 +96,32 @@ test('typing into a host window title during a slow takeover keeps every key', a
   await expect(page.locator('.host-window[data-window-id="main"] .host-window-title'))
     .toHaveValue('Untitled document абц', { timeout: 10_000 });
 });
+
+test('Rename then typing at once in a host window that is not editing replaces the name', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
+  await page.goto('/host.html');
+  const a = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(a.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await a.locator('#editor').fill('общий');
+  await expect(a.locator('#save-indicator')).toHaveText('Saved');
+  await page.getByRole('button', { name: 'New window' }).click();
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+  const b = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(b.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await b.getByRole('button', { name: 'Documents', exact: true }).click();
+  const value = await b.locator('#drafts option', { hasText: 'общий' }).getAttribute('value');
+  await b.locator('#drafts').dispatchEvent('pointerdown');
+  await b.locator('#drafts').selectOption(value!);
+  await expect(b.locator('html')).toHaveAttribute('data-role', 'reader');
+  await page.locator('.host-window[data-window-id="w2"] iframe').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800;
+  });
+
+  const bTitle = page.locator('.host-window[data-window-id="w2"] .host-window-title');
+  await page.locator('.host-window[data-window-id="w2"]').getByRole('button', { name: 'Rename document' }).click();
+  await page.keyboard.type('Novoe');
+  await expect(b.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(bTitle).toHaveValue('Новое', { timeout: 10_000 });
+  await expect(b.locator('#editor')).toHaveValue('общий');
+});

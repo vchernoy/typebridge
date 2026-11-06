@@ -546,6 +546,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           title.selectionStart ?? title.value.length,
           title.selectionEnd ?? title.value.length,
         );
+        // Typed edits replace the selection themselves; do not reselect afterwards.
+        if (held) selectAllOnUnlock = false;
         return !!held;
       } catch { return false; }
     };
