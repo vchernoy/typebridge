@@ -893,9 +893,93 @@ let focusHandoff: FocusHandoffController | undefined;
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** A control clicked in a quiet reader; it runs once this window can edit that document. */
 let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
+/** A title edit typed or pasted while editing moved here; replayed once it arrives. */
+type TitleOp = { inputType: string; data: string | null };
+/** Title edits held during a takeover, tied to their document (#197). */
+let titleBuffer: { documentId: string; baseValue: string; start: number; end: number; ops: TitleOp[]; fromHost: boolean } | undefined;
+/** One title edit through the title Editor (transliteration, undo); host title bar and held edits. */
+function applyTitleEdit(payload: { inputType: string; data: string | null; start: number; end: number }): { value: string; start: number; end: number } | null {
+  if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
+  const length = draftTitle.value.length;
+  const start = Math.max(0, Math.min(payload.start, length));
+  const end = Math.max(start, Math.min(payload.end, length));
+  // Do not focus the hidden embed #draft-title — that steals caret from the host
+  // title bar (especially on Firefox) and drops later keystrokes.
+  try { draftTitle.setSelectionRange(start, end); } catch { /* Not focused. */ }
+  const event = new InputEvent('beforeinput', {
+    bubbles: true,
+    cancelable: true,
+    inputType: payload.inputType,
+    data: payload.data ?? undefined,
+  });
+  draftTitle.dispatchEvent(event);
+  if (!event.defaultPrevented) {
+    if (payload.inputType === 'insertText' && payload.data) {
+      const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+      draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+    } else if (
+      (payload.inputType === 'insertFromPaste' || payload.inputType === 'insertFromDrop')
+      && payload.data
+    ) {
+      const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
+      draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
+    } else if (payload.inputType === 'deleteContentBackward') {
+      if (start === end && start > 0) draftTitle.setRangeText('', start - 1, start, 'end');
+      else draftTitle.setRangeText('', start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+    } else if (payload.inputType === 'deleteContentForward') {
+      if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, start + 1, 'end');
+      else draftTitle.setRangeText('', start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+    } else if (payload.inputType === 'deleteByCut') {
+      draftTitle.setRangeText('', start, end, 'end');
+      draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
+    } else if (payload.inputType === 'historyUndo') {
+      titleEditor.undo();
+      try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
+    } else if (payload.inputType === 'historyRedo') {
+      titleEditor.redo();
+      try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
+    }
+    if (draftTitle.value.length > 150) {
+      draftTitle.value = draftTitle.value.slice(0, 150);
+      draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+  syncTitleTooltip();
+  rememberActive();
+  return {
+    value: draftTitle.value,
+    start: draftTitle.selectionStart ?? 0,
+    end: draftTitle.selectionEnd ?? 0,
+  };
+}
+/** Apply held title edits through the title Editor (transliteration, undo) at the user's caret. */
+function replayTitleBuffer(): void {
+  const held = titleBuffer;
+  titleBuffer = undefined;
+  if (!held || held.documentId !== active.id || draftTitle.readOnly) return;
+  const edit = applyTitleEdit;
+  // A newer title may have arrived with the takeover: keep it and add the edits at its end.
+  const changed = draftTitle.value !== held.baseValue;
+  let start = changed ? draftTitle.value.length : held.start;
+  let end = changed ? draftTitle.value.length : held.end;
+  for (const op of held.ops) {
+    const result = edit({ ...op, start, end });
+    if (!result) break;
+    ({ start, end } = result);
+  }
+  if (!held.fromHost) {
+    draftTitle.focus();
+    try { draftTitle.setSelectionRange(start, end); } catch { /* Not focusable. */ }
+  }
+}
 /** Editing moved to this window: show the normal save state and finish a pending control. */
 function onEditableHere(): void {
   showSaveState();
+  replayTitleBuffer();
   const pendingAction = replayButton;
   replayButton = undefined;
   if (!pendingAction || pendingAction.documentId !== active.id || readOnlyNow()) return;
@@ -1542,6 +1626,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
   replayButton = undefined;
+  titleBuffer = undefined;
   focusHandoff?.cancel();
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
@@ -2182,6 +2267,10 @@ if (!viewMode) {
       if (text === EDITABLE_HERE) onEditableHere();
       else {
         replayButton = undefined;
+        if (titleBuffer) {
+          titleBuffer = undefined;
+          announceAction('Your title change was not applied.', { keepConflict: true });
+        }
         announceAction(text, { keepConflict: true });
       }
     },
@@ -2196,16 +2285,52 @@ if (!viewMode) {
     if (focusHandoff?.pending()) return;
     focusHandoff?.requestHandoff();
   };
+  /**
+   * Hold a title edit made while this window cannot edit yet, and start the takeover.
+   * Returns false when the title is editable (the edit should run normally).
+   */
+  const bufferTitleEdit = (op: TitleOp, start: number, end: number, fromHost: boolean): boolean => {
+    if (!draftTitle.readOnly || !quietReader()) return false;
+    if (!titleBuffer || titleBuffer.documentId !== active.id) {
+      titleBuffer = { documentId: active.id, baseValue: draftTitle.value, start, end, ops: [], fromHost };
+    }
+    titleBuffer.ops.push(op);
+    requestEditHere();
+    return true;
+  };
+  /** The title edit a key stands for, if any (printable, Backspace, Delete; no shortcuts). */
+  const titleOpForKey = (event: KeyboardEvent): TitleOp | undefined => {
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return undefined;
+    if (event.key.length === 1) return { inputType: 'insertText', data: event.key };
+    if (event.key === 'Backspace') return { inputType: 'deleteContentBackward', data: null };
+    if (event.key === 'Delete') return { inputType: 'deleteContentForward', data: null };
+    return undefined;
+  };
   draftTitle.addEventListener('pointerdown', requestEditHere);
   draftTitle.addEventListener('beforeinput', requestEditHere);
-  draftTitle.addEventListener('paste', requestEditHere);
-  // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
-  draftTitle.addEventListener('keydown', event => {
-    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') requestEditHere();
+  draftTitle.addEventListener('paste', event => {
+    const text = event.clipboardData?.getData('text/plain') ?? '';
+    if (text && bufferTitleEdit({ inputType: 'insertFromPaste', data: text },
+      draftTitle.selectionStart ?? draftTitle.value.length, draftTitle.selectionEnd ?? draftTitle.value.length, false)) {
+      event.preventDefault();
+    } else requestEditHere();
   });
-  // Host title bar (#175 step 8) edits this window's title: let it start a takeover too.
-  (window as Window & { __typebridgeRequestEdit?: () => void }).__typebridgeRequestEdit = requestEditHere;
+  // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
+  // The key itself is held and applied once editing arrives, so nothing typed is lost (#197).
+  draftTitle.addEventListener('keydown', event => {
+    const op = titleOpForKey(event);
+    if (!op) return;
+    if (bufferTitleEdit(op, draftTitle.selectionStart ?? draftTitle.value.length,
+      draftTitle.selectionEnd ?? draftTitle.value.length, false)) event.preventDefault();
+  });
+  // Host title bar (#175 step 8) edits this window's title: let it start a takeover too,
+  // and hold what was typed there the same way.
+  const titleHooks = window as Window & {
+    __typebridgeRequestEdit?: () => void;
+    __typebridgeBufferTitleEdit?: (op: TitleOp, start: number, end: number) => boolean;
+  };
+  titleHooks.__typebridgeRequestEdit = requestEditHere;
+  titleHooks.__typebridgeBufferTitleEdit = (op, start, end) => bufferTitleEdit(op, start, end, true);
   const replayAfterTakeover = new Set(['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
   document.addEventListener('click', event => {
     const button = (event.target as Element | null)?.closest?.('button');
@@ -2615,64 +2740,7 @@ if (embedded) {
     scheduleSave(true);
     return { value: draftTitle.value, start: caret, end: caretEnd };
   };
-  hooks.__typebridgeTitleEdit = payload => {
-    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
-    const length = draftTitle.value.length;
-    const start = Math.max(0, Math.min(payload.start, length));
-    const end = Math.max(start, Math.min(payload.end, length));
-    // Do not focus the hidden embed #draft-title — that steals caret from the host
-    // title bar (especially on Firefox) and drops later keystrokes.
-    try { draftTitle.setSelectionRange(start, end); } catch { /* Not focused. */ }
-    const event = new InputEvent('beforeinput', {
-      bubbles: true,
-      cancelable: true,
-      inputType: payload.inputType,
-      data: payload.data ?? undefined,
-    });
-    draftTitle.dispatchEvent(event);
-    if (!event.defaultPrevented) {
-      if (payload.inputType === 'insertText' && payload.data) {
-        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
-        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
-      } else if (
-        (payload.inputType === 'insertFromPaste' || payload.inputType === 'insertFromDrop')
-        && payload.data
-      ) {
-        const room = Math.max(0, 150 - (draftTitle.value.length - (end - start)));
-        draftTitle.setRangeText(payload.data.slice(0, room), start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType, data: payload.data }));
-      } else if (payload.inputType === 'deleteContentBackward') {
-        if (start === end && start > 0) draftTitle.setRangeText('', start - 1, start, 'end');
-        else draftTitle.setRangeText('', start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
-      } else if (payload.inputType === 'deleteContentForward') {
-        if (start === end && start < draftTitle.value.length) draftTitle.setRangeText('', start, start + 1, 'end');
-        else draftTitle.setRangeText('', start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
-      } else if (payload.inputType === 'deleteByCut') {
-        draftTitle.setRangeText('', start, end, 'end');
-        draftTitle.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: payload.inputType }));
-      } else if (payload.inputType === 'historyUndo') {
-        titleEditor.undo();
-        try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
-      } else if (payload.inputType === 'historyRedo') {
-        titleEditor.redo();
-        try { draftTitle.blur(); } catch { /* Hidden embed field. */ }
-      }
-      if (draftTitle.value.length > 150) {
-        draftTitle.value = draftTitle.value.slice(0, 150);
-        draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }
-    syncTitleTooltip();
-    rememberActive();
-    return {
-      value: draftTitle.value,
-      start: draftTitle.selectionStart ?? 0,
-      end: draftTitle.selectionEnd ?? 0,
-    };
-  };
+  hooks.__typebridgeTitleEdit = applyTitleEdit;
   // Catch prefs the host broadcast before this iframe finished booting.
   syncAutosaveCheckboxFromStorage();
   try { applyTabIndentFromStorage(); } catch { /* optional */ }

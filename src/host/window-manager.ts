@@ -505,7 +505,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
               applyingFromIframe = true;
               title.value = authoritative;
               applyingFromIframe = false;
-              title.setSelectionRange(authoritative.length, authoritative.length);
+              // Keep the caret where held edits left it in the window's title.
+              const inner = frame.contentDocument?.querySelector<HTMLInputElement>('#draft-title');
+              const at = inner?.value === authoritative ? inner.selectionStart ?? authoritative.length : authoritative.length;
+              const to = inner?.value === authoritative ? inner.selectionEnd ?? at : at;
+              title.setSelectionRange(at, to);
               applyChromeMeta(title.value);
             }
           } catch { /* Frame mid-navigation. */ }
@@ -523,11 +527,37 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     renameBtn.addEventListener('click', event => { event.stopPropagation(); startRename(); });
     renameHandlers.set(win.id, startRename);
     title.addEventListener('focus', () => { syncTitleEditable(); });
-    title.addEventListener('paste', () => { if (title.readOnly) requestEditFromTitle(); });
-    // Plain focus (Tab, F6) must not take over editing; typing into the title does.
+    type BufferHooks = Window & {
+      __typebridgeBufferTitleEdit?: (op: { inputType: string; data: string | null }, start: number, end: number) => boolean;
+    };
+    /** Hand a title edit made while this window cannot edit to the window, which holds it (#197). */
+    const bufferInFrame = (op: { inputType: string; data: string | null }): boolean => {
+      try {
+        const held = (frame.contentWindow as BufferHooks | null)?.__typebridgeBufferTitleEdit?.(
+          op,
+          title.selectionStart ?? title.value.length,
+          title.selectionEnd ?? title.value.length,
+        );
+        return !!held;
+      } catch { return false; }
+    };
+    title.addEventListener('paste', event => {
+      if (!title.readOnly) return;
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (text && bufferInFrame({ inputType: 'insertFromPaste', data: text })) event.preventDefault();
+      requestEditFromTitle();
+    });
+    // Plain focus (Tab, F6) must not take over editing; typing into the title does, and
+    // what was typed is applied once editing arrives.
     title.addEventListener('keydown', event => {
       if (!title.readOnly || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') requestEditFromTitle();
+      const op = event.key.length === 1 ? { inputType: 'insertText', data: event.key }
+        : event.key === 'Backspace' ? { inputType: 'deleteContentBackward', data: null }
+        : event.key === 'Delete' ? { inputType: 'deleteContentForward', data: null }
+        : undefined;
+      if (!op) return;
+      if (bufferInFrame(op)) event.preventDefault();
+      requestEditFromTitle();
     });
     title.addEventListener('compositionstart', () => { hostTitleComposing = true; });
     title.addEventListener('compositionend', () => {
