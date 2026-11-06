@@ -89,7 +89,10 @@ test('a paste into a reader title is applied after the takeover', async ({ page,
   await title.evaluate((el: HTMLInputElement) => {
     const data = new DataTransfer();
     data.setData('text/plain', ' 2');
-    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    const paste = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+    // Firefox ignores clipboardData in the constructor; attach it so every engine sees it.
+    Object.defineProperty(paste, 'clipboardData', { value: data });
+    el.dispatchEvent(paste);
   });
   await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
   await expect(title).toHaveValue('Имя 2');
