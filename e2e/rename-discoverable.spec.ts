@@ -69,3 +69,23 @@ test('Rename in a window that is not editing selects the whole name once it can 
   await expect.poll(() => bTitle.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd]))
     .toEqual([0, 'Свежее'.length]);
 });
+
+test('Rename… in a tab that is not editing selects the newer name once it can edit', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('тело');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const other = await context.newPage();
+  await other.goto('/');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
+  // The editing tab renames; the takeover brings that newer title along.
+  await page.getByRole('textbox', { name: 'Document title' }).fill('Свежее');
+  await other.getByRole('button', { name: 'Documents', exact: true }).click();
+  await other.getByRole('button', { name: 'Rename…' }).click();
+  const title = other.getByRole('textbox', { name: 'Document title' });
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(title).toHaveValue('Свежее');
+  await expect(title).toBeFocused();
+  await expect.poll(() => title.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd]))
+    .toEqual([0, 'Свежее'.length]);
+});
