@@ -180,7 +180,10 @@ test('choosing a document that vanished keeps its id in the address so reload st
   await viewer.goto(`/?doc=${first.id}&mode=view`);
   await expectViewerReady(viewer, 'Stays');
   await expect(viewer.locator('#drafts option')).toHaveCount(2);
-  // Removed without a signal, so the viewer's list still offers it.
+  // The list reloads when the menu opens, so open it first; removing the row while it
+  // is open, without a signal, leaves the stale entry on offer.
+  await openDocuments(viewer);
+  await expect(viewer.locator('#drafts option')).toHaveCount(2);
   await viewer.evaluate(id => new Promise<void>((resolve, reject) => {
     const open = indexedDB.open('typebridge');
     open.onerror = () => reject(open.error);
@@ -192,7 +195,7 @@ test('choosing a document that vanished keeps its id in the address so reload st
       tx.onerror = () => reject(tx.error);
     };
   }), second.id);
-  await selectDocument(viewer, second.id);
+  await viewer.locator('#drafts').selectOption(second.id);
   await expect(viewer.locator('#viewer-notice')).toContainText('no longer available');
   expect(new URL(viewer.url()).searchParams.get('doc')).toBe(second.id);
   await viewer.reload();

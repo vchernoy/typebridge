@@ -173,6 +173,9 @@ setupDocumentMenu({
     docSearchQuery = query;
     renderDrafts();
   },
+  onOpen: () => {
+    void refreshDrafts().catch(() => { /* Keep the last list; the menu still works. */ });
+  },
 });
 setupMoreMenu();
 setupKeyboardShortcuts();
