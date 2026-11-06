@@ -891,14 +891,16 @@ const editHereButton = document.querySelector<HTMLButtonElement>('#edit-here')!;
 let focusHandoff: FocusHandoffController | undefined;
 /** Controls that change the displayed document; New, Import and switching stay available. */
 const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
-/** A control clicked in a quiet reader; it runs once this window can edit. */
-let replayButton: HTMLButtonElement | undefined;
+/** A control clicked in a quiet reader; it runs once this window can edit that document. */
+let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
 /** Editing moved to this window: show the normal save state and finish a pending control. */
 function onEditableHere(): void {
   showSaveState();
-  const button = replayButton;
+  const pendingAction = replayButton;
   replayButton = undefined;
-  if (button && !readOnlyNow() && button.isConnected && !button.disabled) button.click();
+  if (!pendingAction || pendingAction.documentId !== active.id || readOnlyNow()) return;
+  const { button } = pendingAction;
+  if (button.isConnected && !button.disabled) button.click();
 }
 /** Reflect ownership + transfer freeze in the editors, controls and guidance (ordinary windows only). */
 function applyEditAccess(): void {
@@ -1539,6 +1541,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || transitioning) return { opened: false, conflict: false };
   if (autosaveToggleGate) await autosaveToggleGate;
   if (transitioning) return { opened: false, conflict: false };
+  replayButton = undefined;
   focusHandoff?.cancel();
   if (id === active.id) { renderDrafts(); return { opened: true, conflict: false }; }
   transitioning = true;
@@ -2182,6 +2185,11 @@ if (!viewMode) {
   };
   draftTitle.addEventListener('pointerdown', requestEditHere);
   draftTitle.addEventListener('beforeinput', requestEditHere);
+  // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
+  draftTitle.addEventListener('keydown', event => {
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') requestEditHere();
+  });
   // Host title bar (#175 step 8) edits this window's title: let it start a takeover too.
   (window as Window & { __typebridgeRequestEdit?: () => void }).__typebridgeRequestEdit = requestEditHere;
   const replayAfterTakeover = new Set(['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
@@ -2190,7 +2198,7 @@ if (!viewMode) {
     if (!button || !replayAfterTakeover.has(button.id) || !quietReader()) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    replayButton = button;
+    replayButton = { button, documentId: active.id };
     requestEditHere();
   }, true);
   editHereButton.addEventListener('click', () => {

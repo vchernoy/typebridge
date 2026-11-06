@@ -68,3 +68,29 @@ test('Delete from the window that is not editing takes over and asks first', asy
   await expect(b.locator('#editor')).toHaveValue('общий текст');
   await expectLooksEditable(a);
 });
+
+test('typing in the title of a tab that is not editing takes over editing', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('заголовок тест');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+
+  const other = await context.newPage();
+  await other.goto('/');
+  await expect(other.locator('#editor')).toHaveValue('заголовок тест');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
+  const title = other.locator('#draft-title');
+  // Keyboard focus alone does not take over editing.
+  await title.focus();
+  await other.waitForTimeout(300);
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
+  // Typing does.
+  await title.press('End');
+  await title.press('x');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(title).toBeEditable();
+  await title.fill('Новое имя');
+  await title.press('Enter');
+  await expect(other.locator('#save-indicator')).toHaveText('Saved');
+  await expect(page.locator('#draft-title')).toHaveValue('Новое имя', { timeout: 10_000 });
+});
