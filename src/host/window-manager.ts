@@ -483,7 +483,21 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       let tries = 0;
       unlockTimer = setInterval(() => {
         syncTitleEditable();
-        if (!title.readOnly || ++tries > 40) clearInterval(unlockTimer);
+        if (!title.readOnly) {
+          clearInterval(unlockTimer);
+          // The takeover may carry a newer (even unsaved) title from the other window;
+          // show it before any edit here, so a later commit cannot overwrite it.
+          try {
+            const authoritative = (frame.contentWindow as TitleHooks | null)?.__typebridgeGetTitle?.();
+            if (authoritative !== undefined && authoritative !== title.value) {
+              applyingFromIframe = true;
+              title.value = authoritative;
+              applyingFromIframe = false;
+              title.setSelectionRange(authoritative.length, authoritative.length);
+              applyChromeMeta(title.value);
+            }
+          } catch { /* Frame mid-navigation. */ }
+        } else if (++tries > 40) clearInterval(unlockTimer);
       }, 50);
     };
     title.addEventListener('pointerdown', event => { event.stopPropagation(); requestEditFromTitle(); });
