@@ -437,7 +437,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       applyChromeMeta(title.value);
     };
 
+    /** Runs when the title goes from read-only to editable (set below, after its helpers). */
+    let onTitleUnlocked = (): void => {};
     const syncTitleEditable = (): void => {
+      const wasReadOnly = title.readOnly;
       try {
         const doc = frame.contentDocument;
         if (!doc) return;
@@ -449,6 +452,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         }
         title.readOnly = draft.readOnly || draft.disabled;
       } catch { /* Cross-origin or mid-navigation — keep current state. */ }
+      // Adopt the window's title and caret before any native edit here (#197): held
+      // edits may have just been applied there, so this field's text is stale.
+      if (wasReadOnly && !title.readOnly) onTitleUnlocked();
     };
 
     type TitleHooks = Window & {
@@ -497,30 +503,31 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       let tries = 0;
       unlockTimer = setInterval(() => {
         syncTitleEditable();
-        if (!title.readOnly) {
-          clearInterval(unlockTimer);
-          const selectAll = selectAllOnUnlock;
-          selectAllOnUnlock = false;
-          // The takeover may carry a newer (even unsaved) title from the other window;
-          // show it before any edit here, so a later commit cannot overwrite it.
-          try {
-            const authoritative = (frame.contentWindow as TitleHooks | null)?.__typebridgeGetTitle?.();
-            if (authoritative !== undefined && authoritative !== title.value) {
-              applyingFromIframe = true;
-              title.value = authoritative;
-              applyingFromIframe = false;
-              // Keep the caret where held edits left it in the window's title.
-              const inner = frame.contentDocument?.querySelector<HTMLInputElement>('#draft-title');
-              const at = inner?.value === authoritative ? inner.selectionStart ?? authoritative.length : authoritative.length;
-              const to = inner?.value === authoritative ? inner.selectionEnd ?? at : at;
-              title.setSelectionRange(at, to);
-              applyChromeMeta(title.value);
-            }
-          } catch { /* Frame mid-navigation. */ }
-          // Rename replaces the name: select it again after a newer title arrived.
-          if (selectAll && document.activeElement === title) title.select();
-        } else if (++tries > 40) clearInterval(unlockTimer);
+        if (!title.readOnly || ++tries > 40) clearInterval(unlockTimer);
       }, 50);
+    };
+    onTitleUnlocked = (): void => {
+      clearInterval(unlockTimer);
+      const selectAll = selectAllOnUnlock;
+      selectAllOnUnlock = false;
+      // The takeover may carry a newer (even unsaved) title from the other window;
+      // show it before any edit here, so a later commit cannot overwrite it.
+      try {
+        const authoritative = (frame.contentWindow as TitleHooks | null)?.__typebridgeGetTitle?.();
+        if (authoritative !== undefined && authoritative !== title.value) {
+          applyingFromIframe = true;
+          title.value = authoritative;
+          applyingFromIframe = false;
+          // Keep the caret where held edits left it in the window's title.
+          const inner = frame.contentDocument?.querySelector<HTMLInputElement>('#draft-title');
+          const at = inner?.value === authoritative ? inner.selectionStart ?? authoritative.length : authoritative.length;
+          const to = inner?.value === authoritative ? inner.selectionEnd ?? at : at;
+          title.setSelectionRange(at, to);
+          applyChromeMeta(title.value);
+        }
+      } catch { /* Frame mid-navigation. */ }
+      // Rename replaces the name: select it again after a newer title arrived.
+      if (selectAll && document.activeElement === title) title.select();
     };
     title.addEventListener('pointerdown', event => { event.stopPropagation(); requestEditFromTitle(); });
     const startRename = (): void => {
