@@ -8,7 +8,11 @@ import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 async function clickOption(scope: Page | FrameLocator, title: string): Promise<void> {
   const option = scope.locator('#drafts option', { hasText: title });
   await expect(option).toHaveCount(1);
-  await option.click();
+  const value = await option.getAttribute('value');
+  // A pointer pick: pointerdown on the list, then the selection change. WebKit cannot
+  // click <option> rows in a list box, so send the same two events on every engine.
+  await scope.locator('#drafts').dispatchEvent('pointerdown');
+  await scope.locator('#drafts').selectOption(value!);
 }
 
 test('clicking a document in the list opens it and Delete removes that document', async ({ page }) => {
@@ -69,14 +73,14 @@ test('host windows list documents saved in another window and open them by click
   const first = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(first.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await first.locator('#editor').fill('альфа текст');
-  await expect(first.locator('#status')).toContainText('Saved locally');
+  await expect(first.locator('#save-indicator')).toHaveText('Saved');
 
   await page.getByRole('button', { name: 'New window' }).click();
   await page.getByRole('button', { name: 'Tile side by side' }).click();
   const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await second.locator('#editor').fill('бета текст');
-  await expect(second.locator('#status')).toContainText('Saved locally');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
 
   // The first window's list was rendered before the second document existed.
   await first.getByRole('button', { name: 'Documents', exact: true }).click();
@@ -84,7 +88,6 @@ test('host windows list documents saved in another window and open them by click
 
   // Picking the other document by click opens it here as well.
   await second.getByRole('button', { name: 'Documents', exact: true }).click();
-  await expect(second.locator('#drafts option', { hasText: 'альфа текст' })).toHaveCount(1);
-  await second.locator('#drafts option', { hasText: 'альфа текст' }).click();
+  await clickOption(second, 'альфа текст');
   await expect(second.locator('#editor')).toHaveValue('альфа текст');
 });
