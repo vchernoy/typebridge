@@ -2185,6 +2185,7 @@ if (!viewMode) {
   };
   draftTitle.addEventListener('pointerdown', requestEditHere);
   draftTitle.addEventListener('beforeinput', requestEditHere);
+  draftTitle.addEventListener('paste', requestEditHere);
   // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
   draftTitle.addEventListener('keydown', event => {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;

@@ -502,6 +502,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     };
     title.addEventListener('pointerdown', event => { event.stopPropagation(); requestEditFromTitle(); });
     title.addEventListener('focus', () => { syncTitleEditable(); });
+    title.addEventListener('paste', () => { if (title.readOnly) requestEditFromTitle(); });
     // Plain focus (Tab, F6) must not take over editing; typing into the title does.
     title.addEventListener('keydown', event => {
       if (!title.readOnly || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
