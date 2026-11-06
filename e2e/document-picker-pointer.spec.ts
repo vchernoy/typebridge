@@ -79,6 +79,11 @@ test('host windows list documents saved in another window and open them by click
   await page.getByRole('button', { name: 'Tile side by side' }).click();
   const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  // Start a separate document here, whatever the new window opened with.
+  await second.getByRole('button', { name: 'Documents', exact: true }).click();
+  await second.locator('#new-draft').click();
+  await expect(second.locator('#editor')).toHaveValue('');
+  await expect(second.locator('html')).toHaveAttribute('data-role', 'editor');
   await second.locator('#editor').fill('бета текст');
   await expect(second.locator('#save-indicator')).toHaveText('Saved');
 
