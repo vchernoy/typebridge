@@ -89,7 +89,18 @@ export function installHostSettings(deps: {
       localStorage.setItem(TRANSLITERATION_KEY, requested ? 'on' : 'off');
       broadcast('transliteration');
     } catch {
-      renderHostMode();
+      // Storage blocked or full: still switch every open window for this session.
+      // Each window's own switch applies the mode in memory and shows its warning.
+      for (const frame of deps.frames()) {
+        try {
+          const box = frame.contentDocument?.querySelector<HTMLInputElement>('#enabled');
+          if (box && box.checked !== requested) {
+            box.checked = requested;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } catch { /* Frame mid-navigation. */ }
+      }
+      hostMode.checked = requested;
       preferenceSaved('typing mode', false);
     }
   });

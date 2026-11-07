@@ -251,3 +251,19 @@ test('the window shortcut updates the shared host switch, and windows have no ow
   await page.locator('#host-enabled').check();
   await expect.poll(async () => main.locator('#enabled').isChecked()).toBe(true);
 });
+
+test('the shared switch still changes every window when the host cannot save the preference', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const main = await openHost(page);
+  // Break preference writes in the host page only (each window has its own Storage realm).
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'typebridge.transliteration.enabled.v1') throw new DOMException('Quota', 'QuotaExceededError');
+      return original.call(this, key, value);
+    };
+  });
+  await page.locator('#host-enabled').uncheck();
+  await expect.poll(async () => main.locator('#enabled').isChecked()).toBe(false);
+  await expect(page.locator('#host-enabled')).not.toBeChecked();
+});
