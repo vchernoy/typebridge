@@ -96,10 +96,12 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
   enabled.addEventListener('change', () => {
     syncEditorModes();
     syncSearchEditors();
+    // Announce only where the change was made; other windows and tabs follow silently,
+    // so a screen reader does not hear it once per window (#175 follow-up).
+    if (applyingRemote) return;
     if (modeAnnouncement) {
       modeAnnouncement.textContent = enabled.checked ? 'Transliteration on' : 'Transliteration off';
     }
-    if (applyingRemote) return;
     // Editing continues even when browser storage is blocked.
     try {
       localStorage.setItem(TRANSLITERATION_KEY, enabled.checked ? 'on' : 'off');

@@ -42,9 +42,12 @@ test('host Settings appearance and typing mode apply to every window', async ({ 
   await page.locator('#settings-close').click();
   await expect(page.locator('#settings-panel')).toBeHidden();
 
-  // Mode switch stays in window chrome and syncs across windows, including host titles.
-  await main.locator('.mode-switch .mode-side').first().click();
-  await expect(main.locator('#enabled')).not.toBeChecked();
+  // One shared Latin/Кириллица switch in the host top bar; windows follow it.
+  await expect(page.locator('#host-shortcut-label')).toHaveText(/F8/i);
+  await expect(main.locator('.mode-switch')).toBeHidden();
+  await page.locator('.host-toolbar .mode-switch .mode-side').first().click();
+  await expect(page.locator('#host-enabled')).not.toBeChecked();
+  await expect.poll(async () => main.locator('#enabled').isChecked()).toBe(false);
   await expect.poll(async () => second.locator('#enabled').isChecked()).toBe(false);
   const secondTitle = page.locator('.host-window[data-window-id="w2"] .host-window-title');
   await secondTitle.fill('w');
@@ -233,4 +236,18 @@ test('closing a window does not leave a prefs listener that resurrects discarded
   await expect(remaining.locator('#editor')).not.toHaveValue('private text that must stay discarded');
   const stored = await readStoredDocs(page);
   expect(stored.every(doc => !doc.text.includes('private text that must stay discarded'))).toBe(true);
+});
+
+test('the window shortcut updates the shared host switch, and windows have no own switch or About link', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const main = await openHost(page);
+  await expect(page.locator('#host-enabled')).toBeChecked();
+  await expect(main.locator('#about-documents-open')).toBeHidden();
+  await expect(main.locator('label[for="editor"]')).toHaveText('Your text');
+  await main.locator('#editor').focus();
+  await page.keyboard.press('Control+Shift+Space');
+  await expect.poll(async () => main.locator('#enabled').isChecked()).toBe(false);
+  await expect(page.locator('#host-enabled')).not.toBeChecked();
+  await page.locator('#host-enabled').check();
+  await expect.poll(async () => main.locator('#enabled').isChecked()).toBe(true);
 });

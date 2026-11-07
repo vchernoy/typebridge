@@ -120,7 +120,7 @@ body {
   color: var(--muted);
   cursor: pointer;
 }
-#enabled {
+:is(#enabled, #host-enabled) {
   appearance: none;
   position: relative;
   flex: none;
@@ -132,7 +132,7 @@ body {
   background: var(--background);
   cursor: pointer;
 }
-#enabled::before {
+:is(#enabled, #host-enabled)::before {
   content: "";
   position: absolute;
   top: 2px;
@@ -143,16 +143,16 @@ body {
   background: var(--muted);
   transition: transform 0.15s;
 }
-#enabled:checked {
+:is(#enabled, #host-enabled):checked {
   background: var(--accent);
   border-color: var(--accent);
 }
-#enabled:checked::before {
+:is(#enabled, #host-enabled):checked::before {
   transform: translateX(20px);
   background: var(--switch-active-knob);
 }
-.mode-switch:has(#enabled:not(:checked)) .mode-side:first-child,
-.mode-switch:has(#enabled:checked) label.mode-side {
+.mode-switch:has(:is(#enabled, #host-enabled):not(:checked)) .mode-side:first-child,
+.mode-switch:has(:is(#enabled, #host-enabled):checked) label.mode-side {
   font-weight: 700;
   color: inherit;
 }
@@ -162,18 +162,18 @@ body {
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  #enabled::before {
+  :is(#enabled, #host-enabled)::before {
     transition: none;
   }
 }
 @media (forced-colors: active) {
-  #enabled {
+  :is(#enabled, #host-enabled) {
     border-color: ButtonText;
   }
-  #enabled::before {
+  :is(#enabled, #host-enabled)::before {
     background: ButtonText;
   }
-  #enabled:checked {
+  :is(#enabled, #host-enabled):checked {
     background: Highlight;
   }
 }
@@ -894,10 +894,10 @@ body.focus-mode .bottom {
   .mode-side {
     font-size: 0.9rem;
   }
-  #enabled {
+  :is(#enabled, #host-enabled) {
     width: 40px;
   }
-  #enabled:checked::before {
+  :is(#enabled, #host-enabled):checked::before {
     transform: translateX(14px);
   }
 }
@@ -1014,6 +1014,82 @@ html[data-embed="1"] #draft-title {
   display: none !important;
 }
 
+/* Compact host windows (#175 follow-up): the window frame replaces the page card, the
+   tools share one row, and the text fills the window. Shared Latin/Кириллица lives in the
+   host top bar; About is in Settings; the title bar names the document. */
+html[data-embed="1"] body {
+  min-width: 0;
+}
+html[data-embed="1"] .workspace {
+  height: 100vh;
+  max-width: none;
+  padding: 0;
+  box-sizing: border-box;
+}
+html[data-embed="1"] .workspace > section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px 6px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+html[data-embed="1"] .topbar {
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+}
+html[data-embed="1"] .topbar > .doc {
+  flex: 0 0 auto;
+}
+html[data-embed="1"] .topbar > .toolbar {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+  margin: 0;
+}
+/* Narrow windows: ▾, Saved and Focus on one line, the editing tools on the next. */
+@media (max-width: 560px) {
+  html[data-embed="1"] .topbar > .toolbar {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
+html[data-embed="1"] .top-actions {
+  width: auto;
+  margin-left: auto;
+}
+html[data-embed="1"] .mode-switch,
+html[data-embed="1"] .hint,
+html[data-embed="1"] .resize-grip,
+html[data-embed="1"] #focus-mode .btn-text {
+  display: none !important;
+}
+html[data-embed="1"] .editor-shell {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-bottom: 6px;
+}
+html[data-embed="1"] .editor-shell > label[for="editor"],
+html[data-embed="1"] #mode-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+html[data-embed="1"] #editor {
+  flex: 1 1 auto;
+  width: 100% !important;
+  height: auto !important;
+  max-width: none !important;
+  margin-bottom: 0;
+}
+
 .doc-menu #doc-search {
   width: 100%;
   min-height: 40px;
@@ -1052,6 +1128,7 @@ body.host-page {
 .host-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0.75rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
@@ -1066,6 +1143,31 @@ body.host-page {
   background: var(--button-background);
   color: var(--button-text);
   cursor: pointer;
+}
+.host-toolbar .brand {
+  margin: 0 0.5rem 0 0.25rem;
+  font-size: 1.05rem;
+}
+/* Shared Latin/Кириллица switch for every window, pushed to the right with Settings. */
+.host-toolbar .mode-switch {
+  margin-left: auto;
+}
+.host-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  /* Narrow screens: New window and Settings become icon buttons (names stay for AT). */
+  .host-toolbar [data-host-action="new-window"] .btn-text,
+  .host-toolbar #settings-open .btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 .host-toolbar button:disabled {
   opacity: 0.5;
@@ -1083,6 +1185,8 @@ body.host-page {
   position: absolute;
   display: flex;
   flex-direction: column;
+  /* A <section>: drop the page card's padding/radius so the window has no inner margin. */
+  padding: 0;
   min-width: 280px;
   min-height: 200px;
   border: 1px solid var(--border);

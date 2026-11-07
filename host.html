@@ -27,9 +27,22 @@
     <!-- #175 step 5–7: host owns update notice, window chrome, and Settings. -->
     <div id="host-notice" class="host-notice"></div>
     <div id="host-toolbar" class="host-toolbar" role="toolbar" aria-label="Window layout">
-      <button type="button" data-host-action="new-window">New window</button>
+      <h1 class="brand">TypeBridge</h1>
+      <button type="button" data-host-action="new-window" aria-label="New window" title="New window">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg
+        ><span class="btn-text">New window</span>
+      </button>
       <button type="button" data-host-action="tile-side">Tile side by side</button>
       <button type="button" data-host-action="tile-stack">Tile stacked</button>
+      <div class="mode-switch">
+        <span class="mode-side" aria-hidden="true">Latin</span
+        ><input id="host-enabled" type="checkbox" role="switch" checked aria-describedby="host-shortcut-label" /><label
+          for="host-enabled"
+          class="mode-side"
+          lang="ru"
+          >Кириллица</label
+        ><span id="host-shortcut-label" class="shortcut-hint"></span>
+      </div>
       <button
         id="settings-open"
         type="button"
@@ -37,7 +50,12 @@
         aria-expanded="false"
         aria-controls="settings-panel"
       >
-        Settings
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
+          <circle cx="15" cy="6" r="2" />
+          <circle cx="9" cy="12" r="2" />
+          <circle cx="17" cy="18" r="2" /></svg
+        ><span class="btn-text">Settings</span>
       </button>
     </div>
     <div id="host-root" class="host-root"></div>

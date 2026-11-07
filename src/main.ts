@@ -65,6 +65,14 @@ if (windowId) document.documentElement.dataset.windowId = windowId;
 /** #175 step 3: host page owns Settings panel + update notice; editor runs embedded. */
 const embedded = parseEmbedMode(window.location.search);
 if (embedded) document.documentElement.dataset.embed = '1';
+// Host windows (#175 follow-up): one compact row (▾, Saved, editing tools, Focus) so the
+// text gets the window's height. The window title bar already names the document.
+if (embedded) {
+  const topbar = document.querySelector<HTMLElement>('.topbar');
+  const toolbar = document.querySelector<HTMLElement>('.toolbar');
+  const topActions = topbar?.querySelector<HTMLElement>('.top-actions');
+  if (topbar && toolbar && topActions) topbar.insertBefore(toolbar, topActions);
+}
 
 /**
  * #175 step 10: drop obsolete split prefs; migrate pane-B text backups to the
