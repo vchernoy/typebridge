@@ -64,6 +64,47 @@ export function installHostSettings(deps: {
     notifyPrefsChanged({ name, origin: PREFS_ORIGIN });
   }
 
+  // One shared Latin/Кириллица switch in the host top bar; windows no longer show their own.
+  const hostMode = document.querySelector<HTMLInputElement>('#host-enabled');
+  const hostModeHint = document.querySelector<HTMLElement>('#host-shortcut-label');
+  function renderHostMode(): void {
+    if (!hostMode) return;
+    try { hostMode.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; } catch { /* keep */ }
+    const label = transliterationShortcutLabel(shortcut, /Mac|iPhone|iPad/.test(navigator.platform));
+    hostMode.title = label;
+    if (hostModeHint) hostModeHint.textContent = shortcut === 'off' ? '' : `(${label})`;
+  }
+  // Clicking a side picks that mode (same as the window switch on the standalone page).
+  const [hostLatin, hostCyrillic] = document.querySelectorAll<HTMLElement>('.host-toolbar .mode-switch .mode-side');
+  const chooseHostMode = (cyrillic: boolean): void => {
+    if (!hostMode || hostMode.checked === cyrillic) return;
+    hostMode.checked = cyrillic;
+    hostMode.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  hostLatin?.addEventListener('click', () => { chooseHostMode(false); hostMode?.focus(); });
+  hostCyrillic?.addEventListener('click', event => { event.preventDefault(); chooseHostMode(true); hostMode?.focus(); });
+  hostMode?.addEventListener('change', () => {
+    const requested = hostMode.checked;
+    try {
+      localStorage.setItem(TRANSLITERATION_KEY, requested ? 'on' : 'off');
+      broadcast('transliteration');
+    } catch {
+      // Storage blocked or full: still switch every open window for this session.
+      // Each window's own switch applies the mode in memory and shows its warning.
+      for (const frame of deps.frames()) {
+        try {
+          const box = frame.contentDocument?.querySelector<HTMLInputElement>('#enabled');
+          if (box && box.checked !== requested) {
+            box.checked = requested;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } catch { /* Frame mid-navigation. */ }
+      }
+      hostMode.checked = requested;
+      preferenceSaved('typing mode', false);
+    }
+  });
+
   function saveShortcut(value: TransliterationShortcut): boolean {
     const previous = shortcut;
     shortcutSelect.value = value;
@@ -124,6 +165,10 @@ export function installHostSettings(deps: {
   // Do not skip host origin: appearance/layout/rules notify without broadcast().
   onPrefsChanged(detail => {
     applyPrefsToFrames(deps.frames(), detail.name, detail.origin);
+    if (detail.name === 'transliteration' || detail.name === 'shortcut' || detail.name === 'reset') {
+      // Shortcut changes are host-origin too; render after the stored value updates.
+      queueMicrotask(renderHostMode);
+    }
     if (detail.origin === PREFS_ORIGIN) return;
     if (detail.name === 'autosave' || detail.name === 'reset') {
       try { autosave.checked = autosaveEnabled(); } catch { /* keep */ }
@@ -139,10 +184,6 @@ export function installHostSettings(deps: {
           shortcutSelect.value = shortcut;
         }
       } catch { /* keep */ }
-    }
-    if (detail.name === 'transliteration' || detail.name === 'reset') {
-      // No host mode switch; windows own the chrome.
-      void localStorage.getItem(TRANSLITERATION_KEY);
     }
   });
 
@@ -227,8 +268,7 @@ export function installHostSettings(deps: {
   // Expose for embedded "Change typing shortcut" / About bridges.
   (window as Window & { __typebridgeOpenSettings?: typeof open }).__typebridgeOpenSettings = open;
 
-  // Mac label for the default option stays informative on the host panel.
-  void transliterationShortcutLabel;
+  renderHostMode();
 
   return { open };
 }
