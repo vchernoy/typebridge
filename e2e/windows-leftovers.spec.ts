@@ -1,4 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
+import { fillHostEditor } from './settings-helpers';
+import { readStoredDocs } from './storage-helpers';
 
 /** Follow-ups to the movable windows work (#175): naming, Undo takeover, caret keys, F6. */
 
@@ -29,16 +31,16 @@ async function openSameDocument(frame: FrameLocator, text: string): Promise<void
 
 test('a document started in a new host window keeps its own default name', async ({ page }) => {
   const main = await openHost(page);
-  await main.locator('#editor').fill('альфа');
-  await expect(main.locator('#save-indicator')).toHaveText('Saved');
+  await fillHostEditor(main, 'альфа');
+  await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === 'альфа')).toBe(true);
   const second = await addWindow(page, 'w2');
   const secondTitle = page.locator('.host-window[data-window-id="w2"] .host-window-title');
   await expect(secondTitle).toHaveValue('Untitled document 2');
-  await second.locator('#editor').fill('бета');
-  await expect(second.locator('#save-indicator')).toHaveText('Saved');
-  await main.getByRole('button', { name: 'Documents', exact: true }).click();
-  await expect(main.locator('#drafts option', { hasText: 'бета' })).toContainText('Untitled document 2');
-  await expect(main.locator('#drafts option', { hasText: 'альфа' })).toContainText('Untitled document');
+  await fillHostEditor(second, 'бета');
+  // The saved rows carry distinct names (the bug saved the new one as "Untitled document").
+  await expect.poll(async () => (await readStoredDocs(page))
+    .map(row => `${row.title}|${row.text}`).sort())
+    .toEqual(['Untitled document 2|бета', 'Untitled document|альфа']);
   await expect(secondTitle).toHaveValue('Untitled document 2');
 });
 
