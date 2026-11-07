@@ -50,6 +50,10 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   let waiting: ServiceWorker | null = null;
   function show(worker: ServiceWorker | null): void {
     if (dismissed || !worker || !workerContainer.controller) return;
+    // Only a worker that is still waiting is an update. WebKit can deliver the
+    // "installed" statechange after a first-visit worker already activated and
+    // claimed this page, which showed a spurious notice (#175 / #180).
+    if (worker.state !== 'installed' || registration.waiting !== worker) return;
     waiting = worker;
     message.textContent = 'New version available';
     notice.hidden = false;
@@ -70,7 +74,8 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
     try { sessionStorage.setItem(DISMISSED, 'yes'); } catch { /* Remains dismissed on this page. */ }
   });
   // Keep application shortcuts from acting behind this notice while it owns focus.
-  notice.addEventListener('keydown', event => event.stopPropagation());
+  // F6 still moves between host windows (window cycling is navigation, not an action).
+  notice.addEventListener('keydown', event => { if (event.key !== 'F6') event.stopPropagation(); });
   reload.addEventListener('click', async () => {
     if (!waiting) return;
     const workspaces = resolveFreezeSurfaces();

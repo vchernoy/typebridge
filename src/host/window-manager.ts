@@ -2,6 +2,7 @@
  * #175 step 5–6: free/stacked window manager for the host page.
  * Owns chrome (title bar, resize), tiling, layout mode, Focus maximize — never document text.
  */
+import { moveReadOnlyCaret } from '../ui/readonly-caret';
 import {
   KEYBOARD_MOVE_STEP_PX,
   MAX_HOST_WINDOWS,
@@ -81,7 +82,7 @@ export type WindowManager = {
   layoutMode: () => EffectiveLayoutMode;
   refreshLayoutMode: () => void;
   setHostFocusMode: (enabled: boolean, sourceWindowId?: string) => void;
-  /** #175 step 11: F6 — activate the next window and focus its editor (or title). */
+  /** #175 step 11: F6 / Shift+F6 — activate the next (previous) window and focus it. */
   cycleFocus: () => void;
   /** Focus a window's title for renaming (Documents → Rename… in that window). */
   renameWindow: (id: string) => void;
@@ -335,13 +336,19 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
    * `fromId` is the cycle origin when focus is in a window that is not yet active
    * (host title pointerdown stops shell activation).
    */
-  const cycleFocus = (fromId?: string): void => {
+  const cycleFocus = (fromId?: string, backward = false): void => {
     if (layouts.length === 0) return;
     // Keep modal focus traps intact (discard / Edit here / private reload).
     if (confirmModalOpen()) return;
-    const origin = (fromId && layouts.some(win => win.id === fromId)) ? fromId : activeId;
-    const index = layouts.findIndex(win => win.id === origin);
-    const next = layouts[(index < 0 ? 0 : index + 1) % layouts.length]!;
+    // Cycle in the stable order windows were opened (shell order), not `layouts`, which
+    // free-layout activation re-sorts by z — that made F6/Shift+F6 jump unpredictably.
+    const order = [...shells.keys()].filter(id => layouts.some(win => win.id === id));
+    if (order.length === 0) return;
+    const origin = (fromId && order.includes(fromId)) ? fromId : activeId;
+    const index = order.indexOf(origin);
+    const step = backward ? -1 : 1;
+    const nextId = order[(index < 0 ? 0 : index + step + order.length) % order.length]!;
+    const next = layouts.find(win => win.id === nextId)!;
     setActive(next.id);
     // In host Focus, setActive only swaps visibility — apply full-viewport geometry
     // so the newly active window matches setHostFocusMode(true) maximize behavior.
@@ -568,6 +575,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     // what was typed is applied once editing arrives.
     title.addEventListener('keydown', event => {
       if (!title.readOnly || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+      // Read-only inputs ignore caret keys; place the caret so held edits land where intended.
+      if (moveReadOnlyCaret(title, event)) return;
       const op = event.key.length === 1 ? { inputType: 'insertText', data: event.key }
         : event.key === 'Backspace' ? { inputType: 'deleteContentBackward', data: null }
         : event.key === 'Delete' ? { inputType: 'deleteContentForward', data: null }
@@ -594,12 +603,12 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       // Keep arrow-key window move on the handle; let the input own typing keys.
       // F6 must cycle windows even while renaming — handle before stopPropagation so
       // the document-level host listener is not required for the title field.
-      if (event.key === 'F6' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      if (event.key === 'F6' && !event.altKey && !event.ctrlKey && !event.metaKey
         && !event.isComposing && !event.repeat) {
         event.preventDefault();
         event.stopPropagation();
         // Title clicks do not activate the shell — cycle from this window, not stale activeId.
-        cycleFocus(win.id);
+        cycleFocus(win.id, event.shiftKey);
         return;
       }
       event.stopPropagation();
@@ -751,10 +760,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     const activateFromIframe = (): void => { setActive(win.id); };
     applyChromeTitle(title.value);
     const onFrameCycleKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.isComposing || event.repeat || event.defaultPrevented) return;
       event.preventDefault();
-      cycleFocus();
+      cycleFocus(undefined, event.shiftKey);
     };
 
     // load + readyState=complete can both call wireFrame for the same document —
@@ -1145,7 +1154,6 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         }
         for (const key of remove) sessionStorage.removeItem(key);
         sessionStorage.removeItem(`typebridge.pendingDraft.v1${marker}`);
-        sessionStorage.removeItem(`typebridge.pendingDraft.paneB.v1${marker}`);
       } catch { /* Blocked sessionStorage — layout still closes. */ }
       if (mode === 'stacked' && !hostFocus) enterStacked();
       else applyAllGeometry();
@@ -1233,14 +1241,14 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   /** Host-chrome F6 (iframe keydowns are handled per-frame in createShell). */
   const onHostCycleKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.isComposing || event.repeat || event.defaultPrevented) return;
     event.preventDefault();
     // Move/close controls activate only on pointer — Tab into them leaves activeId stale.
     const focused = document.activeElement;
     const shell = focused instanceof Element ? focused.closest('.host-window') : null;
     const fromId = shell instanceof HTMLElement ? shell.dataset.windowId : undefined;
-    cycleFocus(fromId);
+    cycleFocus(fromId, event.shiftKey);
   };
 
   deps.toolbar.querySelector('[data-host-action="new-window"]')

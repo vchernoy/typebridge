@@ -50,9 +50,8 @@ test('two ordinary tabs on one document: click and type hand off editing', async
   for (const control of ['#delete-draft', '#clear', '#convert-cyrillic']) {
     await expect(other.locator(control)).toBeEnabled();
   }
-  for (const control of ['#undo', '#autosave']) {
-    await expect(other.locator(control)).toBeDisabled();
-  }
+  // Undo/Redo follow the document's history (they take over editing too); Autosave stays locked.
+  await expect(other.locator('#autosave')).toBeDisabled();
   await expect(other.locator('#export-txt')).toBeEnabled();
   await expect(other.locator('#new-draft')).toBeEnabled();
 

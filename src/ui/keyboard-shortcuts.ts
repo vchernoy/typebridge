@@ -36,7 +36,7 @@ export function setupKeyboardShortcuts(): void {
     ];
     // #175 step 11: host window cycle is only meaningful inside an embedded editor.
     if (document.documentElement.dataset.embed === '1') {
-      rows.push(['Next editor window', 'F6']);
+      rows.push(['Next / previous editor window', 'F6 / Shift+F6']);
     }
     const content = document.createElement('div');
     const list = document.createElement('dl');
