@@ -1,3 +1,5 @@
+import { nextCharacterBoundary, previousCharacterBoundary } from '../editor/characters';
+
 /**
  * Caret keys in a read-only text input. Browsers (Chromium) ignore Home/End/arrows there,
  * but a title waiting for editing to move to its window still needs a caret the user can
@@ -14,8 +16,9 @@ export function moveReadOnlyCaret(input: HTMLInputElement, event: KeyboardEvent)
   let next: number;
   if (event.key === 'Home') next = 0;
   else if (event.key === 'End') next = length;
-  else if (event.key === 'ArrowLeft') next = !event.shiftKey && start !== end ? start : Math.max(0, focus - 1);
-  else if (event.key === 'ArrowRight') next = !event.shiftKey && start !== end ? end : Math.min(length, focus + 1);
+  // Step whole characters, so the caret never lands inside an emoji or surrogate pair.
+  else if (event.key === 'ArrowLeft') next = !event.shiftKey && start !== end ? start : focus > 0 ? previousCharacterBoundary(input.value, focus) : 0;
+  else if (event.key === 'ArrowRight') next = !event.shiftKey && start !== end ? end : focus < length ? nextCharacterBoundary(input.value, focus) : length;
   else return false;
   event.preventDefault();
   if (event.shiftKey) {

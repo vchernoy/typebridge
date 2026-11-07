@@ -21,6 +21,7 @@ import {
 } from './editor/drafts';
 import { nextUntitledTitle } from './editor/untitled-title';
 import { moveReadOnlyCaret } from './ui/readonly-caret';
+import { nextCharacterBoundary, previousCharacterBoundary } from './editor/characters';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
@@ -900,29 +901,6 @@ type TitleOp = { inputType: string; data: string | null };
 type HeldTitleOp = TitleOp & { start: number; end: number };
 /** Title edits held during a takeover, tied to their document (#197). */
 let titleBuffer: { documentId: string; baseValue: string; ops: HeldTitleOp[]; fromHost: boolean } | undefined;
-/** Start of the user-perceived character before `pos` (emoji, combining marks, surrogate pairs). */
-function previousCharacterBoundary(text: string, pos: number): number {
-  const Segmenter = (Intl as typeof Intl & { Segmenter?: typeof Intl.Segmenter }).Segmenter;
-  if (Segmenter) {
-    let boundary = 0;
-    for (const { index } of new Segmenter(undefined, { granularity: 'grapheme' }).segment(text.slice(0, pos))) boundary = index;
-    return boundary;
-  }
-  const low = text.charCodeAt(pos - 1);
-  const high = text.charCodeAt(pos - 2);
-  return pos >= 2 && low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff ? pos - 2 : pos - 1;
-}
-/** End of the user-perceived character starting at `pos`. */
-function nextCharacterBoundary(text: string, pos: number): number {
-  const Segmenter = (Intl as typeof Intl & { Segmenter?: typeof Intl.Segmenter }).Segmenter;
-  if (Segmenter) {
-    const first = new Segmenter(undefined, { granularity: 'grapheme' }).segment(text.slice(pos))[Symbol.iterator]().next();
-    return first.done ? pos : pos + first.value.segment.length;
-  }
-  const high = text.charCodeAt(pos);
-  const low = text.charCodeAt(pos + 1);
-  return high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff ? pos + 2 : pos + 1;
-}
 /** One title edit through the title Editor (transliteration, undo); host title bar and held edits. */
 function applyTitleEdit(payload: { inputType: string; data: string | null; start: number; end: number }): { value: string; start: number; end: number } | null {
   if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
