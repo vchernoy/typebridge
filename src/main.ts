@@ -20,6 +20,7 @@ import {
   setAutosaveEnabled,
 } from './editor/drafts';
 import { nextUntitledTitle } from './editor/untitled-title';
+import { moveReadOnlyCaret } from './ui/readonly-caret';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
@@ -425,10 +426,10 @@ function syncMutationControls(): void {
   if (viewMode) return;
   const blocked = !canMutatePrimary();
   const target = activeEditableSession();
-  undo.disabled = blocked || !target.canUndo;
-  redo.disabled = blocked || !target.canRedo;
   // A quiet reader keeps these enabled; the click takes over editing, then runs.
   const controlsBlocked = blocked && !(quietReader() && !transferFrozen);
+  undo.disabled = controlsBlocked || !target.canUndo;
+  redo.disabled = controlsBlocked || !target.canRedo;
   for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
     document.querySelector<HTMLButtonElement>('#' + id)!.disabled = controlsBlocked;
   }
@@ -1983,18 +1984,20 @@ async function initializeDrafts(): Promise<void> {
             })()
           : drafts[0])
         ?? active;
+    // A fresh blank document (new host window) is not stored yet; only a stored one can vanish.
+    const chosenWasStored = drafts.some(draft => draft.id === chosen.id);
     // First acquirer among cooperating windows edits; the others open this document read-only.
     bootAccess = await acquireFor(chosen.id);
     // The list was read before this window owned the document; reread under the fence.
     if (bootAccess.ownership && !restorePending) {
       const fresh = await getStoredDraft(db, chosen.id);
-      if (!fresh) {
+      if (!fresh && chosenWasStored) {
         // Deleted while we acquired — do not install ownership over the stale list snapshot.
         void bootAccess.ownership.release();
         bootAccess = undefined;
-        chosen = { ...newDraft(), revision: 0 };
+        chosen = allocateNewDraft();
         bootAccess = await acquireFor(chosen.id);
-      } else {
+      } else if (fresh) {
         chosen = fresh;
       }
     }
@@ -2368,6 +2371,8 @@ if (!viewMode) {
   // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
   // The key itself is held and applied once editing arrives, so nothing typed is lost (#197).
   draftTitle.addEventListener('keydown', event => {
+    // Read-only inputs ignore caret keys; place the caret so held edits land where intended.
+    if (moveReadOnlyCaret(draftTitle, event)) return;
     const op = titleOpForKey(event);
     if (!op) return;
     if (bufferTitleEdit(op, draftTitle.selectionStart ?? draftTitle.value.length,
@@ -2381,7 +2386,7 @@ if (!viewMode) {
   };
   titleHooks.__typebridgeRequestEdit = requestEditHere;
   titleHooks.__typebridgeBufferTitleEdit = (op, start, end) => bufferTitleEdit(op, start, end, true);
-  const replayAfterTakeover = new Set(['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
+  const replayAfterTakeover = new Set(['undo', 'redo', 'delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
   document.addEventListener('click', event => {
     const button = (event.target as Element | null)?.closest?.('button');
     if (!button || !replayAfterTakeover.has(button.id) || !quietReader()) return;

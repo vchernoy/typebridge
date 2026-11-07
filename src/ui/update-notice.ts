@@ -70,7 +70,8 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
     try { sessionStorage.setItem(DISMISSED, 'yes'); } catch { /* Remains dismissed on this page. */ }
   });
   // Keep application shortcuts from acting behind this notice while it owns focus.
-  notice.addEventListener('keydown', event => event.stopPropagation());
+  // F6 still moves between host windows (window cycling is navigation, not an action).
+  notice.addEventListener('keydown', event => { if (event.key !== 'F6') event.stopPropagation(); });
   reload.addEventListener('click', async () => {
     if (!waiting) return;
     const workspaces = resolveFreezeSurfaces();
