@@ -142,3 +142,28 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await page.screenshot({ path: testInfo.outputPath(`update-notice-${colorScheme}-${width}.png`), fullPage: true, animations: 'disabled' });
   });
 }
+
+test('an "installed" event for a worker that is already active and not waiting shows no notice', async ({ page }) => {
+  await page.addInitScript(() => {
+    const container = new EventTarget();
+    const registration = new EventTarget();
+    const worker = new EventTarget();
+    Object.assign(worker, { state: 'installing', postMessage: () => {} });
+    Object.assign(registration, { waiting: null, installing: worker, active: null });
+    Object.assign(container, { controller: null, ready: Promise.resolve(registration), register: () => Promise.resolve(registration) });
+    Object.defineProperty(navigator, 'serviceWorker', { value: container });
+    // The worker activates and claims the page before its late "installed" statechange is handled.
+    // It already controls the page and is not waiting, yet still reports "installed".
+    Object.assign(window, { lateInstalled: () => {
+      Object.assign(worker, { state: 'installed' });
+      Object.assign(registration, { installing: worker, waiting: null, active: worker });
+      Object.assign(container, { controller: worker });
+      worker.dispatchEvent(new Event('statechange'));
+    } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.evaluate(() => (window as unknown as { lateInstalled: () => void }).lateInstalled());
+  await page.waitForTimeout(300);
+  await expect(page.locator('#update-notice')).toBeHidden();
+});

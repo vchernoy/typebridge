@@ -50,6 +50,10 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   let waiting: ServiceWorker | null = null;
   function show(worker: ServiceWorker | null): void {
     if (dismissed || !worker || !workerContainer.controller) return;
+    // Only a worker that is still waiting is an update. WebKit can deliver the
+    // "installed" statechange after a first-visit worker already activated and
+    // claimed this page, which showed a spurious notice (#175 / #180).
+    if (worker.state !== 'installed' || registration.waiting !== worker) return;
     waiting = worker;
     message.textContent = 'New version available';
     notice.hidden = false;
