@@ -116,3 +116,22 @@ test("host Focus on a phone keeps the title bar to one line", async ({ page }) =
   await expect(main.locator("#exit-focus")).toBeVisible();
   await expect(main.locator(".focus-exit-hint")).toBeHidden();
 });
+
+test('after a reload in host Focus, the Latin and Кириллица words still choose the mode', async ({ page }) => {
+  const main = await openHost(page);
+  await enterFocus(page, main);
+  await page.reload();
+  const restored = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/, { timeout: 30_000 });
+  await expect(restored.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  const titleBar = page.locator('.host-window[data-window-id="main"] .host-window-titlebar');
+  const sides = titleBar.locator('.mode-switch .mode-side');
+  await expect(page.locator('#host-enabled')).toBeChecked();
+  await sides.first().click();
+  await expect(page.locator('#host-enabled')).not.toBeChecked();
+  await sides.last().click();
+  await expect(page.locator('#host-enabled')).toBeChecked();
+  await sides.last().click();
+  // Clicking Кириллица again keeps Cyrillic (it chooses, not toggles).
+  await expect(page.locator('#host-enabled')).toBeChecked();
+});
