@@ -2497,6 +2497,13 @@ if (!viewMode) {
     const title = heldTitle;
     heldText = [];
     heldTitle = [];
+    // Focus first: Firefox can drop an unfocused textarea's caret between replayed edits.
+    if (text.length) {
+      const caretStart = field.selectionStart;
+      const caretEnd = field.selectionEnd;
+      field.focus();
+      try { field.setSelectionRange(caretStart, caretEnd); } catch { /* Not focusable. */ }
+    }
     for (const item of text) replayBufferedInsert(field, item);
     if (title.length) {
       const at = applyHeldTitleOps(title, draftTitle.value !== heldTitleBase);
@@ -2504,8 +2511,6 @@ if (!viewMode) {
         draftTitle.focus();
         try { draftTitle.setSelectionRange(at.start, at.end); } catch { /* Not focusable. */ }
       }
-    } else if (text.length) {
-      field.focus();
     }
   };
   const keepThenApply = (): void => {
