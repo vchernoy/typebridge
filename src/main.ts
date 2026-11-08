@@ -2522,13 +2522,24 @@ if (!viewMode) {
     if (!deletedElsewhere) return undefined;
     return event.target === field ? field : event.target === draftTitle ? draftTitle : undefined;
   };
+  // While Keep is making the copy (usually a few ms), the caret and selection must not move:
+  // held edits replay at the selection captured when it started.
+  const keepPending = (): boolean => !!keepingDeleted || heldText.length > 0 || heldTitle.length > 0;
+  const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
   // Capture on the document so these run before the takeover listeners on the field.
   document.addEventListener('pointerdown', event => {
-    if (deletedTarget(event)) event.stopImmediatePropagation();
+    if (!deletedTarget(event)) return;
+    event.stopImmediatePropagation();
+    if (keepPending()) event.preventDefault();
   }, true);
   document.addEventListener('keydown', event => {
     const target = deletedTarget(event);
     if (!target) return;
+    if (keepPending() && CARET_KEYS.has(event.key)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (target === field) {
       const insert = bufferInsertFromKeyboard(event);
       if (!insert) return;

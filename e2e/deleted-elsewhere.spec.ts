@@ -145,3 +145,18 @@ test('several keys typed in a host title during Keep are applied in order', asyn
   await expect(second.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
   await expect(title).toHaveValue(/ абц$/, { timeout: 10_000 });
 });
+
+test('caret keys are held still while Keep makes the copy', async ({ page, context }) => {
+  const other = await deletedInOtherTab(page, context, 'текст');
+  await other.evaluate(() => { (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 600; });
+  await other.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
+  await other.keyboard.press('a');
+  await other.keyboard.press('Home');
+  await other.keyboard.press('b');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  // Home during the copy does not move where the held keys land.
+  await expect(other.locator('#editor')).toHaveValue('текстаб');
+});
