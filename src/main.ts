@@ -157,6 +157,8 @@ const readOnlyNow = (): boolean => viewMode || editBlock !== '' || transferFroze
  */
 /** The displayed document was deleted in another window (see markDeletedElsewhere). */
 let deletedElsewhere = false;
+/** Replays keys held while a deleted document is kept as a new one (set up with the input handlers). */
+let drainDeletedInput: (() => void) | undefined;
 const deletedBarElement = (): HTMLElement => document.querySelector<HTMLElement>('#deleted-bar')!;
 const quietReader = (): boolean => !viewMode && editBlock === 'busy' && !workspace.dirty() && !deletedElsewhere;
 // Do not delete pendingDraft/activeDraft on viewer boot: same-tab navigation from an editor
@@ -973,14 +975,13 @@ function applyTitleEdit(payload: { inputType: string; data: string | null; start
     end: draftTitle.selectionEnd ?? 0,
   };
 }
-/** Apply held title edits through the title Editor (transliteration, undo) at the user's caret. */
-function replayTitleBuffer(): void {
-  const held = titleBuffer;
-  titleBuffer = undefined;
-  if (!held || held.documentId !== active.id || draftTitle.readOnly) return;
-  const edit = applyTitleEdit;
+/**
+ * Apply held title edits in order. Each edit's selection is in the coordinates of the
+ * title shown while waiting; map it past earlier held edits. When `changed` (a newer
+ * title arrived meanwhile), keep that title and add the edits at its end.
+ */
+function applyHeldTitleOps(ops: HeldTitleOp[], changed: boolean): { start: number; end: number } {
   // A newer title may have arrived with the takeover: keep it and add the edits at its end.
-  const changed = draftTitle.value !== held.baseValue;
   // The field showed the old title while edits were held, so each edit's selection is in
   // old-title coordinates. Map it past earlier held edits: shifts made at or before a
   // position move it along (End, 1, Home, 2 on "Имя" gives "2Имя1").
@@ -989,19 +990,27 @@ function replayTitleBuffer(): void {
   let start = draftTitle.value.length;
   let end = start;
   let previous: HeldTitleOp | undefined;
-  for (const op of held.ops) {
+  for (const op of ops) {
     const sameSpot = previous && previous.start === op.start && previous.end === op.end;
     if (!changed && !sameSpot) {
       start = mapPos(op.start);
       end = Math.max(start, mapPos(op.end));
     }
     const before = draftTitle.value.length;
-    const result = edit({ inputType: op.inputType, data: op.data, start, end });
+    const result = applyTitleEdit({ inputType: op.inputType, data: op.data, start, end });
     if (!result) break;
     if (!changed) shifts.push({ at: op.start, by: result.value.length - before });
     ({ start, end } = result);
     previous = op;
   }
+  return { start, end };
+}
+/** Apply held title edits through the title Editor (transliteration, undo) at the user's caret. */
+function replayTitleBuffer(): void {
+  const held = titleBuffer;
+  titleBuffer = undefined;
+  if (!held || held.documentId !== active.id || draftTitle.readOnly) return;
+  const { start, end } = applyHeldTitleOps(held.ops, draftTitle.value !== held.baseValue);
   // Leave focus where the user put it; only place the caret if the title still has it.
   if (!held.fromHost && document.activeElement === draftTitle) {
     try { draftTitle.setSelectionRange(start, end); } catch { /* Not focusable. */ }
@@ -2182,6 +2191,10 @@ function keepDeletedAsNew(): Promise<boolean> {
   if (keepingDeleted) return keepingDeleted;
   keepingDeleted = (async () => {
     if (!deletedElsewhere || viewMode || transitioning) return false;
+    // Reserve the transition so Close / New / the picker cannot switch documents while the
+    // copy takes ownership (they no-op while transitioning).
+    const originalId = active.id;
+    transitioning = true;
     const copy = allocateNewDraft(field.value);
     const title = draftTitle.value.trim();
     if (title) copy.title = title;
@@ -2190,7 +2203,13 @@ function keepDeletedAsNew(): Promise<boolean> {
     const end = field.selectionEnd;
     const access = await acquireFor(copy.id);
     if (!access.ownership) {
+      transitioning = false;
       announceAction('Could not keep this document here — your text is still shown; copy or export it.', { kind: 'failure' });
+      return false;
+    }
+    if (active.id !== originalId || !deletedElsewhere) {
+      void access.ownership.release();
+      transitioning = false;
       return false;
     }
     writingPosition.save();
@@ -2202,6 +2221,9 @@ function keepDeletedAsNew(): Promise<boolean> {
     workspace.setDirty(true);
     workspace.bumpContentRevision();
     rememberActive();
+    transitioning = false;
+    // Apply keys held while the copy was made before anything else can edit (keeps order).
+    drainDeletedInput?.();
     void refreshDrafts().catch(() => { /* The list refreshes on next open. */ });
     if (autosave.checked) {
       const result = await persist();
@@ -2210,7 +2232,10 @@ function keepDeletedAsNew(): Promise<boolean> {
       announceAction('Kept as a new document. Autosave is off, so it is not saved yet.');
     }
     return true;
-  })().finally(() => { keepingDeleted = undefined; });
+  })().finally(() => {
+    keepingDeleted = undefined;
+    if (transitioning && deletedElsewhere) transitioning = false;
+  });
   return keepingDeleted;
 }
 let primaryVersionNotice = '';
@@ -2441,7 +2466,8 @@ if (!viewMode) {
   titleHooks.__typebridgeBufferTitleEdit = (op, start, end) => {
     // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.
     if (deletedElsewhere) {
-      void keepDeletedAsNew().then(kept => { if (kept) applyTitleEdit({ ...op, start, end }); });
+      holdTitleOp(op, start, end, true);
+      keepThenApply();
       return true;
     }
     return bufferTitleEdit(op, start, end, true);
@@ -2456,22 +2482,35 @@ if (!viewMode) {
     const other = drafts.find(draft => draft.id !== active.id);
     void switchDraft(other?.id);
   });
-  // Held while the copy is created, then replayed through the editors (transliteration, undo).
+  // Held while the copy is created, then replayed through the editors (transliteration, undo)
+  // as soon as it is editable, before any later key or the first save.
   let heldText: BufferedInsert[] = [];
-  let heldTitle: TitleOp[] = [];
-  const keepThenApply = (): void => {
-    if (heldText.length + heldTitle.length > 1) return;
-    void keepDeletedAsNew().then(kept => {
-      const text = heldText;
-      const title = heldTitle;
-      heldText = [];
-      heldTitle = [];
-      if (!kept) return;
-      for (const item of text) replayBufferedInsert(field, item);
-      for (const op of title) {
-        applyTitleEdit({ ...op, start: draftTitle.selectionStart ?? draftTitle.value.length, end: draftTitle.selectionEnd ?? draftTitle.value.length });
+  let heldTitle: HeldTitleOp[] = [];
+  let heldTitleBase = '';
+  let heldTitleFromHost = false;
+  const holdTitleOp = (op: TitleOp, start: number, end: number, fromHost: boolean): void => {
+    if (heldTitle.length === 0) { heldTitleBase = draftTitle.value; heldTitleFromHost = fromHost; }
+    heldTitle.push({ ...op, start, end });
+  };
+  drainDeletedInput = (): void => {
+    const text = heldText;
+    const title = heldTitle;
+    heldText = [];
+    heldTitle = [];
+    for (const item of text) replayBufferedInsert(field, item);
+    if (title.length) {
+      const at = applyHeldTitleOps(title, draftTitle.value !== heldTitleBase);
+      if (!heldTitleFromHost) {
+        draftTitle.focus();
+        try { draftTitle.setSelectionRange(at.start, at.end); } catch { /* Not focusable. */ }
       }
-      (title.length ? draftTitle : field).focus();
+    } else if (text.length) {
+      field.focus();
+    }
+  };
+  const keepThenApply = (): void => {
+    void keepDeletedAsNew().then(kept => {
+      if (!kept) { heldText = []; heldTitle = []; }
     });
   };
   const deletedTarget = (event: Event): HTMLTextAreaElement | HTMLInputElement | undefined => {
@@ -2496,7 +2535,7 @@ if (!viewMode) {
       if (!op) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      heldTitle.push(op);
+      holdTitleOp(op, draftTitle.selectionStart ?? draftTitle.value.length, draftTitle.selectionEnd ?? draftTitle.value.length, false);
     }
     keepThenApply();
   }, true);
@@ -2508,7 +2547,7 @@ if (!viewMode) {
     event.stopImmediatePropagation();
     if (!text) return;
     if (target === field) heldText.push({ kind: 'paste', text });
-    else heldTitle.push({ inputType: 'insertFromPaste', data: text });
+    else holdTitleOp({ inputType: 'insertFromPaste', data: text }, draftTitle.selectionStart ?? draftTitle.value.length, draftTitle.selectionEnd ?? draftTitle.value.length, false);
     keepThenApply();
   }, true);
   const replayAfterTakeover = new Set(['undo', 'redo', 'delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);

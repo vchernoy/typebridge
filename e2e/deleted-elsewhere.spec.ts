@@ -86,3 +86,62 @@ test('Delete warns when the document is open in another host window', async ({ p
   await main.getByRole('button', { name: 'Delete document' }).click();
   await expect(second.locator('#deleted-bar')).toBeVisible({ timeout: 10_000 });
 });
+
+test('keys typed while the kept copy saves stay in order', async ({ page, context }) => {
+  const other = await deletedInOtherTab(page, context, 'ряд');
+  await other.evaluate(() => {
+    const hooks = window as Window & { __typebridgeDelayAcquireMs?: number; __typebridgeDelayPersistMs?: number };
+    hooks.__typebridgeDelayAcquireMs = 300;
+    hooks.__typebridgeDelayPersistMs = 600;
+  });
+  await other.locator('#editor').evaluate((el: HTMLTextAreaElement) => {
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
+  await other.keyboard.type(' ab');
+  await other.waitForTimeout(150);
+  await other.keyboard.type('v');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(other.locator('#editor')).toHaveValue('ряд абв');
+});
+
+test('Close during a slow Keep does not overwrite the document it opens', async ({ page, context }) => {
+  const other = await deletedInOtherTab(page, context, 'медленно');
+  await other.evaluate(() => { (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800; });
+  await other.getByRole('button', { name: 'Keep as new document' }).click();
+  await other.getByRole('button', { name: 'Close' }).click();
+  await other.waitForTimeout(1_500);
+  // Close was ignored while Keep held the transition; the kept copy is what is shown.
+  await expect(other.locator('#editor')).toHaveValue('медленно');
+  await expect(other.locator('html')).toHaveAttribute('data-role', 'editor');
+});
+
+test('several keys typed in a host title during Keep are applied in order', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/host.html');
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(main.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await main.locator('#editor').fill('общий');
+  await expect(main.locator('#save-indicator')).toHaveText('Saved');
+  await page.getByRole('button', { name: 'New window' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await second.getByRole('button', { name: 'Documents', exact: true }).click();
+  const value = await second.locator('#drafts option', { hasText: 'общий' }).getAttribute('value');
+  await second.locator('#drafts').dispatchEvent('pointerdown');
+  await second.locator('#drafts').selectOption(value!);
+  await expect(second.locator('#editor')).toHaveValue('общий');
+  await main.getByRole('button', { name: 'Documents', exact: true }).click();
+  await main.locator('#delete-draft').click();
+  await main.getByRole('button', { name: 'Delete document' }).click();
+  await expect(second.locator('#deleted-bar')).toBeVisible({ timeout: 10_000 });
+  await page.locator('.host-window[data-window-id="w2"] iframe').evaluate((el: HTMLIFrameElement) => {
+    (el.contentWindow as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 600;
+  });
+  const title = page.locator('.host-window[data-window-id="w2"] .host-window-title');
+  await title.focus();
+  await title.press('End');
+  await title.pressSequentially(' abc');
+  await expect(second.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(title).toHaveValue(/ абц$/, { timeout: 10_000 });
+});
