@@ -176,6 +176,30 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     }
   };
 
+  /**
+   * Host Focus is two lines (#175 follow-up): the focused window's title bar carries the
+   * brand, its title and ✎, the shared Latin/Кириллица switch and ⚙ Settings, and the host
+   * toolbar hides. The nodes move (ids, listeners and state stay); they return on exit.
+   */
+  const placeFocusChrome = (): void => {
+    const brand = document.querySelector<HTMLElement>('body.host-page .brand');
+    const modeSwitch = document.querySelector<HTMLElement>('body.host-page .mode-switch');
+    const settings = document.querySelector<HTMLElement>('body.host-page #settings-open');
+    const titleBar = hostFocus ? shells.get(activeId)?.querySelector<HTMLElement>('.host-window-titlebar') : undefined;
+    if (titleBar) {
+      const title = titleBar.querySelector('.host-window-title');
+      const close = titleBar.querySelector('.host-window-close');
+      if (brand && brand.nextElementSibling !== title) titleBar.insertBefore(brand, title);
+      if (modeSwitch && settings && settings.nextElementSibling !== close) {
+        titleBar.insertBefore(modeSwitch, close);
+        titleBar.insertBefore(settings, close);
+      }
+      return;
+    }
+    if (brand && brand.parentElement !== deps.toolbar) deps.toolbar.prepend(brand);
+    if (modeSwitch && settings && settings.parentElement !== deps.toolbar) deps.toolbar.append(modeSwitch, settings);
+  };
+
   const applyModeChrome = (): void => {
     deps.root.dataset.layoutMode = mode;
     document.body.classList.toggle('host-stacked', mode === 'stacked');
@@ -197,6 +221,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         );
       }
     }
+    placeFocusChrome();
     syncToolbar();
   };
 
@@ -1114,6 +1139,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       } else if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
         return false;
       }
+      if (hostFocus && activeId === id) {
+        hostFocus = false;
+        placeFocusChrome();
+        hostFocus = true;
+      }
       shells.get(id)?.remove();
       shells.delete(id);
       renameHandlers.delete(id);
@@ -1186,6 +1216,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           preFocusLayouts = layouts.map(win => ({ ...win }));
         }
         hostFocus = true;
+        // The host toolbar hides in Focus: measure the root after that.
+        applyModeChrome();
         const view = viewportOf(deps.root);
         layouts = layouts.map(win => (
           win.id === activeId
@@ -1233,6 +1265,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       document.removeEventListener('keydown', onHostCycleKey);
       for (const mq of mediaQueries) mq.removeEventListener('change', onCapabilityChange);
       rootObserver?.disconnect();
+      hostFocus = false;
+      placeFocusChrome();
       for (const shell of shells.values()) shell.remove();
       shells.clear();
       frames.clear();
