@@ -27,7 +27,7 @@ import { askConfirmChoice } from './ui/confirm-dialog';
 import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
-import { handoffRefuseGuidance, mapSelectionAcrossTextChange, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
+import { bufferInsertFromKeyboard, handoffRefuseGuidance, mapSelectionAcrossTextChange, replayBufferedInsert, type BufferedInsert, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import type { EditorHistory } from './editor/editor';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
@@ -155,7 +155,10 @@ const readOnlyNow = (): boolean => viewMode || editBlock !== '' || transferFroze
  * editor: no Read-only badge or notice; clicking, typing or using a control takes over
  * editing (focus handoff). Unsaved text here, Edit here warnings and real errors still show.
  */
-const quietReader = (): boolean => !viewMode && editBlock === 'busy' && !workspace.dirty();
+/** The displayed document was deleted in another window (see markDeletedElsewhere). */
+let deletedElsewhere = false;
+const deletedBarElement = (): HTMLElement => document.querySelector<HTMLElement>('#deleted-bar')!;
+const quietReader = (): boolean => !viewMode && editBlock === 'busy' && !workspace.dirty() && !deletedElsewhere;
 // Do not delete pendingDraft/activeDraft on viewer boot: same-tab navigation from an editor
 // writes those keys on pagehide for reload restore, and wiping them here would discard that
 // backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
@@ -705,6 +708,7 @@ const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
   const state = storageProblem || saveFailed ? 'failed'
+    : deletedElsewhere ? 'unsaved'
     : quietReader() ? (!autosave.checked || !db ? 'unsaved' : 'saved')
     : editBlock ? (workspace.dirty() ? 'unsaved' : 'readonly')
     : !autosave.checked || !db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
@@ -874,6 +878,7 @@ async function refreshDrafts(): Promise<void> {
   if (statusMessage.draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
 }
 function showDraft(): void {
+  clearDeletedElsewhere();
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
   workspace.bumpSessionGeneration();
   workspace.setDocumentId(active.id);
@@ -1032,7 +1037,7 @@ function applyEditAccess(): void {
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = controlsBlocked;
   document.documentElement.dataset.role = editBlock !== '' ? 'reader' : 'editor';
   // Temporary transfer freeze must not announce "another window is editing".
-  const guidance = transferFrozen || quietReader() ? '' : editBlockGuidance(editBlock, workspace.dirty());
+  const guidance = transferFrozen || quietReader() || deletedElsewhere ? '' : editBlockGuidance(editBlock, workspace.dirty());
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
   syncHistory();
@@ -1326,7 +1331,7 @@ function retryOwnership(): void {
     if (fresh === undefined) {
       // Another window deleted this row and released the lock; do not edit a ghost snapshot.
       void access.ownership.release();
-      if (active.revision >= 1) showVersionNotice(DELETED_NOTICE);
+      if (active.revision >= 1) markDeletedElsewhere();
       return;
     }
     // Authoritative snapshot under the new fence; unsaved text in memory is never replaced.
@@ -1768,7 +1773,12 @@ document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('cl
   focusHandoff?.cancel();
   clearTimeout(saveTimer);
   const requestedId = active.id;
-  if (!await askConfirmChoice({ title: 'Delete document?', message: 'Permanently delete this saved document?', confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
+  // Warn when another host window shows it; that window keeps its text and can keep a copy.
+  const openElsewhere = openDocumentIdsElsewhere().has(active.id);
+  const deleteMessage = openElsewhere
+    ? 'Permanently delete this saved document? It is also open in another window, which will keep its text until you close it there.'
+    : 'Permanently delete this saved document?';
+  if (!await askConfirmChoice({ title: 'Delete document?', message: deleteMessage, confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
     if (workspace.dirty() && autosave.checked) saveTimer = setTimeout(() => { void persist(); }, 300);
     return;
   }
@@ -2145,7 +2155,64 @@ function postSignal(type: DocumentSignal['type'], documentId: string, revision: 
 }
 const versionNotice = document.querySelector<HTMLElement>('#version-notice')!;
 const NEWER_VERSION_NOTICE = 'A newer saved version of this document exists in another window. Your text here has not been changed.';
-const DELETED_NOTICE = 'This saved document was deleted in another window. Your text here has not been changed.';
+/**
+ * The displayed document was deleted in another window or tab. This window holds the
+ * last copy of its text: offer Keep as new document / Close, never a takeover (there is
+ * no owner left to hand over), and treat typing as Keep (#175 follow-up).
+ */
+function markDeletedElsewhere(): void {
+  if (viewMode) return;
+  deletedElsewhere = true;
+  focusHandoff?.cancel();
+  hideEditHereBar();
+  clearVersionNotice();
+  deletedBarElement().hidden = false;
+  applyEditAccess();
+  setSaveStatus('Deleted in another window — keep it as a new document or close it.');
+}
+function clearDeletedElsewhere(): void {
+  const bar = deletedBarElement();
+  if (!deletedElsewhere && bar.hidden) return;
+  deletedElsewhere = false;
+  bar.hidden = true;
+}
+let keepingDeleted: Promise<boolean> | undefined;
+/** Save the text shown here as a new document that this window edits. */
+function keepDeletedAsNew(): Promise<boolean> {
+  if (keepingDeleted) return keepingDeleted;
+  keepingDeleted = (async () => {
+    if (!deletedElsewhere || viewMode || transitioning) return false;
+    const copy = allocateNewDraft(field.value);
+    const title = draftTitle.value.trim();
+    if (title) copy.title = title;
+    copy.history = editor.exportHistory();
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    const access = await acquireFor(copy.id);
+    if (!access.ownership) {
+      announceAction('Could not keep this document here — your text is still shown; copy or export it.', { kind: 'failure' });
+      return false;
+    }
+    writingPosition.save();
+    active = copy;
+    clearDeletedElsewhere();
+    showDraft();
+    installOwnership(access);
+    try { field.setSelectionRange(start, end); } catch { /* Field not focusable. */ }
+    workspace.setDirty(true);
+    workspace.bumpContentRevision();
+    rememberActive();
+    void refreshDrafts().catch(() => { /* The list refreshes on next open. */ });
+    if (autosave.checked) {
+      const result = await persist();
+      announceAction(result.saved ? 'Kept as a new document.' : 'Kept as a new document; it is not saved yet.');
+    } else {
+      announceAction('Kept as a new document. Autosave is off, so it is not saved yet.');
+    }
+    return true;
+  })().finally(() => { keepingDeleted = undefined; });
+  return keepingDeleted;
+}
 let primaryVersionNotice = '';
 function syncVersionNoticeDisplay(): void {
   const text = primaryVersionNotice;
@@ -2210,10 +2277,10 @@ async function rereadDisplayed(): Promise<void> {
     scheduleListRefresh();
   } else if (action === 'missing') {
     if (viewMode) showViewerMissing(VIEWER_MISSING);
-    else if (active.revision >= 1) showVersionNotice(DELETED_NOTICE);
+    else if (active.revision >= 1) markDeletedElsewhere();
     scheduleListRefresh();
   } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
-  else if (action === 'notice-deleted') showVersionNotice(DELETED_NOTICE);
+  else if (action === 'notice-deleted') markDeletedElsewhere();
 }
 let listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleListRefresh(): void {
@@ -2371,7 +2438,79 @@ if (!viewMode) {
     __typebridgeBufferTitleEdit?: (op: TitleOp, start: number, end: number) => boolean;
   };
   titleHooks.__typebridgeRequestEdit = requestEditHere;
-  titleHooks.__typebridgeBufferTitleEdit = (op, start, end) => bufferTitleEdit(op, start, end, true);
+  titleHooks.__typebridgeBufferTitleEdit = (op, start, end) => {
+    // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.
+    if (deletedElsewhere) {
+      void keepDeletedAsNew().then(kept => { if (kept) applyTitleEdit({ ...op, start, end }); });
+      return true;
+    }
+    return bufferTitleEdit(op, start, end, true);
+  };
+
+  // Deleted elsewhere (#175 follow-up): no takeover (nobody owns it any more). Keep as new
+  // document or Close; typing or pasting into the text or title keeps it, then applies.
+  document.querySelector<HTMLButtonElement>('#keep-deleted')!.addEventListener('click', () => {
+    void keepDeletedAsNew().then(kept => { if (kept) field.focus(); });
+  });
+  document.querySelector<HTMLButtonElement>('#close-deleted')!.addEventListener('click', () => {
+    const other = drafts.find(draft => draft.id !== active.id);
+    void switchDraft(other?.id);
+  });
+  // Held while the copy is created, then replayed through the editors (transliteration, undo).
+  let heldText: BufferedInsert[] = [];
+  let heldTitle: TitleOp[] = [];
+  const keepThenApply = (): void => {
+    if (heldText.length + heldTitle.length > 1) return;
+    void keepDeletedAsNew().then(kept => {
+      const text = heldText;
+      const title = heldTitle;
+      heldText = [];
+      heldTitle = [];
+      if (!kept) return;
+      for (const item of text) replayBufferedInsert(field, item);
+      for (const op of title) {
+        applyTitleEdit({ ...op, start: draftTitle.selectionStart ?? draftTitle.value.length, end: draftTitle.selectionEnd ?? draftTitle.value.length });
+      }
+      (title.length ? draftTitle : field).focus();
+    });
+  };
+  const deletedTarget = (event: Event): HTMLTextAreaElement | HTMLInputElement | undefined => {
+    if (!deletedElsewhere) return undefined;
+    return event.target === field ? field : event.target === draftTitle ? draftTitle : undefined;
+  };
+  // Capture on the document so these run before the takeover listeners on the field.
+  document.addEventListener('pointerdown', event => {
+    if (deletedTarget(event)) event.stopImmediatePropagation();
+  }, true);
+  document.addEventListener('keydown', event => {
+    const target = deletedTarget(event);
+    if (!target) return;
+    if (target === field) {
+      const insert = bufferInsertFromKeyboard(event);
+      if (!insert) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      heldText.push(insert);
+    } else {
+      const op = titleOpForKey(event);
+      if (!op) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      heldTitle.push(op);
+    }
+    keepThenApply();
+  }, true);
+  document.addEventListener('paste', event => {
+    const target = deletedTarget(event);
+    if (!target) return;
+    const text = event.clipboardData?.getData('text/plain') ?? '';
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!text) return;
+    if (target === field) heldText.push({ kind: 'paste', text });
+    else heldTitle.push({ inputType: 'insertFromPaste', data: text });
+    keepThenApply();
+  }, true);
   const replayAfterTakeover = new Set(['undo', 'redo', 'delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
   document.addEventListener('click', event => {
     const button = (event.target as Element | null)?.closest?.('button');

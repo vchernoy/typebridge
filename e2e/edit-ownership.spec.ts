@@ -268,9 +268,9 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
   // Owner already moved on; the reader must not resurrect the deleted id by claiming the free lock.
   await expect.poll(async () => {
     await nudge(other);
-    return other.locator('#version-notice').isVisible();
+    return other.locator('#deleted-bar').isVisible();
   }).toBe(true);
-  await expect(other.locator('#version-notice')).toContainText('deleted in another window');
+  await expect(other.locator('#deleted-bar')).toContainText('deleted in another window');
   await expect(role(other)).toHaveAttribute('data-role', 'reader');
   await expect(other.locator('#status')).not.toContainText('You can edit this document in this window now.');
   expect((await readOwnership(other, id))?.ownerInstanceId ?? '').not.toBe(await instanceOf(other));
