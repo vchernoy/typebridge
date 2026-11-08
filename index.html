@@ -352,6 +352,13 @@
           <p id="edit-here-warning" class="viewer-notice" role="status"></p>
           <button id="edit-here" type="button">Edit here</button>
         </div>
+        <div id="deleted-bar" class="edit-here-bar" hidden>
+          <p id="deleted-warning" class="viewer-notice" role="status">
+            This document was deleted in another window. Its text is still here.
+          </p>
+          <button id="keep-deleted" type="button">Keep as new document</button>
+          <button id="close-deleted" type="button">Close</button>
+        </div>
         <div class="editor-shell">
           <label for="editor">Your text</label>
           <textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea>
