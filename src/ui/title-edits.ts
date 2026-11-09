@@ -12,6 +12,17 @@ export type TitleOp = { inputType: string; data: string | null };
 export type HeldTitleOp = TitleOp & { start: number; end: number };
 export type TitleEditResult = { value: string; start: number; end: number };
 
+type KeyLike = Pick<KeyboardEvent, 'key' | 'isComposing' | 'ctrlKey' | 'metaKey' | 'altKey'>;
+
+/** The title edit a key stands for, if any (printable, Backspace, Delete; no shortcuts). */
+export function titleOpForKey(event: KeyLike): TitleOp | undefined {
+  if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return undefined;
+  if (event.key.length === 1) return { inputType: 'insertText', data: event.key };
+  if (event.key === 'Backspace') return { inputType: 'deleteContentBackward', data: null };
+  if (event.key === 'Delete') return { inputType: 'deleteContentForward', data: null };
+  return undefined;
+}
+
 export type TitleEditDeps = {
   viewMode: boolean;
   draftTitle: HTMLInputElement;
