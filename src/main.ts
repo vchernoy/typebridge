@@ -9,6 +9,7 @@ import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
 import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, EDITABLE_HERE, SAVE_FAILED, STORAGE_UNAVAILABLE } from './editor/status';
 import { createStatusLine } from './ui/status-line';
+import { createReloadBackup, sameContent } from './view/reload-backup';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -554,21 +555,6 @@ try { autosave.checked = autosaveEnabled(); } catch { /* Keep editing available 
 // A tab-scoped emergency snapshot is not the committed draft. It only bridges
 // navigation/reload when the browser aborts an IndexedDB transaction on unload.
 const PENDING_KEY = scopeSessionKey('typebridge.pendingDraft.v1', windowId);
-function parsePendingDraft(raw: string | null): StoredDraft | undefined {
-  try {
-    const value: unknown = JSON.parse(raw ?? 'null');
-    if (!value || typeof value !== 'object') return undefined;
-    const draft = value as Partial<StoredDraft>;
-    if (typeof draft.id !== 'string' || !draft.id || typeof draft.title !== 'string' ||
-        typeof draft.text !== 'string' || typeof draft.updatedAt !== 'number' ||
-        !Number.isSafeInteger(draft.revision) || (draft.revision ?? -1) < 0) return undefined;
-    return draft as StoredDraft;
-  } catch { return undefined; }
-}
-function readPending(): StoredDraft | undefined {
-  try { return parsePendingDraft(sessionStorage.getItem(PENDING_KEY)); }
-  catch { return undefined; }
-}
 function snapshot(): StoredDraft {
   return { ...active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
 }
@@ -578,24 +564,17 @@ function journalEdit(): void {
   try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
   catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
 }
-function sameContent(a: StoredDraft, b: StoredDraft): boolean {
-  return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
-}
-/** Set when the user confirms discarding this window so unload must not recreate backups. */
-let suppressPendingBackup = false;
-function savePending(): void {
-  if (suppressPendingBackup || viewMode || !workspace.dirty() || !autosave.checked || deleting) return;
-  try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(snapshot())); }
-  catch {
-    // Keep any conflict notice and the current risk; only replace the primary.
-    // Trailing period stays; renderStatusBody joins risk with a space after it.
-    setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure');
-  }
-}
-function clearPending(saved: StoredDraft): void {
-  try { const pending = readPending(); if (pending && pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt)) sessionStorage.removeItem(PENDING_KEY); }
-  catch { /* A stale backup is safer than removing one we cannot verify. */ }
-}
+const reloadBackup = createReloadBackup({
+  key: PENDING_KEY,
+  snapshot,
+  mayBackUp: () => !viewMode && workspace.dirty() && autosave.checked && !deleting,
+  // Keep any conflict notice and the current risk; only replace the primary.
+  // Trailing period stays; renderStatusBody joins risk with a space after it.
+  onFailed: () => { setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure'); },
+});
+const readPending = reloadBackup.read;
+const savePending = reloadBackup.save;
+const clearPending = reloadBackup.clear;
 function rememberActive(): void {
   if (viewMode) return;
   try { setActiveDraftId(active.id); } catch { /* Selection is only a hint. */ }
@@ -2415,7 +2394,7 @@ setupExportImport({
   },
 });
 if (!viewMode) window.addEventListener('pagehide', () => {
-  if (suppressPendingBackup) return;
+  if (reloadBackup.suppressed()) return;
   savePending();
   clearTimeout(saveTimer);
   void persist();
@@ -2434,7 +2413,7 @@ function updateReloadReturnFocus(): HTMLElement {
   return field;
 }
 function clearPendingBackups(): void {
-  try { sessionStorage.removeItem(PENDING_KEY); } catch { /* Optional backup. */ }
+  reloadBackup.remove();
 }
 
 /**
@@ -2442,7 +2421,7 @@ function clearPendingBackups(): void {
  * prepare — keeps reload/close consent cancellable without disabling backups for the session.
  */
 function commitWindowClose(): void {
-  suppressPendingBackup = true;
+  reloadBackup.setSuppressed(true);
   clearPendingBackups();
   // Confirmed discard must forget this window's emergency journals so another
   // window's recovery poll does not re-offer text the user chose to discard.
@@ -2513,7 +2492,7 @@ function reloadAfterUpdate(): void {
   try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
 }
 if (!viewMode) window.addEventListener('beforeunload', event => {
-  if (suppressPendingBackup) return;
+  if (reloadBackup.suppressed()) return;
   if (workspace.dirty()) {
     savePending();
     clearTimeout(saveTimer);
@@ -2522,7 +2501,7 @@ if (!viewMode) window.addEventListener('beforeunload', event => {
   }
 });
 if (!viewMode) document.addEventListener('visibilitychange', () => {
-  if (suppressPendingBackup) return;
+  if (reloadBackup.suppressed()) return;
   if (document.visibilityState === 'hidden') {
     clearTimeout(saveTimer);
     void persist();
@@ -2567,7 +2546,7 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
       .then(registration => watchForUpdates(registration, {
         prepareReload: prepareUpdateReload,
         reload: reloadAfterUpdate,
-        cancelReload: () => { allowUpdateReload = false; suppressPendingBackup = false; },
+        cancelReload: () => { allowUpdateReload = false; reloadBackup.setSuppressed(false); },
         dismissedKey: updateDismissKey,
       }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
@@ -2578,7 +2557,7 @@ if (embedded) {
   const hooks: EditorWindow = window;
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
-  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; suppressPendingBackup = false; };
+  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; reloadBackup.setSuppressed(false); };
   hooks.__typebridgePrepareWindowClose = prepareWindowClose;
   hooks.__typebridgeCommitWindowClose = commitWindowClose;
   hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
