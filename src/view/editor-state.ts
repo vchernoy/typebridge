@@ -38,6 +38,8 @@ export type EditorState = {
   loadingDraft: boolean;
   /** Comparison window shows the missing-document state (nothing to save or restore). */
   viewMissing: boolean;
+  /** The shown document was deleted in another window; this window holds the last copy of its text. */
+  deletedElsewhere: boolean;
 };
 
 export function createEditorState(): EditorState {
@@ -53,5 +55,6 @@ export function createEditorState(): EditorState {
     deleting: false,
     loadingDraft: false,
     viewMissing: false,
+    deletedElsewhere: false,
   };
 }

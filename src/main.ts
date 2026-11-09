@@ -17,6 +17,7 @@ import { createAutosaveToggle, type AutosaveToggle } from './view/autosave-toggl
 import { createDocumentActions, type EditAccess } from './view/documents';
 import { createRecovery } from './view/recovery';
 import { initializeDrafts } from './view/boot';
+import { createDocumentSync } from './view/document-sync';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -62,7 +63,7 @@ import { setupComparisonOpen } from './ui/comparison-open';
 import { setupFindGotoBars } from './ui/find-goto-bars';
 import { parseEmbedMode } from './view/embed';
 import { notifyPrefsChanged, onPrefsChanged, PREFS_EVENT, type PrefName } from './view/prefs-sync';
-import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
+import { SIGNAL_POLL_INTERVAL_MS } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
 // Only an absent mode is ordinary boot; invalid mode/doc takes the no-write viewer path.
@@ -159,17 +160,15 @@ const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'f
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
 const readOnlyNow = (): boolean => viewMode || state.editBlock !== '' || transferFrozen;
+/** Replays keys held while a deleted document is kept as a new one (set up with the input handlers). */
+let drainDeletedInput: (() => void) | undefined;
+const deletedBarElement = (): HTMLElement => document.querySelector<HTMLElement>('#deleted-bar')!;
 /**
  * A clean window whose document another window or tab is editing. It looks like a normal
  * editor: no Read-only badge or notice; clicking, typing or using a control takes over
  * editing (focus handoff). Unsaved text here, Edit here warnings and real errors still show.
  */
-/** The displayed document was deleted in another window (see markDeletedElsewhere). */
-let deletedElsewhere = false;
-/** Replays keys held while a deleted document is kept as a new one (set up with the input handlers). */
-let drainDeletedInput: (() => void) | undefined;
-const deletedBarElement = (): HTMLElement => document.querySelector<HTMLElement>('#deleted-bar')!;
-const quietReader = (): boolean => !viewMode && state.editBlock === 'busy' && !workspace.dirty() && !deletedElsewhere;
+const quietReader = (): boolean => !viewMode && state.editBlock === 'busy' && !workspace.dirty() && !state.deletedElsewhere;
 // Do not delete pendingDraft/activeDraft on viewer boot: same-tab navigation from an editor
 // writes those keys on pagehide for reload restore, and wiping them here would discard that
 // backup. Cloned private keys for a new companion are stripped in openComparisonWindow before
@@ -253,7 +252,7 @@ const statusLine = createStatusLine({
 });
 const {
   updateStatus, clearNotices, setSaveStatus, setRiskStatus,
-  announceAction, showSaveState, readOnlyStatus,
+  announceAction, showSaveState,
 } = statusLine;
 const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
@@ -363,7 +362,7 @@ function activatePane(paneId: typeof PRIMARY_PANE_ID = PRIMARY_PANE_ID): void {
   updateStats();
   if (previous !== paneId) {
     showMatchCount();
-    syncVersionNoticeDisplay();
+    sync.syncVersionNoticeDisplay();
   }
 }
 field.addEventListener('focus', () => { activatePane(PRIMARY_PANE_ID); });
@@ -498,7 +497,7 @@ const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
   const indicator = state.storageProblem || state.saveFailed ? 'failed'
-    : deletedElsewhere ? 'unsaved'
+    : state.deletedElsewhere ? 'unsaved'
     : quietReader() ? (!autosave.checked || !state.db ? 'unsaved' : 'saved')
     : state.editBlock ? (workspace.dirty() ? 'unsaved' : 'readonly')
     : !autosave.checked || !state.db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
@@ -791,7 +790,7 @@ function applyEditAccess(): void {
   for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = controlsBlocked;
   document.documentElement.dataset.role = state.editBlock !== '' ? 'reader' : 'editor';
   // Temporary transfer freeze must not announce "another window is editing".
-  const guidance = transferFrozen || quietReader() || deletedElsewhere ? '' : editBlockGuidance(state.editBlock, workspace.dirty());
+  const guidance = transferFrozen || quietReader() || state.deletedElsewhere ? '' : editBlockGuidance(state.editBlock, workspace.dirty());
   if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
   ownershipNotice.hidden = !guidance;
   syncHistory();
@@ -1245,196 +1244,29 @@ const viewer = createViewerMode(state, {
   finishInitialization: () => { finishInitialization(); },
   onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
 });
-// Cross-window saved-version signals (#159 W3). Messages carry only ids/revisions; every
-// receiver rereads IndexedDB, and handlers never save, so signals cannot loop.
-const signalChannel: BroadcastChannel | undefined = (() => {
-  try { return typeof BroadcastChannel === 'function' ? new BroadcastChannel(DOCUMENT_SIGNAL_CHANNEL) : undefined; }
-  catch { return undefined; }
-})();
-function postSignal(type: DocumentSignal['type'], documentId: string, revision: number): void {
-  if (viewMode || !signalChannel) return;
-  try { signalChannel.postMessage(createDocumentSignal(type, documentId, revision, Date.now())); }
-  catch { /* Signals are advisory; reconcile on focus covers a missed one. */ }
-}
-const versionNotice = document.querySelector<HTMLElement>('#version-notice')!;
-const NEWER_VERSION_NOTICE = 'A newer saved version of this document exists in another window. Your text here has not been changed.';
-/**
- * The displayed document was deleted in another window or tab. This window holds the
- * last copy of its text: offer Keep as new document / Close, never a takeover (there is
- * no owner left to hand over), and treat typing as Keep (#175 follow-up).
- */
-function markDeletedElsewhere(): void {
-  if (viewMode) return;
-  deletedElsewhere = true;
-  focusHandoff?.cancel();
-  hideEditHereBar();
-  clearVersionNotice();
-  deletedBarElement().hidden = false;
-  applyEditAccess();
-  setSaveStatus('Deleted in another window — keep it as a new document or close it.');
-}
-function clearDeletedElsewhere(): void {
-  const bar = deletedBarElement();
-  if (!deletedElsewhere && bar.hidden) return;
-  deletedElsewhere = false;
-  bar.hidden = true;
-}
-let keepingDeleted: Promise<boolean> | undefined;
-/** Save the text shown here as a new document that this window edits. */
-function keepDeletedAsNew(): Promise<boolean> {
-  if (keepingDeleted) return keepingDeleted;
-  keepingDeleted = (async () => {
-    if (!deletedElsewhere || viewMode || state.transitioning) return false;
-    // Reserve the transition so Close / New / the picker cannot switch documents while the
-    // copy takes ownership (they no-op while transitioning).
-    const originalId = state.active.id;
-    state.transitioning = true;
-    const copy = allocateNewDraft(field.value);
-    const title = draftTitle.value.trim();
-    if (title) copy.title = title;
-    copy.history = editor.exportHistory();
-    const start = field.selectionStart;
-    const end = field.selectionEnd;
-    const access = await acquireFor(copy.id);
-    if (!access.ownership) {
-      state.transitioning = false;
-      announceAction('Could not keep this document here — your text is still shown; copy or export it.', { kind: 'failure' });
-      return false;
-    }
-    if (state.active.id !== originalId || !deletedElsewhere) {
-      void access.ownership.release();
-      state.transitioning = false;
-      return false;
-    }
-    writingPosition.save();
-    state.active = copy;
-    clearDeletedElsewhere();
-    showDraft();
-    installOwnership(access);
-    try { field.setSelectionRange(start, end); } catch { /* Field not focusable. */ }
-    workspace.setDirty(true);
-    workspace.bumpContentRevision();
-    rememberActive();
-    state.transitioning = false;
-    // Apply keys held while the copy was made before anything else can edit (keeps order).
-    drainDeletedInput?.();
-    void refreshDrafts().catch(() => { /* The list refreshes on next open. */ });
-    if (autosave.checked) {
-      const result = await persist();
-      announceAction(result.saved ? 'Kept as a new document.' : 'Kept as a new document; it is not saved yet.');
-    } else {
-      announceAction('Kept as a new document. Autosave is off, so it is not saved yet.');
-    }
-    return true;
-  })().finally(() => {
-    keepingDeleted = undefined;
-    if (state.transitioning && deletedElsewhere) state.transitioning = false;
-  });
-  return keepingDeleted;
-}
-let primaryVersionNotice = '';
-function syncVersionNoticeDisplay(): void {
-  const text = primaryVersionNotice;
-  if (!text) {
-    if (versionNotice.hidden && !versionNotice.textContent) return;
-    versionNotice.hidden = true;
-    versionNotice.textContent = '';
-    return;
-  }
-  if (versionNotice.textContent !== text) versionNotice.textContent = text;
-  versionNotice.hidden = false;
-}
-function showVersionNotice(text: string): void {
-  primaryVersionNotice = text;
-  syncVersionNoticeDisplay();
-}
-function clearVersionNotice(): void {
-  primaryVersionNotice = '';
-  syncVersionNoticeDisplay();
-}
-let rereadSeq = 0;
-/** Authoritative reread of the displayed document; signals and focus only decide when to run it. */
-/** A signal or focus arrived while the window was still loading; reread once it has. */
-let rereadAfterInit = false;
-function finishInitialization(): void {
-  if (!rereadAfterInit) return;
-  rereadAfterInit = false;
-  void rereadDisplayed();
-}
-async function rereadDisplayed(): Promise<void> {
-  if (field.disabled) { rereadAfterInit = true; return; }
-  if (!state.db || state.loadingDraft || (viewMode && state.viewMissing)) return;
-  // A local commit may be mid-flight; wait so the displayed revision is current.
-  while (!viewMode && saver.inFlight()) await saver.inFlight()!.catch(() => undefined);
-  const id = state.active.id;
-  const generationAtStart = workspace.sessionGeneration();
-  const seq = ++rereadSeq;
-  let stored: StoredDraft | undefined;
-  try { stored = await getStoredDraft(state.db, id); } catch { return; }
-  if (seq !== rereadSeq || generationAtStart !== workspace.sessionGeneration() || state.active.id !== id) return;
-  if (!viewMode && saver.inFlight()) { void rereadDisplayed(); return; }
-  // A clean read-only ordinary window follows the saved version like a viewer; unsaved text is never replaced.
-  const reader = !viewMode && state.editBlock !== '' && !workspace.dirty();
-  const action = decideReread({
-    role: viewMode || reader ? 'viewer' : 'editor',
-    displayedRevision: state.active.revision,
-    displayedUpdatedAt: state.active.updatedAt,
-    stored,
-  });
-  if (action === 'refresh' && stored) {
-    writingPosition.save();
-    if (viewMode) {
-      viewer.showDocument(stored);
-      setSaveStatus('Updated to the latest saved version. Nothing is saved from this window.');
-    } else {
-      state.active = stored;
-      showDraft();
-      applyEditAccess();
-      if (quietReader()) showSaveState();
-      else setSaveStatus('Updated to the latest saved version. ' + readOnlyStatus());
-    }
-    scheduleListRefresh();
-  } else if (action === 'missing') {
-    if (viewMode) viewer.showMissing(viewer.MISSING);
-    else if (state.active.revision >= 1) markDeletedElsewhere();
-    scheduleListRefresh();
-  } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
-  else if (action === 'notice-deleted') markDeletedElsewhere();
-}
-let listRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-function scheduleListRefresh(): void {
-  if (!viewMode || !state.db) return;
-  clearTimeout(listRefreshTimer);
-  listRefreshTimer = setTimeout(() => { void refreshDrafts().catch(() => { /* The list is advisory in a read-only view. */ }); }, 250);
-}
-signalChannel?.addEventListener('message', event => {
-  const signal = parseDocumentSignal(event.data);
-  if (!signal) return;
-  // While loading, `active` is not the represented document yet; reread once it is.
-  if (field.disabled) { rereadAfterInit = true; return; }
-  scheduleListRefresh();
-  if (shouldApplyDocumentSignal(signal, state.active.id, state.active.revision)) {
-    // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
-    if (ownershipRetry) rereadAfterOwnershipRetry = true;
-    else void rereadDisplayed();
-  }
+const sync = createDocumentSync(state, statusLine, {
+  viewMode, field, draftTitle, editor, workspace, autosave, writingPosition, saver, viewer,
+  focusHandoff: () => focusHandoff,
+  hideEditHereBar: () => { hideEditHereBar(); },
+  applyEditAccess: () => { applyEditAccess(); },
+  deletedBar: () => deletedBarElement(),
+  allocateNewDraft: text => allocateNewDraft(text),
+  acquireFor: documentId => acquireFor(documentId),
+  showDraft: () => { showDraft(); },
+  installOwnership: access => { installOwnership(access); },
+  rememberActive: () => { rememberActive(); },
+  drainDeletedInput: () => { drainDeletedInput?.(); },
+  refreshDrafts: () => refreshDrafts(),
+  persist: () => persist(),
+  quietReader: () => quietReader(),
+  retryOwnership: () => { retryOwnership(); },
+  ownershipRetryPending: () => !!ownershipRetry,
+  rereadAfterOwnershipRetry: () => { rereadAfterOwnershipRetry = true; },
 });
-function reconcileSignals(): void {
-  if (document.visibilityState !== 'visible') return;
-  scheduleListRefresh();
-  // Readers: single-flight reread+acquire. Owners/viewers: still reread so missed signals surface.
-  if (mayRetryEditOwnership(state.editBlock)) retryOwnership();
-  else void rereadDisplayed();
-}
-// #175 step 4: pointer on a read-only field runs cooperative handoff (steal only via Edit here).
-// Plain retry still runs for visibility/window focus when the lock was freed without a handoff.
-field.addEventListener('focus', () => {
-  if (focusHandoff?.pending()) return;
-  if (state.editBlock === 'busy' || state.editBlock === 'lost' || state.editBlock === 'error') return;
-  retryOwnership();
-});
-window.addEventListener('focus', reconcileSignals);
-document.addEventListener('visibilitychange', reconcileSignals);
+const {
+  postSignal, markDeletedElsewhere, clearDeletedElsewhere, keepDeletedAsNew, clearVersionNotice,
+  finishInitialization, rereadDisplayed, reconcileSignals,
+} = sync;
 
 if (!viewMode) {
   focusHandoff = installFocusHandoff({
@@ -1556,7 +1388,7 @@ if (!viewMode) {
     __typebridgeRequestEdit: requestEditHere,
     __typebridgeBufferTitleEdit: (op, start, end) => {
       // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.
-      if (deletedElsewhere) {
+      if (state.deletedElsewhere) {
         holdTitleOp(op, start, end, true);
         keepThenApply();
         return true;
@@ -1611,12 +1443,12 @@ if (!viewMode) {
     });
   };
   const deletedTarget = (event: Event): HTMLTextAreaElement | HTMLInputElement | undefined => {
-    if (!deletedElsewhere) return undefined;
+    if (!state.deletedElsewhere) return undefined;
     return event.target === field ? field : event.target === draftTitle ? draftTitle : undefined;
   };
   // While Keep is making the copy (usually a few ms), the caret and selection must not move:
   // held edits replay at the selection captured when it started.
-  const keepPending = (): boolean => !!keepingDeleted || heldText.length > 0 || heldTitle.length > 0;
+  const keepPending = (): boolean => sync.isKeepingDeleted() || heldText.length > 0 || heldTitle.length > 0;
   const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
   // Capture on the document so these run before the takeover listeners on the field.
   document.addEventListener('pointerdown', event => {
@@ -1681,7 +1513,7 @@ if (!viewMode) {
   });
 }
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
-if (viewMode && !signalChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
+if (viewMode && !sync.hasChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
 void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
   embedded,
   windowId: windowId ?? undefined,
