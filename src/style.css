@@ -1170,8 +1170,20 @@ body.host-page {
   align-items: center;
   gap: 6px;
 }
+/* Keep the toolbar on one line (toolbar-fit.ts): level 1 drops the shortcut hint, level 2
+   shows icon buttons (names stay for assistive tech). Phones start compact. */
+.host-toolbar:is([data-fit="1"], [data-fit="2"]) .shortcut-hint {
+  display: none;
+}
+.host-toolbar[data-fit="2"] button .btn-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 @media (max-width: 640px) {
-  /* Narrow screens: New window and Settings become icon buttons (names stay for AT). */
   .host-toolbar [data-host-action="new-window"] .btn-text,
   .host-toolbar #settings-open .btn-text {
     position: absolute;
@@ -1363,11 +1375,26 @@ body.host-page {
   cursor: nwse-resize;
 }
 .host-window-resize-se {
-  bottom: -4px;
-  right: -4px;
-  width: 12px;
-  height: 12px;
+  bottom: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
   cursor: nwse-resize;
+  /* Visible corner grip: the window edges resize, and this marks where. */
+  background: linear-gradient(
+    135deg,
+    transparent 0 55%,
+    currentColor 55% 62%,
+    transparent 62% 72%,
+    currentColor 72% 79%,
+    transparent 79%
+  );
+  color: var(--muted);
+  opacity: 0.7;
+}
+.host-window-resize-se:hover {
+  color: var(--accent);
+  opacity: 1;
 }
 .host-window-resize-sw {
   bottom: -4px;
@@ -1393,8 +1420,18 @@ body.host-stacked .host-window {
   /* Keep the height grip hittable inside the window box. */
   overflow: visible;
 }
+/* Stacked windows do not move: ☰ is hidden, but stays a keyboard stop for Ctrl/⌘+Shift+Up/Down
+   height resize and shows while focused. */
 body.host-stacked .host-window-move {
   cursor: default;
+}
+body.host-stacked .host-window-move:not(:focus-visible) {
+  flex-basis: 0;
+  width: 0;
+  min-width: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
 }
 body.host-stacked .host-window-resize-n,
 body.host-stacked .host-window-resize-e,

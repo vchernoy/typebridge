@@ -6,6 +6,7 @@ import { ACTIVE_DRAFT_KEY_BASE } from '../editor/drafts';
 import { watchForUpdates } from '../ui/update-notice';
 import { scopeSessionKey } from '../view/window-id';
 import { installHostSettings } from './settings';
+import { installToolbarFit } from './toolbar-fit';
 import { installWindowManager } from './window-manager';
 
 const root = document.querySelector<HTMLElement>('#host-root')!;
@@ -91,6 +92,7 @@ hostHooks.__typebridgeHostRename = windowId => { manager.renameWindow(windowId);
 hostHooks.__typebridgeOpenDocumentIds = exceptWindowId => manager.openDocumentIds(exceptWindowId);
 hostHooks.__typebridgeOpenTitles = exceptWindowId => manager.openTitles(exceptWindowId);
 
+installToolbarFit(toolbar);
 installHostSettings({
   frames: editorFrames,
   exitHostFocus: () => { manager.setHostFocusMode(false); },
