@@ -371,14 +371,37 @@ test('boot does not own a document deleted during acquire', async ({ page, conte
     (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1000;
   });
   const booted = booting.goto('/editor.html');
-  await page.waitForTimeout(200);
+  // Delete only once the booting tab has loaded the document and is waiting to acquire it,
+  // so the delete really lands during acquire (before, it could land before boot read it).
+  await expect(booting.locator('#editor')).toHaveValue('gone at boot');
   await documentAction(page, '#delete-draft');
   await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();
   await expect(page.locator('#status')).toContainText('Document deleted');
   await booted;
-  await expect(booting.locator('#editor')).toBeEnabled();
   await expect.poll(async () => (await readStoredDocs(booting)).some(row => row.id === id)).toBe(false);
+  // It never owns the deleted document; it keeps the text and offers Keep / Close (#202).
+  await expect(booting.locator('#deleted-bar')).toBeVisible();
   expect((await readOwnership(booting, id))?.ownerInstanceId ?? '').not.toBe(await instanceOf(booting));
+  await expect(booting.locator('#editor')).toHaveValue('gone at boot');
+  await booting.getByRole('button', { name: 'Keep as new document' }).click();
+  await expect(role(booting)).toHaveAttribute('data-role', 'editor');
+  await booting.locator('#editor').fill('fresh after miss');
+  await expect(booting.locator('#save-indicator')).toHaveText('Saved');
+  const rows = await readStoredDocs(booting);
+  expect(rows.map(row => row.id)).not.toContain(id);
+  expect(rows.map(row => row.text)).toContain('fresh after miss');
+});
+
+test('boot does not open a document deleted before it lists documents', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'gone before boot');
+  await documentAction(page, '#delete-draft');
+  await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();
+  await expect(page.locator('#status')).toContainText('Document deleted');
+
+  const booting = await context.newPage();
+  await openOrdinary(booting);
+  await expect(booting.locator('#deleted-bar')).toBeHidden();
   await expect(role(booting)).toHaveAttribute('data-role', 'editor');
   await booting.locator('#editor').fill('fresh after miss');
   await expect(booting.locator('#save-indicator')).toHaveText('Saved');
