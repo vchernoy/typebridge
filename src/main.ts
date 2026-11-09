@@ -9,7 +9,7 @@ import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
 import { EDITABLE_HERE } from './editor/status';
 import { createStatusLine } from './ui/status-line';
-import { createReloadBackup, sameContent } from './view/reload-backup';
+import { createReloadBackup } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
 import { createViewerMode } from './view/viewer-mode';
 import { createSaver } from './view/saver';
@@ -18,6 +18,7 @@ import { createDocumentActions, type EditAccess } from './view/documents';
 import { createRecovery } from './view/recovery';
 import { initializeDrafts } from './view/boot';
 import { createDocumentSync } from './view/document-sync';
+import { createLeaveGuards } from './view/leave-guards';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -44,7 +45,7 @@ import {
   contentCommandStillCurrent,
   type CommandGeneration,
 } from './view/session';
-import { clearRecovery, writeRecovery } from './editor/recovery';
+import { writeRecovery } from './editor/recovery';
 import { lineColumnAtOffset } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
 import { setupSearch } from './ui/search';
@@ -540,7 +541,6 @@ const reloadBackup = createReloadBackup({
   onFailed: () => { setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure'); },
 });
 const readPending = reloadBackup.read;
-const savePending = reloadBackup.save;
 const clearPending = reloadBackup.clear;
 function rememberActive(): void {
   if (viewMode) return;
@@ -1561,119 +1561,12 @@ setupExportImport({
     return switchDraft(result.draft.id);
   },
 });
-if (!viewMode) window.addEventListener('pagehide', () => {
-  if (reloadBackup.suppressed()) return;
-  savePending();
-  saver.cancel();
-  void persist();
+const leaveGuards = createLeaveGuards(state, {
+  viewMode, field, autosave, workspace, saver, reloadBackup, recovery,
+  persist: () => persist(),
+  snapshot: () => snapshot(),
 });
-let allowUpdateReload = false;
-let privateReloadChoice: { id: string; generation: number } | undefined;
-function updateReloadReturnFocus(): HTMLElement {
-  const local = document.querySelector<HTMLButtonElement>('#update-reload');
-  if (local) return local;
-  try {
-    const host = window.parent !== window
-      ? window.parent.document.querySelector<HTMLButtonElement>('#update-reload')
-      : null;
-    if (host) return host;
-  } catch { /* Cross-origin parent. */ }
-  return field;
-}
-function clearPendingBackups(): void {
-  reloadBackup.remove();
-}
-
-/**
- * Host calls this immediately before removing the iframe. Arming suppress here — not during
- * prepare — keeps reload/close consent cancellable without disabling backups for the session.
- */
-function commitWindowClose(): void {
-  reloadBackup.setSuppressed(true);
-  clearPendingBackups();
-  // Confirmed discard must forget this window's emergency journals so another
-  // window's recovery poll does not re-offer text the user chose to discard.
-  const discardedJournal = recovery.takeCurrentJournal();
-  if (discardedJournal) {
-    try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
-  }
-}
-
-async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
-  if (state.transitioning || state.deleting || field.disabled) return false;
-  privateReloadChoice = undefined;
-  if (workspace.dirty() && !autosave.checked) {
-    const discard = await askConfirmChoice({
-      title: kind === 'close' ? 'Close without saving?' : 'Reload without saving?',
-      message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
-      confirmLabel: kind === 'close' ? 'Discard changes and close' : 'Discard changes and reload',
-      cancelLabel: 'Keep editing',
-      returnFocus: updateReloadReturnFocus(),
-    });
-    if (discard) {
-      privateReloadChoice = { id: state.active.id, generation: workspace.contentRevision() };
-    }
-    return discard;
-  }
-  savePending();
-  if (workspace.dirty()) await persist();
-  if (!workspace.dirty()) return true;
-  savePending();
-  const pending = readPending();
-  const primaryOk = !workspace.dirty() || (!!pending && sameContent(pending, snapshot()));
-  if (kind === 'reload') return primaryOk;
-  // Close: a session backup is not enough — closing removes the iframe and must not
-  // silently destroy the only copy after a failed save. Ask for explicit discard.
-  return askConfirmChoice({
-    title: 'Close and discard unsaved changes?',
-    message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
-    confirmLabel: 'Discard changes and close',
-    cancelLabel: 'Keep editing',
-    returnFocus: updateReloadReturnFocus(),
-  });
-}
-async function prepareUpdateReload(): Promise<boolean> {
-  return prepareLeaveWithUnsaved('reload');
-}
-async function prepareWindowClose(): Promise<boolean> {
-  return prepareLeaveWithUnsaved('close');
-}
-/** Validate and arm reload; throws to abort. Does not navigate (host reloads the top page). */
-function assertSafeToReloadAfterUpdate(): void {
-  if (state.transitioning || state.deleting || field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
-  if (workspace.dirty()) {
-    if (!autosave.checked) {
-      if (privateReloadChoice?.id !== state.active.id || privateReloadChoice.generation !== workspace.contentRevision()) {
-        throw new Error('Private edits changed');
-      }
-    } else {
-      savePending();
-      const pending = readPending();
-      if (!pending || !sameContent(pending, snapshot())) throw new Error('Reload backup unavailable');
-    }
-  }
-  allowUpdateReload = true;
-}
-function reloadAfterUpdate(): void {
-  assertSafeToReloadAfterUpdate();
-  try { window.location.reload(); } catch (error) { allowUpdateReload = false; throw error; }
-}
-if (!viewMode) window.addEventListener('beforeunload', event => {
-  if (reloadBackup.suppressed()) return;
-  if (workspace.dirty()) {
-    savePending();
-    saver.cancel();
-    void persist();
-    if (!allowUpdateReload) { event.preventDefault(); event.returnValue = ''; }
-  }
-});
-if (!viewMode) document.addEventListener('visibilitychange', () => {
-  if (reloadBackup.suppressed()) return;
-  if (document.visibilityState === 'hidden') {
-    saver.cancel();
-    void persist();
-  }
-});
+const { prepareUpdateReload, prepareWindowClose, assertSafeToReloadAfterUpdate, reloadAfterUpdate, commitWindowClose } = leaveGuards;
 updateStats();
 
 if (!embedded) {
@@ -1713,7 +1606,7 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
       .then(registration => watchForUpdates(registration, {
         prepareReload: prepareUpdateReload,
         reload: reloadAfterUpdate,
-        cancelReload: () => { allowUpdateReload = false; reloadBackup.setSuppressed(false); },
+        cancelReload: () => { leaveGuards.cancelUpdateReload(); },
         dismissedKey: updateDismissKey,
       }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
@@ -1724,7 +1617,7 @@ if (embedded) {
   const hooks: EditorWindow = window;
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
-  hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; reloadBackup.setSuppressed(false); };
+  hooks.__typebridgeCancelUpdateReload = () => { leaveGuards.cancelUpdateReload(); };
   hooks.__typebridgePrepareWindowClose = prepareWindowClose;
   hooks.__typebridgeCommitWindowClose = commitWindowClose;
   hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
