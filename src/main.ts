@@ -7,7 +7,7 @@ import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { EDITABLE_HERE, STORAGE_UNAVAILABLE } from './editor/status';
+import { EDITABLE_HERE } from './editor/status';
 import { createStatusLine } from './ui/status-line';
 import { createReloadBackup, sameContent } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
@@ -16,6 +16,7 @@ import { createSaver } from './view/saver';
 import { createAutosaveToggle, type AutosaveToggle } from './view/autosave-toggle';
 import { createDocumentActions, type EditAccess } from './view/documents';
 import { createRecovery } from './view/recovery';
+import { initializeDrafts } from './view/boot';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -23,7 +24,6 @@ import {
   autosaveEnabled,
   configureActiveDraftKey,
   newDraft,
-  readActiveDraftId,
   setActiveDraftId,
 } from './editor/drafts';
 import { nextUntitledTitle } from './editor/untitled-title';
@@ -31,7 +31,7 @@ import { moveReadOnlyCaret } from './ui/readonly-caret';
 import { nextCharacterBoundary, previousCharacterBoundary } from './editor/characters';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
+import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership } from './view/ownership';
 import { bufferInsertFromKeyboard, handoffRefuseGuidance, mapSelectionAcrossTextChange, replayBufferedInsert, type BufferedInsert, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
@@ -54,7 +54,7 @@ import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
-import { isDocumentId, parseComparisonRoute } from './view/route';
+import { parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { editorWindowApi, exposeEditorWindowApi, hostPageApi, testKnob, type EditorWindow } from './view/embed-api';
 import { setupExportImport } from './ui/export-import';
@@ -1225,93 +1225,6 @@ function handleDatabaseUpgrade(): void {
   applyEditAccess();
   syncMutationControls();
 }
-async function initializeDrafts(): Promise<void> {
-  await ownerReady;
-  let bootAccess: EditAccess | undefined;
-  try {
-    state.db = await openDraftDatabase(handleDatabaseUpgrade);
-    state.drafts = await listStoredDrafts(state.db);
-    let selected: string | null = null;
-    try { selected = readActiveDraftId(); } catch { /* Optional hint. */ }
-    // #175 host restores each window with ?doc= when session hints are cold (fresh tab).
-    if (!selected) {
-      try {
-        const doc = new URLSearchParams(window.location.search).get('doc');
-        if (doc && isDocumentId(doc)) selected = doc;
-      } catch { /* Malformed search — fall through. */ }
-    }
-    const pending = readPending();
-    const committed = pending && state.drafts.find(d => d.id === pending.id);
-    if (pending && committed && sameContent(pending, committed)) clearPending(pending);
-    const restorePending = !!pending && (!committed || !sameContent(pending, committed));
-    // A new host window must not inherit main's drafts[0] — that steals ownership and
-    // makes "Saved" text disappear when the primary window still owns the document.
-    // Also: session may already hold a never-saved blank id from rememberActive(); if that
-    // id is not in IndexedDB yet, keep a fresh document instead of falling through to drafts[0].
-    const listed = selected ? state.drafts.find(d => d.id === selected) : undefined;
-    const openFresh = embedded && !!windowId && windowId !== 'main' && !listed && !restorePending;
-    let chosen = restorePending
-      ? pending!
-      : listed
-        ?? (openFresh
-          ? (() => {
-              // Distinct Untitled defaults across host windows (#175 step 8).
-              const fresh = allocateNewDraft();
-              return selected && isDocumentId(selected) ? { ...fresh, id: selected } : fresh;
-            })()
-          : state.drafts[0])
-        ?? state.active;
-    // A fresh blank document (new host window) is not stored yet; only a stored one can vanish.
-    const chosenWasStored = state.drafts.some(draft => draft.id === chosen.id);
-    // First acquirer among cooperating windows edits; the others open this document read-only.
-    bootAccess = await acquireFor(chosen.id);
-    // The list was read before this window owned the document; reread under the fence.
-    if (bootAccess.ownership && !restorePending) {
-      const fresh = await getStoredDraft(state.db, chosen.id);
-      if (!fresh && chosenWasStored) {
-        // Deleted while we acquired — do not install ownership over the stale list snapshot.
-        void bootAccess.ownership.release();
-        bootAccess = undefined;
-        chosen = allocateNewDraft();
-        bootAccess = await acquireFor(chosen.id);
-      } else if (fresh) {
-        chosen = fresh;
-      }
-    }
-    state.active = chosen;
-    rememberActive();
-    showDraft();
-    installOwnership(bootAccess);
-    bootAccess = undefined;
-    if (restorePending) {
-      workspace.setDirty(true); workspace.bumpContentRevision();
-      applyEditAccess();
-      // Another window owns the document: keep the recovered text here (and its reload backup) for copy/export.
-      if (state.editBlock) setSaveStatus('Recovered unsaved text, but another window is editing this document, so it was not saved. Copy or export it.', 'failure');
-      else if (autosave.checked) { setSaveStatus('Recovered unsaved text; saving…'); await persist(); }
-      else setSaveStatus('Recovered unsaved text; autosave is off');
-    } else if (state.editBlock) showSaveState();
-  } catch (error) {
-    void bootAccess?.ownership?.release();
-    state.db?.close(); state.db = undefined;
-    const pending = readPending();
-    if (pending) { state.active = pending; showDraft(); workspace.setDirty(true); workspace.bumpContentRevision(); state.saveFailed = true; }
-    state.storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
-    setSaveStatus(state.storageProblem, 'failure');
-    renderDrafts();
-  } finally {
-    updateStats();
-  }
-  field.disabled = false;
-  draftSelect.disabled = false;
-  draftTitle.disabled = false;
-  applyEditAccess();
-  // Focus mode must restore after the textarea is enabled — focus() is a no-op while disabled.
-  restoreFocusMode();
-  writingPosition.restore(state.active.id);
-  void renderRecovery();
-  finishInitialization();
-}
 
 
 
@@ -1769,7 +1682,26 @@ if (!viewMode) {
 }
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
 if (viewMode && !signalChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
-void (viewMode ? viewer.initialize() : initializeDrafts());
+void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
+  embedded,
+  windowId: windowId ?? undefined,
+  autosave, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,
+  onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
+  readPending: () => readPending(),
+  clearPending: saved => { clearPending(saved); },
+  allocateNewDraft: () => allocateNewDraft(),
+  acquireFor: documentId => acquireFor(documentId),
+  installOwnership: access => { installOwnership(access); },
+  applyEditAccess: () => { applyEditAccess(); },
+  rememberActive: () => { rememberActive(); },
+  showDraft: () => { showDraft(); },
+  renderDrafts: () => { renderDrafts(); },
+  updateStats: () => { updateStats(); },
+  persist: () => persist(),
+  restoreFocusMode: () => { restoreFocusMode(); },
+  renderRecovery: () => renderRecovery(),
+  finishInitialization: () => { finishInitialization(); },
+}));
 
 setupComparisonOpen({
   embedded,
