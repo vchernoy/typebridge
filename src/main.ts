@@ -7,7 +7,8 @@ import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, statusLineParts, withDraftListRefreshFailure, type StatusMessage } from './editor/status';
+import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, EDITABLE_HERE, SAVE_FAILED, STORAGE_UNAVAILABLE } from './editor/status';
+import { createStatusLine } from './ui/status-line';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -231,159 +232,33 @@ const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved, {
   prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
 });
 
-// One status line carries both save state and action feedback (#52).
-// 'progress' is save state that a later save may replace; 'action' is
-// feedback the user caused; 'conflict' and 'failure' come from saving and
-// must not be hidden by a later background success.
-type StatusKind = 'progress' | 'action' | 'conflict' | 'failure';
-const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
-const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
-const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
-const NOT_OWNER_UNSAVED = 'Changes here are not saved — another window is editing this document. Copy or export them.';
-const READ_ONLY_HERE = 'Read-only here — another window is editing this document.';
-/** Handoff success text from focus-handoff.ts; shown quietly as the normal save state. */
-const EDITABLE_HERE = 'You can edit this document in this window now.';
-const READ_ONLY_UNSUPPORTED = 'Read-only — this browser cannot coordinate editing between windows.';
-let statusKind: StatusKind = 'progress';
-let statusMessage: StatusMessage = { conflict: '', primary: '', risk: '', draftListRefreshFailed: false };
 type PersistResult = { saved: boolean; conflict: boolean };
 type SwitchResult = { opened: boolean; conflict: boolean };
-/** Cancels a pending deferred conflict write so a newer setConflict/clear wins. */
-let conflictAnnounceToken = 0;
-/** True between clearing the live region and the rAF rewrite for an identical conflict. */
-let conflictReannouncePending = false;
-/** Routine save progress that the top-bar indicator already shows (#156). */
-function isRoutineSaveAnnouncement(body: string): boolean {
-  return body === 'Saved locally' || body === 'Saving…';
-}
-/** Body/separator only — conflict live region is owned by setConflict. */
-function renderStatus(): void {
-  const { sep, body } = statusLineParts(statusMessage, conflictNotice.textContent ?? '');
-  if (statusSep.textContent !== sep) statusSep.textContent = sep;
-  if (status.textContent !== body) status.textContent = body;
-  // Keep announcing save progress, but show it once in the top bar (#156).
-  status.classList.toggle('status--announced-only', isRoutineSaveAnnouncement(body));
-  updateSaveIndicator();
-}
 let saveFailed = false;
 // Non-empty while browser storage cannot be used (failed or blocked
 // initialization, or an upgrade in another tab). Nothing in this page
 // restores it; only a reload can.
 let storageProblem = '';
-/** Single writer for status fields so clears/resets cannot skip a part. */
-function updateStatus(patch: Partial<StatusMessage>, kind?: StatusKind): void {
-  statusMessage = { ...statusMessage, ...patch };
-  if (kind !== undefined) statusKind = kind;
-  renderStatus();
-}
-/**
- * Write the conflict live region. Identical wording re-announces on a later frame
- * so assistive tech sees a clear change. Switch flushes that defer announcement
- * leave the model empty until switchDraft calls this.
- */
-function setConflict(text: string, reannounce = false): void {
-  statusMessage = { ...statusMessage, conflict: text };
-  if (text) statusKind = 'conflict';
-  if (!text) {
-    conflictAnnounceToken++;
-    conflictReannouncePending = false;
-    if (conflictNotice.textContent) conflictNotice.textContent = '';
-    renderStatus();
-    return;
-  }
-  if (reannounce && conflictNotice.textContent === text) {
-    const token = ++conflictAnnounceToken;
-    conflictReannouncePending = true;
-    conflictNotice.textContent = '';
-    renderStatus();
-    // Microtask: a later turn than this clear (so live regions observe a change), and
-    // not a timer — Playwright's paused fake clock would otherwise leave the notice blank.
-    queueMicrotask(() => {
-      if (token !== conflictAnnounceToken) return;
-      conflictReannouncePending = false;
-      if (statusMessage.conflict !== text) return;
-      conflictNotice.textContent = text;
-      renderStatus();
-    });
-    return;
-  }
-  conflictAnnounceToken++;
-  conflictReannouncePending = false;
-  if (conflictNotice.textContent !== text) conflictNotice.textContent = text;
-  renderStatus();
-}
-function clearNotices(): void {
-  conflictAnnounceToken++;
-  conflictReannouncePending = false;
-  if (conflictNotice.textContent) conflictNotice.textContent = '';
-  updateStatus({ conflict: '', draftListRefreshFailed: false });
-}
-function setSaveStatus(text: string, kind: Exclude<StatusKind, 'action'> = 'progress'): void {
-  // Save-state updates drop a stale list-refresh suffix; conflict is preserved.
-  updateStatus({ primary: text, risk: '', draftListRefreshFailed: false }, kind);
-}
-/** The warning that must stay visible while text or storage is at risk. */
-function riskText(): string {
-  if (storageProblem) {
-    if (!workspace.dirty()) return storageProblem;
-    return storageProblem === STORAGE_UNAVAILABLE ? SAVE_FAILED_NO_STORAGE : 'Changes are unsaved. ' + storageProblem;
-  }
-  if (editBlock && workspace.dirty()) return NOT_OWNER_UNSAVED;
-  if (saveFailed && autosave.checked) return SAVE_FAILED;
-  if (workspace.dirty() && !autosave.checked) return AUTOSAVE_OFF;
-  return '';
-}
-function setRiskStatus(primary: string, kind: StatusKind, risk = riskText()): void {
-  updateStatus({ primary, risk }, kind);
-}
-function statusKindForRisk(risk: string): Exclude<StatusKind, 'action' | 'conflict'> {
-  return risk === AUTOSAVE_OFF ? 'progress' : 'failure';
-}
-/** Explicit action/failure feedback: one place for conflict reset, risk join and kind. */
-function announceAction(text: string, options: {
-  kind?: StatusKind;
-  /** Keep the current conflict string. */
-  keepConflict?: boolean;
-  /** Messages that already describe save state must not also append riskText(). */
-  omitRisk?: boolean;
-} = {}): void {
-  const kind = options.kind ?? 'action';
-  if (!options.keepConflict) setConflict('');
-  else if (statusMessage.conflict && !conflictReannouncePending && conflictNotice.textContent !== statusMessage.conflict) {
-    // Sync a deferred model-only write without cancelling a pending re-announce.
-    setConflict(statusMessage.conflict);
-  }
-  const risk = options.omitRisk ? '' : riskText();
-  if (risk) updateStatus({ draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
-  else updateStatus({ draftListRefreshFailed: false, primary: text, risk: '' }, kind);
-}
-const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
-/** Save progress that never hides a known failure (#52 review of 6a5d4c5). */
-function showSaving(): void {
-  if (storageProblem) setSaveStatus(riskText(), 'failure'); // No save can succeed.
-  else if (saveFailed) setSaveStatus(RETRYING, 'failure');  // Cleared only by a commit.
-  else setSaveStatus('Saving…');
-}
-/** Show the save state alone, e.g. after loading a draft. */
-function showSaveState(): void {
-  const risk = riskText();
-  if (risk) setSaveStatus(risk, statusKindForRisk(risk));
-  else if (editBlock) setSaveStatus(readOnlyStatus());
-  else setSaveStatus(autosave.checked ? 'Saved locally' : AUTOSAVE_OFF);
-}
-function readOnlyStatus(): string {
-  if (quietReader()) return autosave.checked ? 'Saved locally' : AUTOSAVE_OFF;
-  if (editBlock === 'unsupported') return READ_ONLY_UNSUPPORTED;
-  if (editBlock === 'error') return 'Read-only — this window could not confirm it may edit this document.';
-  return READ_ONLY_HERE;
-}
-function markDraftListRefreshFailed(): void {
-  updateStatus(withDraftListRefreshFailure(statusMessage, riskText()));
-}
-/** Same gate for persist and switch refresh failures — never attach to newer action feedback. */
-function shouldAttachDraftListRefreshFailure(): boolean {
-  return !workspace.dirty() && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict');
-}
+const statusLine = createStatusLine({
+  conflictNotice,
+  statusSep,
+  status,
+  afterRender: () => { updateSaveIndicator(); },
+  risk: () => ({
+    storageProblem,
+    dirty: workspace.dirty(),
+    blocked: editBlock !== '',
+    saveFailed,
+    autosaveOn: autosave.checked,
+  }),
+  editBlock: () => editBlock,
+  quietReader: () => quietReader(),
+});
+const {
+  updateStatus, setConflict, clearNotices, setSaveStatus, riskText, setRiskStatus,
+  announceAction, showSaving, showSaveState, readOnlyStatus,
+  markDraftListRefreshFailed, shouldAttachDraftListRefreshFailure,
+} = statusLine;
 const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
 const undo = document.querySelector<HTMLButtonElement>('#undo')!;
@@ -800,7 +675,7 @@ async function refreshDrafts(): Promise<void> {
   if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   if (db) drafts = await listStoredDrafts(db);
   renderDrafts();
-  if (statusMessage.draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
+  if (statusLine.message().draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
 }
 function showDraft(): void {
   clearDeletedElsewhere();
@@ -1333,15 +1208,15 @@ async function persist(): Promise<PersistResult> {
           updateStatus({
             primary: workspace.dirty() && !storageProblem ? 'Saving…' : '',
             risk: riskText(),
-          }, transitioning ? statusKind : 'conflict');
+          }, transitioning ? statusLine.kind() : 'conflict');
           // The copy is a new document; later saves in this loop need its fence.
           await takeOwnership(result.draft.id);
         }
         // A background save must not replace newer action feedback or a conflict
         // notice, but it must replace progress and an earlier failure it resolved.
-        // Use statusKind (not merely a pending conflict string) so an action that
+        // Use the status kind (not merely a pending conflict string) so an action that
         // kept a conflict notice — e.g. a failed draft switch — is not wiped.
-        if (!workspace.dirty() && !result.conflict && (statusKind === 'progress' || statusKind === 'failure' || statusKind === 'conflict')) {
+        if (!workspace.dirty() && !result.conflict && (statusLine.kind() === 'progress' || statusLine.kind() === 'failure' || statusLine.kind() === 'conflict')) {
           // Storage can become unusable while this save was in flight (an
           // upgrade in another tab); never replace that warning.
           const risk = riskText();
@@ -1363,7 +1238,7 @@ async function persist(): Promise<PersistResult> {
       // Keep newer action feedback that already carries this exact warning;
       // keep a conflict notice in front of the warning; otherwise show risk alone.
       const risk = riskText() || SAVE_FAILED;
-      if (statusMessage.primary && statusMessage.risk === risk) updateStatus({}, 'failure');
+      if (statusLine.message().primary && statusLine.message().risk === risk) updateStatus({}, 'failure');
       else setRiskStatus('', 'failure', risk);
       return { saved: false, conflict: createdConflict };
     }
