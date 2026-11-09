@@ -22,13 +22,25 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | [#41](https://github.com/vchernoy/typebridge/issues/41) | Markdown / smart paste / Facebook / themes | Research |
 | [#48](https://github.com/vchernoy/typebridge/issues/48) | Cross-tab saved-version notifications | Saved/renamed/deleted signals for viewers and notice-only editors landed via [#159](https://github.com/vchernoy/typebridge/issues/159) W3; remaining scope (clean-editor refresh, editor list refresh, other preference signals) stays on #48, do not close it automatically |
 | [#159](https://github.com/vchernoy/typebridge/issues/159) | In-tab split (superseded) | Closed / not planned for further S-slices. W1–W4 kept; in-page split removed in #175 step 10. See [ADR 159](adr/159-comparison-window.md) |
-| [#175](https://github.com/vchernoy/typebridge/issues/175) | Movable editor windows in one tab | Replaces #159 split. Iframe windows with tab-style editing/ownership; free layout on desktop, stacked on phone. Steps 1–10 on `main`; step 11 verification packaging + must-ship a11y (F6, named regions): [ADR 175](adr/175-editor-windows.md), [evidence/175](evidence/175/README.md) |
+| [#175](https://github.com/vchernoy/typebridge/issues/175) | Movable editor windows in one tab | **Shipped (closed).** Replaced the #159 split. `/` is the multi-window host (cutover #205); each window is `/editor.html` with tab-style editing/ownership, free layout on desktop, stacked on phone, two-line Focus. Paused split/handoff PRs #164 and #174 are closed. [ADR 175](adr/175-editor-windows.md), [evidence/175](evidence/175/README.md) |
+
+## Next (as of 2026-11-09)
+
+Proposed order after the #175 cutover; each item is one or a few small PRs.
+
+1. **Test reliability.** Find the race behind each intermittent e2e failure and fix it in code or test (no retries, skips or quarantine): `edit-ownership.spec.ts:365` (also fails on `main` under parallel load), `focus-handoff.spec.ts:242`, `host-shared-settings.spec.ts:214`, `find-replace.spec.ts:43`, and the Firefox document-menu race in [#155](https://github.com/vchernoy/typebridge/issues/155).
+2. **Test hooks out of production.** The `__typebridge*` globals used by e2e are exposed in the production build; expose them only in test builds.
+3. **Split `src/main.ts`** ([#99](https://github.com/vchernoy/typebridge/issues/99); now about 3,000 lines) into focused modules with no behavior change.
+4. **Small P2/P3 follow-ups:** [#107](https://github.com/vchernoy/typebridge/issues/107) writing-position write debounce, [#97](https://github.com/vchernoy/typebridge/issues/97) conflict re-announce timing, picker label length, [#62](https://github.com/vchernoy/typebridge/issues/62) search audit.
+5. **Next feature (maintainer to choose):** [#39](https://github.com/vchernoy/typebridge/issues/39) portable share links (ready for implementation) or [#37](https://github.com/vchernoy/typebridge/issues/37) retained version history.
+
+Open questions: whether [#7](https://github.com/vchernoy/typebridge/issues/7) (a source pane with a derived transliterated output pane) is still wanted now that windows exist; [#70](https://github.com/vchernoy/typebridge/issues/70) only concerns the single editor page `/editor.html`, since host windows resize by their edges; [#12](https://github.com/vchernoy/typebridge/issues/12) awaits only its manual release checks.
 
 ## Audit and current reliability follow-ups
 
 [Audit #71](https://github.com/vchernoy/typebridge/issues/71) records baseline code, exact verification limits and AI handoff. #62 tracks search correctness/UX; #72 excluded core unit tests; #73 a recovery confirmation-test wait cycle; #74 stale documentation; #75 the Pages release gate. Existing #66–#70 own status feedback, Escape, macOS shortcut conflict, centralized shortcut settings and editor resizing. Design-dependent issues require their specified UX decision before implementation.
 
-This document is a snapshot. A merged implementation and a production-verified release are different stages; consult linked issues/PRs for later changes. Portable sharing, dual panels, Markdown/rich preview, retained version snapshots and advanced navigation/indentation remain future work. Go to line and the caret line/column readout are the first shipped slice of [#60](https://github.com/vchernoy/typebridge/issues/60); see [navigation](NAVIGATION.md).
+This document is a snapshot. A merged implementation and a production-verified release are different stages; consult linked issues/PRs for later changes. Portable sharing, a source/output dual panel (#7, distinct from windows), Markdown/rich preview, retained version snapshots and advanced navigation/indentation remain future work. Go to line and the caret line/column readout are the first shipped slice of [#60](https://github.com/vchernoy/typebridge/issues/60); see [navigation](NAVIGATION.md).
 
 ## P0 — Reliability and unfinished work
 
