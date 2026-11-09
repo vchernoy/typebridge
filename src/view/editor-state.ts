@@ -44,6 +44,8 @@ export type EditorState = {
   transferFrozen: boolean;
   /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
   storageGeneration: number;
+  /** Suppress scheduleSave while applying handoff snapshots (not a content edit). */
+  suppressEditTracking: boolean;
 };
 
 export function createEditorState(): EditorState {
@@ -62,5 +64,6 @@ export function createEditorState(): EditorState {
     deletedElsewhere: false,
     transferFrozen: false,
     storageGeneration: 0,
+    suppressEditTracking: false,
   };
 }
