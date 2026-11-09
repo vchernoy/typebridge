@@ -50,6 +50,7 @@ import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
+import { editorWindowApi, exposeEditorWindowApi, hostPageApi, testKnob, type EditorWindow } from './view/embed-api';
 import { parseEmbedMode } from './view/embed';
 import { notifyPrefsChanged, onPrefsChanged, PREFS_EVENT, type PrefName } from './view/prefs-sync';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
@@ -180,10 +181,7 @@ const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setu
   onFocusModeChange: enabled => {
     if (!embedded || window.parent === window) return;
     try {
-      const host = window.parent as Window & {
-        __typebridgeHostFocusMode?: (on: boolean, sourceWindowId?: string) => void;
-      };
-      host.__typebridgeHostFocusMode?.(enabled, windowId ?? undefined);
+      hostPageApi()?.__typebridgeHostFocusMode?.(enabled, windowId ?? undefined);
     } catch { /* Cross-origin parent is out of scope. */ }
   },
 });
@@ -821,8 +819,7 @@ function allocateNewDraft(text = ''): StoredDraft {
   // Other host windows may hold unsaved Untitled titles not yet in IndexedDB.
   if (embedded && window.parent !== window) {
     try {
-      const host = window.parent as Window & { __typebridgeOpenTitles?: (exceptWindowId?: string) => string[] };
-      titles.push(...(host.__typebridgeOpenTitles?.(windowId ?? undefined) ?? []));
+      titles.push(...(hostPageApi()?.__typebridgeOpenTitles?.(windowId ?? undefined) ?? []));
     } catch { /* Parent unavailable. */ }
   }
   return { ...newDraft(text, nextUntitledTitle(titles)), revision: 0 };
@@ -831,10 +828,9 @@ function allocateNewDraft(text = ''): StoredDraft {
 function openDocumentIdsElsewhere(): Set<string> {
   if (!embedded || window.parent === window) return new Set();
   try {
-    const host = window.parent as Window & { __typebridgeOpenDocumentIds?: (exceptWindowId?: string) => string[] };
     // exceptWindowId already omits this window; keep ids open in *other* windows,
     // including the active document when it is duplicated (#175 step 8).
-    const ids = host.__typebridgeOpenDocumentIds?.(windowId ?? undefined) ?? [];
+    const ids = hostPageApi()?.__typebridgeOpenDocumentIds?.(windowId ?? undefined) ?? [];
     return new Set(ids.filter(id => !!id));
   } catch {
     return new Set();
@@ -873,7 +869,7 @@ function renderDrafts(): void {
   draftSelect.size = Math.min(8, Math.max(2, draftSelect.options.length || 2));
 }
 async function refreshDrafts(): Promise<void> {
-  const delayMs = (window as Window & { __typebridgeDelayRefreshMs?: number }).__typebridgeDelayRefreshMs;
+  const delayMs = testKnob('__typebridgeDelayRefreshMs');
   if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   if (db) drafts = await listStoredDrafts(db);
   renderDrafts();
@@ -1062,7 +1058,7 @@ async function acquireFor(documentId: string, options: { steal?: boolean } = {})
   if (viewMode || !db) return { block: '', generation: storageGeneration };
   const generation = storageGeneration;
   // E2E may set a delay to assert mutations are frozen during ownership transfer (#159 W4).
-  const delayMs = (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs;
+  const delayMs = testKnob('__typebridgeDelayAcquireMs');
   if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   if (generation !== storageGeneration || !db) return { block: 'error', generation: storageGeneration };
   let held: EditOwnership | undefined;
@@ -1073,7 +1069,7 @@ async function acquireFor(documentId: string, options: { steal?: boolean } = {})
       steal: options.steal,
     });
     // E2E: hold the lock briefly before returning so a mid-flight versionchange can be asserted.
-    const afterMs = (window as Window & { __typebridgeDelayAfterAcquireMs?: number }).__typebridgeDelayAfterAcquireMs;
+    const afterMs = testKnob('__typebridgeDelayAfterAcquireMs');
     if (typeof afterMs === 'number' && afterMs > 0 && result.status === 'acquired') {
       await new Promise(resolve => setTimeout(resolve, afterMs));
     }
@@ -1369,7 +1365,7 @@ async function persist(): Promise<PersistResult> {
   if (saving) return saving;
   saving = (async () => {
     // E2E may delay the in-flight save so Autosave-off can race a document switch (#159 W4).
-    const delayMs = (window as Window & { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+    const delayMs = testKnob('__typebridgeDelayPersistMs');
     if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     let createdConflict = false;
     try {
@@ -1767,15 +1763,15 @@ document.querySelector<HTMLButtonElement>('#rename-draft')!.addEventListener('cl
   if (viewMode) return;
   if (embedded && windowId && window.parent !== window) {
     try {
-      const host = window.parent as Window & { __typebridgeHostRename?: (id: string) => void };
-      if (host.__typebridgeHostRename) { host.__typebridgeHostRename(windowId); return; }
+      const host = hostPageApi();
+      if (host?.__typebridgeHostRename) { host.__typebridgeHostRename(windowId); return; }
     } catch { /* Cross-origin parent is out of scope. */ }
   }
   draftTitle.focus();
   draftTitle.select();
   // If editing must move here first, the takeover reloads the title: select it again then.
   selectTitleWhenEditable = draftTitle.readOnly;
-  (window as Window & { __typebridgeRequestEdit?: () => void }).__typebridgeRequestEdit?.();
+  editorWindowApi(window)?.__typebridgeRequestEdit?.();
 });
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
   if (readOnlyNow() || transitioning) return;
@@ -2458,20 +2454,18 @@ if (!viewMode) {
   });
   // Host title bar (#175 step 8) edits this window's title: let it start a takeover too,
   // and hold what was typed there the same way.
-  const titleHooks = window as Window & {
-    __typebridgeRequestEdit?: () => void;
-    __typebridgeBufferTitleEdit?: (op: TitleOp, start: number, end: number) => boolean;
-  };
-  titleHooks.__typebridgeRequestEdit = requestEditHere;
-  titleHooks.__typebridgeBufferTitleEdit = (op, start, end) => {
-    // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.
-    if (deletedElsewhere) {
-      holdTitleOp(op, start, end, true);
-      keepThenApply();
-      return true;
-    }
-    return bufferTitleEdit(op, start, end, true);
-  };
+  exposeEditorWindowApi({
+    __typebridgeRequestEdit: requestEditHere,
+    __typebridgeBufferTitleEdit: (op, start, end) => {
+      // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.
+      if (deletedElsewhere) {
+        holdTitleOp(op, start, end, true);
+        keepThenApply();
+        return true;
+      }
+      return bufferTitleEdit(op, start, end, true);
+    },
+  });
 
   // Deleted elsewhere (#175 follow-up): no takeover (nobody owns it any more). Keep as new
   // document or Close; typing or pasting into the text or title keeps it, then applies.
@@ -2897,37 +2891,8 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
   });
 }
 if (embedded) {
-  const hooks = window as Window & {
-    __typebridgePrepareUpdateReload?: () => Promise<boolean>;
-    __typebridgeAssertSafeUpdateReload?: () => void;
-    __typebridgeCancelUpdateReload?: () => void;
-    /** Host window manager asks before removing this iframe (#175 step 5). */
-    __typebridgePrepareWindowClose?: () => Promise<boolean>;
-    /** Host calls immediately before removing the iframe after prepareClose succeeds. */
-    __typebridgeCommitWindowClose?: () => void;
-    __typebridgeSetFocusMode?: (enabled: boolean) => void;
-    /** #175 step 7: host Settings asks every window to apply a shared preference. */
-    __typebridgeApplyPrefs?: (name: PrefName, origin?: string) => void;
-    /** #175 step 8: host title bar rename write-through. */
-    __typebridgeSetTitle?: (title: string) => void;
-    __typebridgeGetTitle?: () => string;
-    /** Host title beforeinput — runs through the title Editor (transliteration). */
-    __typebridgeTitleEdit?: (payload: {
-      inputType: string;
-      data: string | null;
-      start: number;
-      end: number;
-    }) => { value: string; start: number; end: number } | null;
-    /** Host title IME/delete commit — records one undoable edit in the title Editor. */
-    __typebridgeTitleCommit?: (
-      value: string,
-      start?: number,
-      end?: number,
-    ) => { value: string; start: number; end: number } | null;
-    __typebridgeToggleTransliteration?: () => void;
-    /** #175 step 9: host title bar Ctrl/⌘+F opens this window's Find. */
-    __typebridgeOpenFind?: () => void;
-  };
+  // This window's side of the host↔window contract (see view/embed-api.ts).
+  const hooks: EditorWindow = window;
   hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
   hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
   hooks.__typebridgeCancelUpdateReload = () => { allowUpdateReload = false; suppressPendingBackup = false; };

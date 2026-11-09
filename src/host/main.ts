@@ -4,6 +4,7 @@
 import '../style.css';
 import { ACTIVE_DRAFT_KEY_BASE } from '../editor/drafts';
 import { watchForUpdates } from '../ui/update-notice';
+import { editorWindowApi, exposeHostPageApi, type EditorWindowApi } from '../view/embed-api';
 import { scopeSessionKey } from '../view/window-id';
 import { installHostSettings } from './settings';
 import { readHostLayout } from './layout';
@@ -15,16 +16,9 @@ const root = document.querySelector<HTMLElement>('#host-root')!;
 const toolbar = document.querySelector<HTMLElement>('#host-toolbar')!;
 const noticeMount = document.querySelector<HTMLElement>('#host-notice')!;
 
-type EditorHooks = {
-  __typebridgePrepareUpdateReload?: () => Promise<boolean>;
-  __typebridgeAssertSafeUpdateReload?: () => void;
-  __typebridgeCancelUpdateReload?: () => void;
-  __typebridgePrepareWindowClose?: () => Promise<boolean>;
-  __typebridgeCommitWindowClose?: () => void;
-};
-
-function editorHooks(frame: HTMLIFrameElement): EditorHooks {
-  return (frame.contentWindow ?? {}) as EditorHooks;
+/** A window's side of the host↔window contract (see view/embed-api.ts); empty until it loads. */
+function editorHooks(frame: HTMLIFrameElement): Partial<EditorWindowApi> {
+  return editorWindowApi(frame.contentWindow) ?? {};
 }
 
 function editorFrames(): HTMLIFrameElement[] {
@@ -82,25 +76,17 @@ const manager = installWindowManager({
   },
 });
 
-// Expose for e2e probes and embedded Focus-mode handoff (#175 step 6).
-const hostHooks = window as Window & {
-  __typebridgeHostWindows?: () => ReturnType<typeof manager.windows>;
-  __typebridgeHostLayoutMode?: () => ReturnType<typeof manager.layoutMode>;
-  __typebridgeHostFocusMode?: (enabled: boolean, sourceWindowId?: string) => void;
-  __typebridgeHostCycleFocus?: () => void;
-  __typebridgeHostRename?: (windowId: string) => void;
-  __typebridgeOpenDocumentIds?: (exceptWindowId?: string) => string[];
-  __typebridgeOpenTitles?: (exceptWindowId?: string) => string[];
-};
-hostHooks.__typebridgeHostWindows = () => manager.windows();
-hostHooks.__typebridgeHostLayoutMode = () => manager.layoutMode();
-hostHooks.__typebridgeHostFocusMode = (enabled, sourceWindowId) => {
-  manager.setHostFocusMode(enabled, sourceWindowId);
-};
-hostHooks.__typebridgeHostCycleFocus = () => { manager.cycleFocus(); };
-hostHooks.__typebridgeHostRename = windowId => { manager.renameWindow(windowId); };
-hostHooks.__typebridgeOpenDocumentIds = exceptWindowId => manager.openDocumentIds(exceptWindowId);
-hostHooks.__typebridgeOpenTitles = exceptWindowId => manager.openTitles(exceptWindowId);
+// The host's side of the host↔window contract (see view/embed-api.ts).
+exposeHostPageApi({
+  __typebridgeHostWindows: () => manager.windows(),
+  __typebridgeHostLayoutMode: () => manager.layoutMode(),
+  __typebridgeHostFocusMode: (enabled, sourceWindowId) => {
+    manager.setHostFocusMode(enabled, sourceWindowId);
+  },
+  __typebridgeHostRename: windowId => { manager.renameWindow(windowId); },
+  __typebridgeOpenDocumentIds: exceptWindowId => manager.openDocumentIds(exceptWindowId),
+  __typebridgeOpenTitles: exceptWindowId => manager.openTitles(exceptWindowId),
+});
 
 installToolbarFit(toolbar);
 installHostSettings({

@@ -7,6 +7,7 @@ import { setupResetSettings } from '../ui/reset-settings';
 import { setupRules } from '../ui/rules';
 import { setupSettings, openSettingsTo, ensureSettingsOpen } from '../ui/settings';
 import { setupWindowLayoutSetting } from '../ui/window-layout-setting';
+import { exposeHostPageApi } from '../view/embed-api';
 import { setAutosaveEnabled, autosaveEnabled } from '../editor/drafts';
 import {
   TRANSLITERATION_SHORTCUTS,
@@ -268,7 +269,7 @@ export function installHostSettings(deps: {
   }
 
   // Expose for embedded "Change typing shortcut" / About bridges.
-  (window as Window & { __typebridgeOpenSettings?: typeof open }).__typebridgeOpenSettings = open;
+  exposeHostPageApi({ __typebridgeOpenSettings: open });
 
   renderHostMode();
 

@@ -6,6 +6,7 @@
  * open the parent host panel instead.
  */
 import { registerEscapeLayer } from './escape-layers';
+import { exposeHostPageApi, hostPageApi } from '../view/embed-api';
 
 let panel: HTMLElement;
 let openButton: HTMLButtonElement;
@@ -38,8 +39,7 @@ export function tryCloseSettings(): boolean {
 export function tryCloseHostSettings(): boolean {
   if (window.parent === window) return false;
   try {
-    const host = window.parent as Window & { __typebridgeTryCloseSettings?: () => boolean };
-    return !!host.__typebridgeTryCloseSettings?.();
+    return !!hostPageApi()?.__typebridgeTryCloseSettings?.();
   } catch {
     return false;
   }
@@ -64,10 +64,8 @@ export function openSettingsTo(target: HTMLElement, restore: HTMLElement): void 
 export function openHostSettings(focusId?: string, restore?: HTMLElement | null): boolean {
   if (window.parent === window) return false;
   try {
-    const host = window.parent as Window & {
-      __typebridgeOpenSettings?: (opts?: { focus?: string; returnFocus?: HTMLElement | null }) => void;
-    };
-    if (!host.__typebridgeOpenSettings) return false;
+    const host = hostPageApi();
+    if (!host?.__typebridgeOpenSettings) return false;
     host.__typebridgeOpenSettings({
       focus: focusId,
       returnFocus: restore ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null),
@@ -114,5 +112,5 @@ export function setupSettings(options?: { embedded?: boolean }): void {
     });
   }
   registerEscapeLayer(panel, 30, close);
-  (window as Window & { __typebridgeTryCloseSettings?: () => boolean }).__typebridgeTryCloseSettings = tryCloseSettings;
+  exposeHostPageApi({ __typebridgeTryCloseSettings: tryCloseSettings });
 }
