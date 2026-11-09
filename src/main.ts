@@ -11,6 +11,7 @@ import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, EDITABLE_HERE, SAVE_FA
 import { createStatusLine } from './ui/status-line';
 import { createReloadBackup, sameContent } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
+import { createViewerMode } from './view/viewer-mode';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -51,7 +52,7 @@ import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
 import { installEscapeLayers } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
-import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
+import { isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { editorWindowApi, exposeEditorWindowApi, hostPageApi, testKnob, type EditorWindow } from './view/embed-api';
 import { setupExportImport } from './ui/export-import';
@@ -1521,7 +1522,7 @@ async function switchDraft(id?: string): Promise<SwitchResult> {
 }
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
 for (const picker of documentPickers) {
-  picker.addEventListener('change', () => { void (viewMode ? viewerOpen(picker.value) : switchDraft(picker.value)); });
+  picker.addEventListener('change', () => { void (viewMode ? viewer.open(picker.value) : switchDraft(picker.value)); });
 }
 draftTitle.addEventListener('blur', () => { selectTitleWhenEditable = false; });
 // Documents → Rename…: in a host window the title lives in the window's title bar.
@@ -1807,112 +1808,21 @@ async function initializeDrafts(): Promise<void> {
 
 /** Restore a pane-B reload snapshot after the primary session is live. */
 
-const viewerBadge = document.querySelector<HTMLElement>('#viewer-badge')!;
-const viewerNotice = document.querySelector<HTMLElement>('#viewer-notice')!;
-const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
-const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
-const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
-const VIEWER_DISABLED_CONTROLS = ['rename-draft', 'new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
-  'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
-/** Controls that only make sense while a saved document is shown. */
-const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];
-function applyViewerChrome(): void {
-  document.body.classList.add('viewer');
-  document.documentElement.dataset.role = 'viewer';
-  document.title = 'Comparison · TypeBridge';
-  saveIndicator.hidden = true;
-  viewerBadge.hidden = false;
-  field.readOnly = true;
-  draftTitle.readOnly = true;
-  autosave.disabled = true;
-  for (const id of VIEWER_DISABLED_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
-}
-function showViewerStatus(): void {
-  if (state.storageProblem) setSaveStatus(state.storageProblem, 'failure');
-  else setSaveStatus(state.viewMissing ? '' : VIEWER_STATUS);
-}
-function showViewerMissing(message: string): void {
-  workspace.bumpSessionGeneration();
-  workspace.setDocumentId('');
-  state.viewMissing = true;
-  state.loadingDraft = true;
-  try { editor.load(''); draftTitle.value = ''; syncTitleTooltip(); }
-  finally { state.loadingDraft = false; }
-  state.active = { ...newDraft(), revision: 0 };
-  workspace.setDirty(false);
-  viewerNotice.textContent = message;
-  viewerNotice.hidden = false;
-  viewerBadge.textContent = 'Read-only comparison view';
-  for (const id of VIEWER_NEEDS_DOCUMENT) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
-  renderDrafts();
-  updateStats();
-  showViewerStatus();
-}
-function showViewerDocument(draft: StoredDraft): void {
-  state.viewMissing = false;
-  state.active = draft;
-  showDraft();
-  viewerNotice.hidden = true;
-  viewerNotice.textContent = '';
-  viewerBadge.textContent = 'Saved version · Read-only';
-  viewerBadge.dataset.revision = String(draft.revision);
-  viewerBadge.title = `Saved revision ${draft.revision}`;
-  for (const id of VIEWER_NEEDS_DOCUMENT) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = false;
-  showViewerStatus();
-}
-function syncViewerUrl(id: string): void {
-  // Preserve ?window= so a viewer iframe keeps scoped sessionStorage across doc switches (#175).
-  const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', id, windowId);
-  if (!href) return;
-  // Keep the hash: it is reserved for portable share links (#39).
-  try { history.replaceState(null, '', href + window.location.hash); } catch { /* The address bar is optional. */ }
-}
-let viewerLoad = 0;
-async function viewerOpen(id: string): Promise<void> {
-  const load = ++viewerLoad;
-  workspace.bumpSessionGeneration();
-  try {
-    if (!state.db) throw new Error('Storage unavailable');
-    const next = await getStoredDraft(state.db, id);
-    if (load !== viewerLoad) return;
-    if (!next || next.revision < 1) {
-      showViewerMissing(VIEWER_MISSING);
-      // Keep the address on the requested id so a reload shows the same missing state.
-      syncViewerUrl(id);
-    } else {
-      writingPosition.save();
-      showViewerDocument(next);
-      syncViewerUrl(next.id);
-    }
-  } catch {
-    if (load !== viewerLoad) return;
-    renderDrafts();
-    setSaveStatus('Could not open that document. The document shown is unchanged.', 'failure');
-    return;
-  }
-  void refreshDrafts().catch(() => { /* The list is advisory in a read-only view. */ });
-}
-async function initializeViewer(): Promise<void> {
-  applyViewerChrome();
-  try {
-    state.db = await openDraftDatabase(handleDatabaseUpgrade);
-    // Only the requested id is loaded for display; the list feeds the Documents menu.
-    const requested = requestedViewId ? await getStoredDraft(state.db, requestedViewId) : undefined;
-    state.drafts = await listStoredDrafts(state.db);
-    if (requested && requested.revision >= 1) showViewerDocument(requested);
-    else showViewerMissing(VIEWER_MISSING);
-  } catch (error) {
-    state.db?.close(); state.db = undefined;
-    state.storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
-    showViewerMissing(VIEWER_STORAGE);
-  } finally {
-    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
-    restoreFocusMode();
-    if (!state.viewMissing) writingPosition.restore(state.active.id);
-    updateStats();
-    finishInitialization();
-  }
-}
+const viewer = createViewerMode(state, {
+  field, draftTitle, draftSelect, editor, workspace, saveIndicator, autosave,
+  windowId: windowId ?? undefined,
+  requestedViewId,
+  writingPosition,
+  syncTitleTooltip: () => { syncTitleTooltip(); },
+  showDraft: () => { showDraft(); },
+  renderDrafts: () => { renderDrafts(); },
+  refreshDrafts: () => refreshDrafts(),
+  updateStats: () => { updateStats(); },
+  setSaveStatus: (text, kind) => { setSaveStatus(text, kind); },
+  restoreFocusMode: () => { restoreFocusMode(); },
+  finishInitialization: () => { finishInitialization(); },
+  onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
+});
 // Cross-window saved-version signals (#159 W3). Messages carry only ids/revisions; every
 // receiver rereads IndexedDB, and handlers never save, so signals cannot loop.
 const signalChannel: BroadcastChannel | undefined = (() => {
@@ -2052,7 +1962,7 @@ async function rereadDisplayed(): Promise<void> {
   if (action === 'refresh' && stored) {
     writingPosition.save();
     if (viewMode) {
-      showViewerDocument(stored);
+      viewer.showDocument(stored);
       setSaveStatus('Updated to the latest saved version. Nothing is saved from this window.');
     } else {
       state.active = stored;
@@ -2063,7 +1973,7 @@ async function rereadDisplayed(): Promise<void> {
     }
     scheduleListRefresh();
   } else if (action === 'missing') {
-    if (viewMode) showViewerMissing(VIEWER_MISSING);
+    if (viewMode) viewer.showMissing(viewer.MISSING);
     else if (state.active.revision >= 1) markDeletedElsewhere();
     scheduleListRefresh();
   } else if (action === 'notice-newer') showVersionNotice(NEWER_VERSION_NOTICE);
@@ -2350,7 +2260,7 @@ if (!viewMode) {
 }
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
 if (viewMode && !signalChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
-void (viewMode ? initializeViewer() : initializeDrafts());
+void (viewMode ? viewer.initialize() : initializeDrafts());
 
 setupComparisonOpen({
   embedded,
