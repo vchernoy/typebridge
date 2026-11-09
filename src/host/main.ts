@@ -98,8 +98,14 @@ installHostSettings({
   exitHostFocus: () => { manager.setHostFocusMode(false); },
 });
 
+/** Run after the page load event — or now, when this module (imported by entry.ts) arrives later. */
+function afterLoad(run: () => void): void {
+  if (document.readyState === 'complete') run();
+  else window.addEventListener('load', run, { once: true });
+}
+
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
+  afterLoad(() => {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(registration => watchForUpdates(registration, {
         mount: noticeMount,
