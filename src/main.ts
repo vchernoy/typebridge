@@ -7,12 +7,13 @@ import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, EDITABLE_HERE, STORAGE_UNAVAILABLE } from './editor/status';
+import { CONFLICT_COPY, CONFLICT_COPY_LEFT, EDITABLE_HERE, STORAGE_UNAVAILABLE } from './editor/status';
 import { createStatusLine } from './ui/status-line';
 import { createReloadBackup, sameContent } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
 import { createViewerMode } from './view/viewer-mode';
 import { createSaver } from './view/saver';
+import { createAutosaveToggle, type AutosaveToggle } from './view/autosave-toggle';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -22,7 +23,6 @@ import {
   newDraft,
   readActiveDraftId,
   setActiveDraftId,
-  setAutosaveEnabled,
 } from './editor/drafts';
 import { nextUntitledTitle } from './editor/untitled-title';
 import { moveReadOnlyCaret } from './ui/readonly-caret';
@@ -148,8 +148,12 @@ const state = createEditorState();
 let transferFrozen = false;
 /** Suppress scheduleSave while applying handoff snapshots (not a content edit). */
 let suppressEditTracking = false;
-/** True for the whole Autosave change handler (including awaits); keeps the checkbox disabled. */
-let autosaveToggleActive = false;
+/**
+ * The Autosave change handler (view/autosave-toggle.ts), created once its dependencies exist.
+ * Declared here because syncAutosaveControl runs during module init, before that point.
+ */
+// eslint-disable-next-line prefer-const -- assigned once later; a const here would be read before it is set.
+let autosaveToggle: AutosaveToggle | undefined;
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
@@ -248,8 +252,8 @@ const statusLine = createStatusLine({
   quietReader: () => quietReader(),
 });
 const {
-  updateStatus, setConflict, clearNotices, setSaveStatus, riskText, setRiskStatus,
-  announceAction, showSaving, showSaveState, readOnlyStatus,
+  updateStatus, setConflict, clearNotices, setSaveStatus, setRiskStatus,
+  announceAction, showSaveState, readOnlyStatus,
   markDraftListRefreshFailed, shouldAttachDraftListRefreshFailure,
 } = statusLine;
 const count = document.querySelector<HTMLElement>('#count')!;
@@ -300,7 +304,7 @@ function autosaveControlBlocked(): boolean {
   return state.editBlock !== '';
 }
 function syncAutosaveControl(): void {
-  if (viewMode || autosaveToggleActive) return;
+  if (viewMode || autosaveToggle?.isActive()) return;
   autosave.disabled = autosaveControlBlocked();
 }
 function syncMutationControls(): void {
@@ -1158,182 +1162,21 @@ draftTitle.addEventListener('input', () => {
   rememberActive();
   scheduleSave(true);
 });
-/** While Autosave is toggling (including delete-saved-copy), document switches wait. */
-let autosaveToggleGate: Promise<void> | undefined;
-let releaseAutosaveToggleGate: (() => void) | undefined;
-function beginAutosaveToggleGate(): void {
-  if (autosaveToggleGate) return;
-  autosaveToggleGate = new Promise(resolve => {
-    releaseAutosaveToggleGate = () => {
-      autosaveToggleGate = undefined;
-      releaseAutosaveToggleGate = undefined;
-      resolve();
-    };
-  });
-}
-function endAutosaveToggleGate(): void {
-  releaseAutosaveToggleGate?.();
-}
-/** Latest host/shared Autosave value dropped while a local toggle was in flight. */
-let pendingRemoteAutosave: boolean | undefined;
-
-/**
- * Apply an Autosave preference change to this window.
- * Local Settings uses prompts; host/shared sync applies without the delete-copy dialog (#175 step 7).
- * Remote sync always updates `autosave.checked` (and clears save timers when turning off), even in
- * read-only windows, so a later ownership handoff cannot save text the user opted out of storing.
- */
-async function applyAutosaveChange(
-  enabled: boolean,
-  opts: { promptDeleteSavedCopy: boolean; persistPreference: boolean },
-): Promise<void> {
-  const remote = !opts.persistPreference;
-  if (autosaveToggleActive) {
-    if (remote) {
-      pendingRemoteAutosave = enabled;
-      // Still mirror the checkbox immediately so a mid-toggle handoff sees the shared choice.
-      autosave.checked = enabled;
-      if (!enabled) saver.cancel();
-    }
-    return;
-  }
-  if (!remote && autosaveControlBlocked()) return;
-  const alreadyMatching = autosave.checked === enabled;
-  // Remote no-op when nothing changed and there is no dirty text left to flush.
-  if (remote && alreadyMatching && !(enabled && workspace.dirty() && !autosaveControlBlocked())) {
-    autosave.checked = enabled;
-    return;
-  }
-  const blocked = autosaveControlBlocked();
-  autosaveToggleActive = true;
-  if (!blocked) autosave.disabled = true;
-  beginAutosaveToggleGate();
-  try {
-    autosave.checked = enabled;
-    if (opts.persistPreference) {
-      try {
-        setAutosaveEnabled(enabled);
-        preferenceSaved('autosave', true);
-        notifyPrefsChanged({
-          name: 'autosave',
-          origin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
-        });
-      } catch { preferenceSaved('autosave', false); }
-    }
-    // Always show the accurate save state. Without storage, no save can succeed: keep saying so.
-    const announce = (text: string): void => {
-      // storageProblem, not !db: db is also unset while initialization runs.
-      if (state.storageProblem) setSaveStatus(riskText(), 'failure');
-      else setSaveStatus(text);
-    };
-    if (enabled) {
-      const primaryCanSave = !viewMode && !transferFrozen && state.editBlock === '';
-      if (!primaryCanSave) return;
-      clearNotices();
-      if (workspace.dirty()) {
-        showSaving();
-        journalEdit();
-        void persist();
-      } else {
-        announce('Autosave on');
-      }
-      return;
-    }
-    saver.cancel();
-    if (blocked || !opts.promptDeleteSavedCopy) {
-      if (!blocked) clearNotices();
-      if (!blocked) announce(AUTOSAVE_OFF);
-      else showSaveState();
-      return;
-    }
-    // Bind deletion to this document before any await — defense if a switch somehow races the gate.
-    const startedId = state.active.id;
-    const startedOwnership = state.ownership;
-    // Await an in-flight save without clearing first — it may create a conflict copy
-    // that the delete prompt then targets, and the user must see that notice.
-    // Older conflict notices still clear when the toggle did not itself create one.
-    const pendingSave = saver.inFlight();
-    const inFlight = pendingSave ? await pendingSave : undefined;
-    if (!inFlight?.conflict) clearNotices();
-    const stayed = state.active.id === startedId && state.ownership === startedOwnership;
-    const conflictCopy = !!(inFlight?.conflict && state.ownership && state.ownership !== startedOwnership && state.active.id !== startedId);
-    // Navigated away during the wait: do not offer to delete a different document's saved copy.
-    if (!stayed && !conflictCopy) {
-      announce(AUTOSAVE_OFF);
-      return;
-    }
-    const targetId = state.active.id;
-    const targetRevision = state.active.revision;
-    const targetOwnership = state.ownership!;
-    // returnFocus is the checkbox itself: it is disabled for this handler, so
-    // capture it here and let askConfirmChoice restore after finally re-enables.
-    const deleteSaved = await askConfirmChoice({
-      title: 'Delete the saved copy?',
-      message: 'Delete the saved copy of this document? Keep saved copy leaves it in your Documents list.',
-      confirmLabel: 'Delete saved copy',
-      cancelLabel: 'Keep saved copy',
-      returnFocus: autosave,
-    });
-    if (deleteSaved) {
-      try {
-        // Keep the fence: this window goes on editing the same id privately.
-        if (!state.db || targetOwnership.documentId !== targetId) throw new Error('Storage unavailable');
-        if (state.active.id !== targetId || state.ownership !== targetOwnership || state.editBlock || transferFrozen || state.transitioning) {
-          throw new Error('Document changed');
-        }
-        if (!await deleteStoredDraft(state.db, targetId, targetRevision, await targetOwnership.writeFence())) throw new Error('Draft changed');
-        if (targetRevision >= 1) postSignal('deleted', targetId, targetRevision);
-        if (state.active.id === targetId) {
-          state.active = { ...state.active, revision: 0 };
-          workspace.setDirty(true);
-        }
-        clearNotices();
-        await refreshDrafts();
-      } catch (error) {
-        if (error instanceof EditOwnershipLostError) loseOwnership();
-        announceAction('Could not delete saved document; current text is kept', { keepConflict: true });
-        return;
-      }
-    }
-    announce(AUTOSAVE_OFF);
-  } finally {
-    endAutosaveToggleGate();
-    autosaveToggleActive = false;
-    autosave.disabled = autosaveControlBlocked();
-    // Re-focus after re-enabling only for local Settings (host owns focus on shared toggles).
-    if (opts.promptDeleteSavedCopy || opts.persistPreference) {
-      if (!embedded) autosave.focus({ preventScroll: true });
-    }
-    const queued = pendingRemoteAutosave;
-    pendingRemoteAutosave = undefined;
-    if (queued !== undefined) {
-      void applyAutosaveChange(queued, { promptDeleteSavedCopy: false, persistPreference: false });
-    }
-  }
-}
-
-/** Re-read shared Autosave before this window can save again (handoff / ownership). */
-function syncAutosaveCheckboxFromStorage(): void {
-  try {
-    const next = autosaveEnabled();
-    const changed = autosave.checked !== next;
-    autosave.checked = next;
-    if (!next) {
-      saver.cancel();
-      if (changed) showSaveState();
-      return;
-    }
-    // Autosave turned on while we were read-only: flush dirty text now that we can edit.
-    if (changed && workspace.dirty() && !autosaveControlBlocked()) {
-      showSaving();
-      journalEdit();
-      void persist();
-    } else if (changed) {
-      showSaveState();
-    }
-  } catch { /* Keep the current control state. */ }
-}
-
+autosaveToggle = createAutosaveToggle(state, statusLine, {
+  autosave, workspace, viewMode, embedded,
+  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+  transferFrozen: () => transferFrozen,
+  controlBlocked: () => autosaveControlBlocked(),
+  preferenceSaved,
+  journalEdit: () => { journalEdit(); },
+  persist: () => persist(),
+  saver,
+  postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
+  refreshDrafts: () => refreshDrafts(),
+  loseOwnership: () => { loseOwnership(); },
+});
+const applyAutosaveChange = autosaveToggle.apply;
+const syncAutosaveCheckboxFromStorage = autosaveToggle.syncFromStorage;
 autosave.addEventListener('change', () => {
   void applyAutosaveChange(autosave.checked, {
     promptDeleteSavedCopy: !embedded,
@@ -1342,7 +1185,7 @@ autosave.addEventListener('change', () => {
 });
 async function switchDraft(id?: string): Promise<SwitchResult> {
   if (viewMode || state.transitioning) return { opened: false, conflict: false };
-  if (autosaveToggleGate) await autosaveToggleGate;
+  { const toggling = autosaveToggle?.gate(); if (toggling) await toggling; }
   if (state.transitioning) return { opened: false, conflict: false };
   replayButton = undefined;
   titleBuffer = undefined;
