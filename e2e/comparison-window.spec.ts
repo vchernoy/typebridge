@@ -60,12 +60,12 @@ async function expectViewerReady(viewer: Page, text: string): Promise<void> {
 }
 
 test('opens a read-only companion for the saved document while the source stays editable', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Saved original');
   const viewer = await openCompanion(context, page);
 
   const url = new URL(viewer.url());
-  expect(url.pathname).toBe('/');
+  expect(url.pathname).toBe('/editor.html');
   expect(url.searchParams.get('doc')).toBe(row.id);
   expect(url.searchParams.get('mode')).toBe('view');
   expect(viewer.url()).not.toContain('Saved');
@@ -103,7 +103,7 @@ test('opens a read-only companion for the saved document while the source stays 
 
 test('a blocked pop-up keeps the text in the source window and explains how to continue', async ({ page, context }) => {
   await page.addInitScript(() => { window.open = () => null; });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await saveDocument(page, 'Stays here');
   const pages: Page[] = [];
   context.on('page', opened => pages.push(opened));
@@ -122,7 +122,7 @@ test('invalid or missing document links show the missing state and create nothin
     `?doc=${MISSING_ID}&mode=view&x=1`,
     `?doc=${MISSING_ID}&mode=typo`,
   ]) {
-    await page.goto('/' + search);
+    await page.goto('/editor.html' + search);
     await expect(page.locator('#editor')).toBeEnabled();
     await expect(page.locator('#viewer-notice')).toBeVisible();
     await expect(page.locator('#editor')).toHaveValue('');
@@ -137,7 +137,7 @@ test('invalid or missing document links show the missing state and create nothin
 });
 
 test('an invalid mode never creates or writes a document', async ({ page }) => {
-  await page.goto(`/?doc=${MISSING_ID}&mode=edit`);
+  await page.goto(`/editor.html?doc=${MISSING_ID}&mode=edit`);
   await expect(page.locator('#editor')).toHaveJSProperty('readOnly', true);
   await expect(page.locator('#viewer-notice')).toBeVisible();
   await page.locator('#editor').click();
@@ -149,14 +149,14 @@ test('an invalid mode never creates or writes a document', async ({ page }) => {
 });
 
 test('a missing-document viewer can still switch to a saved document without gaining edit rights', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const first = await saveDocument(page, 'First saved');
   await documentAction(page, '#new-draft');
   const second = await saveDocument(page, 'Second saved');
   const before = await readDocs(page);
 
   const viewer = await context.newPage();
-  await viewer.goto(`/?mode=view&doc=${MISSING_ID}`);
+  await viewer.goto(`/editor.html?mode=view&doc=${MISSING_ID}`);
   await expect(viewer.locator('#viewer-notice')).toBeVisible();
   await expect(viewer.locator('#drafts option')).toHaveCount(2);
   await selectDocument(viewer, first.id);
@@ -172,12 +172,12 @@ test('a missing-document viewer can still switch to a saved document without gai
 });
 
 test('choosing a document that vanished keeps its id in the address so reload stays missing', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const first = await saveDocument(page, 'Stays');
   await documentAction(page, '#new-draft');
   const second = await saveDocument(page, 'Vanishes');
   const viewer = await context.newPage();
-  await viewer.goto(`/?doc=${first.id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${first.id}&mode=view`);
   await expectViewerReady(viewer, 'Stays');
   await expect(viewer.locator('#drafts option')).toHaveCount(2);
   // The list reloads when the menu opens, so open it first; removing the row while it
@@ -205,7 +205,7 @@ test('choosing a document that vanished keeps its id in the address so reload st
 });
 
 test('reloading the companion stays a viewer for the same document with a fresh instance', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Reload me');
   const before = await readDocs(page);
   const viewer = await openCompanion(context, page);
@@ -224,7 +224,7 @@ test('reloading the companion stays a viewer for the same document with a fresh 
 });
 
 test('with no committed copy the action explains, offers Cancel, and sends no text anywhere', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await setAutosave(page, false);
   const secret = 'PRIVATE-UNSAVED-TEXT';
@@ -252,7 +252,7 @@ test('with no committed copy the action explains, offers Cancel, and sends no te
 });
 
 test('the viewer cannot mutate documents through delete, new, import or replace', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'alpha beta alpha');
   await documentAction(page, '#new-draft');
   await saveDocument(page, 'other document');
@@ -262,7 +262,7 @@ test('the viewer cannot mutate documents through delete, new, import or replace'
   const localBefore = await page.evaluate(() => JSON.stringify({ ...localStorage }));
 
   const viewer = await context.newPage();
-  await viewer.goto(`/?doc=${row.id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${row.id}&mode=view`);
   await expectViewerReady(viewer, 'alpha beta alpha');
 
   const mutationIds = ['new-draft', 'import-draft', 'delete-draft', 'replace-one', 'replace-all', 'clear', 'convert-latin', 'convert-cyrillic'] as const;
@@ -315,7 +315,7 @@ test('the viewer cannot mutate documents through delete, new, import or replace'
 });
 
 test('cloned sessionStorage neither makes the viewer an editor nor restores private pending text', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const first = await saveDocument(page, 'Viewer text 0123456789');
   await documentAction(page, '#new-draft');
   const second = await saveDocument(page, 'Second document');
@@ -332,7 +332,7 @@ test('cloned sessionStorage neither makes the viewer an editor nor restores priv
     sessionStorage.setItem('typebridge.writingPosition.v1.' + state.first, state.position);
     sessionStorage.setItem('typebridge.instanceId', 'cloned-instance');
   }, { second: second.id, pending, first: first.id, position: editorPosition });
-  await viewer.goto(`/?doc=${first.id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${first.id}&mode=view`);
   await expectViewerReady(viewer, 'Viewer text 0123456789');
 
   // The editor-scoped position was not applied to the viewer and is not overwritten by it.
@@ -361,7 +361,7 @@ test('cloned sessionStorage neither makes the viewer an editor nor restores priv
 });
 
 test('same-tab navigation to a viewer preserves the editor reload backup', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Committed for nav');
   // Simulate pagehide writing a pending snapshot without committing that text to IndexedDB.
   await page.evaluate(({ id, title, revision }) => {
@@ -370,16 +370,16 @@ test('same-tab navigation to a viewer preserves the editor reload backup', async
       history: { undo: [], redo: [] },
     }));
   }, { id: row.id, title: row.title, revision: row.revision });
-  await page.goto(`/?doc=${row.id}&mode=view`);
+  await page.goto(`/editor.html?doc=${row.id}&mode=view`);
   await expectViewerReady(page, 'Committed for nav');
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1') ?? '')).toContain('PLUS DIRTY');
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#editor')).toHaveValue('Committed for nav PLUS DIRTY');
 });
 
 test('opening a companion does not receive a private pending canary from the source', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Committed body');
   const canary = 'PRIVATE-CANARY-NOT-FOR-COMPANION';
   await page.evaluate(({ id, title, canary: text }) => {
@@ -399,7 +399,7 @@ test('opening a companion does not receive a private pending canary from the sou
 });
 
 test('selecting a recovery-* document updates the URL so reload keeps it', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const first = await saveDocument(page, 'Ordinary saved');
   const recoveryId = `recovery-${MISSING_ID}`;
   await page.evaluate(({ id }) => new Promise<void>((resolve, reject) => {
@@ -417,7 +417,7 @@ test('selecting a recovery-* document updates the URL so reload keeps it', async
   }), { id: recoveryId });
 
   const viewer = await context.newPage();
-  await viewer.goto(`/?doc=${first.id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${first.id}&mode=view`);
   await expectViewerReady(viewer, 'Ordinary saved');
   await selectDocument(viewer, recoveryId);
   await expectViewerReady(viewer, 'Recovered body');
@@ -428,10 +428,10 @@ test('selecting a recovery-* document updates the URL so reload keeps it', async
 });
 
 test('viewer badge fits a narrow enlarged-text layout without horizontal overflow', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Badge layout');
   await page.setViewportSize({ width: 320, height: 720 });
-  await page.goto(`/?doc=${row.id}&mode=view`);
+  await page.goto(`/editor.html?doc=${row.id}&mode=view`);
   await expectViewerReady(page, 'Badge layout');
   // Style after navigation — addStyleTag before goto is destroyed by the load.
   await page.addStyleTag({ content: 'html { font-size: 24px; }' });
@@ -449,7 +449,7 @@ test('viewer badge fits a narrow enlarged-text layout without horizontal overflo
 });
 
 test('comparison open fails closed when inherited session cleanup throws', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await saveDocument(page, 'Cleanup guard');
   const canary = 'PRIVATE-CLEANUP-CANARY';
   await page.evaluate(text => {

@@ -7,7 +7,7 @@ async function openHost(page: Page, layout: 'free' | 'stacked' = 'free'): Promis
   await page.addInitScript(mode => {
     localStorage.setItem('typebridge.host.layoutMode.v1', mode);
   }, layout);
-  await page.goto('/host.html');
+  await page.goto('/');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   return frame;

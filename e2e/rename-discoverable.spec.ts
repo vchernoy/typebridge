@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 
 test('host title bar ✎ button and Documents → Rename… both start renaming', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto('/host.html');
+  await page.goto('/');
   const frame = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await frame.locator('#editor').fill('текст');
@@ -29,7 +29,7 @@ test('host title bar ✎ button and Documents → Rename… both start renaming'
 });
 
 test('Documents → Rename… focuses the title on the standalone page', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.getByRole('button', { name: 'Documents', exact: true }).click();
   await page.getByRole('button', { name: 'Rename…' }).click();
@@ -42,7 +42,7 @@ test('Documents → Rename… focuses the title on the standalone page', async (
 test('Rename in a window that is not editing selects the whole name once it can edit', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
-  await page.goto('/host.html');
+  await page.goto('/');
   const a = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(a.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await a.locator('#editor').fill('общий');
@@ -71,12 +71,12 @@ test('Rename in a window that is not editing selects the whole name once it can 
 });
 
 test('Rename… in a tab that is not editing selects the newer name once it can edit', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('тело');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
   // The editing tab renames; the takeover brings that newer title along.
   await page.getByRole('textbox', { name: 'Document title' }).fill('Свежее');

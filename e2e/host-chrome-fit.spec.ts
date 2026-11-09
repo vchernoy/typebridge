@@ -9,7 +9,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function openHost(page: Page, width: number, layout: 'free' | 'stacked' = 'free'): Promise<void> {
   await page.setViewportSize({ width, height: 800 });
   await page.addInitScript(mode => { localStorage.setItem('typebridge.host.layoutMode.v1', mode); }, layout);
-  await page.goto('/host.html');
+  await page.goto('/');
   await expect(page.frameLocator('.host-window[data-window-id="main"] iframe').locator('#editor')).toBeEnabled({ timeout: 30_000 });
 }
 

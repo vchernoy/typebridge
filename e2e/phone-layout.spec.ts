@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 for (const width of [320, 390]) {
   test(`phone layout at ${width} px keeps every control and fits the screen (#123)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto("/");
+    await page.goto("/editor.html");
     await expect(page.locator("#editor")).toBeEnabled();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
     const topbar = page.locator("header.topbar");
@@ -49,7 +49,7 @@ test("phone layout wraps instead of overflowing when text is enlarged (#123)", a
       document.head.append(style);
     });
   });
-  await page.goto("/");
+  await page.goto("/editor.html");
   await expect(page.locator("#editor")).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   for (const id of ["#enabled", "#focus-mode", "#settings-open", "#more-open"]) {

@@ -8,12 +8,12 @@ import { readStoredDocs } from './storage-helpers';
  */
 
 async function deletedInOtherTab(page: Page, context: BrowserContext, text: string): Promise<Page> {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill(text);
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('#editor')).toHaveValue(text);
   await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
 
@@ -66,7 +66,7 @@ test('Close leaves a deleted document for another one', async ({ page, context }
 
 test('Delete warns when the document is open in another host window', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto('/host.html');
+  await page.goto('/');
   const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(main.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await main.locator('#editor').fill('общий');
@@ -118,7 +118,7 @@ test('Close during a slow Keep does not overwrite the document it opens', async 
 
 test('several keys typed in a host title during Keep are applied in order', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto('/host.html');
+  await page.goto('/');
   const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(main.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await main.locator('#editor').fill('общий');

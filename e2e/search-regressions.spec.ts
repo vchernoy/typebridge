@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openFind } from './settings-helpers';
 
 test('Find reveals a distant match inside the editor', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await openFind(page);
   const field = page.locator('#editor');
   await field.fill(Array.from({ length: 250 }, (_, i) => i === 240 ? 'TARGET' : `Line ${i}`).join('\n'));
@@ -25,7 +25,7 @@ for (const [text, query, positions] of [
   ['🙂🙂', '(?=🙂)|$', [0, 2, 4]],
 ] as const) {
   test(`zero-width Find advances and wraps in UTF-16 offsets: ${query}`, async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/editor.html');
     await openFind(page);
     const field = page.locator('#editor');
     await field.fill(text);
@@ -50,7 +50,7 @@ for (const [text, query, positions] of [
 
 for (const button of ['#replace-one', '#replace-all']) {
   test(`${button} uses numeric capture fallback and preserves undo`, async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/editor.html');
     await openFind(page);
     await page.locator('#enabled').uncheck();
     const field = page.locator('#editor');
@@ -68,7 +68,7 @@ for (const button of ['#replace-one', '#replace-all']) {
 }
 
 test('zero-width Find never places the caret inside an emoji', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await openFind(page);
   const field = page.locator('#editor');
   await field.fill('🙂🙂');
@@ -84,7 +84,7 @@ test('zero-width Find never places the caret inside an emoji', async ({ page }) 
 });
 
 test('returning to Find with Ctrl+F keeps zero-width navigation moving', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await openFind(page);
   const field = page.locator('#editor');
   await field.fill('Line one\nLine two');

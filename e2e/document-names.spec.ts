@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { closeDocuments, documentAction, openDocuments, selectDocument } from './settings-helpers';
 
 test('documents are called documents throughout the page (#108)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue('Untitled document');
   await openDocuments(page);
@@ -25,7 +25,7 @@ test('documents are called documents throughout the page (#108)', async ({ page 
 });
 
 test('the ▾ document menu opens the list and actions, and closes cleanly (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Первый');
@@ -69,7 +69,7 @@ test('the ▾ document menu opens the list and actions, and closes cleanly (#123
 });
 
 test('arrow keys move through documents without closing the menu (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Один');
@@ -89,7 +89,7 @@ test('arrow keys move through documents without closing the menu (#123)', async 
 test('host title bar renames the document in place (#175 step 8)', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
-  await page.goto('/host.html');
+  await page.goto('/');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   const hostTitle = page.locator('.host-window[data-window-id="main"] .host-window-title');

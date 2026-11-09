@@ -7,7 +7,7 @@ import { readStoredDocs } from './storage-helpers';
 async function openHost(page: Page): Promise<FrameLocator> {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
-  await page.goto('/host.html');
+  await page.goto('/');
   const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(main.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   return main;
@@ -63,13 +63,13 @@ test('Undo in a window that is not editing takes over editing and undoes', async
 });
 
 test('Home, End and Shift+arrows move the caret in a read-only title', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.getByRole('textbox', { name: 'Document title' }).fill('Имя');
   await page.locator('#editor').fill('тело');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
   const title = other.locator('#draft-title');
   await expect(title).toHaveJSProperty('readOnly', true);

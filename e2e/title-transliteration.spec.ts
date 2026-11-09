@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openFind } from './settings-helpers';
 
 test('the draft title transliterates, saves and keeps its own undo (#89)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   const title = page.locator('#draft-title');
   await expect(editor).toBeEnabled();
@@ -18,7 +18,7 @@ test('the draft title transliterates, saves and keeps its own undo (#89)', async
 });
 
 test('the transliteration shortcut works from every text box (#89)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const enabled = page.locator('#enabled');
   await openFind(page);

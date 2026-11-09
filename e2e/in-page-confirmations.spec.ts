@@ -4,7 +4,7 @@ import { documentAction, moreAction, setAutosave } from './settings-helpers';
 for (const action of ['clear', 'delete', 'import', 'switch'] as const) {
   for (const keyboard of [false, true]) for (const accept of [false, true]) {
     test(`${action}: ${keyboard ? 'keyboard' : 'pointer'} ${accept ? 'confirm' : 'safe choice'} (#137 U2)`, async ({ page }) => {
-      await page.goto('/');
+      await page.goto('/editor.html');
       const editor = page.locator('#editor');
       await expect(editor).toBeEnabled();
       await editor.fill('Original text');
@@ -53,7 +53,7 @@ for (const action of ['clear', 'delete', 'import', 'switch'] as const) {
 
 for (const accept of [false, true]) {
   test(`emergency backup keyboard ${accept ? 'discard' : 'keep'} (#137 U2)`, async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/editor.html');
     await expect(page.locator('#editor')).toBeEnabled();
     await page.evaluate(() => localStorage.setItem('typebridge.recovery.v1.closed.backup', JSON.stringify({
       token: 'backup', tab: 'closed', documentId: 'backup', revision: 0, timestamp: Date.now(), title: 'Backup', text: 'Unsaved backup',
@@ -78,7 +78,7 @@ for (const accept of [false, true]) {
 
 
 test('delayed import queues behind Clear without leaking inert state (#137 U2)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Original text');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
@@ -113,7 +113,7 @@ test('delayed import queues behind Clear without leaking inert state (#137 U2)',
 });
 
 test('Focus chord does not confirm Delete on Firefox modified Enter (#137 U2)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Must stay');

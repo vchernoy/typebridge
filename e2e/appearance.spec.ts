@@ -5,7 +5,7 @@ const scheme = (page: import('@playwright/test').Page) => page.locator('html');
 
 test('appearance persists manual choices while System follows the device (#137 U12)', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(scheme(page)).toHaveAttribute('data-color-scheme', 'dark');
   await openSettings(page);
@@ -34,7 +34,7 @@ test('stored palette applies while the application bundle is still blocked (#137
   const gate = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/assets/*.js', async route => { await gate; await route.continue(); });
   try {
-    await page.goto('/', { waitUntil: 'commit' });
+    await page.goto('/editor.html', { waitUntil: 'commit' });
     await expect(scheme(page)).toHaveAttribute('data-color-scheme', 'dark');
   } finally { release(); }
   await page.waitForLoadState('load');
@@ -55,7 +55,7 @@ test('blocked appearance storage keeps current choice and reports failure across
       set.call(this, key, value);
     };
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await openSettings(page);
   await page.getByRole('combobox', { name: 'Color scheme', exact: true }).selectOption('light');
@@ -71,7 +71,7 @@ test('blocked appearance storage keeps current choice and reports failure across
 
 test('reset settings restores System appearance (#137 U12)', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await openSettings(page);
   const select = page.getByRole('combobox', { name: 'Color scheme', exact: true });
@@ -86,7 +86,7 @@ for (const choice of ['light', 'dark']) for (const width of [390, 1400]) {
   test(`manual appearance evidence ${choice} ${width}px (#137 U12)`, async ({ page, browserName }, testInfo) => {
     test.skip(browserName !== 'chromium', 'Chromium evidence; behavior runs in all engines.');
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/');
+    await page.goto('/editor.html');
     await expect(page.locator('#editor')).toBeEnabled();
     await openSettings(page);
     await page.getByRole('combobox', { name: 'Color scheme', exact: true }).selectOption(choice);

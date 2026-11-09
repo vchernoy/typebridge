@@ -63,7 +63,7 @@ async function saveDocument(page: Page, text: string): Promise<Row> {
 
 async function openViewer(context: BrowserContext, id: string, text: string): Promise<Page> {
   const viewer = await context.newPage();
-  await viewer.goto(`/?doc=${id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${id}&mode=view`);
   await expect(viewer.locator('#editor')).toBeEnabled();
   await expect(viewer.locator('#editor')).toHaveValue(text);
   await expect(viewer.locator('#viewer-badge')).toHaveText('Saved version · Read-only');
@@ -74,7 +74,7 @@ const represented = (viewer: Page): Promise<string | undefined> =>
   viewer.locator('#viewer-badge').evaluate((el: HTMLElement) => el.dataset.revision);
 
 test('an editor save refreshes an open viewer and marks the represented revision', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'First version');
   const viewer = await openViewer(context, row.id, 'First version');
   expect(await represented(viewer)).toBe(String(row.revision));
@@ -90,7 +90,7 @@ test('an editor save refreshes an open viewer and marks the represented revision
 });
 
 test('a refresh keeps the viewer position when offsets still fit', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'abcdefghij');
   const viewer = await openViewer(context, row.id, 'abcdefghij');
   await viewer.locator('#editor').evaluate((el: HTMLTextAreaElement) => { el.focus(); el.setSelectionRange(2, 5); el.dispatchEvent(new Event('select')); });
@@ -101,7 +101,7 @@ test('a refresh keeps the viewer position when offsets still fit', async ({ page
 });
 
 test('a rename in the editor updates the viewer title', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Body stays');
   const viewer = await openViewer(context, row.id, 'Body stays');
 
@@ -112,7 +112,7 @@ test('a rename in the editor updates the viewer title', async ({ page, context }
 });
 
 test('deleting the document shows the viewer missing state and keeps it read-only', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Soon gone');
   const viewer = await openViewer(context, row.id, 'Soon gone');
 
@@ -126,7 +126,7 @@ test('deleting the document shows the viewer missing state and keeps it read-onl
 });
 
 test('stale, equal, malformed and other-document signals are ignored; the reread is authoritative', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Base text');
   const viewer = await openViewer(context, row.id, 'Base text');
 
@@ -167,7 +167,7 @@ test('signals carry metadata only', async ({ page, context }) => {
       return original.call(this, message);
     };
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'SECRET-BODY-TEXT');
   await page.locator('#draft-title').fill('SECRET-TITLE');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
@@ -184,7 +184,7 @@ test('signals carry metadata only', async ({ page, context }) => {
 });
 
 test('a dirty editor gets a notice and its text is never replaced or saved over', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Shared base');
   await setAutosave(page, false, 'keep');
   await page.locator('#editor').fill('Private unsaved edits');
@@ -206,7 +206,7 @@ test('a dirty editor gets a notice and its text is never replaced or saved over'
 });
 
 test('a signal that arrives while the viewer is still loading is applied once it is ready', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Loaded version');
   const viewer = await context.newPage();
   // Hold the viewer's Documents list read, so it is still initializing when the signal arrives.
@@ -226,7 +226,7 @@ test('a signal that arrives while the viewer is still loading is applied once it
       return request;
     };
   });
-  await viewer.goto(`/?doc=${row.id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${row.id}&mode=view`);
   await expect.poll(() => viewer.evaluate(() => typeof (window as unknown as { releaseList?: () => void }).releaseList)).toBe('function');
   await expect(viewer.locator('#editor')).toBeDisabled();
 
@@ -239,7 +239,7 @@ test('a signal that arrives while the viewer is still loading is applied once it
 });
 
 test('focus and visibility reconcile a signal that was missed', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Before');
   const viewer = await openViewer(context, row.id, 'Before');
 
@@ -256,7 +256,7 @@ test('focus and visibility reconcile a signal that was missed', async ({ page, c
 });
 
 test('focus reconciliation covers a deletion that was missed', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Will vanish');
   const viewer = await openViewer(context, row.id, 'Will vanish');
   await page.evaluate(id => new Promise<void>((resolve, reject) => {
@@ -278,7 +278,7 @@ test('without BroadcastChannel a viewer still reconciles on focus and the editor
   await context.addInitScript(() => {
     Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'No channel');
   const viewer = await openViewer(context, row.id, 'No channel');
 
@@ -291,7 +291,7 @@ test('without BroadcastChannel a viewer still reconciles on focus and the editor
 });
 
 test('viewers never write documents because of signals', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Read only');
   const viewer = await openViewer(context, row.id, 'Read only');
   await page.locator('#editor').fill('Read only v2');
@@ -304,14 +304,14 @@ test('viewers never write documents because of signals', async ({ page, context 
 });
 
 test('without BroadcastChannel a visible viewer rereads on the slow fallback interval', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const row = await saveDocument(page, 'Interval base');
   const viewer = await context.newPage();
   await viewer.addInitScript(() => {
     Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });
   });
   await viewer.clock.install();
-  await viewer.goto(`/?doc=${row.id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${row.id}&mode=view`);
   await expect(viewer.locator('#editor')).toHaveValue('Interval base');
 
   await writeSilently(page, row.id, { text: 'Interval newer' });

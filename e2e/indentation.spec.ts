@@ -5,7 +5,7 @@ const U = '    ';
 const selection = (el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd];
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.locator('#enabled').uncheck();
   await expect(page.locator('#editor')).toBeEnabled();
 });

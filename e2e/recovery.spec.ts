@@ -4,7 +4,7 @@ import { selectDocument, setAutosave } from './settings-helpers';
 import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 test('interrupted write and immediate tab close leave a recoverable Unicode copy', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await editor.fill('Начало');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -15,7 +15,7 @@ test('interrupted write and immediate tab close leave a recoverable Unicode copy
   page.once('dialog', dialog => dialog.accept());
   await page.close({ runBeforeUnload: true });
   const next = await context.newPage();
-  await next.goto('/');
+  await next.goto('/editor.html');
   const recover = next.getByRole('button', { name: /Recover Untitled document/ });
   await expect(recover).toBeVisible();
   await recover.click();
@@ -27,7 +27,7 @@ test('interrupted write and immediate tab close leave a recoverable Unicode copy
 });
 
 test('recovery keeps a newer version from another tab and does not clear a newer journal', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.locator('#editor').fill('Оригинал');
   await expect(page.locator('#status')).toContainText('Saved locally');
   // A newer revision from a build without edit ownership (#159 W4 keeps current tabs read-only).
@@ -36,7 +36,7 @@ test('recovery keeps a newer version from another tab and does not clear a newer
   await page.locator('#editor').fill('Несохранённая версия');
   await expect(page.locator('#status')).toContainText('Save failed');
   await page.close();
-  const third = await context.newPage(); await third.goto('/');
+  const third = await context.newPage(); await third.goto('/editor.html');
   await third.getByRole('button', { name: /Recover Untitled document/ }).click();
   await expect(third.locator('#status')).toContainText('Recovered a copy');
   await selectDocument(third, { label: 'Untitled document (recovered)' });
@@ -45,14 +45,14 @@ test('recovery keeps a newer version from another tab and does not clear a newer
 });
 
 test('autosave off does not create an emergency journal for new edits', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await setAutosave(page, false);
   await page.locator('#editor').fill('Только в памяти');
   expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('typebridge.recovery.v1.')))).toEqual([]);
 });
 
 test('journal quota failures are visible while editing remains available', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key, value) {
@@ -67,12 +67,12 @@ test('journal quota failures are visible while editing remains available', async
 });
 
 test('retry after committed recovery with failed journal cleanup does not duplicate copies', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.evaluate(() => { IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); }; IDBObjectStore.prototype.add = function () { throw new Error('interrupted'); }; });
   await page.locator('#editor').fill('Сохранить эту запись');
   await expect(page.locator('#status')).toContainText('Save failed');
   await page.close();
-  const other = await context.newPage(); await other.goto('/');
+  const other = await context.newPage(); await other.goto('/editor.html');
   await other.evaluate(() => {
     const original = Storage.prototype.removeItem;
     (window as unknown as { restoreRemove: () => void }).restoreRemove = () => { Storage.prototype.removeItem = original; };
@@ -94,7 +94,7 @@ test('immediate reload recovers text after a failed IndexedDB save', async ({ pa
   await page.addInitScript(() => {
     IDBObjectStore.prototype.put = function () { throw new Error('interrupted'); };
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await editor.fill('Быстрая строка 🙂');
   page.once('dialog', dialog => dialog.accept());
@@ -104,7 +104,7 @@ test('immediate reload recovers text after a failed IndexedDB save', async ({ pa
 });
 
 test('already committed emergency snapshot is removed without a duplicate', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.locator('#editor').fill('Сохранённая запись 🙂');
   await expect(page.locator('#status')).toContainText('Saved locally');
   await page.evaluate(() => {
@@ -118,7 +118,7 @@ test('already committed emergency snapshot is removed without a duplicate', asyn
 });
 
 test('confirmed discard removes only the selected unsaved snapshot', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await editor.fill('Текущий черновик');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -154,8 +154,8 @@ test('confirmed discard removes only the selected unsaved snapshot', async ({ pa
 });
 
 test('active tab snapshots are not presented as lost; closing exposes them', async ({ page, context }) => {
-  await page.goto('/');
-  const other = await context.newPage(); await other.goto('/');
+  await page.goto('/editor.html');
+  const other = await context.newPage(); await other.goto('/editor.html');
   await expect(other.locator('#editor')).toBeEnabled();
   await other.evaluate(() => {
     const observed = document.querySelector('[aria-label="Recover unsaved documents"]')!;
@@ -179,7 +179,7 @@ test('active tab snapshots are not presented as lost; closing exposes them', asy
 });
 
 test('an empty recovery panel takes no space and is not exposed (#118)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const panel = page.locator('[aria-label="Recover unsaved documents"]');
   await expect(panel).toHaveCount(1);

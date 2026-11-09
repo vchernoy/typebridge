@@ -16,7 +16,7 @@ function contrastRatio(first: string, second: string): number {
 }
 
 async function openHost(page: Page): Promise<FrameLocator> {
-  await page.goto('/host.html');
+  await page.goto('/');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await expect(frame.locator('html')).toHaveAttribute('data-embed', '1');
@@ -138,7 +138,7 @@ test('offline host refresh stays on the host shell', async ({ page, context }) =
   await expect(editor.locator('#save-indicator')).toHaveText('Saved');
   await context.setOffline(true);
   await page.reload();
-  await expect(page).toHaveURL(/host\.html/);
+  expect(new URL(page.url()).pathname).toBe('/');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await expect(frame.locator('html')).toHaveAttribute('data-embed', '1');
@@ -177,7 +177,7 @@ test('host does not reload when private edits change after update consent', asyn
     }
   });
   expect(outcome).toContain('Private edits changed');
-  await expect(page).toHaveURL(/host\.html/);
+  expect(new URL(page.url()).pathname).toBe('/');
   await expect(editor.locator('#editor')).toHaveValue('Keep this private text!');
 });
 

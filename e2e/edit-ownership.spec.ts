@@ -19,7 +19,7 @@ async function saveAs(page: Page, text: string): Promise<string> {
 }
 
 async function openOrdinary(page: Page): Promise<void> {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(role(page)).toHaveAttribute('data-role', /^(editor|reader)$/);
 }
@@ -218,7 +218,7 @@ test('a comparison viewer never acquires editing ownership', async ({ page, cont
   await openOrdinary(page);
   const id = await saveAs(page, 'Для сравнения');
   const viewer = await context.newPage();
-  await viewer.goto(`/?doc=${id}&mode=view`);
+  await viewer.goto(`/editor.html?doc=${id}&mode=view`);
   await expect(viewer.locator('#editor')).toHaveValue('Для сравнения');
   await expect(role(viewer)).toHaveAttribute('data-role', 'viewer');
   expect(await heldEditLocks(viewer)).toEqual([`typebridge-edit-owner:${id}`]);
@@ -243,7 +243,7 @@ test('windows opening the same document at once elect exactly one editor', async
   const id = await saveAs(page, 'Гонка');
   await page.close();
   const pages = await Promise.all([context.newPage(), context.newPage(), context.newPage()]);
-  await Promise.all(pages.map(p => p.goto('/')));
+  await Promise.all(pages.map(p => p.goto('/editor.html')));
   for (const p of pages) await expect(role(p)).toHaveAttribute('data-role', /^(editor|reader)$/);
   const roles = await Promise.all(pages.map(p => role(p).getAttribute('data-role')));
   expect(roles.filter(r => r === 'editor')).toHaveLength(1);
@@ -370,7 +370,7 @@ test('boot does not own a document deleted during acquire', async ({ page, conte
   await booting.addInitScript(() => {
     (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1000;
   });
-  const booted = booting.goto('/');
+  const booted = booting.goto('/editor.html');
   await page.waitForTimeout(200);
   await documentAction(page, '#delete-draft');
   await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();

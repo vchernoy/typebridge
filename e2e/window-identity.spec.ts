@@ -24,7 +24,7 @@ async function reloadFrame(page: Page, iframeSelector: string): Promise<void> {
 }
 
 test('unscoped / keeps legacy sessionStorage key names', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('html')).not.toHaveAttribute('data-window-id');
   await page.locator('#editor').fill('Unscoped only');
@@ -161,7 +161,7 @@ test('pending unsaved backups stay isolated per window after reload', async ({ p
 });
 
 test('viewer document switches keep the window id in the URL', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('First saved');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
@@ -173,7 +173,7 @@ test('viewer document switches keep the window id in the URL', async ({ page }) 
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const secondId = (await readStoredDocs(page)).find(row => row.text === 'Second saved')!.id;
 
-  await page.goto(`/?window=alpha&mode=view&doc=${firstId}`);
+  await page.goto(`/editor.html?window=alpha&mode=view&doc=${firstId}`);
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('html')).toHaveAttribute('data-window-id', 'alpha');
   await expect(page.locator('#editor')).toHaveValue('First saved');

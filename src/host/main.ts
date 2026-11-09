@@ -6,6 +6,8 @@ import { ACTIVE_DRAFT_KEY_BASE } from '../editor/drafts';
 import { watchForUpdates } from '../ui/update-notice';
 import { scopeSessionKey } from '../view/window-id';
 import { installHostSettings } from './settings';
+import { readHostLayout } from './layout';
+import { migrateStandaloneSession } from './session-migration';
 import { installToolbarFit } from './toolbar-fit';
 import { installWindowManager } from './window-manager';
 
@@ -43,13 +45,21 @@ function allEditorWorkspaces(): HTMLElement[] {
     .filter((el): el is HTMLElement => !!el);
 }
 
+// A tab that ran the single editor at `/` before the cutover keeps its document, unsaved
+// reload backup and caret: move that session state into the window that shows first.
+try {
+  const ids = readHostLayout(localStorage)?.windows.map(win => win.id) ?? [];
+  const focusId = readHostLayout(localStorage)?.focusWindowId;
+  migrateStandaloneSession(sessionStorage, (focusId && ids.includes(focusId) ? focusId : ids[0]) ?? 'main');
+} catch { /* Blocked storage: windows start without the old session hints. */ }
+
 const manager = installWindowManager({
   root,
   toolbar,
   editorSrc: (windowId, documentId) => {
     const params = new URLSearchParams({ window: windowId, embed: '1' });
     if (documentId) params.set('doc', documentId);
-    return `/?${params.toString()}`;
+    return `/editor.html?${params.toString()}`;
   },
   prepareClose: async frame => {
     const prepare = editorHooks(frame).__typebridgePrepareWindowClose
@@ -98,8 +108,14 @@ installHostSettings({
   exitHostFocus: () => { manager.setHostFocusMode(false); },
 });
 
+/** Run after the page load event — or now, when this module (imported by entry.ts) arrives later. */
+function afterLoad(run: () => void): void {
+  if (document.readyState === 'complete') run();
+  else window.addEventListener('load', run, { once: true });
+}
+
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
+  afterLoad(() => {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(registration => watchForUpdates(registration, {
         mount: noticeMount,

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openFind, openSettings } from './settings-helpers';
 
 test('shortcut toggles global mode, can be remapped, disabled and persists', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.focus();
@@ -26,7 +26,7 @@ test('shortcut toggles global mode, can be remapped, disabled and persists', asy
 });
 
 test('shortcut is not intercepted during composition', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const result = await page.locator('#editor').evaluate(el => {
     const event = new KeyboardEvent('keydown', { code: 'Space', key: ' ', ctrlKey: true, shiftKey: true, isComposing: true, bubbles: true, cancelable: true });
@@ -38,7 +38,7 @@ test('shortcut is not intercepted during composition', async ({ page }) => {
 });
 
 test('mode announcement and active shortcut remain visible with settings closed', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#settings-panel')).toBeHidden();
   await expect(page.locator('#shortcut-label')).toContainText('Ctrl+Shift+Space');
@@ -56,7 +56,7 @@ test('mode announcement and active shortcut remain visible with settings closed'
 
 test('macOS Control shortcut works while unrelated fields are ignored', async ({ page }) => {
   await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' }));
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#shortcut-label')).toContainText('Ctrl+Shift+Space');
   // The mappings box holds Latin rule text, so the shortcut must not apply there.
@@ -79,7 +79,7 @@ test('macOS Control shortcut works while unrelated fields are ignored', async ({
 });
 
 test('Focus Mode keeps transliteration feedback visible and hides settings', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.focus();
@@ -105,7 +105,7 @@ test('Focus Mode keeps transliteration feedback visible and hides settings', asy
 });
 
 test('Escape in the editor enters and exits Focus mode (#67)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Привет');
@@ -120,7 +120,7 @@ test('Escape in the editor enters and exits Focus mode (#67)', async ({ page }) 
 });
 
 test('Escape keeps its cancel role outside the editor and during composition (#67)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await openFind(page);
@@ -134,7 +134,7 @@ test('Escape keeps its cancel role outside the editor and during composition (#6
 });
 
 test('Escape with no control focused toggles Focus mode (#67)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Escape');
@@ -143,7 +143,7 @@ test('Escape with no control focused toggles Focus mode (#67)', async ({ page })
 });
 
 test('Escape guards also apply while Focus mode is active (#67)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.press('Escape');
@@ -161,7 +161,7 @@ test('Escape guards also apply while Focus mode is active (#67)', async ({ page 
 });
 
 test('Cmd/Ctrl+Shift+Enter toggles Focus mode without inserting text or searching', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Привет');

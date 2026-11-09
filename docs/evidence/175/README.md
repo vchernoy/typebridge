@@ -73,7 +73,7 @@ Record device/browser/AT versions and concrete results on #175 (or #11) when tho
 
 Tracked on #175 comments / linked issues; step 11 does not claim them done:
 
-- Cutover of standalone `/` to the host entry.
+- ~~Cutover of standalone `/` to the host entry.~~ Done: `/` is the host; the single editor is `/editor.html`.
 - Broader delayed-command / recovery depth beyond existing suites.
 - Real-device / IME / AT / production smoke sessions (list above).
 - Cross-window Edit here (#164 draft) remains deferred.

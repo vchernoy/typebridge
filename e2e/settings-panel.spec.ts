@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('Settings opens a side panel with every setting, and Escape or × closes it (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const open = page.getByRole('button', { name: 'Settings', exact: true });
   const panel = page.getByRole('dialog', { name: 'Settings' });
@@ -35,7 +35,7 @@ test('Settings opens a side panel with every setting, and Escape or × closes it
 });
 
 test('Settings stays open while you try a rule in the editor (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await expect(field).toBeEnabled();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -48,7 +48,7 @@ test('Settings stays open while you try a rule in the editor (#123)', async ({ p
 });
 
 test('Focus mode hides Settings, and an open panel comes back after leaving it (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();

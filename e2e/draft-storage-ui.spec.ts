@@ -4,7 +4,7 @@ import { selectDocument, documentAction } from './settings-helpers';
 import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 test('a stale tab saves a visible conflict copy without overwriting the newer draft', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.locator('#editor').fill('Исходный текст');
   await expect(page.locator('#status')).toContainText('Saved locally');
   // An older build without edit ownership commits a newer revision (#159 W4 keeps current tabs read-only).
@@ -22,7 +22,7 @@ test('failed database initialization keeps text editable and reports unsaved sta
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await expect(page.locator('#status')).toContainText('Storage unavailable');
@@ -34,7 +34,7 @@ test('failed database initialization keeps text editable and reports unsaved sta
 });
 
 test('switching immediately after typing saves the previous document', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.locator('#editor').fill('Быстрый набор 🙂');
   await documentAction(page, '#new-draft');
   await expect(page.locator('#editor')).toHaveValue('');
@@ -43,7 +43,7 @@ test('switching immediately after typing saves the previous document', async ({ 
 });
 
 test('failed writes keep current text and can be retried without switching away', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.evaluate(() => {
     const original = IDBObjectStore.prototype.put;
@@ -65,7 +65,7 @@ test('failed writes keep current text and can be retried without switching away'
 });
 
 test('repeated edits during autosave persist the latest text', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   for (const text of ['Раз', 'Раз два', 'Раз два три 🙂']) {
@@ -78,7 +78,7 @@ test('repeated edits during autosave persist the latest text', async ({ page }) 
 });
 
 test('imports a text file into its own saved document', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const confirmation1 = answerNextConfirmation(page, true);
   await page.locator('#import-file').setInputFiles({
@@ -100,7 +100,7 @@ test('old localStorage drafts are ignored and left untouched while IndexedDB sav
       sessionStorage.setItem('seeded', 'yes');
     }
   }, old);
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await expect(field).toHaveValue('');
@@ -110,7 +110,7 @@ test('old localStorage drafts are ignored and left untouched while IndexedDB sav
   await expect(field).toHaveValue('Новый пост 🙂\nВторая строка');
   expect(await page.evaluate(() => localStorage.getItem('typebridge.drafts.v1'))).toBe(old);
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('#editor')).toBeEnabled();
   const changed = '[{"id":"other","title":"Old tab","text":"Ignored","updatedAt":2}]';
   await other.evaluate(raw => localStorage.setItem('typebridge.drafts.v1', raw), changed);
@@ -123,7 +123,7 @@ test('old localStorage drafts are ignored and left untouched while IndexedDB sav
 
 for (const operation of ['reload', 'navigation'] as const) {
   test(`immediate ${operation} starts saving the pending edit`, async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/editor.html');
     const field = page.locator('#editor');
     await expect(field).toBeEnabled();
     await field.fill('Начало поста');
@@ -131,13 +131,13 @@ for (const operation of ['reload', 'navigation'] as const) {
     await field.fill('Начало поста — последняя фраза 🙂');
     page.once('dialog', dialog => dialog.accept());
     if (operation === 'reload') await page.reload();
-    else await page.goto('/?navigation=1');
+    else await page.goto('/editor.html?navigation=1');
     await expect(field).toHaveValue('Начало поста — последняя фраза 🙂');
   });
 }
 
 test('a committed save stays successful if refreshing the draft list fails', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Текст');
@@ -160,7 +160,7 @@ test('a committed save stays successful if refreshing the draft list fails', asy
 });
 
 test('JSON export and import round trip preserves Cyrillic, newlines and emoji', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   const content = 'Русский пост 🙂\nВторая строка\nТретья строка 🌍';
   await field.fill(content);
@@ -179,7 +179,7 @@ test('JSON export and import round trip preserves Cyrillic, newlines and emoji',
 });
 
 test('long editing history survives draft switching and reload', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#enabled').uncheck();
@@ -204,7 +204,7 @@ test('long editing history survives draft switching and reload', async ({ page }
 });
 
 test('closing a tab immediately after editing saves or offers recovery', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await field.fill('Начало');
   await expect(page.locator('#status')).toContainText('Saved locally');
@@ -214,7 +214,7 @@ test('closing a tab immediately after editing saves or offers recovery', async (
   await page.close({ runBeforeUnload: true });
   await closed;
   const next = await context.newPage();
-  await next.goto('/');
+  await next.goto('/editor.html');
   await expect(next.locator('#editor')).toBeEnabled();
   if (await next.locator('#editor').inputValue() !== 'Начало — последняя фраза') {
     await next.getByRole('button', { name: /Recover Untitled document/ }).click();
@@ -224,7 +224,7 @@ test('closing a tab immediately after editing saves or offers recovery', async (
 });
 
 test('reload recovery preserves another tab’s newer revision', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await field.fill('Исходный документ');
   await expect(page.locator('#status')).toContainText('Saved locally');

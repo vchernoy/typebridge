@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 for (const width of [390, 1280]) {
   test(`storage information is one step away at ${width}px (#137 U6)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto('/');
+    await page.goto('/editor.html');
     await expect(page.locator('#editor')).toBeEnabled();
     const link = page.getByRole('button', { name: 'About your documents', exact: true });
     await link.focus();
