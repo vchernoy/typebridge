@@ -38,7 +38,7 @@ import {
   type CommandGeneration,
 } from './view/session';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
-import { lineColumnAtOffset, offsetForLineColumn, parseGotoInput } from './editor/goto-line';
+import { lineColumnAtOffset } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
 import { setupSearch } from './ui/search';
 import { setupRules } from './ui/rules';
@@ -46,11 +46,14 @@ import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
 import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
-import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
+import { installEscapeLayers } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 import { comparisonViewerHref, isDocumentId, parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { editorWindowApi, exposeEditorWindowApi, hostPageApi, testKnob, type EditorWindow } from './view/embed-api';
+import { setupExportImport } from './ui/export-import';
+import { setupComparisonOpen } from './ui/comparison-open';
+import { setupFindGotoBars } from './ui/find-goto-bars';
 import { parseEmbedMode } from './view/embed';
 import { notifyPrefsChanged, onPrefsChanged, PREFS_EVENT, type PrefName } from './view/prefs-sync';
 import { DOCUMENT_SIGNAL_CHANNEL, SIGNAL_POLL_INTERVAL_MS, createDocumentSignal, decideReread, parseDocumentSignal, shouldApplyDocumentSignal, type DocumentSignal } from './view/signals';
@@ -588,94 +591,18 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
     replaceTextKey: replaceSessionKey,
   },
 );
-const gotoInput = document.querySelector<HTMLInputElement>('#goto-line')!;
-const gotoStatus = document.querySelector<HTMLElement>('#goto-status')!;
-// Find and Go to line open on demand (#123): from their toolbar buttons or with
-// Cmd/Ctrl+F and Cmd/Ctrl+G. One bar at a time; Escape or × closes it and returns to the editor.
-const findBar = document.querySelector<HTMLElement>('#find-bar')!;
-const gotoBar = document.querySelector<HTMLElement>('#goto-bar')!;
-const findOpen = document.querySelector<HTMLButtonElement>('#find-open')!;
-const gotoOpen = document.querySelector<HTMLButtonElement>('#goto-open')!;
-function setBar(bar: HTMLElement, button: HTMLButtonElement, open: boolean): void {
-  bar.hidden = !open;
-  button.setAttribute('aria-expanded', String(open));
-}
-function leaveFocusPreservingActivePane(): void {
-  if (!document.body.classList.contains('focus-mode')) return;
-  setFocusMode(false);
-  syncMutationControls();
-}
-function openFind(): void {
-  leaveFocusPreservingActivePane();
-  setBar(gotoBar, gotoOpen, false);
-  setBar(findBar, findOpen, true);
-  // Re-read the shared last search so another window's query is visible immediately.
-  try {
-    const shared = sessionStorage.getItem(FIND_KEY);
-    if (shared !== null && findInput.value !== shared) {
-      findInput.value = shared;
-      findEditor.syncFromField();
-    }
-  } catch { /* Optional restore. */ }
-  showMatchCount();
-  findInput.focus();
-  findInput.select();
-}
-function openGoto(): void {
-  leaveFocusPreservingActivePane();
-  setBar(findBar, findOpen, false);
-  setBar(gotoBar, gotoOpen, true);
-  gotoInput.focus();
-  gotoInput.select();
-}
-function activeEditorSurface(): HTMLTextAreaElement {
-  return field;
-}
-function closeBar(bar: HTMLElement, button: HTMLButtonElement): void {
-  setBar(bar, button, false);
-  activeEditorSurface().focus({ preventScroll: true });
-}
-findOpen.addEventListener('click', () => { if (findBar.hidden) openFind(); else closeBar(findBar, findOpen); });
-gotoOpen.addEventListener('click', () => { if (gotoBar.hidden) openGoto(); else closeBar(gotoBar, gotoOpen); });
-document.querySelector<HTMLButtonElement>('#find-close')!.addEventListener('click', () => closeBar(findBar, findOpen));
-document.querySelector<HTMLButtonElement>('#goto-close')!.addEventListener('click', () => closeBar(gotoBar, gotoOpen));
-for (const [bar, button] of [[findBar, findOpen], [gotoBar, gotoOpen]] as const) {
-  registerEscapeLayer(bar, 10, () => closeBar(bar, button));
-}
-function goToLine(): void {
-  const parsed = parseGotoInput(gotoInput.value);
-  if (!parsed) {
-    gotoStatus.textContent = gotoInput.value.trim() ? 'Use line or line:column' : 'Enter a line number';
-    return;
-  }
-  const surface = activeEditorSurface();
-  const surfaceEditor = editor;
-  const target = offsetForLineColumn(surface.value, parsed.line, parsed.column ?? 1);
-  surface.focus({ preventScroll: true });
-  surface.setSelectionRange(target.offset, target.offset);
-  surfaceEditor.revealSelection();
-  updateCaretPosition();
-  gotoStatus.textContent = target.line === parsed.line && (parsed.column === undefined || target.column === parsed.column)
-    ? `Line ${target.line}, column ${target.column}`
-    : `Clamped to line ${target.line}, column ${target.column}`;
-}
-document.querySelector<HTMLButtonElement>('#goto-go')!.addEventListener('click', goToLine);
-gotoInput.addEventListener('keydown', event => {
-  // Skip IME confirmation Enter; composition must not navigate (#88 review).
-  if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.repeat || event.isComposing || event.defaultPrevented) return;
-  event.preventDefault();
-  goToLine();
-});
-document.addEventListener('keydown', event => {
-  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat || event.isComposing) return;
-  const key = event.key.toLowerCase();
-  if (key === SHORTCUTS.find.key && !event.shiftKey) {
-    event.preventDefault(); openFind();
-  } else if (key === SHORTCUTS.goto.key && !event.shiftKey) {
-    // Cmd/Ctrl+G: go to line. May also be reserved by the browser's Find UI.
-    event.preventDefault();
-    openGoto();
-  }
+const { openFind } = setupFindGotoBars({
+  field,
+  editor,
+  findInput,
+  findEditor,
+  showMatchCount,
+  leaveFocusMode: () => {
+    if (!document.body.classList.contains('focus-mode')) return;
+    setFocusMode(false);
+    syncMutationControls();
+  },
+  updateCaretPosition,
 });
 
 
@@ -2586,151 +2513,32 @@ if (!viewMode) {
 if (viewMode && !signalChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
 void (viewMode ? initializeViewer() : initializeDrafts());
 
-const openComparison = document.querySelector<HTMLButtonElement>('#open-comparison')!;
-async function explainNoComparison(message: string): Promise<void> {
-  await askConfirmChoice({
-    title: 'Cannot open comparison window',
-    message,
-    cancelLabel: 'Cancel',
-    returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
-  });
-}
-type ComparisonOpenResult =
-  | { ok: true; window: Window }
-  | { ok: false; reason: 'blocked' | 'cleanup' };
-
-/**
- * Open a same-origin companion without inheriting the source tab's sessionStorage.
- * Some browsers (notably Firefox) clone sessionStorage into window.open targets when an
- * opener relationship exists, which would copy private pending text. Opening about:blank,
- * stripping TypeBridge session keys, then navigating preserves popup-blocked detection
- * (unlike noopener, which returns null even on success) without clearing the source.
- * If inherited-session cleanup throws, fail closed: close the blank window and do not
- * navigate (private keys may still be present).
- */
-function openComparisonWindow(href: string): ComparisonOpenResult {
-  const opened = window.open('about:blank', '_blank');
-  if (!opened) return { ok: false, reason: 'blocked' };
-  try {
-    const doomed: string[] = [];
-    for (let i = 0; i < opened.sessionStorage.length; i++) {
-      const key = opened.sessionStorage.key(i);
-      if (key?.startsWith('typebridge.')) doomed.push(key);
-    }
-    for (const key of doomed) opened.sessionStorage.removeItem(key);
-  } catch {
-    try { opened.close(); } catch { /* Ignore. */ }
-    return { ok: false, reason: 'cleanup' };
-  }
-  try { opened.opener = null; } catch { /* Optional severance. */ }
-  try {
-    opened.location.replace(new URL(href, window.location.href).href);
-  } catch {
-    try { opened.close(); } catch { /* Ignore. */ }
-    return { ok: false, reason: 'blocked' };
-  }
-  return { ok: true, window: opened };
-}
-
-// window.open must run inside this click, so eligibility uses the in-memory IndexedDB revision
-// rather than an async read; the companion verifies the row itself on load. Document text is
-// never part of the URL, postMessage or sessionStorage.
-if (embedded) {
-  openComparison.hidden = true;
-  openComparison.disabled = true;
-}
-openComparison.addEventListener('click', () => {
-  if (viewMode || embedded || field.disabled || transitioning || deleting) return;
-  if (!db || active.revision < 1) {
-    void explainNoComparison(!db
-      ? 'Browser storage is unavailable, so there is no saved copy to open. Copy or export your text instead. Nothing was changed.'
-      : 'There is no saved copy of this document to open. Save or export it first if you want a second window; your text stays in this window. Opening a comparison window never turns on Autosave or saves your text.');
-    return;
-  }
-  const href = comparisonViewerHref(import.meta.env.BASE_URL || '/', active.id);
-  if (!href) {
-    void explainNoComparison('This document cannot be opened in a comparison window yet. Export it and import it as a regular document first. Your text stays in this window.');
-    return;
-  }
-  const opened = openComparisonWindow(href);
-  if (!opened.ok) {
-    if (opened.reason === 'cleanup') {
-      announceAction('Could not open a private comparison window safely. Your text is still only in this window; try again or export a copy.', { kind: 'failure' });
-    } else {
-      announceAction('The comparison window was blocked. Allow pop-ups for TypeBridge and try again. Your text is still here.', { kind: 'failure' });
-    }
-    return;
-  }
-  announceAction(workspace.dirty()
-    ? 'Opened the last saved version in another window. Unsaved typing was not sent.'
-    : 'Opened the last saved version in another window.');
+setupComparisonOpen({
+  embedded,
+  isBusy: () => viewMode || field.disabled || transitioning || deleting,
+  hasStorage: () => !!db,
+  activeDocument: () => ({ id: active.id, revision: active.revision }),
+  isDirty: () => workspace.dirty(),
+  announce: announceAction,
 });
 
-function downloadText(filename: string, content: string, mime: string): void {
-  const url = URL.createObjectURL(new Blob([content], { type: mime }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-function safeFilename(title: string): string {
-  return (title.trim().split('').map(char => char.charCodeAt(0) < 32 || '/\\\\:*?"<>|'.includes(char) ? '-' : char).join('').slice(0, 80) || 'document');
-}
-function exportSurface(): { title: string; text: string } {
-  return {
+setupExportImport({
+  exportSurface: () => ({
     title: draftTitle.value.trim() || UNTITLED_TITLE,
     text: field.value,
-  };
-}
-document.querySelector<HTMLButtonElement>('#export-txt')!.addEventListener('click', () => {
-  const { title, text } = exportSurface();
-  downloadText(safeFilename(title) + '.txt', text, 'text/plain;charset=utf-8');
-  announceAction('Text exported');
-});
-document.querySelector<HTMLButtonElement>('#export-json')!.addEventListener('click', () => {
-  const { title, text } = exportSurface();
-  const draft = { title, text };
-  downloadText(safeFilename(draft.title) + '.typebridge.json', JSON.stringify({ format: 'typebridge-draft', version: 1, draft }, null, 2), 'application/json;charset=utf-8');
-  announceAction('Document exported');
-});
-const importFile = document.querySelector<HTMLInputElement>('#import-file')!;
-document.querySelector<HTMLButtonElement>('#import-draft')!.addEventListener('click', () => { if (!viewMode) importFile.click(); });
-importFile.addEventListener('change', async () => {
-  if (viewMode) { importFile.value = ''; return; }
-  const file = importFile.files?.[0];
-  importFile.value = '';
-  if (!file) return;
-  try {
-    if (file.size > 5 * 1024 * 1024) throw new Error('File exceeds 5 MB');
-    const content = await file.text();
-    let title = file.name.replace(/(\.typebridge)?\.(json|txt)$/i, '');
-    let text = content;
-    if (/\.json$/i.test(file.name)) {
-      const parsed: unknown = JSON.parse(content);
-      if (!parsed || typeof parsed !== 'object' || !('format' in parsed) || parsed.format !== 'typebridge-draft' || !('version' in parsed) || parsed.version !== 1 || !('draft' in parsed) || !parsed.draft || typeof parsed.draft !== 'object' || !('title' in parsed.draft) || typeof parsed.draft.title !== 'string' || !('text' in parsed.draft) || typeof parsed.draft.text !== 'string') throw new Error('Not a supported TypeBridge document');
-      title = parsed.draft.title;
-      text = parsed.draft.text;
-    } else if (!/\.txt$/i.test(file.name)) throw new Error('Choose a .txt or .typebridge.json file');
-    if (!await askConfirmChoice({ title: 'Import document?', message: 'Import as a new document? Your current document will be kept.', confirmLabel: 'Import document', cancelLabel: 'Cancel import', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) return;
-    const imported = { ...newDraft(text), title: title.trim().slice(0, 150) || 'Imported document' };
+  }),
+  announce: announceAction,
+  isViewMode: () => viewMode,
+  confirmImport: () => askConfirmChoice({ title: 'Import document?', message: 'Import as a new document? Your current document will be kept.', confirmLabel: 'Import document', cancelLabel: 'Cancel import', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! }),
+  importDocument: async ({ title, text }) => {
+    const imported = { ...newDraft(text), title };
     // Save even when autosave is off: importing is an explicit save action.
     if (!db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(db, imported, 0, crypto.randomUUID());
     postSignal('saved', result.draft.id, result.draft.revision);
-    const switched = await switchDraft(result.draft.id);
-    // Always confirm the import; keep a conflict notice that the switch flush created.
-    announceAction(
-      switched.opened ? 'Imported as a new document' : 'Import saved in Documents; current text was kept',
-      { keepConflict: switched.conflict },
-    );
-  } catch (error) {
-    announceAction('Import failed: ' + (error instanceof Error ? error.message : String(error)));
-  }
+    return switchDraft(result.draft.id);
+  },
 });
-
 if (!viewMode) window.addEventListener('pagehide', () => {
   if (suppressPendingBackup) return;
   savePending();
