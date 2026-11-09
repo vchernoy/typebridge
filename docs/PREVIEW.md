@@ -14,6 +14,10 @@ CI no longer has its own `push: main` trigger: on main the Pages gate is the sin
 
 Permissions remain read-only except for the deploy job's Pages write and OIDC token. Existing Pages concurrency and environment protections are retained. A workflow PR cannot prove the production gate by publishing: review the job graph, validate with actionlint, and observe the first authorized main deployment after merge.
 
+## Rollback
+
+To undo a bad release, revert the offending commit on `main` (a normal revert PR, or a direct revert by the maintainer). The Pages gate rebuilds and checks the reverted revision and deploys it like any other. Open tabs then get the usual update notice; nothing is deleted from browser storage. Documents saved by the newer version stay readable as long as the storage format did not change; a storage upgrade needs its own rollback plan before it ships.
+
 ## Manual browser checks
 
 Run on iPhone Safari and iPhone Chrome (both use WebKit on iOS), plus desktop Chrome, Firefox and Safari. Record browser/OS version, keyboard/language, steps and expected versus actual results in the pull request or issue being tested. Do not enter sensitive text in a public deployment.
