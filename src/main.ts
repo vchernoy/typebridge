@@ -15,6 +15,7 @@ import { createViewerMode } from './view/viewer-mode';
 import { createSaver } from './view/saver';
 import { createAutosaveToggle, type AutosaveToggle } from './view/autosave-toggle';
 import { createDocumentActions, type EditAccess } from './view/documents';
+import { createRecovery } from './view/recovery';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -30,7 +31,7 @@ import { moveReadOnlyCaret } from './ui/readonly-caret';
 import { nextCharacterBoundary, previousCharacterBoundary } from './editor/characters';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
+import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
 import { editBlockGuidance, mayRetryEditOwnership } from './view/ownership';
 import { bufferInsertFromKeyboard, handoffRefuseGuidance, mapSelectionAcrossTextChange, replayBufferedInsert, type BufferedInsert, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
@@ -42,7 +43,7 @@ import {
   contentCommandStillCurrent,
   type CommandGeneration,
 } from './view/session';
-import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
+import { clearRecovery, writeRecovery } from './editor/recovery';
 import { lineColumnAtOffset } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
 import { setupSearch } from './ui/search';
@@ -512,26 +513,13 @@ const writingPosition = setupWritingPosition(
   () => state.loadingDraft || field.disabled || state.viewMissing ? undefined : state.active.id,
   writingPositionNamespace(windowId, viewMode),
 );
-const journalTab = crypto.randomUUID();
-const OWNER_LOCK = 'typebridge-recovery-owner:';
-let ownershipAvailable = false;
-const ownerReady = new Promise<void>(resolve => {
-  // Viewers write no recovery journals, so they never take recovery ownership.
-  if (!navigator.locks || viewMode) { resolve(); return; }
-  void navigator.locks.request(OWNER_LOCK + journalTab, async () => {
-    ownershipAvailable = true; resolve();
-    await new Promise<void>(() => { /* The browser releases this lock with the page. */ });
-  }).catch(() => { resolve(); });
+const recovery = createRecovery(state, statusLine, {
+  viewMode, autosave, field, draftTitle,
+  anchor: status.parentElement!,
+  postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
+  refreshDrafts: () => refreshDrafts(),
 });
-let currentJournal: RecoverySnapshot | undefined;
-const journalWarning = document.createElement('p');
-journalWarning.setAttribute('role', 'alert');
-journalWarning.hidden = true;
-status.parentElement?.before(journalWarning);
-const recoveryPanel = document.createElement('section');
-recoveryPanel.setAttribute('aria-label', 'Recover unsaved documents');
-recoveryPanel.className = 'recovery-panel'; // Hidden by CSS while empty (#118).
-status.parentElement?.before(recoveryPanel);
+const { ownerReady, journalEdit, renderRecovery } = recovery;
 
 field.disabled = true;
 draftSelect.disabled = true;
@@ -543,12 +531,6 @@ try { autosave.checked = autosaveEnabled(); } catch { /* Keep editing available 
 const PENDING_KEY = scopeSessionKey('typebridge.pendingDraft.v1', windowId);
 function snapshot(): StoredDraft {
   return { ...state.active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
-}
-function journalEdit(): void {
-  if (viewMode || !autosave.checked) return;
-  const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value };
-  try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
-  catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
 }
 const reloadBackup = createReloadBackup({
   key: PENDING_KEY,
@@ -1125,7 +1107,7 @@ function retryOwnership(): void {
 const saver = createSaver(state, statusLine, {
   viewMode, autosave, draftTitle, workspace, writingPosition,
   snapshot: () => snapshot(),
-  currentJournal: () => currentJournal,
+  currentJournal: () => recovery.currentJournal(),
   suppressEditTracking: () => suppressEditTracking,
   readOnlyNow: () => readOnlyNow(),
   clearPending: saved => { clearPending(saved); },
@@ -1227,94 +1209,6 @@ const recoveryNotice = document.createElement('div');
 recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
-let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
-let recoveryRenderVersion = 0;
-let panelSignature = '';
-let inspectUnknownOwners = false;
-async function ownerIsActive(tab: string): Promise<boolean | undefined> {
-  if (!ownershipAvailable) return undefined;
-  try { return (await navigator.locks.query()).held?.some(lock => lock.name === OWNER_LOCK + tab) ?? false; }
-  catch { return undefined; }
-}
-function queueRecovery(): void {
-  if (recoveryTimer) return;
-  recoveryTimer = setTimeout(() => { recoveryTimer = undefined; void renderRecovery(); }, 1200);
-}
-async function renderRecovery(): Promise<void> {
-  const version = ++recoveryRenderVersion;
-  let entries: RecoverySnapshot[];
-  try { entries = listRecovery(localStorage).filter(item => item.tab !== journalTab); }
-  catch { journalWarning.textContent = 'Emergency backups cannot be read. Copy or export unsaved text.'; journalWarning.hidden = false; return; }
-  const candidates: { item: RecoverySnapshot; unknown: boolean }[] = [];
-  for (const item of entries) {
-    const activeOwner = await ownerIsActive(item.tab);
-    if (activeOwner === true) continue;
-    // A committed exact document or idempotent recovery copy makes only this
-    // precise journal version redundant; newer revisions are never overwritten.
-    try {
-      if (state.db) {
-        const original = await getStoredDraft(state.db, item.documentId);
-        const recovered = await getStoredDraft(state.db, 'recovery-' + item.token);
-        if ((original?.title === item.title && original.text === item.text) ||
-            (recovered?.title === item.title + ' (recovered)' && recovered.text === item.text)) {
-          clearRecovery(localStorage, item);
-          continue;
-        }
-      }
-    } catch { /* A failed check must never discard a potentially unsaved snapshot. */ }
-    candidates.push({ item, unknown: activeOwner === undefined });
-  }
-  if (version !== recoveryRenderVersion) return;
-  const signature = JSON.stringify({ candidates, inspectUnknownOwners });
-  if (signature === panelSignature) return;
-  panelSignature = signature;
-  recoveryPanel.replaceChildren();
-  if (!ownershipAvailable && !inspectUnknownOwners) {
-    const inspect = document.createElement('button');
-    inspect.type = 'button'; inspect.textContent = 'Check emergency backups';
-    inspect.addEventListener('click', () => { inspectUnknownOwners = true; panelSignature = ''; void renderRecovery(); });
-    recoveryPanel.append(inspect); return;
-  }
-  if (!candidates.length) return;
-  const heading = document.createElement('p');
-  heading.textContent = ownershipAvailable ? 'Emergency backups found. Recover a copy without changing your current document:' : 'Ownership cannot be verified; these backups may belong to open tabs. Recover a copy without changing your current document:';
-  recoveryPanel.append(heading);
-  for (const { item, unknown } of candidates) {
-    const group = document.createElement('div');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = `Recover ${item.title} (${new Date(item.timestamp).toLocaleString()})`;
-    if (unknown) button.title = 'Tab ownership could not be verified; the original tab may still be open.';
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        if (await ownerIsActive(item.tab) === true) throw new Error('The original tab is still open');
-        if (!state.db) throw new Error('Storage unavailable');
-        const copy = { id: 'recovery-' + item.token, title: item.title + ' (recovered)', text: item.text, updatedAt: item.timestamp };
-        const result = await commitDraft(state.db, copy, 0);
-        if (!result.ok && (!result.current || result.current.title !== copy.title || result.current.text !== copy.text)) throw new Error('Recovery copy already changed');
-        if (result.ok) postSignal('saved', result.draft.id, result.draft.revision);
-        clearRecovery(localStorage, item);
-        await refreshDrafts();
-        announceAction('Recovered a copy in Documents. Your current document was kept.');
-        panelSignature = ''; await renderRecovery();
-      } catch { announceAction('Recovery failed. The emergency backup was kept; retry or copy your text.'); button.disabled = false; }
-    });
-    const discard = document.createElement('button');
-    discard.type = 'button'; discard.textContent = `Discard backup for ${item.title}`;
-    discard.addEventListener('click', async () => {
-      if (await ownerIsActive(item.tab) === true) { announceAction('The original tab is still open; backup kept.'); queueRecovery(); return; }
-      if (!await askConfirmChoice({ title: 'Discard emergency backup?', message: 'Unsaved text in this backup will be lost.', confirmLabel: 'Discard backup', cancelLabel: 'Keep backup', returnFocus: accepted => accepted ? field : discard })) return;
-      try { clearRecovery(localStorage, item); panelSignature = ''; await renderRecovery(); }
-      catch { announceAction('Could not discard backup; it was kept.'); }
-    });
-    group.append(button, discard); recoveryPanel.append(group);
-  }
-}
-if (!viewMode) {
-  window.addEventListener('storage', event => { if (event.key?.startsWith(RECOVERY_PREFIX)) queueRecovery(); });
-  setInterval(queueRecovery, 5000);
-}
 function handleDatabaseUpgrade(): void {
   // Invalidate in-flight acquires, then free any installed Web Lock so an upgraded tab can own.
   storageGeneration++;
@@ -1935,8 +1829,7 @@ function commitWindowClose(): void {
   clearPendingBackups();
   // Confirmed discard must forget this window's emergency journals so another
   // window's recovery poll does not re-offer text the user chose to discard.
-  const discardedJournal = currentJournal;
-  currentJournal = undefined;
+  const discardedJournal = recovery.takeCurrentJournal();
   if (discardedJournal) {
     try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
   }
