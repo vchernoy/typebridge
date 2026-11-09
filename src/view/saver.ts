@@ -78,7 +78,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           deps.workspace.setDirty(deps.workspace.contentRevision() !== version);
           deps.updateSaveIndicator();
           if (result.conflict) {
-            // Conflict copy is a new document id; keep the deps.workspace identity in sync
+            // Conflict copy is a new document id; keep the workspace identity in sync
             // without bumping sessionGeneration mid-persist (same in-flight save stream).
             deps.workspace.setDocumentId(result.draft.id);
             // Retain new edits typed while the transaction was in flight.
@@ -144,7 +144,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     deps.workspace.setDirty(true);
     deps.workspace.bumpContentRevision();
     deps.journalEdit();
-    // With deps.autosave off nothing is committed, so refresh the Documents label from the
+    // With Autosave off nothing is committed, so refresh the Documents label from the
     // on-screen title (and mark unsaved) without waiting for a save (#114).
     if (!deps.autosave.checked && (becameDirty || fromTitle)) deps.renderDrafts();
     clearTimeout(saveTimer);
