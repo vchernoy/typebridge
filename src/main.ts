@@ -21,7 +21,8 @@ import { createDocumentSync } from './view/document-sync';
 import { createLeaveGuards } from './view/leave-guards';
 import { createEditAccess } from './view/edit-access';
 import { createTakeover } from './view/takeover';
-import { createTitleEditing, type HeldTitleOp, type TitleOp } from './ui/title-edits';
+import { createTitleEditing, titleOpForKey, type HeldTitleOp, type TitleOp } from './ui/title-edits';
+import { setupDeletedInput } from './view/deleted-input';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -36,7 +37,6 @@ import { moveReadOnlyCaret } from './ui/readonly-caret';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
-import { bufferInsertFromKeyboard, replayBufferedInsert, type BufferedInsert } from './view/handoff';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
@@ -962,14 +962,6 @@ if (!viewMode) {
     requestEditHere();
     return true;
   };
-  /** The title edit a key stands for, if any (printable, Backspace, Delete; no shortcuts). */
-  const titleOpForKey = (event: KeyboardEvent): TitleOp | undefined => {
-    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return undefined;
-    if (event.key.length === 1) return { inputType: 'insertText', data: event.key };
-    if (event.key === 'Backspace') return { inputType: 'deleteContentBackward', data: null };
-    if (event.key === 'Delete') return { inputType: 'deleteContentForward', data: null };
-    return undefined;
-  };
   draftTitle.addEventListener('pointerdown', requestEditHere);
   draftTitle.addEventListener('beforeinput', requestEditHere);
   draftTitle.addEventListener('paste', event => {
@@ -996,107 +988,22 @@ if (!viewMode) {
     __typebridgeBufferTitleEdit: (op, start, end) => {
       // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.
       if (state.deletedElsewhere) {
-        holdTitleOp(op, start, end, true);
-        keepThenApply();
+        deletedInput.holdTitleOp(op, start, end, true);
+        deletedInput.keepThenApply();
         return true;
       }
       return bufferTitleEdit(op, start, end, true);
     },
   });
 
-  // Deleted elsewhere (#175 follow-up): no takeover (nobody owns it any more). Keep as new
-  // document or Close; typing or pasting into the text or title keeps it, then applies.
-  document.querySelector<HTMLButtonElement>('#keep-deleted')!.addEventListener('click', () => {
-    void keepDeletedAsNew().then(kept => { if (kept) field.focus(); });
+  // Deleted elsewhere (#175 follow-up): Keep as new document or Close (view/deleted-input.ts).
+  const deletedInput = setupDeletedInput(state, {
+    field, draftTitle, applyHeldTitleOps,
+    isKeepingDeleted: () => sync.isKeepingDeleted(),
+    keepDeletedAsNew: () => keepDeletedAsNew(),
+    switchDraft: id => switchDraft(id),
   });
-  document.querySelector<HTMLButtonElement>('#close-deleted')!.addEventListener('click', () => {
-    const other = state.drafts.find(draft => draft.id !== state.active.id);
-    void switchDraft(other?.id);
-  });
-  // Held while the copy is created, then replayed through the editors (transliteration, undo)
-  // as soon as it is editable, before any later key or the first save.
-  let heldText: BufferedInsert[] = [];
-  let heldTitle: HeldTitleOp[] = [];
-  let heldTitleBase = '';
-  let heldTitleFromHost = false;
-  const holdTitleOp = (op: TitleOp, start: number, end: number, fromHost: boolean): void => {
-    if (heldTitle.length === 0) { heldTitleBase = draftTitle.value; heldTitleFromHost = fromHost; }
-    heldTitle.push({ ...op, start, end });
-  };
-  drainDeletedInput = (): void => {
-    const text = heldText;
-    const title = heldTitle;
-    heldText = [];
-    heldTitle = [];
-    // Focus first: Firefox can drop an unfocused textarea's caret between replayed edits.
-    if (text.length) {
-      const caretStart = field.selectionStart;
-      const caretEnd = field.selectionEnd;
-      field.focus();
-      try { field.setSelectionRange(caretStart, caretEnd); } catch { /* Not focusable. */ }
-    }
-    for (const item of text) replayBufferedInsert(field, item);
-    if (title.length) {
-      const at = applyHeldTitleOps(title, draftTitle.value !== heldTitleBase);
-      if (!heldTitleFromHost) {
-        draftTitle.focus();
-        try { draftTitle.setSelectionRange(at.start, at.end); } catch { /* Not focusable. */ }
-      }
-    }
-  };
-  const keepThenApply = (): void => {
-    void keepDeletedAsNew().then(kept => {
-      if (!kept) { heldText = []; heldTitle = []; }
-    });
-  };
-  const deletedTarget = (event: Event): HTMLTextAreaElement | HTMLInputElement | undefined => {
-    if (!state.deletedElsewhere) return undefined;
-    return event.target === field ? field : event.target === draftTitle ? draftTitle : undefined;
-  };
-  // While Keep is making the copy (usually a few ms), the caret and selection must not move:
-  // held edits replay at the selection captured when it started.
-  const keepPending = (): boolean => sync.isKeepingDeleted() || heldText.length > 0 || heldTitle.length > 0;
-  const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
-  // Capture on the document so these run before the takeover listeners on the field.
-  document.addEventListener('pointerdown', event => {
-    if (!deletedTarget(event)) return;
-    event.stopImmediatePropagation();
-    if (keepPending()) event.preventDefault();
-  }, true);
-  document.addEventListener('keydown', event => {
-    const target = deletedTarget(event);
-    if (!target) return;
-    if (keepPending() && CARET_KEYS.has(event.key)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      return;
-    }
-    if (target === field) {
-      const insert = bufferInsertFromKeyboard(event);
-      if (!insert) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      heldText.push(insert);
-    } else {
-      const op = titleOpForKey(event);
-      if (!op) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      holdTitleOp(op, draftTitle.selectionStart ?? draftTitle.value.length, draftTitle.selectionEnd ?? draftTitle.value.length, false);
-    }
-    keepThenApply();
-  }, true);
-  document.addEventListener('paste', event => {
-    const target = deletedTarget(event);
-    if (!target) return;
-    const text = event.clipboardData?.getData('text/plain') ?? '';
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    if (!text) return;
-    if (target === field) heldText.push({ kind: 'paste', text });
-    else holdTitleOp({ inputType: 'insertFromPaste', data: text }, draftTitle.selectionStart ?? draftTitle.value.length, draftTitle.selectionEnd ?? draftTitle.value.length, false);
-    keepThenApply();
-  }, true);
+  drainDeletedInput = deletedInput.drain;
   const replayAfterTakeover = new Set(['undo', 'redo', 'delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
   document.addEventListener('click', event => {
     const button = (event.target as Element | null)?.closest?.('button');
