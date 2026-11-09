@@ -801,6 +801,8 @@ for (const upgradeAfterFailure of [false, true]) {
     await page.clock.runFor(400);
     await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
     await field.pressSequentially('!');
+    // Let the key land before releasing the save (pressSequentially can return first).
+    await expect(field).toHaveValue('Исходный — правка!');
     await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
     await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
     await expect(field).toHaveValue('Исходный — правка!');
@@ -983,8 +985,11 @@ test('a failed retry during a switch flush still announces the conflict', async 
   await field.pressSequentially(' — правка');
   const switching = selectDocument(page, targetId);
   await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
-  // Keep dirty so persist retries after the conflict commit, then fails.
+  // Keep dirty so persist retries after the conflict commit, then fails. Wait for the key to
+  // land before releasing the save: pressSequentially can return first, and then the save
+  // finished clean and the switch (correctly) went ahead — the CI flake.
   await field.pressSequentially('!');
+  await expect(field).toHaveValue('Исходный — правка!');
   await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
   await switching;
   await expect(field).toHaveValue('Исходный — правка!');
@@ -1039,6 +1044,8 @@ test('a failed switch after a conflict flush keeps the open-failure through a la
   const switching = selectDocument(page, targetId);
   await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
   await field.pressSequentially('!');
+  // Let the key land before the save is released (see the test above).
+  await expect(field).toHaveValue('Исходный — правка!');
   await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
   await switching;
   await expect(field).toHaveValue('Исходный — правка!');

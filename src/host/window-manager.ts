@@ -119,6 +119,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   let preference: LayoutModePreference = 'auto';
   let hostFocus = false;
   let preFocusLayouts: HostWindowLayout[] | undefined;
+  /** Host size at the last resize pass: a window that filled it keeps filling the new size. */
+  let lastView: { width: number; height: number } | undefined;
   let activeId = 'main';
 
   const persist = (): void => {
@@ -1070,7 +1072,15 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       return;
     }
     const view = viewportOf(deps.root);
-    layouts = layouts.map(win => ({ ...win, ...clampRect(win, view) }));
+    const before = lastView;
+    lastView = view;
+    layouts = layouts.map(win => (
+      // A full-bleed window grows with the host too (clamping alone only shrinks it, so a
+      // taller host left a gap and the next drag moved it instead of restoring it).
+      before && isFullscreenRect(win, before)
+        ? { ...win, x: 0, y: 0, w: view.width, h: view.height }
+        : { ...win, ...clampRect(win, view) }
+    ));
     applyAllGeometry();
     persist();
   };
@@ -1375,6 +1385,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   rootObserver?.observe(deps.root);
 
   boot();
+  lastView = viewportOf(deps.root);
   refreshMode();
   // Mark the initial active shell without bringToFront/persist — restoring a free-layout
   // session must keep the saved z-order (Codex P1: activating `main` hid a front `w2`).

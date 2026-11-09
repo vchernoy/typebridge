@@ -91,6 +91,26 @@ test('dragging the title bar moves a full-bleed window', async ({ page }) => {
   expect(after!.x + after!.y).toBeGreaterThan(0);
 });
 
+test('a full-bleed window keeps filling the host when the host grows', async ({ page }) => {
+  await openHost(page);
+  const main = () => page.evaluate(() => {
+    const hooks = window as Window & { __typebridgeHostWindows?: () => Array<{ id: string; x: number; y: number; w: number; h: number }> };
+    return hooks.__typebridgeHostWindows?.().find(win => win.id === 'main');
+  });
+  const root = () => page.locator('#host-root').evaluate(el => ({ w: el.clientWidth, h: el.clientHeight }));
+  const before = (await main())!;
+  const view = await root();
+  expect(before).toMatchObject({ x: 0, y: 0, w: view.w, h: view.h });
+  const size = page.viewportSize()!;
+  await page.setViewportSize({ width: size.width + 120, height: size.height + 90 });
+  const grown = await root();
+  expect(grown.w).toBeGreaterThan(view.w);
+  await expect.poll(main).toMatchObject({ x: 0, y: 0, w: grown.w, h: grown.h });
+  // Still full-bleed, so a drag restores it to a smaller movable window.
+  await page.setViewportSize(size);
+  await expect.poll(main).toMatchObject({ x: 0, y: 0, w: view.w, h: view.h });
+});
+
 test('host mounts an editor when localStorage access is blocked', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'localStorage', {

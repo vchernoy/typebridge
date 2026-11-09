@@ -368,17 +368,50 @@ test('boot does not own a document deleted during acquire', async ({ page, conte
 
   const booting = await context.newPage();
   await booting.addInitScript(() => {
-    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1000;
+    // The app reads this delay as it enters acquisition: mark that moment for the test.
+    Object.defineProperty(window, '__typebridgeDelayAcquireMs', {
+      configurable: true,
+      get() {
+        // Only the first (boot) acquisition waits; the fresh document after the miss does not.
+        const state = window as Window & { __typebridgeAcquireEntered?: boolean };
+        if (state.__typebridgeAcquireEntered) return 0;
+        state.__typebridgeAcquireEntered = true;
+        return 3_000;
+      },
+    });
   });
   const booted = booting.goto('/editor.html');
-  await page.waitForTimeout(200);
+  // Delete inside the acquire delay (a fixed sleep let it land before boot listed the
+  // documents, or after it had opened this one).
+  await expect.poll(() => booting.evaluate(() => (window as Window & { __typebridgeAcquireEntered?: boolean }).__typebridgeAcquireEntered === true)
+    .catch(() => false)).toBe(true);
   await documentAction(page, '#delete-draft');
   await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();
   await expect(page.locator('#status')).toContainText('Document deleted');
+  // Still acquiring: the boot tab has not opened anything yet.
+  await expect(booting.locator('#editor')).toBeDisabled();
   await booted;
   await expect(booting.locator('#editor')).toBeEnabled();
   await expect.poll(async () => (await readStoredDocs(booting)).some(row => row.id === id)).toBe(false);
   expect((await readOwnership(booting, id))?.ownerInstanceId ?? '').not.toBe(await instanceOf(booting));
+  // The post-acquire check saw the document gone and started a fresh one.
+  await expect(booting.locator('#deleted-bar')).toBeHidden();
+  await expect(role(booting)).toHaveAttribute('data-role', 'editor');
+  await booting.locator('#editor').fill('fresh after miss');
+  await expect(booting.locator('#save-indicator')).toHaveText('Saved');
+  expect((await readStoredDocs(booting)).map(row => row.id)).not.toContain(id);
+});
+
+test('boot does not open a document deleted before it lists documents', async ({ page, context }) => {
+  await openOrdinary(page);
+  const id = await saveAs(page, 'gone before boot');
+  await documentAction(page, '#delete-draft');
+  await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();
+  await expect(page.locator('#status')).toContainText('Document deleted');
+
+  const booting = await context.newPage();
+  await openOrdinary(booting);
+  await expect(booting.locator('#deleted-bar')).toBeHidden();
   await expect(role(booting)).toHaveAttribute('data-role', 'editor');
   await booting.locator('#editor').fill('fresh after miss');
   await expect(booting.locator('#save-indicator')).toHaveText('Saved');
@@ -505,9 +538,11 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   await expect(page.locator('#editor')).not.toHaveValue('alpha beta');
   const afterConvert = await page.locator('#editor').inputValue();
 
-  // Delay acquire so mutations attempted mid-transfer hit the frozen Editor gates.
+  // Delay acquire so mutations attempted mid-transfer hit the frozen Editor gates. Slow CI
+  // browsers needed more than 800ms for the attempts below, so the switch finished first and
+  // Replace then (correctly) edited the opened document; the premise is now asserted.
   await page.evaluate(() => {
-    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800;
+    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 4_000;
   });
   const switchPromise = selectDocument(page, second);
   await expect.poll(async () => page.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.readOnly)).toBe(true);
@@ -521,6 +556,8 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   await page.locator('#replace-one').click({ force: true });
   await page.locator('#replace-all').click({ force: true });
   await page.keyboard.press('ControlOrMeta+z');
+  // Every attempt above happened while the transfer was still in progress.
+  expect(await page.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.readOnly)).toBe(true);
   await switchPromise;
   await expect(page.locator('#autosave')).toBeEnabled();
 

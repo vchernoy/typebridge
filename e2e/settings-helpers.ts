@@ -113,8 +113,12 @@ export async function openDocuments(page: Page): Promise<void> {
 
 export async function closeDocuments(page: Page): Promise<void> {
   const panel = page.locator('#doc-menu');
-  if (await panel.isVisible()) await page.locator('#doc-menu-open').click();
-  await expect(panel).toBeHidden();
+  // ▾ toggles the menu. If the app closes it between the visibility check and the click
+  // (e.g. a document switch finishing), the click reopens it (#155): check and retry.
+  await expect(async () => {
+    if (await panel.isVisible()) await page.locator('#doc-menu-open').click();
+    await expect(panel).toBeHidden({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
 }
 
 /** Open the menu, pick a document (by value or { label }), and close the menu. */
