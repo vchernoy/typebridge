@@ -40,6 +40,10 @@ export type EditorState = {
   viewMissing: boolean;
   /** The shown document was deleted in another window; this window holds the last copy of its text. */
   deletedElsewhere: boolean;
+  /** True only during the post-flush ownership acquire/reread window (not while flushing). */
+  transferFrozen: boolean;
+  /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
+  storageGeneration: number;
 };
 
 export function createEditorState(): EditorState {
@@ -56,5 +60,7 @@ export function createEditorState(): EditorState {
     loadingDraft: false,
     viewMissing: false,
     deletedElsewhere: false,
+    transferFrozen: false,
+    storageGeneration: 0,
   };
 }
