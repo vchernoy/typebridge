@@ -3,7 +3,7 @@ import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 /** #175 step 6: Auto / Free / Stacked layout and host Focus maximize. */
 
 async function openHost(page: Page): Promise<FrameLocator> {
-  await page.goto('/host.html');
+  await page.goto('/');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   return frame;

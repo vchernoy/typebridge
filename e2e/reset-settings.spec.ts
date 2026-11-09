@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { openSettings } from './settings-helpers';
 
 async function configured(page: Page): Promise<void> {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.evaluate(() => {
     const values = {

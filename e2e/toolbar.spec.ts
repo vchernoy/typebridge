@@ -2,7 +2,7 @@ import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 
 test('the toolbar holds editing actions; Focus and Settings sit in the top bar (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const toolbar = page.getByRole('toolbar', { name: 'Editing' });
   for (const name of ['Undo', 'Redo', 'To Cyrillic', 'To Latin', 'Find', 'Copy', 'More actions']) {
@@ -17,7 +17,7 @@ test('the toolbar holds editing actions; Focus and Settings sit in the top bar (
 });
 
 test('the ⋯ menu works with the keyboard and closes cleanly (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Текст');

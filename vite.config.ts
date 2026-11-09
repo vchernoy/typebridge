@@ -52,10 +52,10 @@ self.addEventListener('fetch', event => {
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(async () => {
       const cache = await caches.open(CACHE);
-      // #175 host page: offline host navigations must not fall back to the standalone editor.
+      // \`/\` is the multi-window host; editor windows and the comparison popup use editor.html.
       const path = url.pathname;
-      if (path.endsWith('/host.html') || path.endsWith('/host')) {
-        return (await cache.match(HOME + 'host.html')) || Response.error();
+      if (path.endsWith('/editor.html') || path.endsWith('/editor')) {
+        return (await cache.match(HOME + 'editor.html')) || Response.error();
       }
       return (await cache.match(HOME + 'index.html')) || Response.error();
     }));
@@ -74,7 +74,9 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
+        // `/` is the multi-window host; each window (and the comparison popup) is editor.html.
         main: 'index.html',
+        editor: 'editor.html',
         host: 'host.html',
       },
     },

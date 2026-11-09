@@ -6,7 +6,7 @@ import { fillHostEditor } from './settings-helpers';
 async function openHost(page: Page): Promise<FrameLocator> {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
-  await page.goto('/host.html');
+  await page.goto('/');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   return frame;

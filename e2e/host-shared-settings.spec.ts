@@ -5,7 +5,7 @@ import { readStoredDocs } from './storage-helpers';
 /** #175 step 7: one host Settings panel; prefs apply live to every window. */
 
 async function openHost(page: Page): Promise<FrameLocator> {
-  await page.goto('/host.html');
+  await page.goto('/');
   const frame = page.frameLocator('.host-window iframe.host-editor').first();
   await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   return frame;

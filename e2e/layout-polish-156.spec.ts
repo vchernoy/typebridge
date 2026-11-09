@@ -4,7 +4,7 @@ import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 test('editing toolbar stays one row at 390px (#156)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const ids = ['#undo', '#redo', '#convert-cyrillic', '#convert-latin', '#find-open', '#copy', '#more-open'];
   const mids = await Promise.all(ids.map(async id => {
@@ -19,7 +19,7 @@ test('editing toolbar stays one row at 390px (#156)', async ({ page }) => {
 
 test('phone Find bar keeps each label with its field (#156)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await openFind(page);
   const findLabel = page.locator('label[for="find-text"]');
@@ -36,7 +36,7 @@ test('phone Find bar keeps each label with its field (#156)', async ({ page }) =
 });
 
 test('save state is visible once in the top bar (#156)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Hello');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
@@ -49,7 +49,7 @@ test('save state is visible once in the top bar (#156)', async ({ page }) => {
 
 test('long titles ellipsize with the full title available (#156)', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const title = 'Untitled document with a very long name for ellipsis';
   await page.locator('#draft-title').fill(title);
@@ -63,7 +63,7 @@ test('long titles ellipsize with the full title available (#156)', async ({ page
 });
 
 test('document counts use singular forms (#156)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('a');
   await expect(page.locator('#count')).toHaveText('1 character · 1 word · 1 min read');
@@ -71,7 +71,7 @@ test('document counts use singular forms (#156)', async ({ page }) => {
 
 test('narrow shortcuts sheet stacks long keys without overflow (#156)', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await setSetting(page, '#tab-indent', false);
   await moreAction(page, '#keyboard-shortcuts');
@@ -88,7 +88,7 @@ test('narrow shortcuts sheet stacks long keys without overflow (#156)', async ({
 });
 
 test('conflict-copy title updates the tooltip (#156)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#draft-title').fill('Shared note');
   await page.locator('#editor').fill('Исходный текст');

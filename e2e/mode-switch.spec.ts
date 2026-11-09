@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('the Latin ⬤ Кириллица switch shows and sets the typing mode (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   const topbar = page.locator('header.topbar');

@@ -40,14 +40,14 @@ describe('comparison route', () => {
   });
 
   it('builds a viewer href under the Vite base, including recovery ids', () => {
-    expect(comparisonViewerHref('/', DOC)).toBe(`/?doc=${DOC}&mode=view`);
-    expect(comparisonViewerHref('/app/', DOC)).toBe(`/app/?doc=${DOC}&mode=view`);
-    expect(comparisonViewerHref('/', RECOVERY)).toBe(`/?doc=${encodeURIComponent(RECOVERY)}&mode=view`);
+    expect(comparisonViewerHref('/', DOC)).toBe(`/editor.html?doc=${DOC}&mode=view`);
+    expect(comparisonViewerHref('/app/', DOC)).toBe(`/app/editor.html?doc=${DOC}&mode=view`);
+    expect(comparisonViewerHref('/', RECOVERY)).toBe(`/editor.html?doc=${encodeURIComponent(RECOVERY)}&mode=view`);
     expect(comparisonViewerHref('/', 'bad')).toBeUndefined();
   });
 
   it('preserves an optional window id on viewer hrefs (#175)', () => {
-    expect(comparisonViewerHref('/', DOC, 'alpha')).toBe(`/?doc=${DOC}&mode=view&window=alpha`);
-    expect(comparisonViewerHref('/', DOC, undefined)).toBe(`/?doc=${DOC}&mode=view`);
+    expect(comparisonViewerHref('/', DOC, 'alpha')).toBe(`/editor.html?doc=${DOC}&mode=view&window=alpha`);
+    expect(comparisonViewerHref('/', DOC, undefined)).toBe(`/editor.html?doc=${DOC}&mode=view`);
   });
 });

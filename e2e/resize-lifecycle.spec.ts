@@ -12,7 +12,7 @@ for (const focus of [false, true]) {
         set.call(this, key, value);
       };
     });
-    await page.goto('/');
+    await page.goto('/editor.html');
     const editor = page.locator('#editor');
     const grip = page.locator('#resize-editor');
     await expect(editor).toBeEnabled();

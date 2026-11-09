@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { documentAction, moreAction, selectDocument, setAutosave } from './settings-helpers';
 
 test('single-pane workspace exposes session and pane hooks', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const root = page.locator('main.workspace');
   await expect(root).toHaveAttribute('data-session-id', 'session-1');
@@ -16,7 +16,7 @@ test('single-pane workspace exposes session and pane hooks', async ({ page }) =>
 });
 
 test('editor types transliteration, edits selections and supports history', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
@@ -35,7 +35,7 @@ test('editor types transliteration, edits selections and supports history', asyn
 });
 
 test('toggle, paste and composition preserve text', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await page.locator('#enabled').uncheck();
@@ -51,7 +51,7 @@ test('toggle, paste and composition preserve text', async ({ page }) => {
 });
 
 test('paste and undo preserve clipboard content and caret', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await page.evaluate(() => { const seed = document.createElement('textarea'); seed.id = 'clipboard-seed'; seed.value = 'ABC 🙂'; document.body.append(seed); });
@@ -70,7 +70,7 @@ test('paste and undo preserve clipboard content and caret', async ({ page }) => 
 
 test('small screen retains an accessible editor and toggle', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 650 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('yozh');
@@ -79,7 +79,7 @@ test('small screen retains an accessible editor and toggle', async ({ page }) =>
 });
 
 test('composition keyboard undo is not intercepted by editor', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await expect(field).toBeEnabled();
@@ -96,7 +96,7 @@ test('composition keyboard undo is not intercepted by editor', async ({ page }) 
 });
 
 test('cut and selection replacement are undoable with selections intact', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await page.locator('#enabled').uncheck();
@@ -114,7 +114,7 @@ test('cut and selection replacement are undoable with selections intact', async 
 });
 
 test('non-cancelable input records actual mutation and ignores no-op beforeinput', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('a');
@@ -133,7 +133,7 @@ test('non-cancelable input records actual mutation and ignores no-op beforeinput
 });
 
 test('composition updates form one undoable edit', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name:'Your text' });
   await field.pressSequentially('a');
@@ -152,7 +152,7 @@ test('composition updates form one undoable edit', async ({ page }) => {
 });
 
 test('non-cancelable native history discards stale custom snapshots', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('ab');
@@ -167,7 +167,7 @@ test('non-cancelable native history discards stale custom snapshots', async ({ p
 });
 
 test('toggle while editing and undo clear', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('sh');
@@ -189,7 +189,7 @@ test('toggle while editing and undo clear', async ({ page }) => {
 test('touch interactions on a narrow viewport', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true });
   const page = await context.newPage();
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.tap();
@@ -203,7 +203,7 @@ test('touch interactions on a narrow viewport', async ({ browser }) => {
 });
 
 test('toolbar Undo and Redo track multiple edits, preserve selection and keyboard history', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const undo = page.getByRole('button', { name: 'Undo', exact: true });
@@ -238,7 +238,7 @@ test('toolbar Undo and Redo track multiple edits, preserve selection and keyboar
 });
 
 test('toolbar history undoes block clear and supports multiple steps', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
@@ -253,7 +253,7 @@ test('toolbar history undoes block clear and supports multiple steps', async ({ 
 });
 
 test('autosave restores text after reload and opens latest draft in a new tab', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
@@ -261,7 +261,7 @@ test('autosave restores text after reload and opens latest draft in a new tab', 
   await page.reload();
   await expect(field).toHaveValue('привет');
   const second = await context.newPage();
-  await second.goto('/');
+  await second.goto('/editor.html');
   await expect(second.getByRole('textbox', { name: 'Your text' })).toHaveValue('привет');
   // The first tab still owns that document (#159 W4); a new document is owned once it opens.
   await expect(second.locator('html')).toHaveAttribute('data-role', 'reader');
@@ -277,7 +277,7 @@ test('autosave restores text after reload and opens latest draft in a new tab', 
 });
 
 test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.pressSequentially('privet');
@@ -302,7 +302,7 @@ test('draft rename, reopen, delete and autosave toggle', async ({ page }) => {
 });
 
 test('undo and redo survive refresh and stay isolated per draft', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const undo = page.getByRole('button', { name: 'Undo', exact: true });
@@ -334,7 +334,7 @@ test('undo and redo survive refresh and stay isolated per draft', async ({ page 
 
 test('editor can shrink to five lines and resize horizontally', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   const sizes = await field.evaluate(el => {
@@ -354,7 +354,7 @@ test('editor can shrink to five lines and resize horizontally', async ({ page })
 });
 
 test('fresh page opens latest saved draft, reload keeps current tab selection', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.getByRole('textbox', { name: 'Your text' });
   await field.fill('First draft');
@@ -363,7 +363,7 @@ test('fresh page opens latest saved draft, reload keeps current tab selection', 
   await field.fill('Latest draft');
   await expect(page.locator('#status')).toContainText('Saved locally');
   const fresh = await context.newPage();
-  await fresh.goto('/');
+  await fresh.goto('/editor.html');
   await expect(fresh.getByRole('textbox', { name: 'Your text' })).toHaveValue('Latest draft');
   await page.reload();
   await expect(field).toHaveValue('Latest draft');

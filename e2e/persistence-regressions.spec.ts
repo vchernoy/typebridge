@@ -5,7 +5,7 @@ import { writeForeignRevision } from './storage-helpers';
 
 for (const saved of [false, true]) for (const delay of [0, 800]) {
   test(`delete pending edits: saved=${saved}, confirmation delay=${delay}`, async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/editor.html');
     const editor = page.locator('#editor');
     await expect(editor).toBeEnabled();
     if (saved) { await editor.fill('Saved'); await expect(page.locator('#status')).toContainText('Saved locally'); }
@@ -24,10 +24,10 @@ for (const saved of [false, true]) for (const delay of [0, 800]) {
 }
 
 test('database version change closes the old connection and warns the editor', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const second = await context.newPage();
-  await second.goto('/');
+  await second.goto('/editor.html');
   await expect(second.locator('#editor')).toBeEnabled();
   const upgraded = await second.evaluate(() => new Promise<boolean>((resolve, reject) => {
     const request = indexedDB.open('typebridge', 3);
@@ -39,7 +39,7 @@ test('database version change closes the old connection and warns the editor', a
 });
 
 test('canceling deletion retains pending edits and autosave', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Оставить текст');
   const confirmation2 = answerNextConfirmation(page, false);
@@ -52,7 +52,7 @@ test('canceling deletion retains pending edits and autosave', async ({ page }) =
 });
 
 test('failed deletion keeps the text and allows retry', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Не потерять');
@@ -81,7 +81,7 @@ test('failed deletion keeps the text and allows retry', async ({ page }) => {
 test('stale deletion retries saving pending edits as a conflict copy', async ({ page }) => {
   // install() alone lets fake time flow; pause so only runFor() fires timers (#132 CI).
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
@@ -103,7 +103,7 @@ test('stale deletion retries saving pending edits as a conflict copy', async ({ 
 });
 
 test('selecting current draft preserves pending text and undo history', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await page.locator('#enabled').uncheck();
@@ -118,7 +118,7 @@ test('selecting current draft preserves pending text and undo history', async ({
 });
 
 test('post-delete list failure does not pretend deleted text is still saved', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Русский пост и история');
@@ -142,7 +142,7 @@ test('post-delete list failure does not pretend deleted text is still saved', as
 });
 
 test('a failed IndexedDB deletion retries pending autosave without further typing', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('Сохранённый текст');

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openFind } from './settings-helpers';
 
 test('find text survives reload within a tab; search options persist in a new tab', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#enabled').uncheck();
   await openFind(page);
@@ -18,7 +18,7 @@ test('find text survives reload within a tab; search options persist in a new ta
   await expect(page.locator('#replace-text')).toHaveValue('Заменить');
   await expect(page.locator('#match-case')).toBeChecked();
   await expect(page.locator('#regex-mode')).toBeChecked();
-  const other = await context.newPage(); await other.goto('/');
+  const other = await context.newPage(); await other.goto('/editor.html');
   await expect(other.locator('#find-text')).toHaveValue('');
   await expect(other.locator('#replace-text')).toHaveValue('');
   await expect(other.locator('#match-case')).toBeChecked();
@@ -29,12 +29,12 @@ test('find text survives reload within a tab; search options persist in a new ta
 });
 
 test('options restore when a page is reopened without retaining search text', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await openFind(page);
   await page.locator('#regex-mode').check();
   await page.locator('#find-text').fill('private text');
   await page.close();
-  const reopened = await context.newPage(); await reopened.goto('/');
+  const reopened = await context.newPage(); await reopened.goto('/editor.html');
   await expect(reopened.locator('#regex-mode')).toBeChecked();
   await expect(reopened.locator('#find-text')).toHaveValue('');
 });
@@ -47,7 +47,7 @@ test('blocked settings storage keeps search usable and reports the problem', asy
       return set.call(this, key, value);
     };
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.locator('#enabled').uncheck();
   await page.locator('#editor').fill('Русский текст');
   await openFind(page);
@@ -60,7 +60,7 @@ test('blocked settings storage keeps search usable and reports the problem', asy
 
 test('real resize drag persists across reload and focus mode', async ({ page }) => {
   await page.setViewportSize({ width: 1900, height: 1600 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.scrollIntoViewIfNeeded();
@@ -100,7 +100,7 @@ test('settings warning clears only after the failed setting is saved', async ({ 
       return original.call(this, key, value);
     };
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.locator('#enabled').uncheck();
   await openFind(page);
   await page.locator('#find-text').fill('a');
@@ -116,7 +116,7 @@ test('settings warning clears only after the failed setting is saved', async ({ 
 
 test('browser profile restart keeps preferences but a new session has no find text', async ({ playwright, browserName, baseURL }, testInfo) => {
   if (!baseURL) throw new Error('A Playwright baseURL is required');
-  const appURL = new URL('/', baseURL).href;
+  const appURL = new URL('/editor.html', baseURL).href;
   const launchOptions = { ...testInfo.project.use.launchOptions };
   if (testInfo.project.use.headless !== undefined) launchOptions.headless = testInfo.project.use.headless;
   if (testInfo.project.use.channel !== undefined) launchOptions.channel = testInfo.project.use.channel;
@@ -139,7 +139,7 @@ test('browser profile restart keeps preferences but a new session has no find te
 
 
 test('resize control supports keyboard and keeps editor content and history', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await page.locator('#enabled').uncheck();
   await editor.fill('Текст для редактора');
@@ -158,7 +158,7 @@ test('resize control supports keyboard and keeps editor content and history', as
 
 test('resize grip follows the editor corner when the width changes (#70)', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   const button = page.locator('#resize-editor');
   await expect(field).toBeEnabled();
@@ -199,7 +199,7 @@ test('resize grip follows the editor corner when the width changes (#70)', async
 
 test('corner grip sits on the editor corner and resizes it, down to the new minimum (#70)', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   const grip = page.locator('#resize-editor');
   await expect(field).toBeEnabled();
@@ -278,7 +278,7 @@ async function expectGripClearOfText(page: import('@playwright/test').Page, expe
 
 test('corner grip does not cover editable text with a mouse (#70)', async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 900 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expectGripClearOfText(page, 32);
 });
 
@@ -286,7 +286,7 @@ test('corner grip touch target does not cover editable text on a touch screen (#
   test.skip(browserName === 'firefox', 'Firefox does not support mobile emulation');
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
   const page = await context.newPage();
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expectGripClearOfText(page, 44);
   await context.close();
 });
@@ -294,7 +294,7 @@ test('corner grip touch target does not cover editable text on a touch screen (#
 for (const mode of ['Normal', 'Focus'] as const) {
   test(`${mode} mode: dragging the grip moves the corner with the pointer, past 900 px and down to 160 × 96 (#70)`, async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 1000 });
-    await page.goto('/');
+    await page.goto('/editor.html');
     const field = page.locator('#editor');
     await expect(field).toBeEnabled();
     if (mode === 'Focus') {
@@ -336,7 +336,7 @@ for (const mode of ['Normal', 'Focus'] as const) {
 
 test('Focus mode: ArrowUp/ArrowDown on the resize grip change only the height (#70)', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#focus-mode').click();
@@ -358,7 +358,7 @@ test('Focus mode: ArrowUp/ArrowDown on the resize grip change only the height (#
 test('resize grip keeps a visible mark in forced-colors mode (#70)', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Forced-colors emulation is Chromium-only');
   await page.emulateMedia({ forcedColors: 'active' });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const mark = await page.locator('#resize-editor').evaluate(el => {
     const style = getComputedStyle(el, '::after');
@@ -374,7 +374,7 @@ test('resize grip keeps a visible mark in forced-colors mode (#70)', async ({ pa
 
 test('Focus mode keeps its own saved size across reload and new tabs, separate from Normal (#120)', async ({ page, context }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   const grip = page.locator('#resize-editor');
   await expect(field).toBeEnabled();
@@ -407,7 +407,7 @@ test('Focus mode keeps its own saved size across reload and new tabs, separate f
   expect(Math.round(box!.width)).toBe(Math.round(parseFloat(focused.width)));
   const other = await context.newPage();
   await other.setViewportSize({ width: 1600, height: 1000 });
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('#editor')).toBeEnabled();
   await expect(other.locator('body')).toHaveClass(/focus-mode/);
   expect(await other.locator('#editor').evaluate(el => ({ width: el.style.width, height: el.style.height }))).toEqual(focused);
@@ -422,7 +422,7 @@ test('Focus mode keeps its own saved size across reload and new tabs, separate f
 test('without a saved Focus size, Focus mode keeps its default layout (#120)', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.addInitScript(() => { try { localStorage.setItem('typebridge.editor.focusSize.v1', '{"width":"bad","height":7}'); } catch { /* ignore */ } });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#focus-mode').click();

@@ -32,7 +32,7 @@ async function waitingUpdate(page: Page, options = { late: false, failActivation
 
 test('a waiting worker is announced without reloading, and dismissal lasts this session (#137 U9)', async ({ page }) => {
   await waitingUpdate(page);
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#update-notice')).toContainText('New version available');
   await page.locator('#editor').fill('Keep writing');
@@ -48,7 +48,7 @@ test('a waiting worker is announced without reloading, and dismissal lasts this 
 
 test('a later installed worker displays the notice (#137 U9)', async ({ page }) => {
   await waitingUpdate(page, { late: true, failActivation: false });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#update-notice')).toBeHidden();
   await page.evaluate(() => (window as unknown as { installTestUpdate: () => void }).installTestUpdate());
@@ -58,7 +58,7 @@ test('a later installed worker displays the notice (#137 U9)', async ({ page }) 
 for (const failSave of [false, true]) {
   test(`explicit update reload preserves pending text; failed save=${failSave} (#137 U9)`, async ({ page }) => {
     await waitingUpdate(page);
-    await page.goto('/');
+    await page.goto('/editor.html');
     const editor = page.locator('#editor');
     await expect(editor).toBeEnabled();
     if (failSave) await page.evaluate(() => {
@@ -75,7 +75,7 @@ for (const failSave of [false, true]) {
 for (const discard of [false, true]) {
   test(`privacy mode requires explicit ${discard ? 'discard' : 'keep editing'} before update reload (#137 U9)`, async ({ page }) => {
     await waitingUpdate(page);
-    await page.goto('/');
+    await page.goto('/editor.html');
     const editor = page.locator('#editor');
     await expect(editor).toBeEnabled();
     await editor.fill('Saved before privacy');
@@ -101,7 +101,7 @@ for (const discard of [false, true]) {
 
 test('failed save and failed reload backup block update reload (#137 U9)', async ({ page }) => {
   await waitingUpdate(page);
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await page.evaluate(() => {
@@ -121,7 +121,7 @@ test('failed save and failed reload backup block update reload (#137 U9)', async
 
 test('activation failure restores editing (#137 U9)', async ({ page }) => {
   await waitingUpdate(page, { late: false, failActivation: true });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Kept after failure');
   await page.locator('#update-reload').click();
@@ -136,7 +136,7 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await waitingUpdate(page);
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ colorScheme });
-    await page.goto('/');
+    await page.goto('/editor.html');
     await expect(page.locator('#editor')).toBeEnabled();
     await expect(page.locator('#update-notice')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`update-notice-${colorScheme}-${width}.png`), fullPage: true, animations: 'disabled' });
@@ -161,7 +161,7 @@ test('an "installed" event for a worker that is already active and not waiting s
       worker.dispatchEvent(new Event('statechange'));
     } });
   });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.evaluate(() => (window as unknown as { lateInstalled: () => void }).lateInstalled());
   await page.waitForTimeout(300);

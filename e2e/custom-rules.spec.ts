@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openSettings } from './settings-helpers';
 
 test('custom rules affect new typing, persist, and leave existing text intact', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.getByRole('textbox', { name: 'Your text' });
   await expect(field).toBeEnabled();
   await field.pressSequentially('w');
@@ -29,7 +29,7 @@ test('custom rules affect new typing, persist, and leave existing text intact', 
 });
 
 test('invalid rules are rejected without affecting conversion', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await openSettings(page);
   const mappings = page.getByRole('textbox', { name: 'Transliteration mappings' });
   await mappings.fill('w = hello');

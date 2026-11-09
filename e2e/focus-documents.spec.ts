@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { documentAction, openDocuments, selectDocument, setAutosave } from './settings-helpers';
 
 async function twoDocuments(page: Page): Promise<string> {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Первый текст');
   await page.locator('#draft-title').fill('Длинное название документа '.repeat(8));

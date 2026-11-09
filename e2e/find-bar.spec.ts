@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('Find and Go to line stay hidden until opened, one at a time (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   const findBar = page.getByRole('search', { name: 'Find and replace' });
@@ -48,7 +48,7 @@ test('Find and Go to line stay hidden until opened, one at a time (#123)', async
 });
 
 test('Cmd/Ctrl+F in Focus mode leaves Focus mode and opens Find (#123)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.press('ControlOrMeta+Shift+Enter');

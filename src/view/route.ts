@@ -60,7 +60,8 @@ export function comparisonViewerHref(
 ): string | undefined {
   if (!isDocumentId(documentId)) return undefined;
   const root = base.endsWith('/') ? base : `${base}/`;
-  const path = root === '/' ? '/' : root;
+  // `/` is the multi-window host (#175); the comparison viewer is the single editor page.
+  const path = `${root}editor.html`;
   const query = new URLSearchParams({ doc: documentId, mode: 'view' });
   if (windowId) query.set('window', windowId);
   return `${path}?${query.toString()}`;

@@ -14,7 +14,7 @@ async function chooseSavedCopy(page: Page, choice: 'keep' | 'delete'): Promise<v
 }
 
 test('status line states privacy consequences when autosave is off', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Сохранено');
   await expect(status(page)).toHaveText('Saved locally');
@@ -30,7 +30,7 @@ test('status line states privacy consequences when autosave is off', async ({ pa
 });
 
 test('Documents list shows the on-screen rename with autosave off', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Текст');
   await expect(status(page)).toHaveText('Saved locally');
@@ -46,7 +46,7 @@ test('Documents list shows the on-screen rename with autosave off', async ({ pag
 });
 
 test('delete-saved-copy dialog Keep and Delete choices work with keyboard', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const field = page.locator('#editor');
   await field.fill('Оставить');

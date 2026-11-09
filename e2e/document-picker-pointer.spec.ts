@@ -16,7 +16,7 @@ async function clickOption(scope: Page | FrameLocator, title: string): Promise<v
 }
 
 test('clicking a document in the list opens it and Delete removes that document', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   const title = page.getByRole('textbox', { name: 'Document title' });
   await expect(field).toBeEnabled();
@@ -46,7 +46,7 @@ test('clicking a document in the list opens it and Delete removes that document'
 });
 
 test('clicking a document after searching opens the match', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   const title = page.getByRole('textbox', { name: 'Document title' });
   await expect(field).toBeEnabled();
@@ -69,7 +69,7 @@ test('clicking a document after searching opens the match', async ({ page }) => 
 test('host windows list documents saved in another window and open them by click', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
-  await page.goto('/host.html');
+  await page.goto('/');
   const first = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(first.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await first.locator('#editor').fill('альфа текст');

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openFind } from './settings-helpers';
 
 test('Find reports totals, position, wrap and edited query state (#137 U3)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('text TEXT text');
   await openFind(page);
@@ -31,7 +31,7 @@ test('Find reports totals, position, wrap and edited query state (#137 U3)', asy
 });
 
 test('Find position includes zero-width regex navigation (#137 U3)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('ab');
   await openFind(page);
@@ -46,7 +46,7 @@ test('Find position includes zero-width regex navigation (#137 U3)', async ({ pa
 });
 
 test('closed Find does not recount matches on editor input (#137 U3)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const editor = page.locator('#editor');
   await expect(editor).toBeEnabled();
   await editor.fill('aaa');
@@ -66,7 +66,7 @@ test('closed Find does not recount matches on editor input (#137 U3)', async ({ 
 });
 
 test('closed Find skips match enumeration and reopening refreshes totals (#137 U3)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('text');
   await openFind(page);

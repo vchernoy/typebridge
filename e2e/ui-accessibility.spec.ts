@@ -30,7 +30,7 @@ async function textContrast(locator: Locator): Promise<void> {
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`new UI text and switch contrast in ${colorScheme} appearance (#137 U10)`, async ({ page }) => {
     await page.emulateMedia({ colorScheme });
-    await page.goto('/');
+    await page.goto('/editor.html');
     const editor = page.locator('#editor');
     await expect(editor).toBeEnabled();
     await editor.fill('Example text');
@@ -60,7 +60,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 }
 
 test('names, descriptions, modal ownership and focus return remain usable (#137 U10)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const toggle = page.getByRole('switch', { name: 'Кириллица', exact: true });
   await expect(toggle).toHaveAccessibleDescription(/Ctrl\+Shift\+Space/);
@@ -100,7 +100,7 @@ test('reduced motion and zoom-equivalent viewport preserve controls (#137 U10)',
   // 1280x800 physical pixels at 200% zoom correspond to this CSS viewport.
   await page.setViewportSize({ width: 640, height: 400 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   expect(await page.locator('#enabled').evaluate(element => element.ownerDocument.defaultView!.getComputedStyle(element, '::before').transitionDuration)).toBe('0s');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(640);
@@ -113,7 +113,7 @@ test('reduced motion and zoom-equivalent viewport preserve controls (#137 U10)',
 test('forced colors keeps panel boundaries and keyboard focus visible (#137 U10)', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Forced-colors emulation is verified in Chromium.');
   await page.emulateMedia({ forcedColors: 'active' });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#more-open').focus();
   await page.keyboard.press('Enter');
@@ -131,7 +131,7 @@ test('forced colors keeps panel boundaries and keyboard focus visible (#137 U10)
 test('editing sends no entered text in network requests (#137 U10)', async ({ page }) => {
   const requests: Array<{ url: string; body: string }> = [];
   page.on('request', request => requests.push({ url: request.url(), body: request.postData() ?? '' }));
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const canary = 'private-writing-canary-137';
   await page.locator('#editor').fill(canary);

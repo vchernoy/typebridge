@@ -49,7 +49,7 @@ const manager = installWindowManager({
   editorSrc: (windowId, documentId) => {
     const params = new URLSearchParams({ window: windowId, embed: '1' });
     if (documentId) params.set('doc', documentId);
-    return `/?${params.toString()}`;
+    return `/editor.html?${params.toString()}`;
   },
   prepareClose: async frame => {
     const prepare = editorHooks(frame).__typebridgePrepareWindowClose

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('remembers plain-text mode across reload and allows switching transliteration back on', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const mode = page.getByRole('switch', { name: 'Кириллица' });
   const field = page.getByRole('textbox', { name: 'Your text' });
   await expect(mode).toBeChecked();
@@ -17,7 +17,7 @@ test('remembers plain-text mode across reload and allows switching transliterati
 });
 
 test('loads previously saved plain-text preference without altering draft text', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.evaluate(() => localStorage.setItem('typebridge.transliteration.enabled.v1', 'off'));
   await page.reload();
   await expect(page.getByRole('switch', { name: 'Кириллица' })).not.toBeChecked();

@@ -11,7 +11,7 @@ function compiledDatabaseModule(): string {
 
 test('stale edits are committed as a separate complete conflict draft', async ({ page }) => {
   const compiled = compiledDatabaseModule();
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.addScriptTag({ content: compiled });
   const result = await page.evaluate(async () => {
@@ -34,10 +34,10 @@ test('stale edits are committed as a separate complete conflict draft', async ({
 
 test('a blocked upgrade reports the blocker and closes a late connection', async ({ page, context }) => {
   const compiled = compiledDatabaseModule();
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const blocker = await context.newPage();
-  await blocker.goto('/');
+  await blocker.goto('/editor.html');
   await expect(blocker.locator('#editor')).toBeEnabled();
   await blocker.evaluate(() => new Promise<void>((resolve, reject) => {
     const open = indexedDB.open('typebridge', 2);
@@ -65,7 +65,7 @@ test('a blocked upgrade reports the blocker and closes a late connection', async
 });
 
 test('the ownership fence gates commits and deletes in the same transaction (#159 W4)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.addScriptTag({ content: compiledDatabaseModule() });
   const result = await page.evaluate(async () => {
@@ -132,7 +132,7 @@ test('upgrading a version 1 database keeps documents and adds the ownership stor
     open.onsuccess = () => { open.result.close(); resolve(); };
     open.onerror = () => reject(open.error);
   }));
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toHaveValue('Текст v1');
   await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
   const stores = await page.evaluate(() => new Promise<{ version: number; names: string[] }>((resolve, reject) => {

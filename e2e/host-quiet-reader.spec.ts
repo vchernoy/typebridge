@@ -8,7 +8,7 @@ import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 async function openSameDocument(page: Page): Promise<{ a: FrameLocator; b: FrameLocator }> {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
-  await page.goto('/host.html');
+  await page.goto('/');
   const a = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(a.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await a.locator('#editor').fill('общий текст');
@@ -70,13 +70,13 @@ test('Delete from the window that is not editing takes over and asks first', asy
 });
 
 test('typing in the title of a tab that is not editing takes over editing', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('заголовок тест');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
 
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('#editor')).toHaveValue('заголовок тест');
   await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
   const title = other.locator('#draft-title');

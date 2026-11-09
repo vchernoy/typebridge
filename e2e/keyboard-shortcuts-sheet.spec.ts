@@ -4,7 +4,7 @@ import { moreAction, setSetting } from './settings-helpers';
 for (const apple of [false, true]) {
   test(`shortcuts sheet uses current choice and platform labels; Apple=${apple} (#137 U7)`, async ({ page }) => {
     await page.addInitScript(value => Object.defineProperty(navigator, 'platform', { get: () => value }), apple ? 'MacIntel' : 'Linux x86_64');
-    await page.goto('/');
+    await page.goto('/editor.html');
     await expect(page.locator('#editor')).toBeEnabled();
     await moreAction(page, '#keyboard-shortcuts');
     const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true });
@@ -37,7 +37,7 @@ for (const apple of [false, true]) {
 
 test('shortcuts sheet keeps the first lines visible on a short viewport (#137 U7)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 420 });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await moreAction(page, '#keyboard-shortcuts');
   const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true });

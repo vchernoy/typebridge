@@ -6,13 +6,13 @@ import { expect, test, type Page } from '@playwright/test';
  */
 
 async function savedReaderPair(page: Page, context: import('@playwright/test').BrowserContext): Promise<Page> {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.getByRole('textbox', { name: 'Document title' }).fill('Имя');
   await page.locator('#editor').fill('тело');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('#editor')).toHaveValue('тело');
   await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
   await expect(other.locator('#draft-title')).toHaveValue('Имя');
@@ -64,13 +64,13 @@ test('moving to the text during a slow takeover keeps focus there', async ({ pag
 });
 
 test('a held Backspace after an emoji removes the whole character', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.getByRole('textbox', { name: 'Document title' }).fill('Имя😀');
   await page.locator('#editor').fill('тело');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('html')).toHaveAttribute('data-role', 'reader');
   await other.evaluate(() => { (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800; });
   const title = other.locator('#draft-title');
@@ -116,7 +116,7 @@ test('switching documents during the takeover drops the held title edit', async 
 test('typing into a host window title during a slow takeover keeps every key', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
-  await page.goto('/host.html');
+  await page.goto('/');
   const a = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(a.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await a.locator('#editor').fill('общий');
@@ -148,7 +148,7 @@ test('typing into a host window title during a slow takeover keeps every key', a
 test('Rename then typing at once in a host window that is not editing replaces the name', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => { localStorage.setItem('typebridge.host.layoutMode.v1', 'free'); });
-  await page.goto('/host.html');
+  await page.goto('/');
   const a = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(a.locator('#editor')).toBeEnabled({ timeout: 30_000 });
   await a.locator('#editor').fill('общий');

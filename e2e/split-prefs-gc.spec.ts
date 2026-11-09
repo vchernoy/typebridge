@@ -22,7 +22,7 @@ test('boot clears obsolete split prefs without touching documents', async ({ pag
     localStorage.setItem('typebridge.transliteration.enabled.v1', 'on');
   }, { id: docId });
 
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
 
   const leftovers = await page.evaluate(() => ({
@@ -82,7 +82,7 @@ test('boot drops empty pane-B leftovers without writing recovery', async ({ page
     }));
   });
 
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
 
   const state = await page.evaluate(() => ({

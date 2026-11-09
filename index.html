@@ -4,17 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script>
-      // Keep the stored palette on first paint, before the application bundle loads.
+      // `/` is the multi-window host (#175). Editor links made before the cutover
+      // (comparison `?doc=…&mode=view`, `?doc=`, `?window=`, `?embed=1`) still open the editor.
       (() => {
-        let choice = "system";
+        const params = new URLSearchParams(location.search);
+        if (['mode', 'doc', 'window', 'embed'].some(name => params.has(name))) {
+          // src/host/entry.ts checks this and does not start the host while leaving.
+          document.documentElement.dataset.forwarding = '1';
+          location.replace('/editor.html' + location.search + location.hash);
+        }
+      })();
+    </script>
+    <script>
+      (() => {
+        let choice = 'system';
         try {
-          const saved = localStorage.getItem("typebridge.appearance.v1");
-          if (saved === "light" || saved === "dark") choice = saved;
+          const saved = localStorage.getItem('typebridge.appearance.v1');
+          if (saved === 'light' || saved === 'dark') choice = saved;
         } catch {
           /* System remains usable when storage is blocked. */
         }
         document.documentElement.dataset.colorScheme =
-          choice === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : choice;
+          choice === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : choice;
       })();
     </script>
     <title>TypeBridge</title>
@@ -34,361 +45,152 @@
     <meta name="twitter:description" content="A local-first text editor with optional Russian transliteration." />
     <meta name="twitter:image" content="https://typebridge.vchernoy.xyz/og-image.png" />
   </head>
-  <body>
-    <main class="workspace">
-      <section aria-label="Editor">
-        <header class="topbar">
-          <h1 class="brand">TypeBridge</h1>
-          <div class="doc">
-            <input id="draft-title" type="text" aria-label="Document title" />
-            <button
-              id="doc-menu-open"
-              type="button"
-              aria-haspopup="dialog"
-              aria-expanded="false"
-              aria-controls="doc-menu"
-              aria-label="Documents"
-              title="Documents"
-            >
-              ▾
-            </button>
-            <span id="save-indicator" class="save-indicator" data-state="unsaved">Not saved</span>
-            <span id="viewer-badge" class="viewer-badge" hidden>Saved version · Read-only</span>
-            <div id="doc-menu" class="doc-menu" role="dialog" aria-label="Documents" hidden>
-              <label for="doc-search" class="menu-label">Documents</label>
-              <input
-                id="doc-search"
-                type="search"
-                enterkeyhint="search"
-                placeholder="Search documents"
-                aria-label="Search documents"
-                autocomplete="off"
-              />
-              <select id="drafts" size="2" aria-label="Documents"></select>
-              <div class="doc-actions">
-                <button
-                  id="open-comparison"
-                  type="button"
-                  title="Opens the last saved version in a read-only window. Unsaved typing in this window is not sent."
-                >
-                  Open in another window
-                </button>
-                <button id="rename-draft" type="button">Rename…</button>
-                <button id="new-draft" type="button">New document</button>
-                <button id="import-draft" type="button">Import…</button>
-                <button id="export-txt" type="button">Export as TXT</button>
-                <button id="export-json" type="button">Export as JSON</button>
-                <!-- Share link (#39) will join this menu when sharing exists. -->
-                <button id="delete-draft" type="button">Delete…</button>
-              </div>
-              <input id="import-file" type="file" accept=".txt,.json,.typebridge.json" hidden />
-            </div>
-          </div>
-          <div class="top-actions">
-            <div class="mode-switch">
-              <span class="mode-side" aria-hidden="true">Latin</span
-              ><input id="enabled" type="checkbox" role="switch" checked aria-describedby="shortcut-label" /><label
-                for="enabled"
-                class="mode-side"
-                lang="ru"
-                >Кириллица</label
-              ><span id="shortcut-label" class="shortcut-hint"></span>
-            </div>
-            <button
-              id="focus-mode"
-              type="button"
-              aria-pressed="false"
-              aria-label="Focus mode"
-              title="Focus mode (Esc or Cmd/Ctrl+Shift+Enter)"
-            >
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg
-              ><span class="btn-text">Focus</span>
-            </button>
-            <button
-              id="settings-open"
-              type="button"
-              aria-haspopup="dialog"
-              aria-expanded="false"
-              aria-controls="settings-panel"
-            >
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
-                <circle cx="15" cy="6" r="2" />
-                <circle cx="9" cy="12" r="2" />
-                <circle cx="17" cy="18" r="2" /></svg
-              ><span class="btn-text">Settings</span>
-            </button>
-            <button id="exit-focus" type="button" aria-label="Exit focus (Esc)" hidden>
-              Exit<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg
-              ><span class="focus-exit-hint">(Esc)</span>
-            </button>
-          </div>
-        </header>
-        <div class="toolbar">
-          <div class="actions" role="toolbar" aria-label="Editing">
-            <button id="undo" class="icon-button" type="button" disabled aria-label="Undo" title="Undo (Cmd/Ctrl+Z)">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M9 14L4 9l5-5" />
-                <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
-              </svg>
-            </button>
-            <button
-              id="redo"
-              class="icon-button"
-              type="button"
-              disabled
-              aria-label="Redo"
-              title="Redo (Cmd/Ctrl+Shift+Z)"
-            >
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M15 14l5-5-5-5" />
-                <path d="M20 9H10a6 6 0 0 0 0 12h3" />
-              </svg>
-            </button>
-            <span class="tool-sep" aria-hidden="true"></span>
-            <button
-              id="convert-cyrillic"
-              type="button"
-              aria-label="To Cyrillic"
-              title="Convert the selected text to Cyrillic (Cmd/Ctrl+Shift+L)"
-            >
-              <span class="convert-label-full">To Cyrillic</span
-              ><span class="convert-label-phone" aria-hidden="true">Cyr</span>
-            </button>
-            <button
-              id="convert-latin"
-              type="button"
-              aria-label="To Latin"
-              title="Convert the selected text to Latin (Cmd/Ctrl+Shift+K)"
-            >
-              <span class="convert-label-full">To Latin</span
-              ><span class="convert-label-phone" aria-hidden="true">Lat</span>
-            </button>
-            <span class="tool-sep" aria-hidden="true"></span>
-            <button
-              id="find-open"
-              type="button"
-              aria-expanded="false"
-              aria-controls="find-bar"
-              title="Find and replace (Cmd/Ctrl+F)"
-            >
-              <svg class="icon phone-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <circle cx="10" cy="10" r="6" />
-                <path d="m15 15 5 5" /></svg
-              ><span class="phone-button-label">Find</span>
-            </button>
-            <button id="copy" type="button">
-              <svg class="icon phone-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <rect x="8" y="8" width="12" height="12" rx="2" />
-                <path d="M16 8V4H4v12h4" /></svg
-              ><span class="phone-button-label">Copy</span>
-            </button>
-            <div class="more-wrap">
-              <button
-                id="more-open"
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded="false"
-                aria-controls="more-menu"
-                aria-label="More actions"
-                title="More actions"
-              >
-                ⋯
-              </button>
-              <div id="more-menu" class="more-menu" role="menu" aria-label="More actions" hidden>
-                <button
-                  id="goto-open"
-                  type="button"
-                  role="menuitem"
-                  aria-expanded="false"
-                  aria-controls="goto-bar"
-                  title="Go to line (Cmd/Ctrl+G)"
-                >
-                  Go to line…
-                </button>
-                <button id="clear" type="button" role="menuitem">Clear text…</button>
-                <button id="keyboard-shortcuts" type="button" role="menuitem">Keyboard shortcuts…</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <aside
-          id="settings-panel"
-          class="settings-panel"
-          role="dialog"
-          aria-modal="false"
-          aria-labelledby="settings-title"
-          hidden
-        >
-          <div class="settings-head">
-            <h2 id="settings-title">Settings</h2>
-            <button id="settings-close" type="button" aria-label="Close settings">×</button>
-          </div>
-          <div class="settings-group shortcut-panel" role="group" aria-labelledby="settings-shortcut-title">
-            <h3 id="settings-shortcut-title">Transliteration shortcut</h3>
-            <p>Choose a shortcut, or disable it. Shortcuts may be reserved by your operating system.</p>
-            <label for="translit-shortcut">Shortcut</label
-            ><select id="translit-shortcut">
-              <option value="default">Default (Ctrl + Shift + Space)</option>
-              <option value="f7">Ctrl/⌘ + Shift + F7</option>
-              <option value="f8">Ctrl/⌘ + Shift + F8</option>
-              <option value="f9">Ctrl/⌘ + Shift + F9</option>
-              <option value="off">Disabled</option></select
-            ><button id="shortcut-reset" type="button">Reset shortcut</button
-            ><span id="shortcut-status" aria-live="polite"></span>
-          </div>
-          <div class="settings-group rules-panel" role="group" aria-labelledby="settings-rules-title">
-            <h3 id="settings-rules-title">Transliteration rules</h3>
-            <p>
-              One rule per line: Latin = Cyrillic. Edit defaults or add rules. Changes affect future typing, not
-              existing text.
-            </p>
-            <label for="rules-text">Mappings</label
-            ><textarea id="rules-text" spellcheck="false" aria-label="Transliteration mappings"></textarea>
-            <div class="actions">
-              <button id="rules-save" type="button">Save rules</button
-              ><button id="rules-reset" type="button">Reset to defaults</button
-              ><button id="rules-export" type="button">Export JSON</button><label for="rules-import">Import JSON</label
-              ><input id="rules-import" type="file" accept=".json,application/json" />
-            </div>
-            <span id="rules-status" aria-live="polite"></span>
-          </div>
-          <div class="settings-group" role="group" aria-labelledby="settings-saving-title">
-            <h3 id="settings-saving-title">Saving</h3>
-            <label class="toggle"
-              ><input id="autosave" type="checkbox" checked aria-describedby="autosave-hint" /> Autosave</label
-            >
-            <p id="autosave-hint" class="setting-note">
-              On: saves text in this browser as you type. Off: privacy mode — text and title are not saved and will be
-              lost on reload (including when a phone browser discards a background tab).
-            </p>
-          </div>
-          <div class="settings-group" role="group" aria-labelledby="settings-editor-title">
-            <h3 id="settings-editor-title">Editor</h3>
-            <label class="toggle"
-              ><input id="tab-indent" type="checkbox" checked aria-describedby="tab-indent-note" /> Tab indents</label
-            >
-            <p id="tab-indent-note" class="setting-note">
-              When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this
-              off, moves focus as usual.
-            </p>
-          </div>
-          <div class="settings-group" role="group" aria-labelledby="settings-appearance-title">
-            <h3 id="settings-appearance-title">Appearance</h3>
-            <label for="appearance">Color scheme</label>
-            <select id="appearance" aria-describedby="appearance-hint">
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-            <p id="appearance-hint" class="setting-note">
-              System follows your device. Your choice is saved in this browser.
-            </p>
-            <div class="settings-host-only">
-              <label for="window-layout">Layout</label>
-              <select id="window-layout" aria-describedby="window-layout-hint">
-                <option value="auto">Auto</option>
-                <option value="free">Free windows</option>
-                <option value="stacked">Stacked</option>
-              </select>
-              <p id="window-layout-hint" class="setting-note">
-                Auto picks free windows on a computer pointer and stacked full-width windows on a phone-sized viewport.
-              </p>
-            </div>
-          </div>
-          <div class="settings-group" role="group" aria-labelledby="settings-defaults-title">
-            <h3 id="settings-defaults-title">Defaults</h3>
-            <button id="reset-settings" type="button">Reset settings to defaults…</button>
-            <p class="setting-note">Documents and your Autosave privacy choice are kept.</p>
-          </div>
-          <div id="settings-about-documents" class="settings-group" role="group" aria-labelledby="settings-about-title">
-            <h3 id="settings-about-title" tabindex="-1">About your documents</h3>
-            <p>
-              Saved documents stay in this browser only and are not synced between devices. Undo history is saved with
-              documents. Browser storage can be cleared or evicted; export important work.
-            </p>
-            <p>
-              Resize the editor from its bottom-right corner. After a successful online service-worker installation, the
-              editor can reopen offline on this device.
-            </p>
-          </div>
-        </aside>
-        <div id="find-bar" class="find-bar" role="search" aria-label="Find and replace" hidden>
-          <div class="find-field">
-            <label for="find-text">Find</label><input id="find-text" type="text" autocomplete="off" />
-          </div>
-          <div class="find-field">
-            <label for="replace-text">Replace</label><input id="replace-text" type="text" autocomplete="off" />
-          </div>
-          <label class="toggle search-chip"><input id="match-case" type="checkbox" /> Match case</label
-          ><label class="toggle search-chip"><input id="regex-mode" type="checkbox" /> Regex (.*)</label
-          ><button id="find-prev" type="button" aria-label="Previous match" title="Previous match">↑</button
-          ><button id="find-next" type="button" aria-label="Next match" title="Next match">↓</button
-          ><button id="replace-one" type="button">Replace</button
-          ><button id="replace-all" type="button">Replace all</button><span id="find-status" aria-live="polite"></span
-          ><button id="find-close" class="bar-close" type="button" aria-label="Close find">×</button
-          ><small
-            >Find and Replace text stays in this tab’s session; browser session restore may retain it after
-            closing.</small
-          >
-        </div>
-        <div id="goto-bar" class="goto-bar" role="navigation" aria-label="Go to line" hidden>
-          <label for="goto-line">Go to line</label
-          ><input
-            id="goto-line"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            placeholder="line[:column]"
-            spellcheck="false"
-            title="Cmd/Ctrl+G"
-          /><button id="goto-go" type="button">Go</button><span id="goto-status" aria-live="polite"></span
-          ><button id="goto-close" class="bar-close" type="button" aria-label="Close go to line">×</button>
-        </div>
-        <p id="viewer-notice" class="viewer-notice" role="status" hidden></p>
-        <p id="version-notice" class="viewer-notice" role="status" hidden></p>
-        <p id="ownership-notice" class="viewer-notice" role="status" hidden></p>
-        <div id="edit-here-bar" class="edit-here-bar" hidden>
-          <p id="edit-here-warning" class="viewer-notice" role="status"></p>
-          <button id="edit-here" type="button">Edit here</button>
-        </div>
-        <div id="deleted-bar" class="edit-here-bar" hidden>
-          <p id="deleted-warning" class="viewer-notice" role="status">
-            This document was deleted in another window. Its text is still here.
-          </p>
-          <button id="keep-deleted" type="button">Keep as new document</button>
-          <button id="close-deleted" type="button">Close</button>
-        </div>
-        <div class="editor-shell">
-          <label for="editor">Your text</label>
-          <textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea>
-        </div>
-        <button
-          id="resize-editor"
-          class="resize-grip"
-          type="button"
-          aria-label="Resize editor"
-          title="Drag to resize; arrow keys adjust size"
-        ></button>
-        <div class="bottom">
-          <span id="count">0 characters · 0 words · 0 min read</span
-          ><span id="caret-position" aria-live="polite">Ln 1, Col 1</span
-          ><span id="mode-announcement" aria-live="polite" aria-atomic="true"></span
-          ><span id="preference-warning" class="preference-warning" aria-live="polite" hidden></span
-          ><span id="status-line"
-            ><span id="conflict-notice" aria-live="polite" aria-atomic="true"></span
-            ><span id="status-sep" aria-hidden="true"></span><span id="status" role="status" aria-live="polite"></span
-          ></span>
-        </div>
-        <p class="hint">
-          <button id="about-documents-open" class="text-button" type="button" aria-controls="settings-about-documents">
-            <span aria-hidden="true">ⓘ </span>About your documents
-          </button>
+  <body class="host-page">
+    <!-- #175 step 5–7: host owns update notice, window chrome, and Settings. -->
+    <div id="host-notice" class="host-notice"></div>
+    <div id="host-toolbar" class="host-toolbar" role="toolbar" aria-label="Window layout">
+      <h1 class="brand">TypeBridge</h1>
+      <button type="button" data-host-action="new-window" aria-label="New window" title="New window">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg
+        ><span class="btn-text">New window</span>
+      </button>
+      <button type="button" data-host-action="tile-side" title="Tile side by side">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4zM12 5v14" /></svg
+        ><span class="btn-text">Tile side by side</span>
+      </button>
+      <button type="button" data-host-action="tile-stack" title="Tile stacked">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4zM4 12h16" /></svg
+        ><span class="btn-text">Tile stacked</span>
+      </button>
+      <div class="mode-switch">
+        <span class="mode-side" aria-hidden="true">Latin</span
+        ><input id="host-enabled" type="checkbox" role="switch" checked aria-describedby="host-shortcut-label" /><label
+          for="host-enabled"
+          class="mode-side"
+          lang="ru"
+          >Кириллица</label
+        ><span id="host-shortcut-label" class="shortcut-hint"></span>
+      </div>
+      <button
+        id="settings-open"
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="settings-panel"
+      >
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
+          <circle cx="15" cy="6" r="2" />
+          <circle cx="9" cy="12" r="2" />
+          <circle cx="17" cy="18" r="2" /></svg
+        ><span class="btn-text">Settings</span>
+      </button>
+    </div>
+    <div id="host-root" class="host-root"></div>
+    <aside
+      id="settings-panel"
+      class="settings-panel host-settings-panel"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="settings-title"
+      hidden
+    >
+      <div class="settings-head">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-close" type="button" aria-label="Close settings">×</button>
+      </div>
+      <div class="settings-group shortcut-panel" role="group" aria-labelledby="settings-shortcut-title">
+        <h3 id="settings-shortcut-title">Transliteration shortcut</h3>
+        <p>Choose a shortcut, or disable it. Shortcuts may be reserved by your operating system.</p>
+        <label for="translit-shortcut">Shortcut</label
+        ><select id="translit-shortcut">
+          <option value="default">Default (Ctrl + Shift + Space)</option>
+          <option value="f7">Ctrl/⌘ + Shift + F7</option>
+          <option value="f8">Ctrl/⌘ + Shift + F8</option>
+          <option value="f9">Ctrl/⌘ + Shift + F9</option>
+          <option value="off">Disabled</option></select
+        ><button id="shortcut-reset" type="button">Reset shortcut</button
+        ><span id="shortcut-status" aria-live="polite"></span>
+      </div>
+      <div class="settings-group rules-panel" role="group" aria-labelledby="settings-rules-title">
+        <h3 id="settings-rules-title">Transliteration rules</h3>
+        <p>
+          One rule per line: Latin = Cyrillic. Edit defaults or add rules. Changes affect future typing, not
+          existing text.
         </p>
-      </section>
-    </main>
-    <script type="module" src="/src/main.ts"></script>
+        <label for="rules-text">Mappings</label
+        ><textarea id="rules-text" spellcheck="false" aria-label="Transliteration mappings"></textarea>
+        <div class="actions">
+          <button id="rules-save" type="button">Save rules</button
+          ><button id="rules-reset" type="button">Reset to defaults</button
+          ><button id="rules-export" type="button">Export JSON</button><label for="rules-import">Import JSON</label
+          ><input id="rules-import" type="file" accept=".json,application/json" />
+        </div>
+        <span id="rules-status" aria-live="polite"></span>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-saving-title">
+        <h3 id="settings-saving-title">Saving</h3>
+        <label class="toggle"
+          ><input id="autosave" type="checkbox" checked aria-describedby="autosave-hint" /> Autosave</label
+        >
+        <p id="autosave-hint" class="setting-note">
+          On: saves text in this browser as you type. Off: privacy mode — text and title are not saved and will be
+          lost on reload (including when a phone browser discards a background tab). This choice applies to every
+          window; turning it off here does not offer to delete a saved copy (use Settings on the standalone editor
+          for that).
+        </p>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-editor-title">
+        <h3 id="settings-editor-title">Editor</h3>
+        <label class="toggle"
+          ><input id="tab-indent" type="checkbox" checked aria-describedby="tab-indent-note" /> Tab indents</label
+        >
+        <p id="tab-indent-note" class="setting-note">
+          When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this
+          off, moves focus as usual.
+        </p>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-appearance-title">
+        <h3 id="settings-appearance-title">Appearance</h3>
+        <label for="appearance">Color scheme</label>
+        <select id="appearance" aria-describedby="appearance-hint">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <p id="appearance-hint" class="setting-note">
+          System follows your device. Your choice is saved in this browser.
+        </p>
+        <div class="settings-host-only">
+          <label for="window-layout">Layout</label>
+          <select id="window-layout" aria-describedby="window-layout-hint">
+            <option value="auto">Auto</option>
+            <option value="free">Free windows</option>
+            <option value="stacked">Stacked</option>
+          </select>
+          <p id="window-layout-hint" class="setting-note">
+            Auto picks free windows on a computer pointer and stacked full-width windows on a phone-sized viewport.
+          </p>
+        </div>
+      </div>
+      <div class="settings-group" role="group" aria-labelledby="settings-defaults-title">
+        <h3 id="settings-defaults-title">Defaults</h3>
+        <button id="reset-settings" type="button">Reset settings to defaults…</button>
+        <p class="setting-note">Documents and your Autosave privacy choice are kept.</p>
+        <span id="host-settings-status" aria-live="polite"></span>
+      </div>
+      <div id="settings-about-documents" class="settings-group" role="group" aria-labelledby="settings-about-title">
+        <h3 id="settings-about-title" tabindex="-1">About your documents</h3>
+        <p>
+          Saved documents stay in this browser only and are not synced between devices. Undo history is saved with
+          documents. Browser storage can be cleared or evicted; export important work.
+        </p>
+        <p>
+          Resize the editor from its bottom-right corner. After a successful online service-worker installation, the
+          editor can reopen offline on this device.
+        </p>
+      </div>
+    </aside>
+    <script type="module" src="/src/host/entry.ts"></script>
   </body>
 </html>

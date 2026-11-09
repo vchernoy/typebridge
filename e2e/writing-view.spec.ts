@@ -10,7 +10,7 @@ const text = Array.from({ length: 140 }, (_, i) => `Строка ${i}: Прив�
 
 test('Focus preference survives closing and reopening a real browser profile', async ({ playwright, browserName, baseURL }, testInfo) => {
   if (!baseURL) throw new Error('A Playwright baseURL is required');
-  const appURL = new URL('/', baseURL).href;
+  const appURL = new URL('/editor.html', baseURL).href;
   const options = { ...testInfo.project.use.launchOptions };
   if (testInfo.project.use.headless !== undefined) options.headless = testInfo.project.use.headless;
   if (testInfo.project.use.channel !== undefined) options.channel = testInfo.project.use.channel;
@@ -39,7 +39,7 @@ async function position(field: Locator) {
 }
 
 test('Focus mode survives reload and new tabs without overwriting Normal-mode size', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   // Use the keyboard resize control so this checks the real size-persistence path.
@@ -54,7 +54,7 @@ test('Focus mode survives reload and new tabs without overwriting Normal-mode si
   await expect(field).toBeFocused();
   expect(await page.evaluate(() => localStorage.getItem('typebridge.editor.size.v1'))).toBe(size);
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('#editor')).toBeEnabled();
   await expect(other.locator('body')).toHaveClass(/focus-mode/);
   await expect(other.locator('#editor')).toBeFocused();
@@ -69,7 +69,7 @@ test('Focus mode survives reload and new tabs without overwriting Normal-mode si
 
 for (const focused of [false, true]) {
   test(`reload restores backward selection and editor scroll without changing text or Undo; Focus=${focused}`, async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/editor.html');
     const field = page.locator('#editor');
     await expect(field).toBeEnabled();
     await field.fill(text);
@@ -96,7 +96,7 @@ for (const focused of [false, true]) {
 }
 
 test('each draft and independent tab keeps its own writing position', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Первый черновик 🙂');
@@ -113,7 +113,7 @@ test('each draft and independent tab keeps its own writing position', async ({ p
   await selectDocument(page, second);
   await expect.poll(() => position(field)).toMatchObject({ start: 5, end: 5 });
   const other = await context.newPage();
-  await other.goto('/');
+  await other.goto('/editor.html');
   await expect(other.locator('#editor')).toBeEnabled();
   await expect(other.locator('#editor')).toHaveValue('Второй черновик');
   await expect.poll(() => position(other.locator('#editor'))).toMatchObject({ start: 0, end: 0 });
@@ -124,7 +124,7 @@ test('each draft and independent tab keeps its own writing position', async ({ p
 });
 
 test('stale offsets clamp at Unicode boundaries and corrupt view metadata is ignored', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('a🙂');
@@ -154,7 +154,7 @@ test('blocked view storage starts normally and never prevents editing or togglin
       return set.call(this, key, value);
     };
   }, { focus: FOCUS_KEY, prefix: PREFIX });
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);

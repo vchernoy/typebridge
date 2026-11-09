@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('Escape closes Settings after focus moves to the editor instead of toggling Focus (#132)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#settings-open').click();
@@ -13,7 +13,7 @@ test('Escape closes Settings after focus moves to the editor instead of toggling
 });
 
 test('Escape closes Find from the editor and only then toggles Focus (#132)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#find-open').click();
@@ -29,7 +29,7 @@ test('Escape closes Find from the editor and only then toggles Focus (#132)', as
 });
 
 test('Settings, menu and Find close one layer at a time in plan order (#132)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#find-open').click();
   await page.locator('#settings-open').click();
@@ -49,7 +49,7 @@ test('Settings, menu and Find close one layer at a time in plan order (#132)', a
 });
 
 test('privacy dialog consumes Escape before Settings; next Escape closes Settings (#132)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Текст для сохранения');
@@ -68,7 +68,7 @@ test('privacy dialog consumes Escape before Settings; next Escape closes Setting
 });
 
 test('composition, repeat, handled events and native selects keep Escape (#132)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await page.locator('#settings-open').click();

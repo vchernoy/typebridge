@@ -12,7 +12,7 @@ async function openHost(page: Page, width = 1280): Promise<FrameLocator> {
   await page.addInitScript(() => {
     localStorage.setItem("typebridge.host.layoutMode.v1", "free");
   });
-  await page.goto("/host.html");
+  await page.goto("/");
   const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(main.locator("#editor")).toBeEnabled({ timeout: 30_000 });
   return main;

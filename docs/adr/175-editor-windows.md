@@ -66,6 +66,7 @@ Constraints from AGENTS.md remain: client-only; no text logging/telemetry; Index
 | **9** | Find/Replace per window | Yes (this slice: shared Find query across windows; Replace text + UI per window; Replace disabled when read-only; host Ctrl/⌘+F from title) |
 | **10** | Remove in-page split | Yes (shipped: delete pane B / live mirror / split prefs; keep W1–W4 `mode=view` comparison popup; GC `typebridge.split.v1` + pane-B pending keys without touching documents) |
 | **11** | Verification, screenshots, honest device/AT limits | Docs + tests (this slice: F6 window cycle; `role="region"` + title `aria-label`; Playwright a11y/host smoke; [evidence/175](../evidence/175/README.md) packaging — no real-device/AT/IME/production claims) |
+| **12** | Cutover: `/` is the host | Yes (shipped: `index.html` is the multi-window host; the editor moved to `/editor.html` for windows and the `mode=view` comparison popup; `/host.html` redirects to `/`; pre-cutover `/?doc=`, `mode=`, `window=` and `embed=` links forward to `/editor.html`) |
 
 ## Merge / PR notes
 

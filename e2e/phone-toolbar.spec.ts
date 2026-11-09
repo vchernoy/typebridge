@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 for (const width of [320, 390]) {
   test(`Find and Copy have compact named touch targets at ${width}px (#137 U8)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto('/');
+    await page.goto('/editor.html');
     await expect(page.locator('#editor')).toBeEnabled();
     for (const name of ['Find', 'Copy']) {
       const button = page.getByRole('button', { name, exact: true });

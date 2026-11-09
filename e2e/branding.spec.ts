@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const files = ['favicon-16x16.png', 'favicon-32x32.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'og-image.png'];
 test('branding metadata points to the PNG assets and the canonical site', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page).toHaveTitle('TypeBridge');
   await expect(page.locator('link[rel="icon"][sizes="16x16"]')).toHaveAttribute('href', '/favicon-16x16.png');
   await expect(page.locator('link[rel="icon"][sizes="32x32"]')).toHaveAttribute('href', '/favicon-32x32.png');
@@ -21,7 +21,7 @@ test('branding metadata points to the PNG assets and the canonical site', async 
 });
 
 test('approved branding images are precached for offline use', async ({ page, context }) => {
-  await page.goto('/');
+  await page.goto('/editor.html');
   await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
     if (!registration.active) throw new Error('Worker did not activate');

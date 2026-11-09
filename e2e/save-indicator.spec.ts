@@ -3,7 +3,7 @@ import { setAutosave } from './settings-helpers';
 
 test('compact save state follows commits without replacing action feedback (#131)', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const indicator = page.locator('#save-indicator');
@@ -33,7 +33,7 @@ test('compact save state follows commits without replacing action feedback (#131
 
 test('compact failure stays until a retry commits (#131)', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
-  await page.goto('/');
+  await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   await page.evaluate(() => {
@@ -54,7 +54,7 @@ test('compact failure stays until a retry commits (#131)', async ({ page }) => {
 for (const width of [320, 390, 1280]) {
   test(`save label and long title fit at ${width}px (#131)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto('/');
+    await page.goto('/editor.html');
     await expect(page.locator('#editor')).toBeEnabled();
     await page.locator('#draft-title').fill('Очень длинное название документа '.repeat(10));
     await expect(page.locator('#save-indicator')).toHaveText('Saved');
