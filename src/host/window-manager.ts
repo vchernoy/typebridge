@@ -3,6 +3,7 @@
  * Owns chrome (title bar, resize), tiling, layout mode, Focus maximize — never document text.
  */
 import { moveReadOnlyCaret } from '../ui/readonly-caret';
+import { editorWindowApi } from '../view/embed-api';
 import {
   KEYBOARD_MOVE_STEP_PX,
   MAX_HOST_WINDOWS,
@@ -165,9 +166,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const syncEmbeddedFocusChrome = (enabled: boolean): void => {
     for (const [wid, frame] of frames) {
       try {
-        const hooks = frame.contentWindow as (Window & {
-          __typebridgeSetFocusMode?: (on: boolean) => void;
-        }) | null;
+        const hooks = editorWindowApi(frame.contentWindow);
         const want = enabled && wid === activeId;
         const doc = frame.contentDocument;
         const already = !!doc?.body.classList.contains('focus-mode');
@@ -491,24 +490,6 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (wasReadOnly && !title.readOnly) onTitleUnlocked();
     };
 
-    type TitleHooks = Window & {
-      __typebridgeGetTitle?: () => string;
-      __typebridgeSetTitle?: (value: string) => void;
-      __typebridgeTitleCommit?: (
-        value: string,
-        start?: number,
-        end?: number,
-      ) => { value: string; start: number; end: number } | null;
-      __typebridgeTitleEdit?: (payload: {
-        inputType: string;
-        data: string | null;
-        start: number;
-        end: number;
-      }) => { value: string; start: number; end: number } | null;
-      __typebridgeToggleTransliteration?: () => void;
-      __typebridgeOpenFind?: () => void;
-    };
-
     let applyingFromIframe = false;
     let hostTitleComposing = false;
     const applyHostTitleResult = (result: { value: string; start: number; end: number }): void => {
@@ -530,8 +511,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       syncTitleEditable();
       if (!title.readOnly) return;
       try {
-        (frame.contentWindow as (Window & { __typebridgeRequestEdit?: () => void }) | null)
-          ?.__typebridgeRequestEdit?.();
+        editorWindowApi(frame.contentWindow)?.__typebridgeRequestEdit?.();
       } catch { /* Frame mid-navigation. */ }
       clearInterval(unlockTimer);
       let tries = 0;
@@ -547,7 +527,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       // The takeover may carry a newer (even unsaved) title from the other window;
       // show it before any edit here, so a later commit cannot overwrite it.
       try {
-        const authoritative = (frame.contentWindow as TitleHooks | null)?.__typebridgeGetTitle?.();
+        const authoritative = editorWindowApi(frame.contentWindow)?.__typebridgeGetTitle?.();
         if (authoritative !== undefined && authoritative !== title.value) {
           applyingFromIframe = true;
           title.value = authoritative;
@@ -576,13 +556,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     renameBtn.addEventListener('click', event => { event.stopPropagation(); startRename(); });
     renameHandlers.set(win.id, startRename);
     title.addEventListener('focus', () => { syncTitleEditable(); });
-    type BufferHooks = Window & {
-      __typebridgeBufferTitleEdit?: (op: { inputType: string; data: string | null }, start: number, end: number) => boolean;
-    };
     /** Hand a title edit made while this window cannot edit to the window, which holds it (#197). */
     const bufferInFrame = (op: { inputType: string; data: string | null }): boolean => {
       try {
-        const held = (frame.contentWindow as BufferHooks | null)?.__typebridgeBufferTitleEdit?.(
+        const held = editorWindowApi(frame.contentWindow)?.__typebridgeBufferTitleEdit?.(
           op,
           title.selectionStart ?? title.value.length,
           title.selectionEnd ?? title.value.length,
@@ -617,7 +594,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       hostTitleComposing = false;
       if (title.readOnly) return;
       try {
-        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(
+        const result = editorWindowApi(frame.contentWindow)?.__typebridgeTitleCommit?.(
           title.value,
           title.selectionStart ?? title.value.length,
           title.selectionEnd ?? title.value.length,
@@ -641,7 +618,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       event.stopPropagation();
       if (event.isComposing) return;
       try {
-        const hooks = frame.contentWindow as TitleHooks | null;
+        const hooks = editorWindowApi(frame.contentWindow);
         // #175 step 9: Find stays available in read-only windows (Replace does not).
         // Handle Ctrl/⌘+F before the read-only guard so a read-only title still opens Find.
         if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey
@@ -694,7 +671,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (!insert) return;
       event.preventDefault();
       try {
-        const hooks = frame.contentWindow as TitleHooks | null;
+        const hooks = editorWindowApi(frame.contentWindow);
         const result = hooks?.__typebridgeTitleEdit?.({
           inputType: event.inputType === 'insertReplacementText' ? 'insertText' : event.inputType,
           data: event.data,
@@ -718,7 +695,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       syncTitleEditable();
       if (title.readOnly) {
         try {
-          const hooks = frame.contentWindow as TitleHooks | null;
+          const hooks = editorWindowApi(frame.contentWindow);
           const authoritative = hooks?.__typebridgeGetTitle?.();
           if (authoritative !== undefined) title.value = authoritative;
         } catch { /* Frame mid-navigation. */ }
@@ -730,7 +707,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (title.value.length > 150) title.value = title.value.slice(0, 150);
       applyChromeMeta(title.value);
       try {
-        const result = (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(
+        const result = editorWindowApi(frame.contentWindow)?.__typebridgeTitleCommit?.(
           title.value,
           title.selectionStart ?? title.value.length,
           title.selectionEnd ?? title.value.length,
@@ -749,7 +726,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         title.value = label;
         try {
           // Record normalization in titleEditor undo history (setTitle skips deltas).
-          (frame.contentWindow as TitleHooks | null)?.__typebridgeTitleCommit?.(label, label.length, label.length);
+          editorWindowApi(frame.contentWindow)?.__typebridgeTitleCommit?.(label, label.length, label.length);
         } catch { /* Frame mid-navigation. */ }
       }
       applyChromeMeta(label);
@@ -812,10 +789,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         // hold the iframe title read-only for a few frames (ownership acquire).
         let attempts = 0;
         const syncHooks = (): void => {
-          const hooks = frame.contentWindow as (Window & {
-            __typebridgeSetFocusMode?: (on: boolean) => void;
-            __typebridgeGetTitle?: () => string;
-          }) | null;
+          const hooks = editorWindowApi(frame.contentWindow);
           if (hooks?.__typebridgeGetTitle) applyChromeTitle(hooks.__typebridgeGetTitle());
           syncTitleEditable();
           if (hostFocus) hooks?.__typebridgeSetFocusMode?.(win.id === activeId);
@@ -1107,7 +1081,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           continue;
         }
         try {
-          const hooks = frames.get(win.id)?.contentWindow as (Window & { __typebridgeGetTitle?: () => string }) | null;
+          const hooks = editorWindowApi(frames.get(win.id)?.contentWindow);
           const fromFrame = hooks?.__typebridgeGetTitle?.()?.trim();
           if (fromFrame) titles.push(fromFrame);
         } catch { /* Mid-navigation. */ }

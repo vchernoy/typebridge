@@ -3,6 +3,7 @@
  * localStorage is shared, but `storage` events do not fire in the writing document —
  * same-tab windows need a CustomEvent (and optional direct frame calls).
  */
+import { editorWindowApi } from './embed-api';
 
 export const PREFS_EVENT = 'typebridge-prefs';
 
@@ -66,10 +67,7 @@ export function applyPrefsToFrames(
 ): void {
   for (const frame of frames) {
     try {
-      const hooks = frame.contentWindow as (Window & {
-        __typebridgeApplyPrefs?: (pref: PrefName, origin?: string) => void;
-      }) | null;
-      hooks?.__typebridgeApplyPrefs?.(name, origin);
+      editorWindowApi(frame.contentWindow)?.__typebridgeApplyPrefs?.(name, origin);
     } catch { /* Frame may be mid-navigation. */ }
   }
 }

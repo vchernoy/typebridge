@@ -26,6 +26,7 @@ import {
 } from './handoff';
 import type { EditBlock } from './ownership';
 import type { WindowId } from './window-id';
+import { testKnob } from './embed-api';
 
 export type FocusHandoffDeps = {
   field: HTMLTextAreaElement;
@@ -178,8 +179,7 @@ export function installFocusHandoff(deps: FocusHandoffDeps): FocusHandoffControl
   let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
   const ignoresHandoffRequests = (): boolean =>
-    !!(window as Window & { __typebridgeIgnoreHandoffRequests?: boolean })
-      .__typebridgeIgnoreHandoffRequests;
+    !!testKnob('__typebridgeIgnoreHandoffRequests');
 
   const postMeta = (message: HandoffMessage): void => {
     try { channel?.postMessage(message); } catch { /* Channel may be closed. */ }
