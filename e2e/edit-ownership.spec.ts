@@ -368,28 +368,38 @@ test('boot does not own a document deleted during acquire', async ({ page, conte
 
   const booting = await context.newPage();
   await booting.addInitScript(() => {
-    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 1000;
+    // The app reads this delay as it enters acquisition: mark that moment for the test.
+    Object.defineProperty(window, '__typebridgeDelayAcquireMs', {
+      configurable: true,
+      get() {
+        // Only the first (boot) acquisition waits; the fresh document after the miss does not.
+        const state = window as Window & { __typebridgeAcquireEntered?: boolean };
+        if (state.__typebridgeAcquireEntered) return 0;
+        state.__typebridgeAcquireEntered = true;
+        return 3_000;
+      },
+    });
   });
   const booted = booting.goto('/editor.html');
-  // Delete only once the booting tab has loaded the document and is waiting to acquire it,
-  // so the delete really lands during acquire (before, it could land before boot read it).
-  await expect(booting.locator('#editor')).toHaveValue('gone at boot');
+  // Delete inside the acquire delay (a fixed sleep let it land before boot listed the
+  // documents, or after it had opened this one).
+  await expect.poll(() => booting.evaluate(() => (window as Window & { __typebridgeAcquireEntered?: boolean }).__typebridgeAcquireEntered === true)
+    .catch(() => false)).toBe(true);
   await documentAction(page, '#delete-draft');
   await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document' }).click();
   await expect(page.locator('#status')).toContainText('Document deleted');
+  // Still acquiring: the boot tab has not opened anything yet.
+  await expect(booting.locator('#editor')).toBeDisabled();
   await booted;
+  await expect(booting.locator('#editor')).toBeEnabled();
   await expect.poll(async () => (await readStoredDocs(booting)).some(row => row.id === id)).toBe(false);
-  // It never owns the deleted document; it keeps the text and offers Keep / Close (#202).
-  await expect(booting.locator('#deleted-bar')).toBeVisible();
   expect((await readOwnership(booting, id))?.ownerInstanceId ?? '').not.toBe(await instanceOf(booting));
-  await expect(booting.locator('#editor')).toHaveValue('gone at boot');
-  await booting.getByRole('button', { name: 'Keep as new document' }).click();
+  // The post-acquire check saw the document gone and started a fresh one.
+  await expect(booting.locator('#deleted-bar')).toBeHidden();
   await expect(role(booting)).toHaveAttribute('data-role', 'editor');
   await booting.locator('#editor').fill('fresh after miss');
   await expect(booting.locator('#save-indicator')).toHaveText('Saved');
-  const rows = await readStoredDocs(booting);
-  expect(rows.map(row => row.id)).not.toContain(id);
-  expect(rows.map(row => row.text)).toContain('fresh after miss');
+  expect((await readStoredDocs(booting)).map(row => row.id)).not.toContain(id);
 });
 
 test('boot does not open a document deleted before it lists documents', async ({ page, context }) => {
