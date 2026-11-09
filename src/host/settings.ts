@@ -75,7 +75,9 @@ export function installHostSettings(deps: {
     if (hostModeHint) hostModeHint.textContent = shortcut === 'off' ? '' : `(${label})`;
   }
   // Clicking a side picks that mode (same as the window switch on the standalone page).
-  const [hostLatin, hostCyrillic] = document.querySelectorAll<HTMLElement>('.host-toolbar .mode-switch .mode-side');
+  // Found from the switch itself: a restored host Focus has already moved it out of the toolbar.
+  const hostSwitch = hostMode?.closest('.mode-switch');
+  const [hostLatin, hostCyrillic] = hostSwitch ? hostSwitch.querySelectorAll<HTMLElement>('.mode-side') : [];
   const chooseHostMode = (cyrillic: boolean): void => {
     if (!hostMode || hostMode.checked === cyrillic) return;
     hostMode.checked = cyrillic;

@@ -237,8 +237,9 @@ test('closing the Focus window after F6 restores remaining tiled geometry', asyn
   await expect.poll(() => activeWindowId(page)).toBe('w3');
 
   // Close the focused window — exits Focus and must restore main/w2 tiled sizes.
+  // × is hidden in Focus (two-line layout); send its click to cover the close path.
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('.host-window[data-window-id="w3"] .host-window-close').click();
+  await page.locator('.host-window[data-window-id="w3"] .host-window-close').dispatchEvent('click');
   // Clean untitled windows close without a confirm; if a dialog appears, accept above.
   await expect(page.locator('.host-window')).toHaveCount(2, { timeout: 15_000 });
   await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);

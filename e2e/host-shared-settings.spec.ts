@@ -184,23 +184,23 @@ test('host Autosave off updates a read-only window checkbox', async ({ page }) =
   })).toBe(false);
 });
 
-test('host Focus mode hides Settings; Reset still exits Focus', async ({ page }) => {
+test('host Focus keeps Settings as an icon; Reset exits Focus', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => localStorage.setItem('typebridge.host.layoutMode.v1', 'free'));
   const main = await openHost(page);
   await page.getByRole('button', { name: 'New window' }).click();
   await expect(page.locator('.host-window')).toHaveCount(2);
 
-  // Open Settings first; Focus hides the panel and toolbar button (same as standalone).
+  // Open Settings first; it stays open in Focus, where ⚙ moves to the window title bar.
   await openHostSettings(page);
   await main.locator('#focus-mode').evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeHidden();
-  await expect(page.locator('#settings-open')).toBeHidden();
-  await expect(page.locator('#settings-panel')).toBeHidden();
+  await expect(page.locator('.host-window[data-window-id="main"] .host-window-titlebar #settings-open')).toBeVisible();
+  await expect(page.locator('#settings-panel')).toBeVisible();
 
-  // Panel is only CSS-hidden; Reset (via the still-mounted control) still clears host Focus.
-  await page.locator('#reset-settings').evaluate((button: HTMLButtonElement) => button.click());
+  // Reset clears host Focus as well.
+  await page.locator('#reset-settings').click();
   const dialog = page.getByRole('dialog', { name: 'Reset settings to defaults?' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Reset settings' }).click();
@@ -208,7 +208,7 @@ test('host Focus mode hides Settings; Reset still exits Focus', async ({ page })
   await expect(page.locator('.host-window[data-window-id="main"]')).toBeVisible();
   await expect(page.locator('.host-window[data-window-id="w2"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'New window' })).toBeEnabled();
-  await expect(page.locator('#settings-open')).toBeVisible();
+  await expect(page.locator('#host-toolbar #settings-open')).toBeVisible();
 });
 
 test('closing a window does not leave a prefs listener that resurrects discarded text', async ({ page }) => {

@@ -555,8 +555,14 @@ body.focus-mode .settings-panel {
    It also keeps one line of the top bar: the document title with its ▾ menu and save
    state, the typing switch and Exit focus (#104). */
 #exit-focus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: none;
   white-space: nowrap;
+}
+#exit-focus[hidden] {
+  display: none;
 }
 @media (max-width: 640px) {
   .focus-exit-hint {
@@ -1058,6 +1064,11 @@ html[data-embed="1"] .topbar > .toolbar {
     flex-basis: 100%;
   }
 }
+/* A window is its own width: Focus spans it instead of the 900px page column. */
+html[data-embed="1"] body.focus-mode .topbar,
+html[data-embed="1"] body.focus-mode .bottom {
+  max-width: none;
+}
 html[data-embed="1"] .top-actions {
   width: auto;
   margin-left: auto;
@@ -1088,6 +1099,8 @@ html[data-embed="1"] #editor {
   height: auto !important;
   max-width: none !important;
   margin-bottom: 0;
+  /* The window sizes the field; a textarea resize corner would do nothing here. */
+  resize: none !important;
 }
 
 .doc-menu #doc-search {
@@ -1403,17 +1416,48 @@ body.host-stacked .host-window-resize-sw {
   cursor: ns-resize;
   touch-action: none;
 }
-body.host-focus-mode .host-toolbar [data-host-action="tile-side"],
-body.host-focus-mode .host-toolbar [data-host-action="tile-stack"],
-body.host-focus-mode .host-toolbar [data-host-action="new-window"],
-body.host-focus-mode .host-toolbar #settings-open {
-  display: none;
-}
-body.host-focus-mode .host-settings-panel {
-  display: none;
-}
+/* Host Focus is two lines: the focused window's title bar (brand, title, ✎, the shared
+   switch and ⚙) and the window's own ▾ / Saved / Exit row. Move and close are off. */
+body.host-focus-mode .host-toolbar,
+body.host-focus-mode .host-window-move,
+body.host-focus-mode .host-window-close,
 body.host-focus-mode .host-window-resize {
   display: none;
+}
+.host-window-titlebar .brand {
+  margin: 0 0.5rem 0 0.25rem;
+  font-size: 1.05rem;
+  white-space: nowrap;
+}
+.host-window-titlebar .mode-switch {
+  flex: none;
+  margin-left: 0.5rem;
+}
+.host-window-titlebar #settings-open {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--button-background);
+  color: var(--button-text);
+  cursor: pointer;
+}
+.host-window-titlebar #settings-open .btn-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .host-window-titlebar .brand,
+  .host-window-titlebar .shortcut-hint {
+    display: none;
+  }
 }
 body.host-focus-mode .host-window.is-host-focused {
   border-color: var(--accent);
