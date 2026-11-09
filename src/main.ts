@@ -7,13 +7,14 @@ import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { CONFLICT_COPY, CONFLICT_COPY_LEFT, EDITABLE_HERE, STORAGE_UNAVAILABLE } from './editor/status';
+import { EDITABLE_HERE, STORAGE_UNAVAILABLE } from './editor/status';
 import { createStatusLine } from './ui/status-line';
 import { createReloadBackup, sameContent } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
 import { createViewerMode } from './view/viewer-mode';
 import { createSaver } from './view/saver';
 import { createAutosaveToggle, type AutosaveToggle } from './view/autosave-toggle';
+import { createDocumentActions, type EditAccess } from './view/documents';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -29,9 +30,9 @@ import { moveReadOnlyCaret } from './ui/readonly-caret';
 import { nextCharacterBoundary, previousCharacterBoundary } from './editor/characters';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, deleteStoredDraft, EditOwnershipLostError, type StoredDraft } from './editor/indexeddb';
+import { openDraftDatabase, listStoredDrafts, getStoredDraft, commitDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
 import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
-import { editBlockGuidance, mayRetryEditOwnership, type EditBlock } from './view/ownership';
+import { editBlockGuidance, mayRetryEditOwnership } from './view/ownership';
 import { bufferInsertFromKeyboard, handoffRefuseGuidance, mapSelectionAcrossTextChange, replayBufferedInsert, type BufferedInsert, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import type { EditorHistory } from './editor/editor';
@@ -39,7 +40,6 @@ import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
   commandAllowedOnPane,
   contentCommandStillCurrent,
-  sessionPersistStillCurrent,
   type CommandGeneration,
 } from './view/session';
 import { clearRecovery, listRecovery, writeRecovery, RECOVERY_PREFIX, type RecoverySnapshot } from './editor/recovery';
@@ -235,7 +235,6 @@ const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved, {
   prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
 });
 
-type SwitchResult = { opened: boolean; conflict: boolean };
 const statusLine = createStatusLine({
   conflictNotice,
   statusSep,
@@ -252,9 +251,8 @@ const statusLine = createStatusLine({
   quietReader: () => quietReader(),
 });
 const {
-  updateStatus, setConflict, clearNotices, setSaveStatus, setRiskStatus,
+  updateStatus, clearNotices, setSaveStatus, setRiskStatus,
   announceAction, showSaveState, readOnlyStatus,
-  markDraftListRefreshFailed, shouldAttachDraftListRefreshFailure,
 } = statusLine;
 const count = document.querySelector<HTMLElement>('#count')!;
 const caretPosition = document.querySelector<HTMLElement>('#caret-position')!;
@@ -820,7 +818,7 @@ function applyEditAccess(): void {
 }
 /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
 let storageGeneration = 0;
-type EditAccess = { ownership?: EditOwnership; block: EditBlock; generation: number };
+
 /** Try to own `documentId` without waiting; pass `steal` only for #175 suspended-owner handoff. */
 async function acquireFor(documentId: string, options: { steal?: boolean } = {}): Promise<EditAccess> {
   // Without storage nothing can be written, so there is nothing to own.
@@ -1183,96 +1181,27 @@ autosave.addEventListener('change', () => {
     persistPreference: true,
   });
 });
-async function switchDraft(id?: string): Promise<SwitchResult> {
-  if (viewMode || state.transitioning) return { opened: false, conflict: false };
-  { const toggling = autosaveToggle?.gate(); if (toggling) await toggling; }
-  if (state.transitioning) return { opened: false, conflict: false };
-  replayButton = undefined;
-  titleBuffer = undefined;
-  focusHandoff?.cancel();
-  if (id === state.active.id) { renderDrafts(); return { opened: true, conflict: false }; }
-  state.transitioning = true;
-  let flushConflict = false;
-  /** Announce a flush conflict when the switch does not open another draft. */
-  const announceAbortedFlushConflict = (): void => {
-    if (flushConflict) setConflict(CONFLICT_COPY);
-  };
-  let acquired: EditOwnership | undefined;
-  try {
-    saver.cancel();
-    let next: StoredDraft | undefined;
-    while (true) {
-      while (workspace.dirty() && autosave.checked && !state.editBlock) {
-        const result = await persist();
-        if (result.conflict) flushConflict = true;
-        if (!result.saved && state.saveFailed) {
-          announceAbortedFlushConflict();
-          return { opened: false, conflict: flushConflict };
-        }
-      }
-      // Text this window cannot save (Autosave off, or another window owns the document) needs consent to drop.
-      if (workspace.dirty() && (!autosave.checked || state.editBlock)) {
-        const persistToken = workspace.capturePersistGeneration();
-        const contentAtPrompt = workspace.contentRevision();
-        if (!await askConfirmChoice({ title: 'Discard unsaved changes?', message: state.editBlock
-          ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them.'
-          : 'Copy or export unsaved changes first to keep them.', confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
-          announceAbortedFlushConflict();
-          return { opened: false, conflict: flushConflict };
-        }
-        // Edit-in-this-pane must not cancel discard (persist token ignores paneGeneration),
-        // but a document-identity change during the dialog must.
-        if (!sessionPersistStillCurrent(persistToken, {
-          sessionId: workspace.sessionId,
-          sessionGeneration: workspace.sessionGeneration(),
-        }) || workspace.contentRevision() !== contentAtPrompt) {
-          announceAction('Discard cancelled — the document changed while the dialog was open.');
-          announceAbortedFlushConflict();
-          return { opened: false, conflict: flushConflict };
-        }
-      }
-      const version = workspace.contentRevision();
-      next = id && state.db ? await getStoredDraft(state.db, id) : undefined;
-      if (id && !next) throw new Error('Draft no longer exists');
-      if (workspace.contentRevision() === version) break;
-    }
-    // Freeze Editor mutation gates (not only DOM readOnly) for the whole acquire/reread window.
-    freezeEditorsForTransition();
-    let target = next ?? allocateNewDraft();
-    const access = await acquireFor(target.id);
-    acquired = access.ownership;
-    if (acquired && next && state.db) {
-      // Reread under the new fence: the previous owner may have saved just before releasing.
-      const fresh = await getStoredDraft(state.db, next.id);
-      if (!fresh) throw new Error('Draft no longer exists');
-      target = fresh;
-    }
-    writingPosition.save();
-    state.active = target;
-    rememberActive();
-    showDraft();
-    installOwnership(access);
-    acquired = undefined;
-    // Always show the opened draft's save state — pre-switch action feedback must not stick.
-    showSaveState();
-    // Flush announced nothing while transitioning; name the draft that was left once.
-    if (flushConflict) setConflict(CONFLICT_COPY_LEFT);
-    void refreshDrafts().catch(() => {
-      if (shouldAttachDraftListRefreshFailure()) markDraftListRefreshFailed();
-    });
-    return { opened: true, conflict: flushConflict };
-  } catch {
-    void acquired?.release();
-    announceAbortedFlushConflict();
-    announceAction('Could not open document — current text was kept', { keepConflict: flushConflict });
-    return { opened: false, conflict: flushConflict };
-  }
-  finally {
-    state.transitioning = false;
-    unfreezeEditorsAfterTransition();
-    renderDrafts();
-  }
-}
+const documents = createDocumentActions(state, statusLine, {
+  viewMode, autosave, workspace, writingPosition, saver,
+  persist: () => persist(),
+  autosaveGate: () => autosaveToggle?.gate(),
+  focusHandoff: () => focusHandoff,
+  clearHeldEdits: () => { replayButton = undefined; titleBuffer = undefined; },
+  readOnlyNow: () => readOnlyNow(),
+  freezeEditorsForTransition: () => { freezeEditorsForTransition(); },
+  unfreezeEditorsAfterTransition: () => { unfreezeEditorsAfterTransition(); },
+  allocateNewDraft: () => allocateNewDraft(),
+  acquireFor: documentId => acquireFor(documentId),
+  installOwnership: access => { installOwnership(access); },
+  loseOwnership: () => { loseOwnership(); },
+  rememberActive: () => { rememberActive(); },
+  showDraft: () => { showDraft(); },
+  renderDrafts: () => { renderDrafts(); },
+  refreshDrafts: () => refreshDrafts(),
+  openDocumentIdsElsewhere: () => openDocumentIdsElsewhere(),
+  postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
+});
+const switchDraft = documents.switchDraft;
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
 for (const picker of documentPickers) {
   picker.addEventListener('change', () => { void (viewMode ? viewer.open(picker.value) : switchDraft(picker.value)); });
@@ -1293,73 +1222,7 @@ document.querySelector<HTMLButtonElement>('#rename-draft')!.addEventListener('cl
   selectTitleWhenEditable = draftTitle.readOnly;
   editorWindowApi(window)?.__typebridgeRequestEdit?.();
 });
-document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', async () => {
-  if (readOnlyNow() || state.transitioning) return;
-  focusHandoff?.cancel();
-  saver.cancel();
-  const requestedId = state.active.id;
-  // Warn when another host window shows it; that window keeps its text and can keep a copy.
-  const openElsewhere = openDocumentIdsElsewhere().has(state.active.id);
-  const deleteMessage = openElsewhere
-    ? 'Permanently delete this saved document? It is also open in another window, which will keep its text until you close it there.'
-    : 'Permanently delete this saved document?';
-  if (!await askConfirmChoice({ title: 'Delete document?', message: deleteMessage, confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
-    if (workspace.dirty() && autosave.checked) saver.saveSoon();
-    return;
-  }
-  state.transitioning = true;
-  freezeEditorsForTransition();
-  let committed = false;
-  let savedBeforeDelete = false;
-  try {
-    { const pendingSave = saver.inFlight(); if (pendingSave && !(await pendingSave).saved) throw new Error('Save failed'); }
-    if (workspace.dirty() && autosave.checked) {
-      if (!(await persist()).saved) throw new Error('Save failed');
-      savedBeforeDelete = true;
-    }
-    if (state.active.id !== requestedId) {
-      announceAction('Could not delete original — your changes were saved as a conflict copy.');
-      return;
-    }
-    state.deleting = true;
-    const deletedRevision = state.active.revision;
-    if (!state.db) throw new Error('Storage unavailable');
-    if (!state.ownership || state.ownership.documentId !== state.active.id) throw new EditOwnershipLostError();
-    if (!await deleteStoredDraft(state.db, state.active.id, state.active.revision, await state.ownership.writeFence(), true)) throw new Error('Draft changed in another tab');
-    committed = true;
-    if (deletedRevision >= 1) postSignal('deleted', state.active.id, deletedRevision);
-    saver.cancel();
-    writingPosition.save();
-    const replacement: StoredDraft = allocateNewDraft();
-    const access = await acquireFor(replacement.id);
-    state.active = replacement;
-    rememberActive();
-    // The deletion is durable; clear the editor before a fallible list refresh.
-    showDraft();
-    installOwnership(access);
-    try { await refreshDrafts(); announceAction('Document deleted'); }
-    catch { announceAction('Document deleted, but the document list could not be refreshed'); }
-  } catch (error) {
-    if (error instanceof EditOwnershipLostError) loseOwnership();
-    // Without storage, announceAction() adds the storage warning; no save will follow.
-    // Explicit delete failures clear conflict feedback; these two messages already
-    // state the save situation, so they do not also append riskText().
-    if (state.editBlock) {
-      announceAction('Could not delete document — another window is editing it. Your text is kept.', { kind: 'failure' });
-    } else if (workspace.dirty() && !state.saveFailed && autosave.checked && !state.storageProblem) {
-      announceAction('Could not delete document — your changes are unsaved; saving again…', { kind: 'progress', omitRisk: true });
-    } else if (workspace.dirty() && !autosave.checked && !state.storageProblem) {
-      announceAction('Could not delete document — your changes are unsaved; autosave is off', { kind: 'progress', omitRisk: true });
-    } else announceAction(savedBeforeDelete ? 'Could not delete document — Saved locally; your text is kept.' : 'Could not delete document — your text is kept.');
-  } finally {
-    state.transitioning = false;
-    state.deleting = false;
-    unfreezeEditorsAfterTransition();
-    if (!committed && workspace.dirty() && autosave.checked && !state.editBlock) {
-      saver.saveSoon();
-    }
-  }
-});
+document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', () => { void documents.deleteActive(); });
 const recoveryNotice = document.createElement('div');
 recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
