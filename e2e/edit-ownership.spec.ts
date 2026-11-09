@@ -528,9 +528,11 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   await expect(page.locator('#editor')).not.toHaveValue('alpha beta');
   const afterConvert = await page.locator('#editor').inputValue();
 
-  // Delay acquire so mutations attempted mid-transfer hit the frozen Editor gates.
+  // Delay acquire so mutations attempted mid-transfer hit the frozen Editor gates. Slow CI
+  // browsers needed more than 800ms for the attempts below, so the switch finished first and
+  // Replace then (correctly) edited the opened document; the premise is now asserted.
   await page.evaluate(() => {
-    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 800;
+    (window as Window & { __typebridgeDelayAcquireMs?: number }).__typebridgeDelayAcquireMs = 4_000;
   });
   const switchPromise = selectDocument(page, second);
   await expect.poll(async () => page.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.readOnly)).toBe(true);
@@ -544,6 +546,8 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   await page.locator('#replace-one').click({ force: true });
   await page.locator('#replace-all').click({ force: true });
   await page.keyboard.press('ControlOrMeta+z');
+  // Every attempt above happened while the transfer was still in progress.
+  expect(await page.locator('#editor').evaluate((el: HTMLTextAreaElement) => el.readOnly)).toBe(true);
   await switchPromise;
   await expect(page.locator('#autosave')).toBeEnabled();
 
