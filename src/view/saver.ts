@@ -1,0 +1,168 @@
+/**
+ * Saving the shown document (#159 W4 fence): debounced Autosave writes under this window's
+ * edit ownership, conflict copies when another tab changed the document, and the status that
+ * follows. One save runs at a time; later edits are saved by the same loop or the next timer.
+ */
+import { UNTITLED_TITLE } from '../editor/drafts';
+import type { DocumentSignal } from './signals';
+import { commitOrCreateConflictCopy, EditOwnershipLostError, type StoredDraft } from '../editor/indexeddb';
+import { clearRecovery, type RecoverySnapshot } from '../editor/recovery';
+import { CONFLICT_COPY, SAVE_FAILED } from '../editor/status';
+import type { StatusLine } from '../ui/status-line';
+import type { EditorState } from './editor-state';
+import { testKnob } from './embed-api';
+import type { Workspace } from './workspace';
+
+export type SaveResult = { saved: boolean; conflict: boolean };
+
+export type SaverDeps = {
+  viewMode: boolean;
+  autosave: HTMLInputElement;
+  draftTitle: HTMLInputElement;
+  workspace: Workspace;
+  writingPosition: { save: () => void };
+  /** Text, title and history to save now. */
+  snapshot: () => StoredDraft;
+  /** The emergency journal entry for the unsaved text, if any. */
+  currentJournal: () => RecoverySnapshot | undefined;
+  /** Applying a handoff snapshot is not an edit. */
+  suppressEditTracking: () => boolean;
+  readOnlyNow: () => boolean;
+  clearPending: (saved: StoredDraft) => void;
+  clearVersionNotice: () => void;
+  postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
+  journalEdit: () => void;
+  rememberActive: () => void;
+  updateSaveIndicator: () => void;
+  syncTitleTooltip: () => void;
+  takeOwnership: (documentId: string) => Promise<void>;
+  loseOwnership: () => void;
+  refreshDrafts: () => Promise<void>;
+  renderDrafts: () => void;
+};
+
+export function createSaver(state: EditorState, status: StatusLine, deps: SaverDeps) {
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  let saving: Promise<SaveResult> | undefined;
+  async function persist(): Promise<SaveResult> {
+    if (deps.viewMode) return { saved: true, conflict: false };
+    clearTimeout(saveTimer);
+    if (state.deleting || !deps.autosave.checked || !deps.workspace.dirty()) return { saved: !deps.workspace.dirty(), conflict: false };
+    if (state.editBlock) return { saved: false, conflict: false };
+    if (saving) return saving;
+    saving = (async () => {
+      // E2E may delay the in-flight save so Autosave-off can race a document switch (#159 W4).
+      const delayMs = testKnob('__typebridgeDelayPersistMs');
+      if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+      let createdConflict = false;
+      try {
+        if (!state.db) throw new Error('Storage unavailable');
+        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
+          const version = deps.workspace.contentRevision();
+          const saved = deps.snapshot();
+          if (state.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
+          const owner = await state.ownership.writeFence();
+          const current = deps.currentJournal();
+          const journal = current && current.documentId === saved.id && current.revision === state.active.revision && current.text === saved.text && current.title === saved.title ? current : undefined;
+          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner);
+          deps.clearPending(saved);
+          const titleOnly = !result.conflict && saved.title !== state.active.title && saved.text === state.active.text;
+          if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
+          state.active = result.draft;
+          deps.clearVersionNotice();
+          deps.postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
+          deps.writingPosition.save();
+          if (deps.workspace.contentRevision() !== version && deps.autosave.checked) deps.journalEdit();
+          deps.rememberActive();
+          state.saveFailed = false;
+          deps.workspace.setDirty(deps.workspace.contentRevision() !== version);
+          deps.updateSaveIndicator();
+          if (result.conflict) {
+            // Conflict copy is a new document id; keep the deps.workspace identity in sync
+            // without bumping sessionGeneration mid-persist (same in-flight save stream).
+            deps.workspace.setDocumentId(result.draft.id);
+            // Retain new edits typed while the transaction was in flight.
+            if ((deps.draftTitle.value.trim() || UNTITLED_TITLE) === saved.title) {
+              deps.draftTitle.value = state.active.title;
+              deps.syncTitleTooltip();
+            }
+            // Storage may have become unusable while the copy was written.
+            createdConflict = true;
+            // While switching, leave announcement to switchDraft so early returns and
+            // the success path each announce once (avoids CONFLICT_COPY then LEFT).
+            if (!state.transitioning) status.setConflict(CONFLICT_COPY, true);
+            status.updateStatus({
+              primary: deps.workspace.dirty() && !state.storageProblem ? 'Saving…' : '',
+              risk: status.riskText(),
+            }, state.transitioning ? status.kind() : 'conflict');
+            // The copy is a new document; later saves in this loop need its fence.
+            await deps.takeOwnership(result.draft.id);
+          }
+          // A background save must not replace newer action feedback or a conflict
+          // notice, but it must replace progress and an earlier failure it resolved.
+          // Use the status kind (not merely a pending conflict string) so an action that
+          // kept a conflict notice — e.g. a failed draft switch — is not wiped.
+          if (!deps.workspace.dirty() && !result.conflict && (status.kind() === 'progress' || status.kind() === 'failure' || status.kind() === 'conflict')) {
+            // Storage can become unusable while this save was in flight (an
+            // upgrade in another tab); never replace that warning.
+            const risk = status.riskText();
+            if (risk) status.setRiskStatus('', 'failure', risk);
+            else status.setSaveStatus('Saved locally');
+          }
+        }
+        try { await deps.refreshDrafts(); }
+        catch {
+          if (status.shouldAttachDraftListRefreshFailure()) status.markDraftListRefreshFailed();
+        }
+        return { saved: !deps.workspace.dirty(), conflict: createdConflict };
+      } catch (error) {
+        if (error instanceof EditOwnershipLostError) {
+          deps.loseOwnership();
+          return { saved: false, conflict: createdConflict };
+        }
+        state.saveFailed = true;
+        // Keep newer action feedback that already carries this exact warning;
+        // keep a conflict notice in front of the warning; otherwise show risk alone.
+        const risk = status.riskText() || SAVE_FAILED;
+        if (status.message().primary && status.message().risk === risk) status.updateStatus({}, 'failure');
+        else status.setRiskStatus('', 'failure', risk);
+        return { saved: false, conflict: createdConflict };
+      }
+    })();
+    try { return await saving; } finally {
+      saving = undefined;
+      // An edit can arrive while the post-commit draft list is loading.
+      if (!state.deleting && deps.workspace.dirty() && deps.autosave.checked && !state.saveFailed && !state.editBlock) {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => { void persist(); }, 300);
+      }
+    }
+  }
+  function scheduleSave(fromTitle = false): void {
+    if (deps.readOnlyNow() || state.loadingDraft || deps.suppressEditTracking()) return;
+    const becameDirty = !deps.workspace.dirty();
+    deps.workspace.setDirty(true);
+    deps.workspace.bumpContentRevision();
+    deps.journalEdit();
+    // With deps.autosave off nothing is committed, so refresh the Documents label from the
+    // on-screen title (and mark unsaved) without waiting for a save (#114).
+    if (!deps.autosave.checked && (becameDirty || fromTitle)) deps.renderDrafts();
+    clearTimeout(saveTimer);
+    if (deps.autosave.checked) { status.showSaving(); saveTimer = setTimeout(() => { void persist(); }, 300); }
+    else status.showSaveState();
+  }
+  return {
+    persist,
+    /** Record an edit and save it after the Autosave delay (or show it is unsaved). */
+    scheduleSave,
+    /** Drop a pending timed save. */
+    cancel(): void { clearTimeout(saveTimer); },
+    /** Save after the Autosave delay, replacing a pending timed save. */
+    saveSoon(): void {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { void persist(); }, 300);
+    },
+    /** The save that is running now, if any. */
+    inFlight: (): Promise<SaveResult> | undefined => saving,
+  };
+}
