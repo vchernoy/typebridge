@@ -7,7 +7,6 @@ import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
 import { Editor } from './editor/editor';
 import { indentEdit } from './editor/indent';
-import { EDITABLE_HERE } from './editor/status';
 import { createStatusLine } from './ui/status-line';
 import { createReloadBackup } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
@@ -21,8 +20,9 @@ import { createDocumentSync } from './view/document-sync';
 import { createLeaveGuards } from './view/leave-guards';
 import { createEditAccess } from './view/edit-access';
 import { createTakeover } from './view/takeover';
-import { createTitleEditing, titleOpForKey, type HeldTitleOp, type TitleOp } from './ui/title-edits';
+import { createTitleEditing } from './ui/title-edits';
 import { setupDeletedInput } from './view/deleted-input';
+import { createHeldEdits } from './view/held-edits';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -33,7 +33,6 @@ import {
   setActiveDraftId,
 } from './editor/drafts';
 import { nextUntitledTitle } from './editor/untitled-title';
-import { moveReadOnlyCaret } from './ui/readonly-caret';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
@@ -645,42 +644,18 @@ const editHereBar = document.querySelector<HTMLElement>('#edit-here-bar')!;
 const editHereWarning = document.querySelector<HTMLElement>('#edit-here-warning')!;
 const editHereButton = document.querySelector<HTMLButtonElement>('#edit-here')!;
 let focusHandoff: FocusHandoffController | undefined;
-/** A control clicked in a quiet reader; it runs once this window can edit that document. */
-let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
-/** Title edits held during a takeover, tied to their document (#197). */
-let titleBuffer: { documentId: string; baseValue: string; ops: HeldTitleOp[]; fromHost: boolean } | undefined;
 const { applyTitleEdit, applyHeldTitleOps } = createTitleEditing({
   viewMode, draftTitle, titleEditor,
   syncTitleTooltip: () => { syncTitleTooltip(); },
   rememberActive: () => { rememberActive(); },
 });
-/** Apply held title edits through the title Editor (transliteration, undo) at the user's caret. */
-function replayTitleBuffer(): void {
-  const held = titleBuffer;
-  titleBuffer = undefined;
-  if (!held || held.documentId !== state.active.id || draftTitle.readOnly) return;
-  const { start, end } = applyHeldTitleOps(held.ops, draftTitle.value !== held.baseValue);
-  // Leave focus where the user put it; only place the caret if the title still has it.
-  if (!held.fromHost && document.activeElement === draftTitle) {
-    try { draftTitle.setSelectionRange(start, end); } catch { /* Not focusable. */ }
-  }
-}
-/** Rename… started while read-only: select the (possibly newer) title once editable. */
-let selectTitleWhenEditable = false;
-/** Editing moved to this window: show the normal save state and finish a pending control. */
-function onEditableHere(): void {
-  showSaveState();
-  replayTitleBuffer();
-  if (selectTitleWhenEditable) {
-    selectTitleWhenEditable = false;
-    if (document.activeElement === draftTitle) draftTitle.select();
-  }
-  const pendingAction = replayButton;
-  replayButton = undefined;
-  if (!pendingAction || pendingAction.documentId !== state.active.id || readOnlyNow()) return;
-  const { button } = pendingAction;
-  if (button.isConnected && !button.disabled) button.click();
-}
+const heldEdits = createHeldEdits(state, statusLine, {
+  draftTitle, applyHeldTitleOps,
+  quietReader: () => quietReader(),
+  readOnlyNow: () => readOnlyNow(),
+  focusHandoff: () => focusHandoff,
+});
+const { onEditableHere } = heldEdits;
 const editAccess = createEditAccess(state, statusLine, {
   viewMode, instanceId, webLocks, workspace, editor, titleEditor, ownershipNotice, undo, redo, autosave,
   writingPosition, quietReader,
@@ -774,7 +749,7 @@ const documents = createDocumentActions(state, statusLine, {
   persist: () => persist(),
   autosaveGate: () => autosaveToggle?.gate(),
   focusHandoff: () => focusHandoff,
-  clearHeldEdits: () => { replayButton = undefined; titleBuffer = undefined; },
+  clearHeldEdits: () => { heldEdits.clear(); },
   readOnlyNow: () => readOnlyNow(),
   freezeEditorsForTransition: () => { freezeEditorsForTransition(); },
   unfreezeEditorsAfterTransition: () => { unfreezeEditorsAfterTransition(); },
@@ -794,7 +769,7 @@ document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click
 for (const picker of documentPickers) {
   picker.addEventListener('change', () => { void (viewMode ? viewer.open(picker.value) : switchDraft(picker.value)); });
 }
-draftTitle.addEventListener('blur', () => { selectTitleWhenEditable = false; });
+draftTitle.addEventListener('blur', () => { heldEdits.selectTitleWhenEditable(false); });
 // Documents → Rename…: in a host window the title lives in the window's title bar.
 document.querySelector<HTMLButtonElement>('#rename-draft')!.addEventListener('click', () => {
   if (viewMode) return;
@@ -807,7 +782,7 @@ document.querySelector<HTMLButtonElement>('#rename-draft')!.addEventListener('cl
   draftTitle.focus();
   draftTitle.select();
   // If editing must move here first, the takeover reloads the title: select it again then.
-  selectTitleWhenEditable = draftTitle.readOnly;
+  heldEdits.selectTitleWhenEditable(draftTitle.readOnly);
   editorWindowApi(window)?.__typebridgeRequestEdit?.();
 });
 document.querySelector<HTMLButtonElement>('#delete-draft')!.addEventListener('click', () => { void documents.deleteActive(); });
@@ -925,62 +900,12 @@ if (!viewMode) {
     discardParkedText: discardParkedHandoffText,
     recoverParkedOwnership: recoverParkedHandoffOwnership,
     takeOver: takeOverFromHandoff,
-    announce: text => {
-      if (text === EDITABLE_HERE) onEditableHere();
-      else {
-        replayButton = undefined;
-        if (titleBuffer) {
-          titleBuffer = undefined;
-          announceAction('Your title change was not applied.', { keepConflict: true });
-        }
-        announceAction(text, { keepConflict: true });
-      }
-    },
+    announce: text => { heldEdits.onHandoffAnnouncement(text); },
     showEditHere: showEditHereBar,
     hideEditHere: hideEditHereBar,
   });
-  // A quiet reader takes over editing from any edit gesture, not only the text field:
-  // the title and document-changing controls. Plain focus (Tab, F6, programmatic) does
-  // not take over; the text field starts a takeover on pointer or typing (focus-handoff).
-  const requestEditHere = (): void => {
-    if (!quietReader() || state.transitioning || state.deleting || state.transferFrozen) return;
-    if (focusHandoff?.pending()) return;
-    focusHandoff?.requestHandoff();
-  };
-  /**
-   * Hold a title edit made while this window cannot edit yet, and start the takeover.
-   * Returns false when the title is editable (the edit should run normally).
-   */
-  const bufferTitleEdit = (op: TitleOp, start: number, end: number, fromHost: boolean): boolean => {
-    if (!draftTitle.readOnly || !quietReader()) return false;
-    if (!titleBuffer || titleBuffer.documentId !== state.active.id) {
-      titleBuffer = { documentId: state.active.id, baseValue: draftTitle.value, ops: [], fromHost };
-    }
-    titleBuffer.ops.push({ ...op, start, end });
-    // Typed edits replace the selection themselves; do not reselect afterwards.
-    selectTitleWhenEditable = false;
-    requestEditHere();
-    return true;
-  };
-  draftTitle.addEventListener('pointerdown', requestEditHere);
-  draftTitle.addEventListener('beforeinput', requestEditHere);
-  draftTitle.addEventListener('paste', event => {
-    const text = event.clipboardData?.getData('text/plain') ?? '';
-    if (text && bufferTitleEdit({ inputType: 'insertFromPaste', data: text },
-      draftTitle.selectionStart ?? draftTitle.value.length, draftTitle.selectionEnd ?? draftTitle.value.length, false)) {
-      event.preventDefault();
-    } else requestEditHere();
-  });
-  // A read-only input fires no beforeinput, so start from keyboard intent; focus alone does not.
-  // The key itself is held and applied once editing arrives, so nothing typed is lost (#197).
-  draftTitle.addEventListener('keydown', event => {
-    // Read-only inputs ignore caret keys; place the caret so held edits land where intended.
-    if (moveReadOnlyCaret(draftTitle, event)) return;
-    const op = titleOpForKey(event);
-    if (!op) return;
-    if (bufferTitleEdit(op, draftTitle.selectionStart ?? draftTitle.value.length,
-      draftTitle.selectionEnd ?? draftTitle.value.length, false)) event.preventDefault();
-  });
+  const { requestEditHere, bufferTitleEdit } = heldEdits;
+  heldEdits.installTitleListeners();
   // Host title bar (#175 step 8) edits this window's title: let it start a takeover too,
   // and hold what was typed there the same way.
   exposeEditorWindowApi({
@@ -1004,15 +929,7 @@ if (!viewMode) {
     switchDraft: id => switchDraft(id),
   });
   drainDeletedInput = deletedInput.drain;
-  const replayAfterTakeover = new Set(['undo', 'redo', 'delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
-  document.addEventListener('click', event => {
-    const button = (event.target as Element | null)?.closest?.('button');
-    if (!button || !replayAfterTakeover.has(button.id) || !quietReader()) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    replayButton = { button, documentId: state.active.id };
-    requestEditHere();
-  }, true);
+  heldEdits.installControlReplay();
   editHereButton.addEventListener('click', () => { takeover.editHere(); });
 }
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
