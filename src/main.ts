@@ -14,11 +14,12 @@ import { createEditorState } from './view/editor-state';
 import { createViewerMode } from './view/viewer-mode';
 import { createSaver } from './view/saver';
 import { createAutosaveToggle, type AutosaveToggle } from './view/autosave-toggle';
-import { createDocumentActions, type EditAccess } from './view/documents';
+import { createDocumentActions } from './view/documents';
 import { createRecovery } from './view/recovery';
 import { initializeDrafts } from './view/boot';
 import { createDocumentSync } from './view/document-sync';
 import { createLeaveGuards } from './view/leave-guards';
+import { createEditAccess } from './view/edit-access';
 import { createTitleEditing, type HeldTitleOp, type TitleOp } from './ui/title-edits';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
@@ -34,8 +35,7 @@ import { moveReadOnlyCaret } from './ui/readonly-caret';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
-import { acquireEditOwnership, type EditOwnership } from './editor/edit-ownership';
-import { editBlockGuidance, mayRetryEditOwnership } from './view/ownership';
+import { mayRetryEditOwnership } from './view/ownership';
 import { bufferInsertFromKeyboard, handoffRefuseGuidance, mapSelectionAcrossTextChange, replayBufferedInsert, type BufferedInsert, type HandoffRefuseReason, type HandoffSnapshot } from './view/handoff';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import type { EditorHistory } from './editor/editor';
@@ -147,8 +147,6 @@ const instanceId = crypto.randomUUID();
 document.documentElement.dataset.instanceId = instanceId;
 /** Core document state shared with the split-out modules (view/editor-state.ts). */
 const state = createEditorState();
-/** True only during the post-flush ownership acquire/reread window (not while flushing). */
-let transferFrozen = false;
 /** Suppress scheduleSave while applying handoff snapshots (not a content edit). */
 let suppressEditTracking = false;
 /**
@@ -160,7 +158,7 @@ let autosaveToggle: AutosaveToggle | undefined;
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
-const readOnlyNow = (): boolean => viewMode || state.editBlock !== '' || transferFrozen;
+const readOnlyNow = (): boolean => viewMode || state.editBlock !== '' || state.transferFrozen;
 /** Replays keys held while a deleted document is kept as a new one (set up with the input handlers). */
 let drainDeletedInput: (() => void) | undefined;
 const deletedBarElement = (): HTMLElement => document.querySelector<HTMLElement>('#deleted-bar')!;
@@ -299,7 +297,7 @@ function canMutatePrimary(): boolean {
 /** Autosave is blocked for viewers and non-owners. */
 function autosaveControlBlocked(): boolean {
   // Viewers never own the preference; keep the change handler gated too.
-  if (viewMode || transferFrozen) return true;
+  if (viewMode || state.transferFrozen) return true;
   return state.editBlock !== '';
 }
 function syncAutosaveControl(): void {
@@ -313,7 +311,7 @@ function syncMutationControls(): void {
   const blocked = !canMutatePrimary();
   const target = activeEditableSession();
   // A quiet reader keeps these enabled; the click takes over editing, then runs.
-  const controlsBlocked = blocked && !(quietReader() && !transferFrozen);
+  const controlsBlocked = blocked && !(quietReader() && !state.transferFrozen);
   undo.disabled = controlsBlocked || !target.canUndo;
   redo.disabled = controlsBlocked || !target.canRedo;
   for (const id of ['convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'] as const) {
@@ -650,8 +648,6 @@ const editHereBar = document.querySelector<HTMLElement>('#edit-here-bar')!;
 const editHereWarning = document.querySelector<HTMLElement>('#edit-here-warning')!;
 const editHereButton = document.querySelector<HTMLButtonElement>('#edit-here')!;
 let focusHandoff: FocusHandoffController | undefined;
-/** Controls that change the displayed document; New, Import and switching stay available. */
-const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
 /** A control clicked in a quiet reader; it runs once this window can edit that document. */
 let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
 /** Title edits held during a takeover, tied to their document (#197). */
@@ -688,162 +684,22 @@ function onEditableHere(): void {
   const { button } = pendingAction;
   if (button.isConnected && !button.disabled) button.click();
 }
-/** Reflect ownership + transfer freeze in the editors, controls and guidance (ordinary windows only). */
-function applyEditAccess(): void {
-  if (viewMode) return;
-  // Must match readOnlyNow: stay frozen for the whole switch/delete interval even if
-  // installOwnership runs before the handler finishes (e.g. refreshDrafts after delete).
-  const blocked = state.editBlock !== '' || transferFrozen;
-  workspace.setPaneRole(blocked ? 'readonly' : 'editable');
-  if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
-  if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
-  // A quiet reader keeps its controls enabled; a click takes over editing first (below).
-  const controlsBlocked = blocked && !(quietReader() && !transferFrozen);
-  for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = controlsBlocked;
-  document.documentElement.dataset.role = state.editBlock !== '' ? 'reader' : 'editor';
-  // Temporary transfer freeze must not announce "another window is editing".
-  const guidance = transferFrozen || quietReader() || state.deletedElsewhere ? '' : editBlockGuidance(state.editBlock, workspace.dirty());
-  if (ownershipNotice.textContent !== guidance) ownershipNotice.textContent = guidance;
-  ownershipNotice.hidden = !guidance;
-  syncHistory();
-  syncMutationControls();
-  updateSaveIndicator();
-}
-/** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
-let storageGeneration = 0;
-
-/** Try to own `documentId` without waiting; pass `steal` only for #175 suspended-owner handoff. */
-async function acquireFor(documentId: string, options: { steal?: boolean } = {}): Promise<EditAccess> {
-  // Without storage nothing can be written, so there is nothing to own.
-  if (viewMode || !state.db) return { block: '', generation: storageGeneration };
-  const generation = storageGeneration;
-  // E2E may set a delay to assert mutations are frozen during ownership transfer (#159 W4).
-  const delayMs = testKnob('__typebridgeDelayAcquireMs');
-  if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
-  if (generation !== storageGeneration || !state.db) return { block: 'error', generation: storageGeneration };
-  let held: EditOwnership | undefined;
-  try {
-    const result = await acquireEditOwnership({
-      db: state.db, locks: webLocks, documentId, instanceId,
-      onLost: () => { if (held && state.ownership === held) loseOwnership(); },
-      steal: options.steal,
-    });
-    // E2E: hold the lock briefly before returning so a mid-flight versionchange can be asserted.
-    const afterMs = testKnob('__typebridgeDelayAfterAcquireMs');
-    if (typeof afterMs === 'number' && afterMs > 0 && result.status === 'acquired') {
-      await new Promise(resolve => setTimeout(resolve, afterMs));
-    }
-    if (generation !== storageGeneration || !state.db) {
-      if (result.status === 'acquired') void result.ownership.release();
-      return { block: 'error', generation: storageGeneration };
-    }
-    if (result.status !== 'acquired') return { block: result.status, generation };
-    held = result.ownership;
-    return { ownership: held, block: '', generation };
-  } catch { return { block: 'error', generation: storageGeneration }; }
-}
-
-/** Freeze Editor + title gates and mutation controls for the ownership-transfer window. */
-function freezeEditorsForTransition(): void {
-  transferFrozen = true;
-  workspace.setPaneRole('readonly');
-  editor.setReadOnly(true);
-  titleEditor.setReadOnly(true);
-  for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = true;
-  undo.disabled = true;
-  redo.disabled = true;
-  autosave.disabled = true;
-}
-
-function unfreezeEditorsAfterTransition(): void {
-  transferFrozen = false;
-  applyEditAccess();
-}
-/** Make `access` current and release whatever this window owned before. */
-function installOwnership(access: EditAccess): void {
-  let next = access;
-  // Drop a handle acquired before storage was invalidated (versionchange mid-switch/boot).
-  if (access.ownership && (access.generation !== storageGeneration || !state.db)) {
-    void access.ownership.release();
-    next = { block: access.block === '' ? 'error' : access.block, generation: storageGeneration };
-  }
-  const previous = state.ownership;
-  state.ownership = next.ownership;
-  state.editBlock = next.block;
-  if (previous && previous !== state.ownership) void previous.release();
-  applyEditAccess();
-  // #175 step 7: pick up host Autosave changes that arrived while this window was read-only.
-  if (state.editBlock === '') syncAutosaveCheckboxFromStorage();
-}
-async function takeOwnership(documentId: string): Promise<void> {
-  installOwnership(await acquireFor(documentId));
-}
-/**
- * Another window owns this document now (fence mismatch or lock taken). Stop writing, keep the
- * text, title and history in memory for copy/export, and become read-only.
- */
-function loseOwnership(): void {
-  if (viewMode) return;
-  const previous = state.ownership;
-  state.ownership = undefined;
-  state.editBlock = 'lost';
-  saver.cancel();
-  void previous?.release();
-  applyEditAccess();
-  showSaveState();
-}
-/**
- * Two-phase #175 handoff park: freeze the UI synchronously, then release the lock
- * while keeping text/title/history/dirty until the requester confirms takeover.
- */
-let parkReleaseHandle: EditOwnership | undefined;
-function beginParkFreeze(): void {
-  if (viewMode) return;
-  parkReleaseHandle = state.ownership;
-  state.ownership = undefined;
-  state.editBlock = 'busy';
-  saver.cancel();
-  // Freeze before any await so typing cannot land outside the snapshot.
-  applyEditAccess();
-  showSaveState();
-}
-async function finishParkRelease(): Promise<void> {
-  const previous = parkReleaseHandle;
-  parkReleaseHandle = undefined;
-  await previous?.release();
-}
-/** Confirmed takeover: show last saved text when this window had transferred private edits. */
-async function discardParkedHandoffText(documentId: string): Promise<void> {
-  // Must still be viewing the yielded document — never wipe a different draft after a switch.
-  if (viewMode || state.active.id !== documentId || !workspace.dirty() || !state.db) return;
-  try {
-    const fresh = await getStoredDraft(state.db, documentId);
-    if (fresh) {
-      writingPosition.save();
-      state.active = fresh;
-      showDraft();
-      workspace.setDirty(false);
-    }
-  } catch { /* Keep the parked snapshot read-only if IndexedDB is unavailable. */ }
-  applyEditAccess();
-  showSaveState();
-}
-/** Failed/timed-out takeover: try to re-acquire while keeping parked text intact. */
-async function recoverParkedHandoffOwnership(documentId: string): Promise<void> {
-  if (viewMode || state.ownership || state.active.id !== documentId) return;
-  const access = await acquireFor(documentId);
-  if (access.ownership) {
-    installOwnership(access);
-    announceAction('Editing stayed in this window — the other window could not take over.', { keepConflict: true });
-    if (workspace.dirty() && autosave.checked) {
-      saver.saveSoon();
-    }
-    return;
-  }
-  state.editBlock = access.block || 'lost';
-  applyEditAccess();
-  showSaveState();
-}
+const editAccess = createEditAccess(state, statusLine, {
+  viewMode, instanceId, webLocks, workspace, editor, titleEditor, ownershipNotice, undo, redo, autosave,
+  writingPosition, quietReader,
+  syncHistory: () => { syncHistory(); },
+  syncMutationControls: () => { syncMutationControls(); },
+  updateSaveIndicator: () => { updateSaveIndicator(); },
+  syncAutosaveCheckboxFromStorage: () => { syncAutosaveCheckboxFromStorage(); },
+  showDraft: () => { showDraft(); },
+  cancelSave: () => { saver.cancel(); },
+  saveSoon: () => { saver.saveSoon(); },
+});
+const {
+  applyEditAccess, acquireFor, freezeEditorsForTransition, unfreezeEditorsAfterTransition, installOwnership,
+  takeOwnership, loseOwnership, beginParkFreeze, finishParkRelease, discardParkedHandoffText,
+  recoverParkedHandoffOwnership,
+} = editAccess;
 function captureHandoffSnapshot(): HandoffSnapshot {
   return {
     text: field.value,
@@ -1056,7 +912,7 @@ draftTitle.addEventListener('input', () => {
 autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, workspace, viewMode, embedded,
   prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
-  transferFrozen: () => transferFrozen,
+  transferFrozen: () => state.transferFrozen,
   controlBlocked: () => autosaveControlBlocked(),
   preferenceSaved,
   journalEdit: () => { journalEdit(); },
@@ -1122,7 +978,7 @@ recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
 function handleDatabaseUpgrade(): void {
   // Invalidate in-flight acquires, then free any installed Web Lock so an upgraded tab can own.
-  storageGeneration++;
+  state.storageGeneration++;
   const previous = state.ownership;
   state.ownership = undefined;
   saver.cancel();
@@ -1190,7 +1046,7 @@ if (!viewMode) {
     isOwner: () => !!state.ownership && state.editBlock === '',
     editBlock: () => state.editBlock,
     isComposing: () => editor.composing,
-    isTransitioning: () => state.transitioning || state.deleting || transferFrozen || !!ownershipRetry,
+    isTransitioning: () => state.transitioning || state.deleting || state.transferFrozen || !!ownershipRetry,
     isSaving: () => !!saver.inFlight(),
     saveFailed: () => state.saveFailed,
     isDirty: () => workspace.dirty(),
@@ -1248,7 +1104,7 @@ if (!viewMode) {
   // the title and document-changing controls. Plain focus (Tab, F6, programmatic) does
   // not take over; the text field starts a takeover on pointer or typing (focus-handoff).
   const requestEditHere = (): void => {
-    if (!quietReader() || state.transitioning || state.deleting || transferFrozen) return;
+    if (!quietReader() || state.transitioning || state.deleting || state.transferFrozen) return;
     if (focusHandoff?.pending()) return;
     focusHandoff?.requestHandoff();
   };
