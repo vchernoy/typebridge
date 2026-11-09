@@ -33,8 +33,11 @@ for (const width of [320, 390]) {
     await expect(
       page.getByRole("toolbar", { name: "Editing" }).getByRole("button", { name: "More actions" }),
     ).toBeVisible();
-    // The editor starts high on the screen.
-    expect((await page.locator("#editor").boundingBox())!.y).toBeLessThan(width < 360 ? 340 : 300);
+    // The editor starts high on the screen once the layout settles. WebKit in CI can wrap
+    // one extra 44px row for a moment after boot; a lasting wrap still fails here.
+    await expect
+      .poll(async () => (await page.locator("#editor").boundingBox())!.y)
+      .toBeLessThan(width < 360 ? 340 : 300);
   });
 }
 
