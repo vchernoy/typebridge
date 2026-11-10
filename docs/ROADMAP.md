@@ -30,7 +30,7 @@ Proposed order after the #175 cutover; each item is one or a few small PRs.
 
 1. **Test reliability.** Find the race behind each intermittent e2e failure and fix it in code or test (no retries, skips or quarantine): `edit-ownership.spec.ts:365` (also fails on `main` under parallel load), `focus-handoff.spec.ts:242`, `host-shared-settings.spec.ts:214`, `find-replace.spec.ts:43`, and the Firefox document-menu race in [#155](https://github.com/vchernoy/typebridge/issues/155).
 2. **Test hooks out of production.** The `__typebridge*` globals used by e2e are exposed in the production build; expose them only in test builds.
-3. **Split `src/main.ts`** ([#99](https://github.com/vchernoy/typebridge/issues/99); now about 3,000 lines) into focused modules with no behavior change.
+3. ~~**Split `src/main.ts`**~~ **Done** ([#99](https://github.com/vchernoy/typebridge/issues/99), PRs #208–#229): about 3,000 → 1,015 lines in focused modules, plus the host title bar out of `window-manager.ts` and `style.css` into ordered stylesheets; no behavior change. See the [code map](ARCHITECTURE.md#code-map).
 4. **Small P2/P3 follow-ups:** [#107](https://github.com/vchernoy/typebridge/issues/107) writing-position write debounce, [#97](https://github.com/vchernoy/typebridge/issues/97) conflict re-announce timing, picker label length, [#62](https://github.com/vchernoy/typebridge/issues/62) search audit.
 5. **Next feature (maintainer to choose):** [#39](https://github.com/vchernoy/typebridge/issues/39) portable share links (ready for implementation) or [#37](https://github.com/vchernoy/typebridge/issues/37) retained version history.
 
