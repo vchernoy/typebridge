@@ -177,6 +177,7 @@ test('position events batch storage writes and pagehide flushes the latest selec
   // Let boot/input-generated selection events settle before measuring a new burst.
   await page.waitForTimeout(300);
   await page.clock.install();
+  await page.clock.pauseAt(new Date());
   await page.evaluate(() => {
     const w = window as unknown as { positionWrites: number };
     w.positionWrites = 0;
