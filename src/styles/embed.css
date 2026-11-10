@@ -1,0 +1,116 @@
+/* An editor window embedded in the host page: chrome it hides or compacts. */
+/* #175 step 6–7: Layout preference only on the host Settings panel. */
+body:not(.host-page) .settings-host-only {
+  display: none;
+}
+
+/* #175 step 7–8: Settings + document title live on the host; keep embed chrome clean.
+   Comparison window entry is redundant with host windows (in-page split removed in step 10). */
+html[data-embed="1"] #settings-open,
+html[data-embed="1"] #settings-panel,
+html[data-embed="1"] #open-comparison,
+html[data-embed="1"] .brand,
+html[data-embed="1"] #draft-title {
+  display: none !important;
+}
+
+/* Compact host windows (#175 follow-up): the window frame replaces the page card, the
+   tools share one row, and the text fills the window. Shared Latin/Кириллица lives in the
+   host top bar; About is in Settings; the title bar names the document. */
+html[data-embed="1"] body {
+  min-width: 0;
+}
+html[data-embed="1"] .workspace {
+  height: 100vh;
+  max-width: none;
+  padding: 0;
+  box-sizing: border-box;
+}
+html[data-embed="1"] .workspace > section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px 6px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+html[data-embed="1"] .topbar {
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+}
+html[data-embed="1"] .topbar > .doc {
+  flex: 0 0 auto;
+}
+html[data-embed="1"] .topbar > .toolbar {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+  margin: 0;
+}
+/* Narrow windows: ▾, Saved and Focus on one line, the editing tools on the next. */
+@media (max-width: 560px) {
+  html[data-embed="1"] .topbar > .toolbar {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
+/* A window is its own width: Focus spans it instead of the 900px page column. */
+html[data-embed="1"] body.focus-mode .topbar,
+html[data-embed="1"] body.focus-mode .bottom {
+  max-width: none;
+}
+html[data-embed="1"] .top-actions {
+  width: auto;
+  margin-left: auto;
+}
+html[data-embed="1"] .mode-switch,
+html[data-embed="1"] .hint,
+html[data-embed="1"] .resize-grip,
+html[data-embed="1"] #focus-mode .btn-text {
+  display: none !important;
+}
+html[data-embed="1"] .editor-shell {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-bottom: 6px;
+}
+html[data-embed="1"] .editor-shell > label[for="editor"],
+html[data-embed="1"] #mode-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+html[data-embed="1"] #editor {
+  flex: 1 1 auto;
+  width: 100% !important;
+  height: auto !important;
+  max-width: none !important;
+  margin-bottom: 0;
+  /* The window sizes the field; a textarea resize corner would do nothing here. */
+  resize: none !important;
+}
+
+.doc-menu #doc-search {
+  width: 100%;
+  min-height: 40px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+body.host-page .host-settings-panel {
+  position: fixed;
+  /* Above free-layout windows (z compacted to 1..n) and the host notice; below confirm dialogs (1000). */
+  z-index: 900;
+}

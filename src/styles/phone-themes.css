@@ -1,0 +1,201 @@
+/* Phone layout, search option chips, colour-scheme overrides and the update notice. */
+/* Phone layout pass (#123, step 6). */
+#focus-mode,
+#settings-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  .workspace {
+    padding: 12px 10px;
+  }
+  section {
+    padding: 14px;
+  }
+  .topbar {
+    gap: 6px 10px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+  }
+  /* Wraps when text is enlarged; at the default size everything fits on one row. */
+  .top-actions {
+    width: 100%;
+    margin-left: 0;
+    gap: 6px;
+  }
+  .mode-switch {
+    gap: 6px;
+  }
+  /* Focus and Settings become icon buttons; their names stay for assistive tech. */
+  #focus-mode,
+  #settings-open {
+    min-width: 44px;
+    padding: 0 10px;
+  }
+  #focus-mode .btn-text,
+  #settings-open .btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  #focus-mode {
+    margin-left: auto;
+  }
+  .toolbar {
+    margin-bottom: 12px;
+  }
+  .actions {
+    gap: 6px;
+  }
+  .actions > button,
+  #more-open {
+    padding: 0 11px;
+  }
+  .tool-sep {
+    display: none;
+  }
+  /* Shorter convert labels leave room for Find/Copy/⋯ on one row at ~390 px (#156). */
+  .convert-label-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .convert-label-phone {
+    display: inline;
+  }
+  #convert-cyrillic,
+  #convert-latin {
+    padding: 0 8px;
+  }
+  .toolbar .actions {
+    gap: 4px;
+  }
+  .find-field {
+    flex: 1 1 100%;
+  }
+  .find-field input[type="text"] {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+}
+@media (max-width: 360px) {
+  /* Narrowest phones: a slightly smaller switch keeps it on one row with Focus and Settings. */
+  .mode-switch {
+    gap: 4px;
+  }
+  .mode-side {
+    font-size: 0.9rem;
+  }
+  :is(#enabled, #host-enabled) {
+    width: 40px;
+  }
+  :is(#enabled, #host-enabled):checked::before {
+    transform: translateX(14px);
+  }
+}
+
+/* Compact search options retain native checkboxes and a visible checked state. */
+.search-chip {
+  min-height: 44px;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+.search-chip:has(input:checked) {
+  font-weight: 700;
+  border-width: 2px;
+  padding-inline: 9px;
+}
+.search-chip:focus-within {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --background: #151b29;
+  --surface: #202a3b;
+  --dialog-surface: var(--surface);
+  --text: #edf2fb;
+  --muted: #c4d0e3;
+  --border: #47536a;
+  --panel-border: #47536a;
+  --button-background: #33445f;
+  --button-text: #fff;
+  --accent: #8fa8ff;
+  --brand: #a9c5ff;
+  --warning: #f0b36a;
+  --switch-border: var(--muted);
+  --switch-active-knob: #151b29;
+}
+:root[data-color-scheme="light"] {
+  color-scheme: light;
+}
+
+.text-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+}
+#settings-about-title {
+  scroll-margin-top: 72px;
+}
+
+.update-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+}
+.update-notice [role="status"] {
+  flex: 1 1 220px;
+}
+
+.phone-icon {
+  display: none;
+}
+@media (max-width: 400px) {
+  #find-open,
+  #copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+  }
+  .phone-icon {
+    display: inline-block;
+  }
+  .phone-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+#appearance,
+#window-layout {
+  min-height: 44px;
+  margin: 0 8px 8px;
+  font: inherit;
+}
