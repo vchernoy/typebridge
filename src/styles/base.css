@@ -1,0 +1,42 @@
+/* Page tokens, light/dark colours and the page column. */
+:root {
+  --background: #f4f7fc;
+  --surface: #fff;
+  --text: #1b2840;
+  --muted: #50627a;
+  --border: #d9e2ef;
+  --control-border: #aab8cd;
+  --panel-border: #aab8cd;
+  --button-background: #edf3ff;
+  --button-text: #1b2840;
+  --accent: #3153e9;
+  --brand: #3153e9;
+  --warning: #9a4d06;
+  --focus: #527fd4;
+  --switch-border: var(--muted);
+  --switch-active-knob: #fff;
+  --title-hover-border: #d9e2ef;
+  --grip-color: #7d8ca6;
+  --dialog-surface: #fff;
+  --modal-backdrop: #151b29a6;
+  --surface-shadow: #1830550a;
+  --menu-shadow: #1830552e;
+  --settings-shadow: #18305526;
+  --dialog-shadow: #18305533;
+  font-family: system-ui, sans-serif;
+  color: var(--text);
+  background: var(--background);
+  color-scheme: light dark;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+.workspace {
+  max-width: 1600px;
+  margin: auto;
+  padding: clamp(20px, 5vw, 56px) 20px;
+}

@@ -1,0 +1,139 @@
+/* Editor toolbar, the ⋯ menu and the Latin/Кириллица switch. */
+/* Toolbar (#123, step 4): icon buttons, groups, and the ⋯ menu. */
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+.icon-button {
+  min-width: 44px;
+  padding: 0 10px;
+}
+.tool-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 4px;
+  background: var(--border);
+}
+.more-wrap {
+  position: relative;
+}
+#more-open {
+  min-width: 44px;
+  padding: 0 12px;
+  font-weight: 700;
+}
+.more-menu {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 200px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px var(--menu-shadow);
+}
+.more-menu [role="menuitem"] {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: 6px;
+}
+.more-menu [role="menuitem"]:hover,
+.more-menu [role="menuitem"]:focus-visible {
+  background: var(--button-background);
+}
+#clear {
+  color: var(--warning);
+}
+.top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-left: auto;
+}
+@media (max-width: 640px) {
+  /* Still the switch's accessible description; just not shown on narrow screens. */
+  .shortcut-hint {
+    display: none;
+  }
+}
+/* Typing mode (#123, step 5): Latin ⬤ Кириллица. The checkbox itself is drawn as the
+   switch track, so it stays a real, focusable control; the active side is emphasized. */
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.mode-side {
+  font-weight: 400;
+  color: var(--muted);
+  cursor: pointer;
+}
+:is(#enabled, #host-enabled) {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 26px;
+  margin: 0;
+  border: 1px solid var(--switch-border);
+  border-radius: 999px;
+  background: var(--background);
+  cursor: pointer;
+}
+:is(#enabled, #host-enabled)::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.15s;
+}
+:is(#enabled, #host-enabled):checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+:is(#enabled, #host-enabled):checked::before {
+  transform: translateX(20px);
+  background: var(--switch-active-knob);
+}
+.mode-switch:has(:is(#enabled, #host-enabled):not(:checked)) .mode-side:first-child,
+.mode-switch:has(:is(#enabled, #host-enabled):checked) label.mode-side {
+  font-weight: 700;
+  color: inherit;
+}
+.shortcut-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(#enabled, #host-enabled)::before {
+    transition: none;
+  }
+}
+@media (forced-colors: active) {
+  :is(#enabled, #host-enabled) {
+    border-color: ButtonText;
+  }
+  :is(#enabled, #host-enabled)::before {
+    background: ButtonText;
+  }
+  :is(#enabled, #host-enabled):checked {
+    background: Highlight;
+  }
+}

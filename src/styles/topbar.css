@@ -1,0 +1,170 @@
+/* Top bar: brand, document title, save indicator, viewer and Edit here notices, Documents menu. */
+/* Top bar: a small name, the document's title and its menu (#123, step 3). */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--brand);
+}
+.doc {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+#draft-title {
+  width: min(36ch, 100%);
+  min-width: 0;
+  flex-shrink: 1;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Size the title to its text where supported, so ▾ sits right after it. */
+@supports (field-sizing: content) {
+  #draft-title {
+    field-sizing: content;
+    width: auto;
+    max-width: 100%;
+  }
+}
+@media (max-width: 640px) {
+  .brand {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+#draft-title:hover {
+  border-color: var(--title-hover-border);
+}
+#draft-title:focus {
+  border-color: var(--control-border);
+}
+.save-indicator {
+  flex: none;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.save-indicator::before {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin-right: 0.4em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.save-indicator[data-state="saved"]::before {
+  background: currentColor;
+}
+.viewer-badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 400px) {
+  .viewer-badge {
+    font-size: 0.72rem;
+    padding: 2px 6px;
+  }
+}
+.viewer-notice {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+}
+.viewer-notice[hidden] {
+  display: none;
+}
+.edit-here-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px;
+}
+.edit-here-bar[hidden] {
+  display: none;
+}
+.edit-here-bar .viewer-notice {
+  flex: 1 1 12rem;
+  margin: 0;
+}
+.edit-here-bar #edit-here {
+  flex: 0 0 auto;
+}
+#doc-menu-open {
+  min-width: 44px;
+  padding: 0 10px;
+}
+.doc-menu {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(380px, calc(100vw - 40px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px var(--menu-shadow);
+}
+.doc-menu .menu-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.doc-menu select {
+  width: 100%;
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#delete-draft {
+  color: var(--warning);
+}

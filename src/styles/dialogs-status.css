@@ -1,0 +1,97 @@
+/* Confirm dialogs, the status line and the recovery panel. */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--modal-backdrop);
+}
+.confirm-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 40px);
+  overflow: hidden;
+  width: min(100%, 420px);
+  padding: 20px 22px;
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  background: var(--dialog-surface);
+  box-shadow: 0 16px 40px var(--dialog-shadow);
+  color: inherit;
+}
+.confirm-dialog h2 {
+  flex: 0 0 auto;
+  margin: 0 0 10px;
+  font-size: 1.15rem;
+}
+.confirm-dialog-message {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  white-space: pre-line;
+  margin: 0 0 18px;
+  line-height: 1.45;
+}
+.confirm-dialog-message .shortcut-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0 0 12px;
+  white-space: normal;
+}
+.confirm-dialog-message .shortcut-list dt,
+.confirm-dialog-message .shortcut-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.confirm-dialog-message .shortcut-list dt {
+  font-weight: 600;
+}
+.confirm-dialog-message .shortcut-list dd {
+  text-align: end;
+}
+@media (max-width: 420px) {
+  .confirm-dialog-message .shortcut-list {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+  .confirm-dialog-message .shortcut-list dd {
+    text-align: start;
+    margin-bottom: 8px;
+    color: var(--muted);
+  }
+}
+.confirm-dialog-message .shortcut-note {
+  margin: 0 0 10px;
+  white-space: normal;
+}
+.confirm-dialog-message .shortcut-note:last-child {
+  margin-bottom: 0;
+}
+/* Routine save progress stays announced but is shown only in the top bar (#156). */
+.status--announced-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.convert-label-phone {
+  display: none;
+}
+.confirm-dialog-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+/* The recovery panel is a <section> in the status bar; while it has nothing to
+   offer it must not draw the generic section card or expose an empty region (#118). */
+.recovery-panel:empty {
+  display: none;
+}

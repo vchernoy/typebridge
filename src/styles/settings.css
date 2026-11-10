@@ -1,0 +1,84 @@
+/* The Settings side panel and the rules editor. */
+/* Settings: a non-modal side panel, so rules can be tried in the editor while it is open (#123). */
+.settings-panel {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 100%);
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px var(--settings-shadow);
+  padding: env(safe-area-inset-top, 0px) max(20px, env(safe-area-inset-right, 0px))
+    calc(24px + env(safe-area-inset-bottom, 0px)) 20px;
+}
+.settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  background: inherit;
+  border-bottom: 1px solid var(--border);
+}
+.settings-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.settings-group {
+  padding: 4px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-group:last-child {
+  border-bottom: 0;
+}
+.settings-group h3 {
+  margin: 18px 0 6px;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.settings-group p,
+.setting-note {
+  margin: 4px 0 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.shortcut-panel label {
+  margin-right: 8px;
+}
+.shortcut-panel select {
+  min-height: 44px;
+  margin: 0 8px 8px 0;
+}
+
+body.focus-mode .settings-panel {
+  display: none;
+}
+.rules-panel p {
+  font-size: 0.9rem;
+}
+.rules-panel textarea {
+  width: 100%;
+  max-width: 700px;
+  height: 240px;
+  min-height: 140px;
+  resize: vertical;
+  font:
+    1rem/1.5 ui-monospace,
+    monospace;
+  margin-bottom: 12px;
+}
+.rules-panel .actions {
+  margin: 8px 0;
+}
+#rules-status {
+  display: block;
+  margin-top: 8px;
+}

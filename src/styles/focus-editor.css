@@ -1,0 +1,157 @@
+/* Focus mode, the editor shell, its minimum size and the drawn resize grip. */
+/* Focus mode keeps the same textarea and editor instance, preserving selection and history.
+   It also keeps one line of the top bar: the document title with its ▾ menu and save
+   state, the typing switch and Exit focus (#104). */
+#exit-focus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+#exit-focus[hidden] {
+  display: none;
+}
+@media (max-width: 640px) {
+  .focus-exit-hint {
+    display: none;
+  }
+}
+body.focus-mode {
+  background: var(--background);
+}
+body.focus-mode .workspace {
+  max-width: none;
+  padding: 16px clamp(12px, 4vw, 48px);
+}
+body.focus-mode .toolbar,
+body.focus-mode .find-bar,
+body.focus-mode .goto-bar,
+body.focus-mode .rules-panel,
+body.focus-mode .shortcut-panel,
+body.focus-mode .hint,
+body.focus-mode label[for="editor"] {
+  display: none;
+}
+body.focus-mode section {
+  box-shadow: none;
+  border: 0;
+  padding: clamp(12px, 2vw, 28px);
+  min-height: calc(100dvh - 32px);
+}
+body.focus-mode .topbar {
+  max-width: 900px;
+  margin: 0 auto 10px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+body.focus-mode .brand,
+body.focus-mode #focus-mode,
+body.focus-mode #settings-open,
+body.focus-mode .shortcut-hint {
+  display: none;
+}
+body.focus-mode .top-actions {
+  width: auto;
+  margin-left: auto;
+}
+body.focus-mode #editor {
+  width: 100%;
+  max-width: 900px;
+  min-width: 0;
+  height: calc(100dvh - 160px);
+  /* Match the #70 grip floor (96px); 12rem blocked Focus shrink in the split shell. */
+  min-height: 96px;
+  resize: vertical;
+  margin: 0 auto;
+}
+body.focus-mode .bottom {
+  max-width: 900px;
+  margin-inline: auto;
+}
+
+.editor-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: 18px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The same minimums for the main editor in Normal and Focus mode (#70). The bottom
+   margin keeps the text below clear of the grip's touch target, which extends
+   --grip-outset-y below the editor. */
+#editor {
+  min-width: min(100%, 160px);
+  min-height: 96px;
+  resize: none;
+}
+/* Drawn corner grip (#70): iOS Safari never shows the native textarea grip.
+   The touch target reaches outside the editor so that, inside it, it covers
+   only the bottom padding strip (16 px padding + 1 px border), never text at
+   rest: inside height = height - outset-y <= 14 px. */
+.resize-grip {
+  --grip-outset-x: 6px;
+  --grip-outset-y: 18px;
+  position: absolute;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background-color: transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background: linear-gradient(
+      135deg,
+      transparent 0 40%,
+      var(--grip-color) 40% 48%,
+      transparent 48% 60%,
+      var(--grip-color) 60% 68%,
+      transparent 68% 80%,
+      var(--grip-color) 80% 88%,
+      transparent 88%
+    )
+    no-repeat right calc(var(--grip-outset-x) + 3px) bottom calc(var(--grip-outset-y) + 3px) / 14px 14px;
+}
+@media (any-pointer: coarse) {
+  #editor {
+    margin-bottom: 30px;
+  }
+  .resize-grip {
+    --grip-outset-x: 8px;
+    --grip-outset-y: 30px;
+    width: 44px;
+    height: 44px;
+  }
+}
+/* Forced-colors modes (e.g. Windows High Contrast) drop background gradients, so the
+   grip above would vanish. Draw a corner mark with a system-color border instead. */
+@media (forced-colors: active) {
+  .resize-grip::after {
+    content: "";
+    position: absolute;
+    right: calc(var(--grip-outset-x) + 3px);
+    bottom: calc(var(--grip-outset-y) + 3px);
+    width: 10px;
+    height: 10px;
+    border-right: 2px solid ButtonText;
+    border-bottom: 2px solid ButtonText;
+  }
+}
