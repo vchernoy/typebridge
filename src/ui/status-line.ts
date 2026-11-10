@@ -29,6 +29,13 @@ export type StatusLineDeps = {
   quietReader: () => boolean;
 };
 
+/**
+ * How long an identical conflict notice stays cleared before it is written again (#97). A
+ * later task, not a microtask: assistive tech must see the empty region before the text
+ * returns, or a repeated identical notice is not spoken.
+ */
+export const CONFLICT_REANNOUNCE_DELAY_MS = 100;
+
 /** Routine save progress that the top-bar indicator already shows (#156). */
 function isRoutineSaveAnnouncement(body: string): boolean {
   return body === 'Saved locally' || body === 'Saving…';
@@ -40,8 +47,19 @@ export function createStatusLine(deps: StatusLineDeps) {
   let message: StatusMessage = { conflict: '', primary: '', risk: '', draftListRefreshFailed: false };
   /** Cancels a pending deferred conflict write so a newer setConflict/clear wins. */
   let conflictAnnounceToken = 0;
-  /** True between clearing the live region and the rewrite for an identical conflict. */
-  let conflictReannouncePending = false;
+  /**
+   * Conflict text cleared from the live region in the current task. Writing the same text
+   * back in that task (e.g. a document switch clears notices, then reports its flush
+   * conflict) is no change assistive tech can see, so it is treated like an identical one.
+   */
+  let clearedThisTask = '';
+  function clearConflictNotice(): void {
+    const cleared = conflictNotice.textContent;
+    if (!cleared) return;
+    conflictNotice.textContent = '';
+    clearedThisTask = cleared;
+    setTimeout(() => { if (clearedThisTask === cleared) clearedThisTask = ''; }, 0);
+  }
 
   const currentRisk = (): string => riskText(deps.risk());
 
@@ -61,45 +79,40 @@ export function createStatusLine(deps: StatusLineDeps) {
     renderStatus();
   }
   /**
-   * Write the conflict live region. Identical wording re-announces on a later turn
-   * so assistive tech sees a clear change. Switch flushes that defer announcement
-   * leave the model empty until switchDraft calls this.
+   * Write the conflict live region. With `reannounce`, identical wording (shown now, or
+   * cleared earlier in this task) is cleared and written again after
+   * CONFLICT_REANNOUNCE_DELAY_MS so assistive tech speaks it again.
+   * Switch flushes that defer announcement leave the model empty until switchDraft calls this.
    */
   function setConflict(text: string, reannounce = false): void {
     message = { ...message, conflict: text };
     if (text) kind = 'conflict';
     if (!text) {
       conflictAnnounceToken++;
-      conflictReannouncePending = false;
-      if (conflictNotice.textContent) conflictNotice.textContent = '';
+      clearConflictNotice();
       renderStatus();
       return;
     }
-    if (reannounce && conflictNotice.textContent === text) {
+    const shown = conflictNotice.textContent;
+    if (reannounce && (shown === text || (!shown && clearedThisTask === text))) {
       const token = ++conflictAnnounceToken;
-      conflictReannouncePending = true;
-      conflictNotice.textContent = '';
+      clearConflictNotice();
       renderStatus();
-      // Microtask: a later turn than this clear (so live regions observe a change), and
-      // not a timer — Playwright's paused fake clock would otherwise leave the notice blank.
-      queueMicrotask(() => {
+      setTimeout(() => {
         if (token !== conflictAnnounceToken) return;
-        conflictReannouncePending = false;
         if (message.conflict !== text) return;
         conflictNotice.textContent = text;
         renderStatus();
-      });
+      }, CONFLICT_REANNOUNCE_DELAY_MS);
       return;
     }
     conflictAnnounceToken++;
-    conflictReannouncePending = false;
     if (conflictNotice.textContent !== text) conflictNotice.textContent = text;
     renderStatus();
   }
   function clearNotices(): void {
     conflictAnnounceToken++;
-    conflictReannouncePending = false;
-    if (conflictNotice.textContent) conflictNotice.textContent = '';
+    clearConflictNotice();
     updateStatus({ conflict: '', draftListRefreshFailed: false });
   }
   function setSaveStatus(text: string, nextKind: Exclude<StatusKind, 'action'> = 'progress'): void {
@@ -119,10 +132,6 @@ export function createStatusLine(deps: StatusLineDeps) {
   } = {}): void {
     const nextKind = options.kind ?? 'action';
     if (!options.keepConflict) setConflict('');
-    else if (message.conflict && !conflictReannouncePending && conflictNotice.textContent !== message.conflict) {
-      // Sync a deferred model-only write without cancelling a pending re-announce.
-      setConflict(message.conflict);
-    }
     const risk = options.omitRisk ? '' : currentRisk();
     if (risk) updateStatus({ draftListRefreshFailed: false, primary: text.replace(/[.…]$/, ''), risk }, statusKindForRisk(risk));
     else updateStatus({ draftListRefreshFailed: false, primary: text, risk: '' }, nextKind);
