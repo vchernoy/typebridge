@@ -1,4 +1,4 @@
-import { SHORTCUTS, formatShortcut, TRANSLITERATION_SHORTCUTS, transliterationShortcutLabel, type TransliterationShortcut } from '../editor/keyboard-shortcuts';
+import { SHORTCUTS, formatShortcut, isApplePlatform, TRANSLITERATION_SHORTCUTS, transliterationShortcutLabel, type TransliterationShortcut } from '../editor/keyboard-shortcuts';
 import { askConfirmChoice } from './confirm-dialog';
 import { openHostSettings, openSettingsTo } from './settings';
 
@@ -6,13 +6,17 @@ export function setupKeyboardShortcuts(): void {
   const trigger = document.querySelector<HTMLButtonElement>('#keyboard-shortcuts')!;
   const more = document.querySelector<HTMLButtonElement>('#more-open')!;
   const shortcut = document.querySelector<HTMLSelectElement>('#translit-shortcut');
-  const apple = /Mac|iPhone|iPad/.test(navigator.platform);
+  const apple = isApplePlatform();
   const label = (key: keyof typeof SHORTCUTS): string => formatShortcut(SHORTCUTS[key], apple);
-  for (const [id, key] of [['convert-cyrillic', 'convertCyrillic'], ['convert-latin', 'convertLatin'], ['find-open', 'find'], ['goto-open', 'goto'], ['focus-mode', 'focus']] as const) {
-    const control = document.getElementById(id)!;
+  // Tooltips name the shortcut in this platform's style (the HTML holds a Cmd/Ctrl fallback).
+  for (const [id, key] of [['convert-cyrillic', 'convertCyrillic'], ['convert-latin', 'convertLatin'], ['find-open', 'find'], ['goto-open', 'goto'], ['focus-mode', 'focus'], ['undo', 'undo'], ['redo', 'redo']] as const) {
+    const control = document.getElementById(id);
+    if (!control) continue;
     const name = control.getAttribute('aria-label') ?? control.textContent?.trim() ?? '';
     control.title = `${name} (${label(key)})`;
   }
+  const gotoField = document.getElementById('goto-line');
+  if (gotoField) gotoField.title = label('goto');
   trigger.addEventListener('click', async () => {
     let choice: TransliterationShortcut = 'default';
     try {
@@ -53,7 +57,7 @@ export function setupKeyboardShortcuts(): void {
     escapeNote.textContent = `${label('escape')}: closes the current dialog, panel, menu or search bar first; otherwise toggles Focus from the editor, or exits Focus.`;
     const reserveNote = document.createElement('p');
     reserveNote.className = 'shortcut-note';
-    reserveNote.textContent = 'Some systems reserve Ctrl+Shift+Space for keyboard-language switching. Use Change typing shortcut to choose another binding or disable it. Browser/OS-reserved shortcuts may take priority.';
+    reserveNote.textContent = `Some systems reserve ${transliterationShortcutLabel('default', apple)} for keyboard-language switching. Use Change typing shortcut to choose another binding or disable it. Browser/OS-reserved shortcuts may take priority.`;
     content.append(list, escapeNote, reserveNote);
     const change = await askConfirmChoice({
       title: 'Keyboard shortcuts',
