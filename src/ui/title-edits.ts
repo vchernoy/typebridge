@@ -29,6 +29,8 @@ export type TitleEditDeps = {
   titleEditor: Editor;
   syncTitleTooltip: () => void;
   rememberActive: () => void;
+  /** Save soon after a title change from the host title bar. */
+  scheduleTitleSave: () => void;
 };
 
 export function createTitleEditing(deps: TitleEditDeps) {
@@ -121,5 +123,31 @@ export function createTitleEditing(deps: TitleEditDeps) {
     }
     return { start, end };
   }
-  return { applyTitleEdit, applyHeldTitleOps };
+  /** Title-bar rename write-through: replace the title without an edit step (#175 step 8). */
+  function setTitle(title: string): void {
+    if (deps.viewMode || deps.draftTitle.readOnly || deps.draftTitle.disabled) return;
+    const next = title.slice(0, 150);
+    if (deps.draftTitle.value === next) return;
+    deps.draftTitle.value = next;
+    deps.syncTitleTooltip();
+    deps.rememberActive();
+    deps.scheduleTitleSave();
+  }
+  /** Title-bar IME/delete commit: record the new value as one undoable title edit. */
+  function commitTitle(value: string, start?: number, end?: number): TitleEditResult | null {
+    if (deps.viewMode || deps.draftTitle.readOnly || deps.draftTitle.disabled) return null;
+    const next = value.slice(0, 150);
+    if (deps.draftTitle.value !== next) {
+      deps.draftTitle.value = next;
+      // Dispatch input so titleEditor records a single undoable edit.
+      deps.draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const caret = Math.max(0, Math.min(start ?? next.length, next.length));
+    const caretEnd = Math.max(caret, Math.min(end ?? caret, next.length));
+    deps.syncTitleTooltip();
+    deps.rememberActive();
+    deps.scheduleTitleSave();
+    return { value: deps.draftTitle.value, start: caret, end: caretEnd };
+  }
+  return { applyTitleEdit, applyHeldTitleOps, setTitle, commitTitle };
 }

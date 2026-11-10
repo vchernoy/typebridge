@@ -23,6 +23,7 @@ import { createTakeover } from './view/takeover';
 import { createTitleEditing } from './ui/title-edits';
 import { setupDeletedInput } from './view/deleted-input';
 import { createHeldEdits } from './view/held-edits';
+import { installEmbedHooks } from './view/embed-hooks';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
@@ -56,12 +57,12 @@ import { installEscapeLayers } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 import { parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
-import { editorWindowApi, exposeEditorWindowApi, hostPageApi, testKnob, type EditorWindow } from './view/embed-api';
+import { editorWindowApi, exposeEditorWindowApi, hostPageApi, testKnob } from './view/embed-api';
 import { setupExportImport } from './ui/export-import';
 import { setupComparisonOpen } from './ui/comparison-open';
 import { setupFindGotoBars } from './ui/find-goto-bars';
 import { parseEmbedMode } from './view/embed';
-import { notifyPrefsChanged, onPrefsChanged, PREFS_EVENT, type PrefName } from './view/prefs-sync';
+import { notifyPrefsChanged, onPrefsChanged, type PrefName } from './view/prefs-sync';
 import { SIGNAL_POLL_INTERVAL_MS } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -644,10 +645,11 @@ const editHereBar = document.querySelector<HTMLElement>('#edit-here-bar')!;
 const editHereWarning = document.querySelector<HTMLElement>('#edit-here-warning')!;
 const editHereButton = document.querySelector<HTMLButtonElement>('#edit-here')!;
 let focusHandoff: FocusHandoffController | undefined;
-const { applyTitleEdit, applyHeldTitleOps } = createTitleEditing({
+const { applyTitleEdit, applyHeldTitleOps, setTitle, commitTitle } = createTitleEditing({
   viewMode, draftTitle, titleEditor,
   syncTitleTooltip: () => { syncTitleTooltip(); },
   rememberActive: () => { rememberActive(); },
+  scheduleTitleSave: () => { scheduleSave(true); },
 });
 const heldEdits = createHeldEdits(state, statusLine, {
   draftTitle, applyHeldTitleOps,
@@ -986,7 +988,7 @@ const leaveGuards = createLeaveGuards(state, {
   persist: () => persist(),
   snapshot: () => snapshot(),
 });
-const { prepareUpdateReload, prepareWindowClose, assertSafeToReloadAfterUpdate, reloadAfterUpdate, commitWindowClose } = leaveGuards;
+const { prepareUpdateReload, reloadAfterUpdate } = leaveGuards;
 updateStats();
 
 if (!embedded) {
@@ -1033,56 +1035,18 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
   });
 }
 if (embedded) {
-  // This window's side of the host↔window contract (see view/embed-api.ts).
-  const hooks: EditorWindow = window;
-  hooks.__typebridgePrepareUpdateReload = prepareUpdateReload;
-  hooks.__typebridgeAssertSafeUpdateReload = assertSafeToReloadAfterUpdate;
-  hooks.__typebridgeCancelUpdateReload = () => { leaveGuards.cancelUpdateReload(); };
-  hooks.__typebridgePrepareWindowClose = prepareWindowClose;
-  hooks.__typebridgeCommitWindowClose = commitWindowClose;
-  hooks.__typebridgeSetFocusMode = applyFocusModeOnly;
-  hooks.__typebridgeApplyPrefs = (name, origin) => {
-    if (origin && origin === `window:${windowId ?? 'main'}`) return;
-    // Re-dispatch in this window with iframe-local primitives so every module
-    // listener runs (rules, appearance, …). Avoid host-realm detail objects.
-    window.dispatchEvent(new CustomEvent(PREFS_EVENT, {
-      detail: {
-        name: String(name) as PrefName,
-        origin: origin !== undefined ? String(origin) : undefined,
-      },
-    }));
-  };
-  hooks.__typebridgeGetTitle = () => draftTitle.value.trim() || UNTITLED_TITLE;
-  hooks.__typebridgeSetTitle = title => {
-    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return;
-    const next = title.slice(0, 150);
-    if (draftTitle.value === next) return;
-    draftTitle.value = next;
-    syncTitleTooltip();
-    rememberActive();
-    scheduleSave(true);
-  };
-  hooks.__typebridgeToggleTransliteration = () => {
-    enabled.checked = !enabled.checked;
-    enabled.dispatchEvent(new Event('change', { bubbles: true }));
-  };
-  hooks.__typebridgeOpenFind = openFind;
-  hooks.__typebridgeTitleCommit = (value, start, end) => {
-    if (viewMode || draftTitle.readOnly || draftTitle.disabled) return null;
-    const next = value.slice(0, 150);
-    if (draftTitle.value !== next) {
-      draftTitle.value = next;
-      // Dispatch input so titleEditor records a single undoable edit.
-      draftTitle.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    const caret = Math.max(0, Math.min(start ?? next.length, next.length));
-    const caretEnd = Math.max(caret, Math.min(end ?? caret, next.length));
-    syncTitleTooltip();
-    rememberActive();
-    scheduleSave(true);
-    return { value: draftTitle.value, start: caret, end: caretEnd };
-  };
-  hooks.__typebridgeTitleEdit = applyTitleEdit;
+  // This window's side of the host↔window contract (view/embed-hooks.ts, view/embed-api.ts).
+  installEmbedHooks({
+    prefsOrigin: `window:${windowId ?? 'main'}`,
+    leaveGuards,
+    setFocusMode: applyFocusModeOnly,
+    getTitle: () => draftTitle.value.trim() || UNTITLED_TITLE,
+    setTitle, commitTitle, applyTitleEdit, openFind,
+    toggleTransliteration: () => {
+      enabled.checked = !enabled.checked;
+      enabled.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+  });
   // Catch prefs the host broadcast before this iframe finished booting.
   syncAutosaveCheckboxFromStorage();
   try { applyTabIndentFromStorage(); } catch { /* optional */ }
