@@ -1,6 +1,6 @@
 import { SHORTCUTS } from '../editor/keyboard-shortcuts';
 import { Editor } from '../editor/editor';
-import { replaceMatchAt } from '../editor/search';
+import { buildSearchPattern, findMatches, replaceMatchAt, replacedAllStatus } from '../editor/search';
 import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from '../editor/search-settings';
 
 export type SearchTarget = { field: HTMLTextAreaElement; editor: Editor };
@@ -77,24 +77,17 @@ export function setupSearch(
   }
   syncSearchEditors();
   function searchPattern(): RegExp | null {
-    const query = findInput.value;
-    if (!query) { findStatus.textContent = ''; return null; }
-    // `u` keeps matches, including zero-width ones, on code point boundaries.
-    const flags = matchCase.checked ? 'gu' : 'giu';
-    const escaped = Array.from(query, char => '\\^$.*+?()[]{}|'.includes(char) ? '\\' + char : char).join('');
-    try {
-      const pattern = new RegExp(regexMode.checked ? query : escaped, flags);
-      findStatus.textContent = '';
-      return pattern;
-    } catch (error) {
-      findStatus.textContent = 'Invalid regex: ' + (error instanceof Error ? error.message : String(error));
+    const built = buildSearchPattern(findInput.value, { matchCase: matchCase.checked, regex: regexMode.checked });
+    if (built && 'error' in built) {
+      findStatus.textContent = 'Invalid regex: ' + built.error;
       return null;
     }
+    findStatus.textContent = '';
+    return built?.pattern ?? null;
   }
   function matches(text: string): Array<[number, number]> {
     const pattern = searchPattern();
-    if (!pattern) return [];
-    return Array.from(text.matchAll(pattern), m => [m.index, m.index + m[0].length]);
+    return pattern ? findMatches(text, pattern) : [];
   }
   let lastZeroWidthMatch: {
     field: HTMLTextAreaElement;
@@ -189,7 +182,7 @@ export function setupSearch(
     // Native substitution in regex mode; literal mode inserts the replacement text as is.
     const result = regexMode.checked ? original.replace(pattern, replaceInput.value) : original.replace(pattern, () => replaceInput.value);
     target.editor.replaceRange(0, original.length, result);
-    findStatus.textContent = `Replaced ${count} matches`;
+    findStatus.textContent = replacedAllStatus(count);
     target.field.focus({ preventScroll: true });
   });
   findInput.addEventListener('keydown', event => {
