@@ -210,3 +210,19 @@ test('position events batch storage writes and pagehide flushes the latest selec
   await page.clock.runFor(300);
   expect(await writes()).toBe(2);
 });
+
+test('restoring Focus after delayed startup keeps the control the user focused (#107)', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('typebridge.focusMode.v1', 'on');
+    (window as unknown as { __typebridgeDelayAcquireMs: number }).__typebridgeDelayAcquireMs = 1000;
+  });
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeDisabled();
+  const mode = page.locator('#enabled');
+  await mode.focus();
+  await expect(mode).toBeFocused();
+  await expect(field).toBeEnabled();
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await expect(mode).toBeFocused();
+});

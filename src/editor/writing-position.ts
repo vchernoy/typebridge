@@ -27,6 +27,7 @@ export const VIEWER_POSITION_NAMESPACE = 'view:';
 
 export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () => string | undefined, namespace = '') {
   let restoring = false;
+  let restoreGeneration = 0;
   let previous = '';
   let pending: { id: string; value: WritingPosition } | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -67,17 +68,43 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     clearTimeout(timer);
     timer = undefined;
     pending = undefined;
+    const generation = ++restoreGeneration;
     restoring = true;
     previous = '';
+    let deferred = false;
     try {
       const position = parseWritingPosition(sessionStorage.getItem(POSITION_PREFIX + namespace + id), field.value);
       if (!position) return;
-      field.setSelectionRange(position.start, position.end, position.direction);
-      // Set scroll after selection; the browser clamps it to the current layout.
-      field.scrollTop = position.scrollTop;
-      field.scrollLeft = position.scrollLeft;
+      const apply = (): void => {
+        field.setSelectionRange(position.start, position.end, position.direction);
+        field.scrollTop = position.scrollTop;
+        field.scrollLeft = position.scrollLeft;
+      };
+      apply();
+      deferred = true;
+      // Focus sizing and its queued select/scroll events settle over rendering turns.
+      // A newer restore or genuine user input cancels this deferred application.
+      requestAnimationFrame(() => {
+        if (generation !== restoreGeneration) return;
+        if (documentId() !== id) { restoring = false; return; }
+        apply();
+        requestAnimationFrame(() => {
+          if (generation === restoreGeneration) restoring = false;
+        });
+      });
+      return;
     } catch { /* Fall back to the loaded draft's default view. */ }
-    finally { restoring = false; }
+    finally {
+      if (!deferred) restoring = false;
+    }
+  }
+  const cancelRestore = (): void => {
+    ++restoreGeneration;
+    restoring = false;
+  };
+  // User intent wins over restoration; input/history also cover programmatic edits.
+  for (const type of ['pointerdown', 'keydown', 'beforeinput', 'input', 'historychange', 'wheel', 'touchstart']) {
+    field.addEventListener(type, cancelRestore);
   }
   for (const type of ['input', 'select', 'keyup', 'click', 'scroll', 'historychange']) field.addEventListener(type, schedule);
   window.addEventListener('pagehide', save);
