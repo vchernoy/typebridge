@@ -1,5 +1,6 @@
 import { snapToCodePointBoundary } from './goto-line';
 
+export const POSITION_SAVE_DELAY_MS = 250;
 export const POSITION_PREFIX = 'typebridge.writingPosition.v1.';
 export type WritingPosition = {
   start: number; end: number; direction: 'forward' | 'backward' | 'none'; scrollTop: number; scrollLeft: number;
@@ -27,19 +28,45 @@ export const VIEWER_POSITION_NAMESPACE = 'view:';
 export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () => string | undefined, namespace = '') {
   let restoring = false;
   let previous = '';
-  function save(): void {
+  let pending: { id: string; value: WritingPosition } | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  function capture(): void {
     const id = documentId();
     if (!id || restoring) return;
     const value: WritingPosition = {
       start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection,
       scrollTop: Math.max(0, field.scrollTop), scrollLeft: Math.max(0, field.scrollLeft),
     };
+    pending = { id, value };
+  }
+  function flush(): void {
+    clearTimeout(timer);
+    timer = undefined;
+    const latest = pending;
+    pending = undefined;
+    if (!latest) return;
+    const { id, value } = latest;
     const raw = JSON.stringify(value);
     if (previous === id + raw) return;
     try { sessionStorage.setItem(POSITION_PREFIX + namespace + id, raw); previous = id + raw; }
     catch { /* Selection is optional, even if storage is blocked or full. */ }
   }
+  // Public save is a synchronous boundary flush before a caller changes documents.
+  function save(): void {
+    capture();
+    flush();
+  }
+  function schedule(): void {
+    capture();
+    if (!pending) return;
+    clearTimeout(timer);
+    timer = setTimeout(flush, POSITION_SAVE_DELAY_MS);
+  }
   function restore(id: string): void {
+    // A timer from the previous document must never write after restoration.
+    clearTimeout(timer);
+    timer = undefined;
+    pending = undefined;
     restoring = true;
     previous = '';
     try {
@@ -52,7 +79,7 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     } catch { /* Fall back to the loaded draft's default view. */ }
     finally { restoring = false; }
   }
-  for (const type of ['input', 'select', 'keyup', 'click', 'scroll', 'historychange']) field.addEventListener(type, save);
+  for (const type of ['input', 'select', 'keyup', 'click', 'scroll', 'historychange']) field.addEventListener(type, schedule);
   window.addEventListener('pagehide', save);
   window.addEventListener('beforeunload', save);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
