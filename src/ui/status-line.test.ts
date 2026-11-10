@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { AUTOSAVE_OFF, CONFLICT_COPY, SAVE_FAILED, type RiskInputs } from '../editor/status';
-import { createStatusLine } from './status-line';
+import { describe, expect, it, vi } from 'vitest';
+import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, SAVE_FAILED, type RiskInputs } from '../editor/status';
+import { CONFLICT_REANNOUNCE_DELAY_MS, createStatusLine } from './status-line';
 
 function fakeElement(): HTMLElement {
   const classes = new Set<string>();
@@ -43,19 +43,38 @@ describe('status line', () => {
     expect(line.kind()).toBe('failure');
   });
 
-  it('re-announces an identical conflict on a later microtask', async () => {
-    const { line, conflictNotice } = setup();
-    line.setConflict(CONFLICT_COPY);
-    expect(conflictNotice.textContent).toBe(CONFLICT_COPY);
-    line.setConflict(CONFLICT_COPY, true);
-    expect(conflictNotice.textContent).toBe('');
-    await Promise.resolve();
-    expect(conflictNotice.textContent).toBe(CONFLICT_COPY);
-    // An action clears the conflict, including one still waiting to re-announce.
-    line.setConflict(CONFLICT_COPY, true);
-    line.announceAction('Done');
-    await Promise.resolve();
-    expect(conflictNotice.textContent).toBe('');
-    expect(line.message().conflict).toBe('');
+  it('re-announces an identical conflict after a real delay, not a microtask (#97)', () => {
+    vi.useFakeTimers();
+    try {
+      const { line, conflictNotice } = setup();
+      line.setConflict(CONFLICT_COPY);
+      expect(conflictNotice.textContent).toBe(CONFLICT_COPY);
+      line.setConflict(CONFLICT_COPY, true);
+      expect(conflictNotice.textContent).toBe('');
+      // Still cleared after microtasks and just before the delay: assistive tech sees the change.
+      vi.advanceTimersByTime(CONFLICT_REANNOUNCE_DELAY_MS - 1);
+      expect(conflictNotice.textContent).toBe('');
+      vi.advanceTimersByTime(1);
+      expect(conflictNotice.textContent).toBe(CONFLICT_COPY);
+      // An action clears the conflict, including one still waiting to re-announce.
+      line.setConflict(CONFLICT_COPY, true);
+      line.announceAction('Done');
+      vi.advanceTimersByTime(CONFLICT_REANNOUNCE_DELAY_MS);
+      expect(conflictNotice.textContent).toBe('');
+      expect(line.message().conflict).toBe('');
+      // Cleared and written back in the same task (a switch clears notices first): still deferred.
+      line.setConflict(CONFLICT_COPY);
+      line.clearNotices();
+      line.setConflict(CONFLICT_COPY, true);
+      expect(conflictNotice.textContent).toBe('');
+      vi.advanceTimersByTime(CONFLICT_REANNOUNCE_DELAY_MS);
+      expect(conflictNotice.textContent).toBe(CONFLICT_COPY);
+      // Different wording is written at once.
+      line.setConflict(CONFLICT_COPY);
+      line.setConflict(CONFLICT_COPY_LEFT, true);
+      expect(conflictNotice.textContent).toBe(CONFLICT_COPY_LEFT);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

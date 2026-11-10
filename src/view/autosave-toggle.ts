@@ -179,7 +179,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     } finally {
       endAutosaveToggleGate();
       active = false;
-      deps.autosave.disabled = deps.controlBlocked();
+      // A remote change can finish mid-switch; the checkbox stays disabled until it ends (#97).
+      deps.autosave.disabled = deps.controlBlocked() || state.transitioning;
       // Re-focus after re-enabling only for local Settings (host owns focus on shared toggles).
       if (opts.promptDeleteSavedCopy || opts.persistPreference) {
         if (!deps.embedded) deps.autosave.focus({ preventScroll: true });

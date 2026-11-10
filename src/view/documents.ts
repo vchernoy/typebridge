@@ -33,6 +33,8 @@ export type DocumentActionsDeps = {
   readOnlyNow: () => boolean;
   freezeEditorsForTransition: () => void;
   unfreezeEditorsAfterTransition: () => void;
+  /** Re-evaluate whether the Autosave checkbox may be used (disabled while transitioning). */
+  syncAutosaveControl: () => void;
   allocateNewDraft: () => StoredDraft;
   acquireFor: (documentId: string) => Promise<EditAccess>;
   installOwnership: (access: EditAccess) => void;
@@ -54,10 +56,14 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
     deps.focusHandoff()?.cancel();
     if (id === state.active.id) { deps.renderDrafts(); return { opened: true, conflict: false }; }
     state.transitioning = true;
+    // Autosave cannot change mid-switch: turning it off would offer to delete a conflict copy
+    // whose notice is only shown once the switch finishes (#97). Re-enabled on unfreeze.
+    deps.syncAutosaveControl();
     let flushConflict = false;
     /** Announce a flush conflict when the switch does not open another draft. */
     const announceAbortedFlushConflict = (): void => {
-      if (flushConflict) status.setConflict(CONFLICT_COPY);
+      // Re-announce when the same wording is already shown: this is a new conflict copy (#97).
+      if (flushConflict) status.setConflict(CONFLICT_COPY, true);
     };
     let acquired: EditOwnership | undefined;
     try {
@@ -118,7 +124,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       // Always show the opened draft's save state — pre-switch action feedback must not stick.
       status.showSaveState();
       // Flush announced nothing while transitioning; name the draft that was left once.
-      if (flushConflict) status.setConflict(CONFLICT_COPY_LEFT);
+      if (flushConflict) status.setConflict(CONFLICT_COPY_LEFT, true);
       void deps.refreshDrafts().catch(() => {
         if (status.shouldAttachDraftListRefreshFailure()) status.markDraftListRefreshFailed();
       });

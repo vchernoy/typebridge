@@ -672,6 +672,19 @@ test('a failed delete without storage and with autosave off keeps the storage wa
 
 const CONFLICT_COPY = 'Another tab changed this document. Your edits were saved as a conflict copy.';
 const CONFLICT_COPY_LEFT = 'Another tab changed the document you left. Your edits were saved as a conflict copy.';
+/** ui/status-line.ts CONFLICT_REANNOUNCE_DELAY_MS. */
+const CONFLICT_REANNOUNCE_DELAY_MS = 100;
+/** Record every text the conflict live region shows, in order. */
+async function recordConflictNotice(page: Page): Promise<() => Promise<string[]>> {
+  await page.evaluate(() => {
+    const w = window as unknown as { conflictTexts: string[] };
+    const notice = document.querySelector('#conflict-notice')!;
+    w.conflictTexts = [];
+    new MutationObserver(() => { w.conflictTexts.push(notice.textContent ?? ''); })
+      .observe(notice, { childList: true, characterData: true, subtree: true });
+  });
+  return () => page.evaluate(() => (window as unknown as { conflictTexts: string[] }).conflictTexts);
+}
 const UPGRADED = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
 
 /**
@@ -1009,11 +1022,74 @@ test('a second identical conflict copy re-announces and keeps a space before sav
   await field.pressSequentially('!');
   await page.clock.runFor(400);
   await expect.poll(() => storedTexts(page)).toContain('Исходный — правка!');
+  // The identical notice is cleared, and stays cleared for a real later task (not a
+  // microtask) so assistive tech sees the change before it is written again (#97).
+  await expect(page.locator('#conflict-notice')).toHaveText('');
+  await page.clock.runFor(CONFLICT_REANNOUNCE_DELAY_MS - 1);
+  await expect(page.locator('#conflict-notice')).toHaveText('');
+  await page.clock.runFor(1);
   await expect(page.locator('#conflict-notice')).toHaveText(CONFLICT_COPY);
   // A later non-conflict save must keep the separator after the deferred re-announce.
   await field.pressSequentially('?');
   await page.clock.runFor(400);
   await expect(status(page)).toHaveText(CONFLICT_COPY + ' Saved locally');
+});
+
+test('a second switch-time conflict with the same wording is announced again (#97)', async ({ page, context }) => {
+  const { field, targetId } = await prepareConflict(page, context, true);
+  const sourceId = await page.locator('#drafts').inputValue();
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await selectDocument(page, targetId);
+  await expect(field).toHaveValue('Целевой черновик');
+  await expect(page.locator('#conflict-notice')).toHaveText(CONFLICT_COPY_LEFT);
+  // The second switch flushes another stale draft into a copy while the same notice shows.
+  await createForeignRevision(page, context, 'Целевой черновик');
+  const texts = await recordConflictNotice(page);
+  await field.press('End');
+  await field.pressSequentially('!');
+  await selectDocument(page, sourceId);
+  await expect.poll(() => storedTexts(page)).toContain('Целевой черновик!');
+  await expect(page.locator('#conflict-notice')).toHaveText('');
+  await page.clock.runFor(CONFLICT_REANNOUNCE_DELAY_MS);
+  await expect(page.locator('#conflict-notice')).toHaveText(CONFLICT_COPY_LEFT);
+  expect(await texts()).toEqual(['', CONFLICT_COPY_LEFT]);
+});
+
+test('Autosave cannot be turned off while a document switch is flushing (#97)', async ({ page, context }) => {
+  const { field, targetId } = await prepareConflict(page, context, true);
+  // Hold the conflict-copy write so the switch stays in its flush.
+  await page.evaluate(() => {
+    const state = window as unknown as { holdConflict: boolean; conflictHeld: boolean };
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+      IDBObjectStore.prototype.add = add;
+      state.holdConflict = true;
+      const copyId = (args[0] as { id: string }).id;
+      const result = add.apply(this, args);
+      result.addEventListener('success', () => {
+        state.conflictHeld = true;
+        const keepAlive = (): void => {
+          if (state.holdConflict) this.get(copyId).addEventListener('success', keepAlive);
+        };
+        keepAlive();
+      });
+      return result;
+    };
+  });
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  const switching = selectDocument(page, targetId);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
+  // Mid-flush the conflict notice is not shown yet, so no prompt may offer to delete that copy.
+  await expect(page.locator('#autosave')).toBeDisabled();
+  await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
+  await switching;
+  await expect(field).toHaveValue('Целевой черновик');
+  await expect(page.locator('#conflict-notice')).toHaveText(CONFLICT_COPY_LEFT);
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(page.locator('#autosave')).toBeChecked();
 });
 
 test('a failed switch after a conflict flush keeps the open-failure through a later save', async ({ page, context }) => {

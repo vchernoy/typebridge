@@ -290,7 +290,8 @@ function autosaveControlBlocked(): boolean {
 }
 function syncAutosaveControl(): void {
   if (viewMode || autosaveToggle?.isActive()) return;
-  autosave.disabled = autosaveControlBlocked();
+  // Also disabled for a whole document switch, flush included (#97).
+  autosave.disabled = autosaveControlBlocked() || state.transitioning;
 }
 function syncMutationControls(): void {
   // Comparison viewers own these attributes via applyViewerChrome; do not fight tests that
@@ -715,6 +716,7 @@ const documents = createDocumentActions(state, statusLine, {
   readOnlyNow: () => readOnlyNow(),
   freezeEditorsForTransition: () => { freezeEditorsForTransition(); },
   unfreezeEditorsAfterTransition: () => { unfreezeEditorsAfterTransition(); },
+  syncAutosaveControl: () => { syncAutosaveControl(); },
   allocateNewDraft: () => allocateNewDraft(),
   acquireFor: documentId => acquireFor(documentId),
   installOwnership: access => { installOwnership(access); },
