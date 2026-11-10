@@ -1,12 +1,14 @@
 import { setupAppearance } from './ui/appearance';
 import { setupWindowLayoutSetting } from './ui/window-layout-setting';
 import { setupResetSettings } from './ui/reset-settings';
+import { createPreferenceWarning } from './ui/preference-warning';
+import { setupTabIndent } from './ui/tab-indent';
+import { applyPrefs } from './view/prefs-apply';
 import { watchForUpdates } from './ui/update-notice';
 import { SHORTCUTS } from './editor/keyboard-shortcuts';
 import { setupKeyboardShortcuts } from './ui/keyboard-shortcuts';
 import './style.css';
 import { Editor } from './editor/editor';
-import { indentEdit } from './editor/indent';
 import { createStatusLine } from './ui/status-line';
 import { createReloadBackup } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
@@ -62,7 +64,7 @@ import { setupExportImport } from './ui/export-import';
 import { setupComparisonOpen } from './ui/comparison-open';
 import { setupFindGotoBars } from './ui/find-goto-bars';
 import { parseEmbedMode } from './view/embed';
-import { notifyPrefsChanged, onPrefsChanged, type PrefName } from './view/prefs-sync';
+import { onPrefsChanged } from './view/prefs-sync';
 import { SIGNAL_POLL_INTERVAL_MS } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -76,6 +78,8 @@ if (windowId) document.documentElement.dataset.windowId = windowId;
 /** #175 step 3: host page owns Settings panel + update notice; editor runs embedded. */
 const embedded = parseEmbedMode(window.location.search);
 if (embedded) document.documentElement.dataset.embed = '1';
+/** This window's origin on shared preference broadcasts, so it ignores its own echo. */
+const prefsOrigin = embedded ? `window:${windowId ?? 'main'}` : 'standalone';
 // Host windows (#175 follow-up): one compact row (▾, Saved, editing tools, Focus) so the
 // text gets the window's height. The window title bar already names the document.
 if (embedded) {
@@ -213,23 +217,10 @@ const enabled = document.querySelector<HTMLInputElement>('#enabled')!;
 const conflictNotice = document.querySelector<HTMLElement>('#conflict-notice')!;
 const statusSep = document.querySelector<HTMLElement>('#status-sep')!;
 const status = document.querySelector<HTMLElement>('#status')!;
-// Preference write failures are shown apart from the document status line, so a
-// later successful draft save cannot hide them. Each clears only when that
-// preference is saved successfully (#57).
-const preferenceWarning = document.querySelector<HTMLElement>('#preference-warning')!;
-const failedPreferences = new Set<string>();
-function preferenceSaved(name: string, saved: boolean): void {
-  if (saved) failedPreferences.delete(name); else failedPreferences.add(name);
-  const names = [...failedPreferences];
-  preferenceWarning.textContent = names.length === 0 ? ''
-    : names.length === 1 ? `Could not save the ${names[0]} setting; it may reset on reload.`
-    : `Could not save the ${names.join(' and ')} settings; they may reset on reload.`;
-  preferenceWarning.hidden = names.length === 0;
-}
-const appearanceSettings = setupAppearance(preferenceSaved, { prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' });
-const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved, {
-  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
-});
+/** Shown until each preference that failed to save is saved (ui/preference-warning.ts, #57). */
+const preferenceSaved = createPreferenceWarning(document.querySelector<HTMLElement>('#preference-warning')!);
+const appearanceSettings = setupAppearance(preferenceSaved, { prefsOrigin });
+const windowLayoutSettings = setupWindowLayoutSetting(preferenceSaved, { prefsOrigin });
 
 const statusLine = createStatusLine({
   conflictNotice,
@@ -362,45 +353,14 @@ function activatePane(paneId: typeof PRIMARY_PANE_ID = PRIMARY_PANE_ID): void {
   }
 }
 field.addEventListener('focus', () => { activatePane(PRIMARY_PANE_ID); });
-// Tab and Shift+Tab indent lines (#56). Keyboard users are never trapped: the
-// "Tab indents" setting turns this off, and Shift+Tab on a line with nothing to
-// outdent moves focus as usual.
-const TAB_INDENT_KEY = 'typebridge.editor.tabIndent.v1';
-const tabIndent = document.querySelector<HTMLInputElement>('#tab-indent')!;
-try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* Keep the default. */ }
-function saveTabIndent(): boolean {
-  try {
-    localStorage.setItem(TAB_INDENT_KEY, tabIndent.checked ? 'on' : 'off');
-    notifyPrefsChanged({
-      name: 'tabIndent',
-      origin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
-    });
-    return true;
-  } catch { return false; }
-}
-let applyingTabIndentRemote = false;
-tabIndent.addEventListener('change', () => {
-  if (applyingTabIndentRemote) return;
-  saveTabIndent();
+// Tab and Shift+Tab indent lines (ui/tab-indent.ts, #56).
+const tabIndent = setupTabIndent({
+  checkbox: document.querySelector<HTMLInputElement>('#tab-indent')!,
+  prefsOrigin,
+  canIndent: () => canMutatePrimary(),
 });
-function applyTabIndentFromStorage(): void {
-  applyingTabIndentRemote = true;
-  try {
-    try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* keep */ }
-  } finally {
-    applyingTabIndentRemote = false;
-  }
-}
-function handleTabIndent(event: KeyboardEvent, surface: HTMLTextAreaElement, surfaceEditor: Editor): void {
-  if (event.key !== SHORTCUTS.indent.key || !tabIndent.checked || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || surface.readOnly || !canMutatePrimary()) return;
-  const change = indentEdit(surface.value, surface.selectionStart, surface.selectionEnd, event.shiftKey);
-  // Only Shift+Tab with nothing to outdent leaves the editor; a forward Tab that changes nothing stays put.
-  if (!change && event.shiftKey) return;
-  event.preventDefault();
-  if (!change) return;
-  surfaceEditor.replaceAndSelect(change.start, change.end, change.text, change.selectionStart, change.selectionEnd);
-}
-field.addEventListener('keydown', event => { handleTabIndent(event, field, editor); });
+const applyTabIndentFromStorage = tabIndent.applyFromStorage;
+field.addEventListener('keydown', event => { tabIndent.handleKeydown(event, field, editor); });
 function updateStats(): void {
   count.textContent = formatDocumentStats(field.value);
   updateCaretPosition();
@@ -413,7 +373,7 @@ field.addEventListener('select', updateCaretPosition);
 const typingSettings = setupTransliteration(enabled, editor, {
   syncSearchEditors: () => syncSearchEditors(),
   preferenceSaved,
-  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+  prefsOrigin,
 });
 document.querySelector<HTMLButtonElement>('#copy')!.addEventListener('click', async () => {
   const text = field.value;
@@ -474,7 +434,7 @@ const { openFind } = setupFindGotoBars({
 
 const resetRules = setupRules(
   () => [editor, findEditor, replaceEditor, titleEditor],
-  { prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' },
+  { prefsOrigin },
 );
 
 const draftSelect = document.querySelector<HTMLSelectElement>('#drafts')!;
@@ -727,7 +687,7 @@ draftTitle.addEventListener('input', () => {
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, workspace, viewMode, embedded,
-  prefsOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone',
+  prefsOrigin,
   transferFrozen: () => state.transferFrozen,
   controlBlocked: () => autosaveControlBlocked(),
   preferenceSaved,
@@ -995,7 +955,7 @@ if (!embedded) {
   setupResetSettings({ actions: [
     ['appearance', appearanceSettings.reset], ['window layout', windowLayoutSettings.reset],
     ['typing mode/shortcut', typingSettings.reset], ['custom rules', resetRules], ['Find options', resetOptions],
-    ['Tab indents', () => { tabIndent.checked = true; return saveTabIndent(); }], ['editor layout', resetLayout],
+    ['Tab indents', tabIndent.reset], ['editor layout', resetLayout],
   ], announce: announceAction });
 }
 
@@ -1006,20 +966,17 @@ function applyAutosaveFromStorage(): void {
   void applyAutosaveChange(next, { promptDeleteSavedCopy: false, persistPreference: false });
 }
 
-function applyPrefs(name: PrefName): void {
-  if (name === 'appearance' || name === 'reset') appearanceSettings.applyFromStorage();
-  if (name === 'transliteration' || name === 'shortcut' || name === 'reset') typingSettings.applyFromStorage();
-  if (name === 'tabIndent' || name === 'reset') applyTabIndentFromStorage();
-  if (name === 'autosave' || name === 'reset') applyAutosaveFromStorage();
-  if (name === 'reset') {
-    try { resetOptions(); } catch { /* Find bar may be closed. */ }
-    try { resetLayout(); } catch { /* Layout reset is best-effort. */ }
-  }
-}
-
+// A shared preference changed in another window: re-read it here (view/prefs-apply.ts).
 onPrefsChanged(detail => {
-  applyPrefs(detail.name);
-}, { skipOrigin: embedded ? `window:${windowId ?? 'main'}` : 'standalone' });
+  applyPrefs(detail.name, {
+    appearance: () => { appearanceSettings.applyFromStorage(); },
+    typing: () => { typingSettings.applyFromStorage(); },
+    tabIndent: () => { applyTabIndentFromStorage(); },
+    autosave: () => { applyAutosaveFromStorage(); },
+    findOptions: () => { resetOptions(); },
+    layout: () => { resetLayout(); },
+  });
+}, { skipOrigin: prefsOrigin });
 
 // Host page registers the service worker and shows the update notice once (#175 step 3).
 if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
@@ -1037,7 +994,7 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
 if (embedded) {
   // This window's side of the host↔window contract (view/embed-hooks.ts, view/embed-api.ts).
   installEmbedHooks({
-    prefsOrigin: `window:${windowId ?? 'main'}`,
+    prefsOrigin,
     leaveGuards,
     setFocusMode: applyFocusModeOnly,
     getTitle: () => draftTitle.value.trim() || UNTITLED_TITLE,
