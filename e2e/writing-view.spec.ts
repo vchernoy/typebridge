@@ -167,3 +167,46 @@ test('blocked view storage starts normally and never prevents editing or togglin
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
   await expect(field).toHaveValue('Не терять');
 });
+
+test('position events batch storage writes and pagehide flushes the latest selection immediately (#107)', async ({ page }) => {
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Позиция 🙂 текста');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  // Let boot/input-generated selection events settle before measuring a new burst.
+  await page.waitForTimeout(300);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.evaluate(() => {
+    const w = window as unknown as { positionWrites: number };
+    w.positionWrites = 0;
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith('typebridge.writingPosition.v1.')) w.positionWrites++;
+      original.call(this, key, value);
+    };
+    const area = document.querySelector<HTMLTextAreaElement>('#editor')!;
+    for (let i = 1; i <= 8; i++) {
+      area.setSelectionRange(i, i);
+      area.dispatchEvent(new Event('select'));
+      area.dispatchEvent(new Event('keyup'));
+    }
+  });
+  const writes = () => page.evaluate(() => (window as unknown as { positionWrites: number }).positionWrites);
+  await page.clock.runFor(249);
+  expect(await writes()).toBe(0);
+  await page.clock.runFor(1);
+  expect(await writes()).toBe(1);
+  const id = await page.locator('#drafts').inputValue();
+  await field.evaluate((area: HTMLTextAreaElement) => {
+    area.setSelectionRange(2, 5, 'backward');
+    area.dispatchEvent(new Event('select'));
+    window.dispatchEvent(new Event('pagehide'));
+  });
+  expect(await writes()).toBe(2);
+  const saved = await page.evaluate(key => JSON.parse(sessionStorage.getItem(key)!), PREFIX + id);
+  expect(saved).toMatchObject({ start: 2, end: 5, direction: 'backward' });
+  await page.clock.runFor(300);
+  expect(await writes()).toBe(2);
+});
