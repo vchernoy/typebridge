@@ -10,11 +10,11 @@ for (const apple of [false, true]) {
     const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts', exact: true });
     const list = dialog.locator('dl.shortcut-list');
     await expect(list.locator('dt', { hasText: 'Toggle typing mode' })).toBeVisible();
-    await expect(list.locator('dd', { hasText: 'Ctrl+Shift+Space' }).first()).toBeVisible();
+    await expect(list.locator('dd', { hasText: apple ? '⌃⇧Space' : 'Ctrl+Shift+Space' }).first()).toBeVisible();
     await expect(list.locator('dt', { hasText: /^Find$/ })).toBeVisible();
-    await expect(list.locator('dd', { hasText: `${apple ? '⌘' : 'Ctrl'}+F` }).first()).toBeVisible();
+    await expect(list.locator('dd', { hasText: apple ? '⌘F' : 'Ctrl+F' }).first()).toBeVisible();
     await expect(list.locator('dt', { hasText: 'Resize grip' })).toBeVisible();
-    await expect(dialog).toContainText('Some systems reserve Ctrl+Shift+Space');
+    await expect(dialog).toContainText(`Some systems reserve ${apple ? '⌃⇧Space' : 'Ctrl+Shift+Space'}`);
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(page.locator('#more-open')).toBeFocused();
@@ -27,7 +27,7 @@ for (const apple of [false, true]) {
     await expect(page.locator('#settings-panel')).toBeHidden();
     await expect(page.locator('#more-open')).toBeFocused();
     await moreAction(page, '#keyboard-shortcuts');
-    await expect(dialog.locator('dl.shortcut-list dd').first()).toHaveText(`${apple ? '⌘' : 'Ctrl'}+Shift+F8`);
+    await expect(dialog.locator('dl.shortcut-list dd').first()).toHaveText(apple ? '⇧⌘F8' : 'Ctrl+Shift+F8');
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await setSetting(page, '#tab-indent', false);
     await moreAction(page, '#keyboard-shortcuts');

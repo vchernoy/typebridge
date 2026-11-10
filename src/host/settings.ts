@@ -11,6 +11,8 @@ import { exposeHostPageApi } from '../view/embed-api';
 import { setAutosaveEnabled, autosaveEnabled } from '../editor/drafts';
 import {
   TRANSLITERATION_SHORTCUTS,
+  isApplePlatform,
+  transliterationOptionLabel,
   transliterationShortcutLabel,
   type TransliterationShortcut,
 } from '../editor/keyboard-shortcuts';
@@ -58,6 +60,11 @@ export function installHostSettings(deps: {
       shortcut = stored as TransliterationShortcut;
     }
   } catch { /* default */ }
+  for (const option of shortcutSelect.options) {
+    if (TRANSLITERATION_SHORTCUTS.some(value => value === option.value)) {
+      option.textContent = transliterationOptionLabel(option.value as TransliterationShortcut, isApplePlatform());
+    }
+  }
   shortcutSelect.value = shortcut;
 
   function broadcast(name: PrefName): void {
@@ -71,7 +78,7 @@ export function installHostSettings(deps: {
   function renderHostMode(): void {
     if (!hostMode) return;
     try { hostMode.checked = localStorage.getItem(TRANSLITERATION_KEY) !== 'off'; } catch { /* keep */ }
-    const label = transliterationShortcutLabel(shortcut, /Mac|iPhone|iPad/.test(navigator.platform));
+    const label = transliterationShortcutLabel(shortcut, isApplePlatform());
     hostMode.title = label;
     if (hostModeHint) hostModeHint.textContent = shortcut === 'off' ? '' : `(${label})`;
   }

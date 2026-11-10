@@ -1,4 +1,4 @@
-import { TRANSLITERATION_SHORTCUTS, transliterationShortcutLabel, transliterationBinding, type TransliterationShortcut } from '../editor/keyboard-shortcuts';
+import { TRANSLITERATION_SHORTCUTS, isApplePlatform, transliterationOptionLabel, transliterationShortcutLabel, transliterationBinding, type TransliterationShortcut } from '../editor/keyboard-shortcuts';
 import type { Editor } from '../editor/editor';
 import { notifyPrefsChanged, onPrefsChanged } from '../view/prefs-sync';
 
@@ -38,9 +38,14 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
     const stored = localStorage.getItem(SHORTCUT_KEY);
     if (shortcutOptions.some(value => value === stored)) shortcut = stored as Shortcut;
   } catch { /* Keep the default if preferences are unavailable. */ }
-  if (shortcutSelect) shortcutSelect.value = shortcut;
+  if (shortcutSelect) {
+    for (const option of shortcutSelect.options) {
+      if (shortcutOptions.some(value => value === option.value)) option.textContent = transliterationOptionLabel(option.value as Shortcut, isApplePlatform());
+    }
+    shortcutSelect.value = shortcut;
+  }
   function renderShortcut(): void {
-    const label = transliterationShortcutLabel(shortcut, /Mac|iPhone|iPad/.test(navigator.platform));
+    const label = transliterationShortcutLabel(shortcut, isApplePlatform());
     if (shortcutLabel) shortcutLabel.textContent = `(${label})`;
     enabled.title = label;
   }
@@ -73,7 +78,7 @@ export function setupTransliteration(enabled: HTMLInputElement, editor: Editor, 
   });
   document.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.repeat || event.altKey || !event.shiftKey || shortcut === 'off') return;
-    const usesCommand = shortcut !== 'default' && /Mac|iPhone|iPad/.test(navigator.platform);
+    const usesCommand = shortcut !== 'default' && isApplePlatform();
     if (usesCommand ? (!event.metaKey || event.ctrlKey) : (!event.ctrlKey || event.metaKey)) return;
     if (event.code !== transliterationBinding(shortcut, usesCommand)?.key) return;
     if (!(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement)) return;

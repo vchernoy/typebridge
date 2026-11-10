@@ -17,9 +17,9 @@ for (const saved of [null, 'default', 'invalid']) {
     await expect(field).toBeEnabled();
     await field.fill('Привет 🙂');
     await expect(page.locator('#status')).toContainText('Saved locally');
-    await expect(page.locator('#shortcut-label')).toHaveText('(Ctrl+Shift+Space)');
-    await expect(page.locator('#enabled')).toHaveAttribute('title', 'Ctrl+Shift+Space');
-    await expect(page.locator('#translit-shortcut option[value="default"]')).toHaveText('Default (Ctrl + Shift + Space)');
+    await expect(page.locator('#shortcut-label')).toHaveText('(⌃⇧Space)');
+    await expect(page.locator('#enabled')).toHaveAttribute('title', '⌃⇧Space');
+    await expect(page.locator('#translit-shortcut option[value="default"]')).toHaveText('Default (⌃⇧Space)');
     const intercepted = await field.evaluate(el => {
       const event = new KeyboardEvent('keydown', { code: 'Space', key: ' ', metaKey: true, shiftKey: true, bubbles: true, cancelable: true });
       el.dispatchEvent(event);
@@ -33,7 +33,7 @@ for (const saved of [null, 'default', 'invalid']) {
     await expect(page.locator('#mode-announcement')).toHaveText('Transliteration off');
     await page.reload();
     await expect(field).toHaveValue('Привет 🙂');
-    await expect(page.locator('#shortcut-label')).toHaveText('(Ctrl+Shift+Space)');
+    await expect(page.locator('#shortcut-label')).toHaveText('(⌃⇧Space)');
     await page.locator('#draft-title').press('Control+Shift+Space');
     await expect(page.locator('#enabled')).toBeChecked();
   });
@@ -53,7 +53,7 @@ for (const saved of ['f7', 'f8', 'f9', 'off']) {
     await page.locator('#editor').press('Control+Shift+Space');
     await expect(page.locator('#enabled')).toBeChecked();
     if (saved !== 'off') {
-      await expect(page.locator('#shortcut-label')).toHaveText(`(⌘+Shift+${saved.toUpperCase()})`);
+      await expect(page.locator('#shortcut-label')).toHaveText(`(⇧⌘${saved.toUpperCase()})`);
       await page.locator('#editor').press(`Meta+Shift+${saved.toUpperCase()}`);
       await expect(page.locator('#enabled')).not.toBeChecked();
     } else {
@@ -65,12 +65,12 @@ for (const saved of ['f7', 'f8', 'f9', 'off']) {
     await expect(page.locator('#translit-shortcut')).toHaveValue(saved);
     await openSettings(page);
     await page.locator('#shortcut-reset').click();
-    await expect(page.locator('#shortcut-label')).toHaveText('(Ctrl+Shift+Space)');
+    await expect(page.locator('#shortcut-label')).toHaveText('(⌃⇧Space)');
     expect(await page.evaluate(key => localStorage.getItem(key), KEY)).toBe('default');
     await page.reload();
     await expect(page.locator('#editor')).toBeEnabled();
     await expect(page.locator('#translit-shortcut')).toHaveValue('default');
-    await expect(page.locator('#shortcut-label')).toHaveText('(Ctrl+Shift+Space)');
+    await expect(page.locator('#shortcut-label')).toHaveText('(⌃⇧Space)');
   });
 }
 

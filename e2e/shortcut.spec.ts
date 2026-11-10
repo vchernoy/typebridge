@@ -58,7 +58,7 @@ test('macOS Control shortcut works while unrelated fields are ignored', async ({
   await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' }));
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
-  await expect(page.locator('#shortcut-label')).toContainText('Ctrl+Shift+Space');
+  await expect(page.locator('#shortcut-label')).toContainText('⌃⇧Space');
   // The mappings box holds Latin rule text, so the shortcut must not apply there.
   const unrelated = page.locator('#rules-text');
   const blocked = await unrelated.evaluate(el => {
