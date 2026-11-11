@@ -347,3 +347,21 @@ test('startup pruning retains the recovered unsaved document position (#107)', a
   await expect.poll(() => position(field)).toMatchObject({ start: 900, end: 918, direction: 'backward', scrollTop: 450 });
   expect(await page.evaluate(key => sessionStorage.getItem(key), PREFIX + id)).not.toBeNull();
 });
+
+test('removing position beforeunload handling preserves the unsaved-document warning (#107)', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('typebridge.autosave.v1', 'off'));
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await expect(page.locator('#autosave')).not.toBeChecked();
+  await field.fill('Приватный несохранённый текст');
+  const prevented = await page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(prevented).toBe(true);
+  await expect(field).toHaveValue('Приватный несохранённый текст');
+  // Position-only cleanup must not weaken the privacy/unsaved leave guard.
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1'))).toBeNull();
+});

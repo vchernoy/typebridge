@@ -51,7 +51,7 @@ it('flushes the outgoing document immediately and cancels its timer before resto
   expect(setItem.mock.calls[0]![0]).toBe(POSITION_PREFIX + 'window:first');
 });
 
-it.each(['pagehide', 'beforeunload', 'hidden'])('flushes the current position on %s without waiting', event => {
+it.each(['pagehide', 'hidden'])('flushes the current position on %s without waiting', event => {
   const { field, win, doc, setItem } = setup();
   field.dispatchEvent(new Event('scroll'));
   field.scrollTop = 90;
@@ -63,16 +63,39 @@ it.each(['pagehide', 'beforeunload', 'hidden'])('flushes the current position on
   expect(setItem).toHaveBeenCalledTimes(1);
 });
 
-it('restoration cancels a pending write and storage failure leaves later flushes usable', () => {
-  const { field, api, setItem } = setup();
+it('restore flushes the captured outgoing position without recapturing the incoming field', () => {
+  const { field, api, setItem, switchId, stored } = setup();
   field.dispatchEvent(new Event('select'));
-  api.restore('first');
+  switchId('second');
+  field.selectionStart = field.selectionEnd = 5;
+  api.restore('second');
+  expect(JSON.parse(stored.get(POSITION_PREFIX + 'window:first')!)).toMatchObject({ start: 1, end: 3 });
+  expect(stored.has(POSITION_PREFIX + 'window:second')).toBe(false);
   vi.advanceTimersByTime(1000);
-  expect(setItem).not.toHaveBeenCalled();
+  expect(setItem).toHaveBeenCalledTimes(1);
+});
+
+it('a failed outgoing flush does not prevent restoration or later saves', () => {
+  const { field, api, getItem, setItem, frames, switchId } = setup();
+  field.dispatchEvent(new Event('select'));
+  switchId('second');
+  getItem.mockReturnValue(JSON.stringify({ start: 2, end: 4, direction: 'forward', scrollTop: 10, scrollLeft: 0 }));
   setItem.mockImplementationOnce(() => { throw new Error('quota'); });
-  expect(() => api.save()).not.toThrow();
+  expect(() => api.restore('second')).not.toThrow();
+  expect(field.setSelectionRange).toHaveBeenLastCalledWith(2, 4, 'forward');
+  frames.shift()!(0);
+  frames.shift()!(16);
   api.save();
   expect(setItem).toHaveBeenCalledTimes(2);
+});
+
+it('beforeunload no longer writes position metadata; pagehide still flushes it', () => {
+  const { field, win, setItem } = setup();
+  field.dispatchEvent(new Event('select'));
+  win.dispatchEvent(new Event('beforeunload'));
+  expect(setItem).not.toHaveBeenCalled();
+  win.dispatchEvent(new Event('pagehide'));
+  expect(setItem).toHaveBeenCalledTimes(1);
 });
 
 

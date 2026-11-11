@@ -67,10 +67,9 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     timer = setTimeout(flush, POSITION_SAVE_DELAY_MS);
   }
   function restore(id: string): void {
-    // A timer from the previous document must never write after restoration.
-    clearTimeout(timer);
-    timer = undefined;
-    pending = undefined;
+    // Flush the captured outgoing id/offsets, never recapture the incoming field here.
+    // Callers normally save before switching; this also protects restore-only callers.
+    flush();
     const generation = ++restoreGeneration;
     restoring = true;
     previous = '';
@@ -142,7 +141,6 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
   }
   for (const type of ['input', 'select', 'keyup', 'click', 'scroll', 'historychange']) field.addEventListener(type, schedule);
   window.addEventListener('pagehide', save);
-  window.addEventListener('beforeunload', save);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
   return { save, restore, remove, prune };
 }
