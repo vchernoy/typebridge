@@ -67,9 +67,10 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     timer = setTimeout(flush, POSITION_SAVE_DELAY_MS);
   }
   function restore(id: string): void {
-    // Flush the captured outgoing id/offsets, never recapture the incoming field here.
-    // Callers normally save before switching; this also protects restore-only callers.
-    flush();
+    // Only flush a different, outgoing id; a same-id capture may be a transient
+    // caret/scroll from loading or Focus layout and must not replace saved offsets.
+    if (pending && pending.id !== id) flush();
+    else { clearTimeout(timer); timer = undefined; pending = undefined; }
     const generation = ++restoreGeneration;
     restoring = true;
     previous = '';

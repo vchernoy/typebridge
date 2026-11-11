@@ -98,7 +98,6 @@ it('beforeunload no longer writes position metadata; pagehide still flushes it',
   expect(setItem).toHaveBeenCalledTimes(1);
 });
 
-
 it('reapplies after layout and ignores restore-generated selection/scroll writes', () => {
   const { field, api, getItem, setItem, frames } = setup();
   getItem.mockReturnValue(JSON.stringify({ start: 1, end: 3, direction: 'backward', scrollTop: 90, scrollLeft: 0 }));
@@ -130,7 +129,6 @@ it('user input cancels deferred restoration and saves the user position', () => 
   expect(JSON.parse(setItem.mock.calls[0]![1])).toMatchObject({ start: 4, end: 4, scrollTop: 20 });
 });
 
-
 it('does not overwrite a selection remapped programmatically after restore (#235)', () => {
   const { field, api, getItem, frames } = setup();
   getItem.mockReturnValue(JSON.stringify({ start: 1, end: 3, direction: 'backward', scrollTop: 90, scrollLeft: 0 }));
@@ -143,7 +141,6 @@ it('does not overwrite a selection remapped programmatically after restore (#235
   expect(field.setSelectionRange).toHaveBeenCalledTimes(2);
   expect(field.setSelectionRange).toHaveBeenLastCalledWith(4, 6, 'forward');
 });
-
 
 it('removes a deleted document and prevents timer, input and lifecycle writes from recreating it', () => {
   const { field, api, stored, setItem, win } = setup();
@@ -177,7 +174,6 @@ it('a removed document does not block later documents, and cleanup storage error
   expect(stored.has(POSITION_PREFIX + 'window:second')).toBe(true);
 });
 
-
 it('unscoped pruning cannot reach embedded or viewer namespaces', () => {
   const { api, stored, removeItem } = setup('');
   for (const key of [POSITION_PREFIX + 'obsolete', POSITION_PREFIX + 'view:obsolete',
@@ -185,7 +181,6 @@ it('unscoped pruning cannot reach embedded or viewer namespaces', () => {
   api.prune([]);
   expect(removeItem).toHaveBeenCalledExactlyOnceWith(POSITION_PREFIX + 'obsolete');
 });
-
 
 it('pruning does not suppress position saving when a temporarily absent document returns', () => {
   const { api, stored, switchId } = setup();
@@ -199,4 +194,22 @@ it('pruning does not suppress position saving when a temporarily absent document
   api.restore('returning');
   api.save();
   expect(stored.has(key)).toBe(true);
+});
+
+it('same-document restore discards transient captures without overwriting saved offsets', () => {
+  const { field, api, stored, getItem, setItem } = setup();
+  const key = POSITION_PREFIX + 'window:first';
+  const saved = JSON.stringify({ start: 2, end: 4, direction: 'backward', scrollTop: 90, scrollLeft: 0 });
+  stored.set(key, saved);
+  getItem.mockImplementation(() => stored.get(key) ?? null);
+  field.selectionStart = field.selectionEnd = 0;
+  field.scrollTop = 0;
+  field.dispatchEvent(new Event('select'));
+  api.restore('first');
+  expect(setItem).not.toHaveBeenCalled();
+  expect(stored.get(key)).toBe(saved);
+  expect(field.setSelectionRange).toHaveBeenLastCalledWith(2, 4, 'backward');
+  expect(field.scrollTop).toBe(90);
+  vi.advanceTimersByTime(1000);
+  expect(setItem).not.toHaveBeenCalled();
 });
