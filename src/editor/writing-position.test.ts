@@ -162,3 +162,18 @@ it('unscoped pruning cannot reach embedded or viewer namespaces', () => {
   api.prune([]);
   expect(removeItem).toHaveBeenCalledExactlyOnceWith(POSITION_PREFIX + 'obsolete');
 });
+
+
+it('pruning does not suppress position saving when a temporarily absent document returns', () => {
+  const { api, stored, switchId } = setup();
+  const key = POSITION_PREFIX + 'window:returning';
+  stored.set(key, '{}');
+  api.prune([]);
+  expect(stored.has(key)).toBe(false);
+  // Delete saved copy can remove a row temporarily without changing its document id.
+  api.prune(['returning']);
+  switchId('returning');
+  api.restore('returning');
+  api.save();
+  expect(stored.has(key)).toBe(true);
+});

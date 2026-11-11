@@ -102,8 +102,8 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     }
   }
   /** Only call after deletion commits; later events cannot recreate the removed key. */
-  function remove(id: string): void {
-    removed.add(id);
+  function remove(id: string, suppressFutureWrites = true): void {
+    if (suppressFutureWrites) removed.add(id);
     if (pending?.id === id) {
       pending = undefined;
       clearTimeout(timer);
@@ -129,7 +129,7 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
         if (!id || /[:.]/.test(id) || keep.has(id)) continue;
         stale.push(id);
       }
-      for (const id of stale) remove(id);
+      for (const id of stale) remove(id, false);
     } catch { /* Blocked storage must not affect the document list. */ }
   }
   const cancelRestore = (): void => {
