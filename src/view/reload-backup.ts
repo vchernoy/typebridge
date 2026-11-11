@@ -10,7 +10,9 @@ export function parsePendingDraft(raw: string | null): StoredDraft | undefined {
   try {
     const value: unknown = JSON.parse(raw ?? 'null');
     if (!value || typeof value !== 'object') return undefined;
-    const draft = value as Partial<StoredDraft>;
+    const draft = { ...value } as Partial<StoredDraft> & { reloadBackupToken?: unknown };
+    // Private write identity is not document content and must never reach IndexedDB.
+    delete draft.reloadBackupToken;
     if (typeof draft.id !== 'string' || !draft.id || typeof draft.title !== 'string' ||
         typeof draft.text !== 'string' || typeof draft.updatedAt !== 'number' ||
         !Number.isSafeInteger(draft.revision) || (draft.revision ?? -1) < 0) return undefined;
@@ -23,9 +25,9 @@ export function sameContent(a: StoredDraft, b: StoredDraft): boolean {
   return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
 }
 
-/** A save of `saved` makes `pending` redundant when it holds the same content or is not newer. */
+/** Matching content/history proves coverage; wall-clock timestamps do not. */
 export function savedCoversBackup(pending: StoredDraft, saved: StoredDraft): boolean {
-  return pending.id === saved.id && (sameContent(pending, saved) || saved.updatedAt >= pending.updatedAt);
+  return sameContent(pending, saved);
 }
 
 export type ReloadBackupDeps = {
@@ -50,13 +52,31 @@ export function createReloadBackup(deps: ReloadBackupDeps) {
     read,
     save(): void {
       if (suppressed || !deps.mayBackUp()) return;
-      try { sessionStorage.setItem(deps.key, JSON.stringify(deps.snapshot())); }
+      try { sessionStorage.setItem(deps.key, JSON.stringify({ ...deps.snapshot(), reloadBackupToken: crypto.randomUUID() })); }
       catch { deps.onFailed(); }
     },
     /** Remove the backup once `saved` covers it. */
     clear(saved: StoredDraft): void {
       try { const pending = read(); if (pending && savedCoversBackup(pending, saved)) sessionStorage.removeItem(deps.key); }
       catch { /* A stale backup is safer than removing one we cannot verify. */ }
+    },
+    /** Capture before any save awaits; call the returned cleanup only after commit. */
+    prepareClear(saved: StoredDraft): () => void {
+      let observed: string | null = null;
+      try { observed = sessionStorage.getItem(deps.key); } catch { /* Retain on uncertainty. */ }
+      const prior = parsePendingDraft(observed);
+      return () => {
+        try {
+          const raw = sessionStorage.getItem(deps.key);
+          const pending = parsePendingDraft(raw);
+          if (!pending) return;
+          // An unchanged backup observed before the snapshot's save is superseded.
+          // A backup written during the save must match the committed content/history.
+          if (savedCoversBackup(pending, saved) || (prior?.id === saved.id && raw === observed)) {
+            sessionStorage.removeItem(deps.key);
+          }
+        } catch { /* A retained duplicate is safer than deleting an uncertain backup. */ }
+      };
     },
     remove(): void {
       try { sessionStorage.removeItem(deps.key); } catch { /* Optional backup. */ }

@@ -187,3 +187,49 @@ test('an empty recovery panel takes no space and is not exposed (#118)', async (
   await expect(panel).toBeHidden();
   await expect(page.getByRole('region', { name: 'Recover unsaved documents' })).toHaveCount(0);
 });
+
+for (const rollback of [false, true]) {
+  test(`a save keeps a newer reload backup when timestamps ${rollback ? 'go backwards' : 'are equal'} (#37)`, async ({ page }) => {
+    await page.goto('/editor.html');
+    const editor = page.locator('#editor');
+    await expect(editor).toBeEnabled();
+    await editor.fill('Сохранённая основа');
+    await expect(page.locator('#status')).toContainText('Saved locally');
+    await page.clock.setFixedTime(new Date('2026-01-01T00:00:00Z'));
+    await page.evaluate(() => {
+      const win = window as unknown as { holdSave: boolean; saveHeld: boolean };
+      win.holdSave = true;
+      let intercepted = false;
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+        if (this.name !== 'documents') return put.apply(this, args);
+        if (intercepted) throw new DOMException('follow-up save failed', 'QuotaExceededError');
+        intercepted = true;
+        const request = put.apply(this, args);
+        request.addEventListener('success', () => {
+          win.saveHeld = true;
+          const keepAlive = (): void => {
+            if (win.holdSave) this.get((args[0] as { id: string }).id).addEventListener('success', keepAlive);
+          };
+          keepAlive();
+        });
+        return request;
+      };
+    });
+    await editor.fill('Первая правка');
+    await expect.poll(() => page.evaluate(() => (window as unknown as { saveHeld: boolean }).saveHeld)).toBe(true);
+    if (rollback) await page.clock.setFixedTime(new Date('2025-12-31T23:59:00Z'));
+    await editor.fill('Новая несохранённая правка 🙂');
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('pagehide')); // Creates a newer reload backup while the first transaction is held.
+      (window as unknown as { holdSave: boolean }).holdSave = false;
+    });
+    await expect(page.locator('#status')).toContainText('Save failed');
+    const backup = await page.evaluate(() => JSON.parse(sessionStorage.getItem('typebridge.pendingDraft.v1') ?? 'null'));
+    expect(backup?.text).toBe('Новая несохранённая правка 🙂');
+    // Reload removes the injected write failure and must reopen the latest backup, not the older commit.
+    page.once('dialog', dialog => dialog.accept());
+    await page.reload();
+    await expect(editor).toHaveValue('Новая несохранённая правка 🙂');
+  });
+}

@@ -30,11 +30,11 @@ describe('reload backup rules', () => {
     expect(parsePendingDraft(JSON.stringify({ ...draft(), revision: 1.5 }))).toBeUndefined();
   });
 
-  it('a save covers a backup with the same content or one that is not newer', () => {
+  it('a save covers a backup only with matching content and history', () => {
     expect(sameContent(draft(), draft({ updatedAt: 5 }))).toBe(true);
     expect(sameContent(draft(), draft({ text: 'другой' }))).toBe(false);
     expect(savedCoversBackup(draft({ text: 'новее', updatedAt: 200 }), draft({ updatedAt: 150 }))).toBe(false);
-    expect(savedCoversBackup(draft({ text: 'новее', updatedAt: 200 }), draft({ updatedAt: 200 }))).toBe(true);
+    expect(savedCoversBackup(draft({ text: 'новее', updatedAt: 200 }), draft({ updatedAt: 200 }))).toBe(false);
     expect(savedCoversBackup(draft({ id: 'other' }), draft())).toBe(false);
   });
 });
@@ -49,7 +49,7 @@ describe('reload backup', () => {
     expect(backup.read()?.text).toBe('несохранённое');
     backup.clear(draft({ updatedAt: 200 }));
     expect(backup.read()).toBeDefined();
-    backup.clear(draft({ updatedAt: 300 }));
+    backup.clear(current);
     expect(backup.read()).toBeUndefined();
     backup.setSuppressed(true);
     backup.save();
@@ -73,4 +73,49 @@ describe('reload backup', () => {
     createReloadBackup({ key: 'k', snapshot: () => draft(), mayBackUp: () => true, onFailed: () => { failed++; } }).save();
     expect(failed).toBe(1);
   });
+});
+
+
+it.each([100, 99])('keeps a different backup written during a save despite timestamp %s', timestamp => {
+  const storage = memorySession();
+  (globalThis as { sessionStorage?: Storage }).sessionStorage = storage;
+  let current = draft({ text: 'old', updatedAt: 100 });
+  const backup = createReloadBackup({ key: 'k', snapshot: () => current, mayBackUp: () => true, onFailed: () => {} });
+  backup.save();
+  const saved = current;
+  const finishSave = backup.prepareClear(saved);
+  current = draft({ text: 'new', updatedAt: timestamp });
+  backup.save();
+  finishSave();
+  expect(backup.read()?.text).toBe('new');
+});
+
+it('removes an unchanged older backup observed before a newer save', () => {
+  const storage = memorySession();
+  (globalThis as { sessionStorage?: Storage }).sessionStorage = storage;
+  const backup = createReloadBackup({ key: 'k', snapshot: () => draft({ text: 'old' }), mayBackUp: () => true, onFailed: () => {} });
+  backup.save();
+  const finishSave = backup.prepareClear(draft({ text: 'new' }));
+  finishSave();
+  expect(backup.read()).toBeUndefined();
+});
+
+it('retains different titles/history and foreign-document backups regardless of clocks', () => {
+  const saved = draft();
+  expect(savedCoversBackup(draft({ title: 'Changed', updatedAt: 1 }), saved)).toBe(false);
+  const history = { v: 1 as const, current: saved.text, undo: [], redo: [] };
+  expect(savedCoversBackup(draft({ history, updatedAt: 1 }), saved)).toBe(false);
+  expect(savedCoversBackup(draft({ id: 'other', updatedAt: 1 }), saved)).toBe(false);
+});
+
+
+it('distinguishes a new identical backup write from the pre-save backup at the same timestamp', () => {
+  (globalThis as { sessionStorage?: Storage }).sessionStorage = memorySession();
+  const backup = createReloadBackup({ key: 'k', snapshot: () => draft({ text: 'old' }), mayBackUp: () => true, onFailed: () => {} });
+  backup.save();
+  const finishSave = backup.prepareClear(draft({ text: 'new' }));
+  backup.save(); // A later revert can recreate identical content and timestamps.
+  finishSave();
+  expect(backup.read()?.text).toBe('old');
+  expect(backup.read()).not.toHaveProperty('reloadBackupToken');
 });

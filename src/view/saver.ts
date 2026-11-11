@@ -28,7 +28,7 @@ export type SaverDeps = {
   /** Applying a handoff snapshot is not an edit. */
   suppressEditTracking: () => boolean;
   readOnlyNow: () => boolean;
-  clearPending: (saved: StoredDraft) => void;
+  preparePendingClear: (saved: StoredDraft) => () => void;
   clearVersionNotice: () => void;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
   journalEdit: () => void;
@@ -60,12 +60,13 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
         while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
+          const clearPendingAfterCommit = deps.preparePendingClear(saved);
           if (state.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
           const owner = await state.ownership.writeFence();
           const current = deps.currentJournal();
           const journal = current && current.documentId === saved.id && current.revision === state.active.revision && current.text === saved.text && current.title === saved.title ? current : undefined;
           const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner);
-          deps.clearPending(saved);
+          clearPendingAfterCommit();
           const titleOnly = !result.conflict && saved.title !== state.active.title && saved.text === state.active.text;
           if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
           state.active = result.draft;
