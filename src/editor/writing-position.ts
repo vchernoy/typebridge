@@ -75,19 +75,19 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     try {
       const position = parseWritingPosition(sessionStorage.getItem(POSITION_PREFIX + namespace + id), field.value);
       if (!position) return;
-      const apply = (): void => {
-        field.setSelectionRange(position.start, position.end, position.direction);
+      field.setSelectionRange(position.start, position.end, position.direction);
+      const applyScroll = (): void => {
         field.scrollTop = position.scrollTop;
         field.scrollLeft = position.scrollLeft;
       };
-      apply();
+      applyScroll();
       deferred = true;
       // Focus sizing and its queued select/scroll events settle over rendering turns.
       // A newer restore or genuine user input cancels this deferred application.
       requestAnimationFrame(() => {
         if (generation !== restoreGeneration) return;
         if (documentId() !== id) { restoring = false; return; }
-        apply();
+        applyScroll();
         requestAnimationFrame(() => {
           if (generation === restoreGeneration) restoring = false;
         });

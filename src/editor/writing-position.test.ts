@@ -104,3 +104,17 @@ it('user input cancels deferred restoration and saves the user position', () => 
   vi.advanceTimersByTime(POSITION_SAVE_DELAY_MS);
   expect(JSON.parse(setItem.mock.calls[0]![1])).toMatchObject({ start: 4, end: 4, scrollTop: 20 });
 });
+
+
+it('does not overwrite a selection remapped programmatically after restore (#235)', () => {
+  const { field, api, getItem, frames } = setup();
+  getItem.mockReturnValue(JSON.stringify({ start: 1, end: 3, direction: 'backward', scrollTop: 90, scrollLeft: 0 }));
+  api.restore('first');
+  expect(field.setSelectionRange).toHaveBeenCalledTimes(1);
+  // Ownership handoff maps the old offsets to the newly loaded document after showDraft.
+  field.setSelectionRange(4, 6, 'forward');
+  frames.shift()!(0);
+  frames.shift()!(16);
+  expect(field.setSelectionRange).toHaveBeenCalledTimes(2);
+  expect(field.setSelectionRange).toHaveBeenLastCalledWith(4, 6, 'forward');
+});
