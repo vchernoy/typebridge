@@ -142,3 +142,46 @@ test('upgrading a version 1 database keeps documents and adds the ownership stor
   }));
   expect(stores).toEqual({ version: 2, names: ['documents', 'editOwnership'] });
 });
+
+
+for (const operation of ['direct', 'save'] as const) {
+  test(`aborting a real ${operation} transaction after request success preserves the committed document (#37 R2a)`, async ({ page }) => {
+    await page.goto('/editor.html');
+    await expect(page.locator('#editor')).toBeEnabled();
+    await page.addScriptTag({ content: compiledDatabaseModule() });
+    const result = await page.evaluate(async operation => {
+      const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+      const db = await api.openDraftDatabase();
+      const base = {
+        id: crypto.randomUUID(), title: 'Прежний заголовок', text: 'Прежний текст 🙂', updatedAt: 1,
+        history: { v: 1 as const, current: 'Прежний текст 🙂', undo: [], redo: [] },
+      };
+      const initial = await api.commitDraft(db, base, 0);
+      if (!initial.ok) throw new Error('Initial commit failed');
+      const put = IDBObjectStore.prototype.put;
+      let requestSucceeded = false;
+      IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+        const request = put.apply(this, args);
+        if (this.name === 'documents' && (args[0] as { id: string }).id === base.id) {
+          request.addEventListener('success', () => {
+            requestSucceeded = true;
+            this.transaction.abort();
+          });
+        }
+        return request;
+      };
+      let rejected = false;
+      try {
+        const changed = { ...base, title: 'Новый заголовок', text: 'Новый текст', updatedAt: 2 };
+        if (operation === 'direct') await api.commitDraft(db, changed, 1);
+        else await api.commitOrCreateConflictCopy(db, changed, 1, crypto.randomUUID());
+      } catch { rejected = true; }
+      finally { IDBObjectStore.prototype.put = put; }
+      try { return { requestSucceeded, rejected, stored: await api.getStoredDraft(db, base.id), base }; }
+      finally { db.close(); }
+    }, operation);
+    expect(result.requestSucceeded).toBe(true);
+    expect(result.rejected).toBe(true);
+    expect(result.stored).toEqual({ ...result.base, revision: 1 });
+  });
+}

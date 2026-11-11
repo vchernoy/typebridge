@@ -1,6 +1,7 @@
 /**
  * Emergency recovery (#53): while Autosave is on, each edit is journaled to localStorage under
- * this tab's id, so text survives a crash before IndexedDB commits. Other tabs' journals whose
+ * this tab's id, providing best-effort recovery before IndexedDB commits. A synchronous
+ * localStorage write does not guarantee durability after whole-browser termination. Journals whose
  * owner is gone are offered in a recovery panel: recover as a copy, or discard.
  */
 import { UNTITLED_TITLE } from '../editor/drafts';
