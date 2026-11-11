@@ -329,3 +329,21 @@ for (const storageFails of [false, true]) {
     expect(stored).toBe(storageFails ? '{}' : null);
   });
 }
+
+test('startup pruning retains the recovered unsaved document position (#107)', async ({ page }) => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  await page.addInitScript(({ id, text, key }) => {
+    localStorage.setItem('typebridge.autosave.v1', 'off');
+    sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify({
+      id, title: 'Recovered position', text, updatedAt: Date.now(), revision: 0,
+    }));
+    sessionStorage.setItem(key, JSON.stringify({ start: 900, end: 918, direction: 'backward', scrollTop: 450, scrollLeft: 0 }));
+  }, { id, text, key: PREFIX + id });
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await expect(field).toHaveValue(text);
+  await expect(page.locator('#drafts')).toHaveValue(id);
+  await expect.poll(() => position(field)).toMatchObject({ start: 900, end: 918, direction: 'backward', scrollTop: 450 });
+  expect(await page.evaluate(key => sessionStorage.getItem(key), PREFIX + id)).not.toBeNull();
+});

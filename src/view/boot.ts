@@ -140,7 +140,7 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
     deps.rememberActive();
     deps.showDraft({ restorePosition: false });
     shown = true;
-    deps.writingPosition.prune(state.drafts.map(draft => draft.id));
+    deps.writingPosition.prune([...state.drafts.map(draft => draft.id), state.active.id]);
     deps.installOwnership(bootAccess);
     bootAccess = undefined;
     if (restorePending) {
