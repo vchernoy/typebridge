@@ -3,7 +3,7 @@ import { POSITION_PREFIX, POSITION_SAVE_DELAY_MS, setupWritingPosition } from '.
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-function setup() {
+function setup(namespace = 'window:') {
   vi.useFakeTimers();
   const field = Object.assign(new EventTarget(), {
     selectionStart: 1, selectionEnd: 3, selectionDirection: 'backward',
@@ -12,16 +12,18 @@ function setup() {
   }) as unknown as HTMLTextAreaElement;
   const win = new EventTarget();
   const doc = Object.assign(new EventTarget(), { hidden: false });
-  const setItem = vi.fn();
+  const stored = new Map<string, string>();
+  const setItem = vi.fn((key: string, value: string) => { stored.set(key, value); });
+  const removeItem = vi.fn((key: string) => { stored.delete(key); });
   const getItem = vi.fn<() => string | null>(() => null);
   const frames: FrameRequestCallback[] = [];
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
   vi.stubGlobal('window', win);
   vi.stubGlobal('document', doc);
-  vi.stubGlobal('sessionStorage', { setItem, getItem });
+  vi.stubGlobal('sessionStorage', { setItem, getItem, removeItem, get length() { return stored.size; }, key: (index: number) => [...stored.keys()][index] ?? null });
   let id = 'first';
-  const api = setupWritingPosition(field, () => id, 'window:');
-  return { field, win, doc, setItem, getItem, frames, api, switchId: (next: string) => { id = next; } };
+  const api = setupWritingPosition(field, () => id, namespace);
+  return { field, win, doc, setItem, getItem, removeItem, stored, frames, api, switchId: (next: string) => { id = next; } };
 }
 
 it('batches a burst and writes only the latest position after inactivity', () => {
@@ -117,4 +119,46 @@ it('does not overwrite a selection remapped programmatically after restore (#235
   frames.shift()!(16);
   expect(field.setSelectionRange).toHaveBeenCalledTimes(2);
   expect(field.setSelectionRange).toHaveBeenLastCalledWith(4, 6, 'forward');
+});
+
+
+it('removes a deleted document and prevents timer, input and lifecycle writes from recreating it', () => {
+  const { field, api, stored, setItem, win } = setup();
+  stored.set(POSITION_PREFIX + 'window:first', '{}');
+  field.dispatchEvent(new Event('select'));
+  api.remove('first');
+  vi.advanceTimersByTime(1000);
+  field.dispatchEvent(new Event('input'));
+  win.dispatchEvent(new Event('pagehide'));
+  expect(stored.has(POSITION_PREFIX + 'window:first')).toBe(false);
+  expect(setItem).not.toHaveBeenCalled();
+});
+
+it('prunes only its own obsolete keys, keeping saved and current private positions', () => {
+  const { api, stored, removeItem } = setup();
+  const own = POSITION_PREFIX + 'window:';
+  for (const key of [own + 'first', own + 'saved', own + 'stale', own + 'view:stale',
+    POSITION_PREFIX + 'w:other.stale', 'typebridge.pendingDraft.v1']) stored.set(key, '{}');
+  api.prune(['saved']);
+  expect(removeItem).toHaveBeenCalledExactlyOnceWith(own + 'stale');
+  expect(stored.has(own + 'first')).toBe(true);
+  expect(stored.has(own + 'saved')).toBe(true);
+});
+
+it('a removed document does not block later documents, and cleanup storage errors are optional', () => {
+  const { api, removeItem, switchId, stored } = setup();
+  removeItem.mockImplementationOnce(() => { throw new Error('blocked'); });
+  expect(() => api.remove('first')).not.toThrow();
+  switchId('second');
+  api.save();
+  expect(stored.has(POSITION_PREFIX + 'window:second')).toBe(true);
+});
+
+
+it('unscoped pruning cannot reach embedded or viewer namespaces', () => {
+  const { api, stored, removeItem } = setup('');
+  for (const key of [POSITION_PREFIX + 'obsolete', POSITION_PREFIX + 'view:obsolete',
+    POSITION_PREFIX + 'w:main.obsolete', POSITION_PREFIX + 'w:main.view:obsolete']) stored.set(key, '{}');
+  api.prune([]);
+  expect(removeItem).toHaveBeenCalledExactlyOnceWith(POSITION_PREFIX + 'obsolete');
 });

@@ -26,6 +26,8 @@ export function parseWritingPosition(raw: string | null, text: string): WritingP
 export const VIEWER_POSITION_NAMESPACE = 'view:';
 
 export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () => string | undefined, namespace = '') {
+  const removed = new Set<string>();
+  const prefix = POSITION_PREFIX + namespace;
   let restoring = false;
   let restoreGeneration = 0;
   let previous = '';
@@ -33,7 +35,7 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
   let timer: ReturnType<typeof setTimeout> | undefined;
   function capture(): void {
     const id = documentId();
-    if (!id || restoring) return;
+    if (!id || restoring || removed.has(id)) return;
     const value: WritingPosition = {
       start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection,
       scrollTop: Math.max(0, field.scrollTop), scrollLeft: Math.max(0, field.scrollLeft),
@@ -47,6 +49,7 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     pending = undefined;
     if (!latest) return;
     const { id, value } = latest;
+    if (removed.has(id)) return;
     const raw = JSON.stringify(value);
     if (previous === id + raw) return;
     try { sessionStorage.setItem(POSITION_PREFIX + namespace + id, raw); previous = id + raw; }
@@ -98,6 +101,37 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
       if (!deferred) restoring = false;
     }
   }
+  /** Only call after deletion commits; later events cannot recreate the removed key. */
+  function remove(id: string): void {
+    removed.add(id);
+    if (pending?.id === id) {
+      pending = undefined;
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (documentId() === id) { ++restoreGeneration; restoring = false; }
+    previous = '';
+    try { sessionStorage.removeItem(prefix + id); } catch { /* Optional metadata. */ }
+  }
+  /** A successful complete list only. Keep the current unsaved or private document too. */
+  function prune(savedIds: Iterable<string>): void {
+    const keep = new Set(savedIds);
+    const current = documentId();
+    if (current) keep.add(current);
+    try {
+      const stale: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (!key?.startsWith(prefix)) continue;
+        const id = key.slice(prefix.length);
+        // Window/view namespaces contain ':' or '.'; document ids contain neither.
+        // In particular, an unscoped editor must never prune embedded/viewer keys.
+        if (!id || /[:.]/.test(id) || keep.has(id)) continue;
+        stale.push(id);
+      }
+      for (const id of stale) remove(id);
+    } catch { /* Blocked storage must not affect the document list. */ }
+  }
   const cancelRestore = (): void => {
     ++restoreGeneration;
     restoring = false;
@@ -110,5 +144,5 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
   window.addEventListener('pagehide', save);
   window.addEventListener('beforeunload', save);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
-  return { save, restore };
+  return { save, restore, remove, prune };
 }
