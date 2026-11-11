@@ -13,12 +13,15 @@ function setup() {
   const win = new EventTarget();
   const doc = Object.assign(new EventTarget(), { hidden: false });
   const setItem = vi.fn();
+  const getItem = vi.fn<() => string | null>(() => null);
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
   vi.stubGlobal('window', win);
   vi.stubGlobal('document', doc);
-  vi.stubGlobal('sessionStorage', { setItem, getItem: () => null });
+  vi.stubGlobal('sessionStorage', { setItem, getItem });
   let id = 'first';
   const api = setupWritingPosition(field, () => id, 'window:');
-  return { field, win, doc, setItem, api, switchId: (next: string) => { id = next; } };
+  return { field, win, doc, setItem, getItem, frames, api, switchId: (next: string) => { id = next; } };
 }
 
 it('batches a burst and writes only the latest position after inactivity', () => {
@@ -68,4 +71,50 @@ it('restoration cancels a pending write and storage failure leaves later flushes
   expect(() => api.save()).not.toThrow();
   api.save();
   expect(setItem).toHaveBeenCalledTimes(2);
+});
+
+
+it('reapplies after layout and ignores restore-generated selection/scroll writes', () => {
+  const { field, api, getItem, setItem, frames } = setup();
+  getItem.mockReturnValue(JSON.stringify({ start: 1, end: 3, direction: 'backward', scrollTop: 90, scrollLeft: 0 }));
+  api.restore('first');
+  field.scrollTop = 0; // An intermediate layout clamps the initial scroll.
+  field.dispatchEvent(new Event('scroll'));
+  field.dispatchEvent(new Event('select'));
+  api.save(); // Leaving during restore must not persist that intermediate clamp.
+  expect(setItem).not.toHaveBeenCalled();
+  frames.shift()!(0);
+  expect(field.scrollTop).toBe(90);
+  field.dispatchEvent(new Event('scroll'));
+  frames.shift()!(16);
+  vi.advanceTimersByTime(1000);
+  expect(setItem).not.toHaveBeenCalled();
+});
+
+it('user input cancels deferred restoration and saves the user position', () => {
+  const { field, api, getItem, setItem, frames } = setup();
+  getItem.mockReturnValue(JSON.stringify({ start: 1, end: 3, direction: 'backward', scrollTop: 90, scrollLeft: 0 }));
+  api.restore('first');
+  field.dispatchEvent(new Event('keydown'));
+  field.scrollTop = 20;
+  field.selectionStart = field.selectionEnd = 4;
+  field.dispatchEvent(new Event('input'));
+  frames.shift()!(0);
+  expect(field.scrollTop).toBe(20);
+  vi.advanceTimersByTime(POSITION_SAVE_DELAY_MS);
+  expect(JSON.parse(setItem.mock.calls[0]![1])).toMatchObject({ start: 4, end: 4, scrollTop: 20 });
+});
+
+
+it('does not overwrite a selection remapped programmatically after restore (#235)', () => {
+  const { field, api, getItem, frames } = setup();
+  getItem.mockReturnValue(JSON.stringify({ start: 1, end: 3, direction: 'backward', scrollTop: 90, scrollLeft: 0 }));
+  api.restore('first');
+  expect(field.setSelectionRange).toHaveBeenCalledTimes(1);
+  // Ownership handoff maps the old offsets to the newly loaded document after showDraft.
+  field.setSelectionRange(4, 6, 'forward');
+  frames.shift()!(0);
+  frames.shift()!(16);
+  expect(field.setSelectionRange).toHaveBeenCalledTimes(2);
+  expect(field.setSelectionRange).toHaveBeenLastCalledWith(4, 6, 'forward');
 });

@@ -174,7 +174,7 @@ export function setupLayout(
     // #175 step 6: embedded editors leave Focus restore to the host so every
     // iframe does not race to maximize itself after reload.
     if (document.documentElement.dataset.embed === '1') return;
-    try { if (localStorage.getItem(FOCUS_KEY) === 'on') applyFocusMode(true); }
+    try { if (localStorage.getItem(FOCUS_KEY) === 'on') applyFocusMode(true, { moveFocus: document.activeElement === document.body }); }
     catch { /* Start in Normal mode when storage is unavailable. */ }
   }
   focusButton.addEventListener('click', () => setFocusMode(!document.body.classList.contains('focus-mode')));
