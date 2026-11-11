@@ -51,7 +51,7 @@ it('flushes the outgoing document immediately and cancels its timer before resto
   expect(setItem.mock.calls[0]![0]).toBe(POSITION_PREFIX + 'window:first');
 });
 
-it.each(['pagehide', 'beforeunload', 'hidden'])('flushes the current position on %s without waiting', event => {
+it.each(['pagehide', 'hidden'])('flushes the current position on %s without waiting', event => {
   const { field, win, doc, setItem } = setup();
   field.dispatchEvent(new Event('scroll'));
   field.scrollTop = 90;
@@ -63,18 +63,40 @@ it.each(['pagehide', 'beforeunload', 'hidden'])('flushes the current position on
   expect(setItem).toHaveBeenCalledTimes(1);
 });
 
-it('restoration cancels a pending write and storage failure leaves later flushes usable', () => {
-  const { field, api, setItem } = setup();
+it('restore flushes the captured outgoing position without recapturing the incoming field', () => {
+  const { field, api, setItem, switchId, stored } = setup();
   field.dispatchEvent(new Event('select'));
-  api.restore('first');
+  switchId('second');
+  field.selectionStart = field.selectionEnd = 5;
+  api.restore('second');
+  expect(JSON.parse(stored.get(POSITION_PREFIX + 'window:first')!)).toMatchObject({ start: 1, end: 3 });
+  expect(stored.has(POSITION_PREFIX + 'window:second')).toBe(false);
   vi.advanceTimersByTime(1000);
-  expect(setItem).not.toHaveBeenCalled();
+  expect(setItem).toHaveBeenCalledTimes(1);
+});
+
+it('a failed outgoing flush does not prevent restoration or later saves', () => {
+  const { field, api, getItem, setItem, frames, switchId } = setup();
+  field.dispatchEvent(new Event('select'));
+  switchId('second');
+  getItem.mockReturnValue(JSON.stringify({ start: 2, end: 4, direction: 'forward', scrollTop: 10, scrollLeft: 0 }));
   setItem.mockImplementationOnce(() => { throw new Error('quota'); });
-  expect(() => api.save()).not.toThrow();
+  expect(() => api.restore('second')).not.toThrow();
+  expect(field.setSelectionRange).toHaveBeenLastCalledWith(2, 4, 'forward');
+  frames.shift()!(0);
+  frames.shift()!(16);
   api.save();
   expect(setItem).toHaveBeenCalledTimes(2);
 });
 
+it('beforeunload no longer writes position metadata; pagehide still flushes it', () => {
+  const { field, win, setItem } = setup();
+  field.dispatchEvent(new Event('select'));
+  win.dispatchEvent(new Event('beforeunload'));
+  expect(setItem).not.toHaveBeenCalled();
+  win.dispatchEvent(new Event('pagehide'));
+  expect(setItem).toHaveBeenCalledTimes(1);
+});
 
 it('reapplies after layout and ignores restore-generated selection/scroll writes', () => {
   const { field, api, getItem, setItem, frames } = setup();
@@ -107,7 +129,6 @@ it('user input cancels deferred restoration and saves the user position', () => 
   expect(JSON.parse(setItem.mock.calls[0]![1])).toMatchObject({ start: 4, end: 4, scrollTop: 20 });
 });
 
-
 it('does not overwrite a selection remapped programmatically after restore (#235)', () => {
   const { field, api, getItem, frames } = setup();
   getItem.mockReturnValue(JSON.stringify({ start: 1, end: 3, direction: 'backward', scrollTop: 90, scrollLeft: 0 }));
@@ -120,7 +141,6 @@ it('does not overwrite a selection remapped programmatically after restore (#235
   expect(field.setSelectionRange).toHaveBeenCalledTimes(2);
   expect(field.setSelectionRange).toHaveBeenLastCalledWith(4, 6, 'forward');
 });
-
 
 it('removes a deleted document and prevents timer, input and lifecycle writes from recreating it', () => {
   const { field, api, stored, setItem, win } = setup();
@@ -154,7 +174,6 @@ it('a removed document does not block later documents, and cleanup storage error
   expect(stored.has(POSITION_PREFIX + 'window:second')).toBe(true);
 });
 
-
 it('unscoped pruning cannot reach embedded or viewer namespaces', () => {
   const { api, stored, removeItem } = setup('');
   for (const key of [POSITION_PREFIX + 'obsolete', POSITION_PREFIX + 'view:obsolete',
@@ -162,7 +181,6 @@ it('unscoped pruning cannot reach embedded or viewer namespaces', () => {
   api.prune([]);
   expect(removeItem).toHaveBeenCalledExactlyOnceWith(POSITION_PREFIX + 'obsolete');
 });
-
 
 it('pruning does not suppress position saving when a temporarily absent document returns', () => {
   const { api, stored, switchId } = setup();
@@ -176,4 +194,22 @@ it('pruning does not suppress position saving when a temporarily absent document
   api.restore('returning');
   api.save();
   expect(stored.has(key)).toBe(true);
+});
+
+it('same-document restore discards transient captures without overwriting saved offsets', () => {
+  const { field, api, stored, getItem, setItem } = setup();
+  const key = POSITION_PREFIX + 'window:first';
+  const saved = JSON.stringify({ start: 2, end: 4, direction: 'backward', scrollTop: 90, scrollLeft: 0 });
+  stored.set(key, saved);
+  getItem.mockImplementation(() => stored.get(key) ?? null);
+  field.selectionStart = field.selectionEnd = 0;
+  field.scrollTop = 0;
+  field.dispatchEvent(new Event('select'));
+  api.restore('first');
+  expect(setItem).not.toHaveBeenCalled();
+  expect(stored.get(key)).toBe(saved);
+  expect(field.setSelectionRange).toHaveBeenLastCalledWith(2, 4, 'backward');
+  expect(field.scrollTop).toBe(90);
+  vi.advanceTimersByTime(1000);
+  expect(setItem).not.toHaveBeenCalled();
 });

@@ -67,10 +67,10 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     timer = setTimeout(flush, POSITION_SAVE_DELAY_MS);
   }
   function restore(id: string): void {
-    // A timer from the previous document must never write after restoration.
-    clearTimeout(timer);
-    timer = undefined;
-    pending = undefined;
+    // Only flush a different, outgoing id; a same-id capture may be a transient
+    // caret/scroll from loading or Focus layout and must not replace saved offsets.
+    if (pending && pending.id !== id) flush();
+    else { clearTimeout(timer); timer = undefined; pending = undefined; }
     const generation = ++restoreGeneration;
     restoring = true;
     previous = '';
@@ -142,7 +142,6 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
   }
   for (const type of ['input', 'select', 'keyup', 'click', 'scroll', 'historychange']) field.addEventListener(type, schedule);
   window.addEventListener('pagehide', save);
-  window.addEventListener('beforeunload', save);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
   return { save, restore, remove, prune };
 }
