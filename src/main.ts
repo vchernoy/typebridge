@@ -575,7 +575,10 @@ function renderDrafts(): void {
 async function refreshDrafts(): Promise<void> {
   const delayMs = testKnob('__typebridgeDelayRefreshMs');
   if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
-  if (state.db) state.drafts = await listStoredDrafts(state.db);
+  if (state.db) {
+    state.drafts = await listStoredDrafts(state.db);
+    writingPosition.prune(state.drafts.map(draft => draft.id));
+  }
   renderDrafts();
   if (statusLine.message().draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
 }

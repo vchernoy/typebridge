@@ -226,3 +226,60 @@ test('restoring Focus after delayed startup keeps the control the user focused (
   await expect(page.locator('body')).toHaveClass(/focus-mode/);
   await expect(mode).toBeFocused();
 });
+
+for (const fail of [false, true]) {
+  test(`position cleanup follows successful deletion only; failed=${fail} (#107)`, async ({ page }) => {
+    await page.goto('/editor.html');
+    const field = page.locator('#editor');
+    await expect(field).toBeEnabled();
+    await field.fill('Позиция документа');
+    await expect(page.locator('#status')).toContainText('Saved locally');
+    const id = await page.locator('#drafts').inputValue();
+    await field.evaluate((area: HTMLTextAreaElement) => {
+      area.setSelectionRange(2, 4, 'backward');
+      area.dispatchEvent(new Event('select'));
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    const key = PREFIX + id;
+    expect(await page.evaluate(key => sessionStorage.getItem(key), key)).not.toBeNull();
+    if (fail) await page.evaluate(() => {
+      IDBObjectStore.prototype.delete = function () { throw new DOMException('blocked', 'UnknownError'); };
+    });
+    await documentAction(page, '#delete-draft');
+    await page.getByRole('dialog', { name: 'Delete document?' }).getByRole('button', { name: 'Delete document', exact: true }).click();
+    await expect(page.locator('#status')).toContainText(fail ? 'Could not delete' : 'Document deleted');
+    // Let queued select/scroll events and debounce timers run: deleted keys must stay absent.
+    await page.waitForTimeout(350);
+    const stored = await page.evaluate(key => sessionStorage.getItem(key), key);
+    if (fail) expect(stored).not.toBeNull();
+    else expect(stored).toBeNull();
+  });
+}
+
+test('list refresh prunes obsolete positions without touching another window or viewer (#107)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const current = await page.locator('#drafts').inputValue();
+  const keys = [PREFIX + current, PREFIX + 'obsolete', PREFIX + 'w:other.obsolete', PREFIX + 'view:obsolete'];
+  await page.evaluate(keys => { for (const key of keys) sessionStorage.setItem(key, '{}'); }, keys);
+  await page.locator('#doc-menu-open').click();
+  await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key), keys[1]!)).toBeNull();
+  for (const key of [keys[0]!, keys[2]!, keys[3]!]) {
+    expect(await page.evaluate(key => sessionStorage.getItem(key), key)).not.toBeNull();
+  }
+});
+
+test('a failed list refresh leaves position keys untouched (#107)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  const key = PREFIX + 'obsolete';
+  await page.evaluate(key => {
+    sessionStorage.setItem(key, '{}');
+    IDBObjectStore.prototype.getAll = function () { throw new DOMException('blocked', 'UnknownError'); };
+  }, key);
+  await page.locator('#doc-menu-open').click();
+  await expect(page.locator('#doc-menu')).toBeVisible();
+  // The failed refresh must not turn the previous list into authority for pruning.
+  await page.waitForTimeout(350);
+  expect(await page.evaluate(key => sessionStorage.getItem(key), key)).toBe('{}');
+});

@@ -22,7 +22,7 @@ export type DocumentActionsDeps = {
   viewMode: boolean;
   autosave: HTMLInputElement;
   workspace: Workspace;
-  writingPosition: { save: () => void };
+  writingPosition: { save: () => void; remove: (id: string) => void };
   saver: { cancel: () => void; saveSoon: () => void; inFlight: () => Promise<SaveResult> | undefined };
   persist: () => Promise<SaveResult>;
   /** Resolves when an in-flight Autosave change finishes. */
@@ -175,9 +175,9 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       if (!state.ownership || state.ownership.documentId !== state.active.id) throw new EditOwnershipLostError();
       if (!await deleteStoredDraft(state.db, state.active.id, state.active.revision, await state.ownership.writeFence(), true)) throw new Error('Draft changed in another tab');
       committed = true;
+      deps.writingPosition.remove(requestedId);
       if (deletedRevision >= 1) deps.postSignal('deleted', state.active.id, deletedRevision);
       deps.saver.cancel();
-      deps.writingPosition.save();
       const replacement: StoredDraft = deps.allocateNewDraft();
       const access = await deps.acquireFor(replacement.id);
       state.active = replacement;
