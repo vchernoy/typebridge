@@ -68,7 +68,7 @@ export type BootDeps = {
   draftSelect: HTMLSelectElement;
   draftTitle: HTMLInputElement;
   workspace: Workspace;
-  writingPosition: { restore: (id: string) => void };
+  writingPosition: { restore: (id: string) => void; prune: (ids: Iterable<string>) => void };
   ownerReady: Promise<void>;
   onDatabaseUpgrade: () => void;
   readPending: () => StoredDraft | undefined;
@@ -78,7 +78,7 @@ export type BootDeps = {
   installOwnership: (access: EditAccess) => void;
   applyEditAccess: () => void;
   rememberActive: () => void;
-  showDraft: () => void;
+  showDraft: (options?: { restorePosition?: boolean }) => void;
   renderDrafts: () => void;
   updateStats: () => void;
   persist: () => Promise<SaveResult>;
@@ -89,6 +89,7 @@ export type BootDeps = {
 
 export async function initializeDrafts(state: EditorState, status: StatusLine, deps: BootDeps): Promise<void> {
   await deps.ownerReady;
+  let shown = false;
   let bootAccess: EditAccess | undefined;
   try {
     state.db = await openDraftDatabase(deps.onDatabaseUpgrade);
@@ -137,7 +138,9 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
     }
     state.active = chosen;
     deps.rememberActive();
-    deps.showDraft();
+    deps.showDraft({ restorePosition: false });
+    shown = true;
+    deps.writingPosition.prune([...state.drafts.map(draft => draft.id), state.active.id]);
     deps.installOwnership(bootAccess);
     bootAccess = undefined;
     if (restorePending) {
@@ -152,12 +155,12 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
     void bootAccess?.ownership?.release();
     state.db?.close(); state.db = undefined;
     const pending = deps.readPending();
-    if (pending) { state.active = pending; deps.showDraft(); deps.workspace.setDirty(true); deps.workspace.bumpContentRevision(); state.saveFailed = true; }
+    if (pending) { state.active = pending; deps.showDraft({ restorePosition: false }); shown = true; deps.workspace.setDirty(true); deps.workspace.bumpContentRevision(); state.saveFailed = true; }
     state.storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
     status.setSaveStatus(state.storageProblem, 'failure');
     deps.renderDrafts();
   } finally {
-    deps.updateStats();
+    if (!shown) deps.updateStats();
   }
   deps.field.disabled = false;
   deps.draftSelect.disabled = false;

@@ -283,3 +283,67 @@ test('a failed list refresh leaves position keys untouched (#107)', async ({ pag
   await page.waitForTimeout(350);
   expect(await page.evaluate(key => sessionStorage.getItem(key), key)).toBe('{}');
 });
+
+for (const viewer of [false, true]) {
+  test(`startup prunes its namespace and restores saved selection once; viewer=${viewer} (#107)`, async ({ page }) => {
+    await page.goto('/editor.html');
+    const field = page.locator('#editor');
+    await expect(field).toBeEnabled();
+    await field.fill(text);
+    await expect(page.locator('#status')).toContainText('Saved locally');
+    const id = await page.locator('#drafts').inputValue();
+    const prefix = PREFIX + (viewer ? 'view:' : '');
+    await page.addInitScript(({ key, stale, other }) => {
+      sessionStorage.setItem(key, JSON.stringify({ start: 900, end: 918, direction: 'backward', scrollTop: 450, scrollLeft: 0 }));
+      sessionStorage.setItem(stale, '{}');
+      sessionStorage.setItem(other, '{}');
+      const win = window as unknown as { restoreSelectionCalls: number };
+      win.restoreSelectionCalls = 0;
+      const original = HTMLTextAreaElement.prototype.setSelectionRange;
+      HTMLTextAreaElement.prototype.setSelectionRange = function (start, end, direction) {
+        if (this.id === 'editor' && start === 900 && end === 918 && direction === 'backward') win.restoreSelectionCalls++;
+        original.call(this, start, end, direction);
+      };
+    }, { key: prefix + id, stale: prefix + 'obsolete', other: PREFIX + 'w:other.obsolete' });
+    await page.goto(viewer ? `/editor.html?doc=${id}&mode=view` : '/editor.html');
+    await expect(field).toBeEnabled();
+    await expect(field).toHaveValue(text);
+    await expect.poll(() => position(field)).toMatchObject({ start: 900, end: 918, direction: 'backward', scrollTop: 450 });
+    await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key), prefix + 'obsolete')).toBeNull();
+    expect(await page.evaluate(() => (window as unknown as { restoreSelectionCalls: number }).restoreSelectionCalls)).toBe(1);
+    expect(await page.evaluate(key => sessionStorage.getItem(key), PREFIX + 'w:other.obsolete')).toBe('{}');
+  });
+}
+
+for (const storageFails of [false, true]) {
+  test(`missing viewer startup handles pruning safely; storage failure=${storageFails} (#107)`, async ({ page }) => {
+    await page.addInitScript(({ key, fail }) => {
+      sessionStorage.setItem(key, '{}');
+      if (fail) Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
+    }, { key: PREFIX + 'view:obsolete', fail: storageFails });
+    await page.goto('/editor.html?doc=11111111-1111-4111-8111-111111111111&mode=view');
+    await expect(page.locator('#editor')).toBeEnabled();
+    await expect(page.locator('#editor')).toHaveValue('');
+    await expect(page.locator('#viewer-notice')).toContainText(storageFails ? 'storage is unavailable' : 'no longer available');
+    const stored = await page.evaluate(key => sessionStorage.getItem(key), PREFIX + 'view:obsolete');
+    expect(stored).toBe(storageFails ? '{}' : null);
+  });
+}
+
+test('startup pruning retains the recovered unsaved document position (#107)', async ({ page }) => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  await page.addInitScript(({ id, text, key }) => {
+    localStorage.setItem('typebridge.autosave.v1', 'off');
+    sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify({
+      id, title: 'Recovered position', text, updatedAt: Date.now(), revision: 0,
+    }));
+    sessionStorage.setItem(key, JSON.stringify({ start: 900, end: 918, direction: 'backward', scrollTop: 450, scrollLeft: 0 }));
+  }, { id, text, key: PREFIX + id });
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await expect(field).toHaveValue(text);
+  await expect(page.locator('#drafts')).toHaveValue(id);
+  await expect.poll(() => position(field)).toMatchObject({ start: 900, end: 918, direction: 'backward', scrollTop: 450 });
+  expect(await page.evaluate(key => sessionStorage.getItem(key), PREFIX + id)).not.toBeNull();
+});

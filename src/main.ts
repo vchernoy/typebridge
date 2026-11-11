@@ -582,7 +582,7 @@ async function refreshDrafts(): Promise<void> {
   renderDrafts();
   if (statusLine.message().draftListRefreshFailed) updateStatus({ draftListRefreshFailed: false });
 }
-function showDraft(): void {
+function showDraft(options?: { restorePosition?: boolean }): void {
   clearDeletedElsewhere();
   // Callers decide post-load status; clearing through updateStatus keeps the DOM in sync.
   workspace.bumpSessionGeneration();
@@ -598,7 +598,7 @@ function showDraft(): void {
     workspace.setDirty(false);
     state.saveFailed = false; // The editor no longer holds the unsaved text.
   } finally { state.loadingDraft = false; }
-  writingPosition.restore(state.active.id);
+  if (options?.restorePosition !== false) writingPosition.restore(state.active.id);
   renderDrafts();
   updateStats();
   updateSaveIndicator();
@@ -784,7 +784,7 @@ const viewer = createViewerMode(state, {
   requestedViewId,
   writingPosition,
   syncTitleTooltip: () => { syncTitleTooltip(); },
-  showDraft: () => { showDraft(); },
+  showDraft: options => { showDraft(options); },
   renderDrafts: () => { renderDrafts(); },
   refreshDrafts: () => refreshDrafts(),
   updateStats: () => { updateStats(); },
@@ -913,7 +913,7 @@ void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
   installOwnership: access => { installOwnership(access); },
   applyEditAccess: () => { applyEditAccess(); },
   rememberActive: () => { rememberActive(); },
-  showDraft: () => { showDraft(); },
+  showDraft: options => { showDraft(options); },
   renderDrafts: () => { renderDrafts(); },
   updateStats: () => { updateStats(); },
   persist: () => persist(),

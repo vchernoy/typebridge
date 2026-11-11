@@ -22,9 +22,9 @@ export type ViewerDeps = {
   windowId: string | undefined;
   /** The document id from the link (undefined when the link has none or is invalid). */
   requestedViewId: string | undefined;
-  writingPosition: { save: () => void; restore: (id: string) => void };
+  writingPosition: { save: () => void; restore: (id: string) => void; prune: (ids: Iterable<string>) => void };
   syncTitleTooltip: () => void;
-  showDraft: () => void;
+  showDraft: (options?: { restorePosition?: boolean }) => void;
   renderDrafts: () => void;
   refreshDrafts: () => Promise<void>;
   updateStats: () => void;
@@ -76,10 +76,10 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     deps.updateStats();
     showViewerStatus();
   }
-  function showViewerDocument(draft: StoredDraft): void {
+  function showViewerDocument(draft: StoredDraft, restorePosition = true): void {
     state.viewMissing = false;
     state.active = draft;
-    deps.showDraft();
+    deps.showDraft({ restorePosition });
     viewerNotice.hidden = true;
     viewerNotice.textContent = '';
     viewerBadge.textContent = 'Saved version · Read-only';
@@ -127,8 +127,9 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
       // Only the requested id is loaded for display; the list feeds the Documents menu.
       const requested = deps.requestedViewId ? await getStoredDraft(state.db, deps.requestedViewId) : undefined;
       state.drafts = await listStoredDrafts(state.db);
-      if (requested && requested.revision >= 1) showViewerDocument(requested);
+      if (requested && requested.revision >= 1) showViewerDocument(requested, false);
       else showViewerMissing(VIEWER_MISSING);
+      deps.writingPosition.prune(state.drafts.map(draft => draft.id));
     } catch (error) {
       state.db?.close(); state.db = undefined;
       state.storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
@@ -137,7 +138,6 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
       deps.field.disabled = false; deps.draftSelect.disabled = false; deps.draftTitle.disabled = false;
       deps.restoreFocusMode();
       if (!state.viewMissing) deps.writingPosition.restore(state.active.id);
-      deps.updateStats();
       deps.finishInitialization();
     }
   }
