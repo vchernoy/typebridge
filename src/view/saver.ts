@@ -32,6 +32,14 @@ export type SaverDeps = {
   clearVersionNotice: () => void;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
   journalEdit: () => void;
+  /** Change log of the shown document (#37 R2c). */
+  changes: {
+    edit: () => void;
+    idle: () => Promise<void>;
+    upToForSave: (documentId: string, savedText: string) => { upTo: number; keepRun: string };
+    /** Whether the save prepared by upToForSave for `run` committed its text. */
+    saved: (run: string, ok: boolean) => void;
+  };
   rememberActive: () => void;
   updateSaveIndicator: () => void;
   syncTitleTooltip: () => void;
@@ -55,17 +63,31 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       const delayMs = testKnob('__typebridgeDelayPersistMs');
       if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
       let createdConflict = false;
+      /** The change-log run of the save in flight, until its outcome is reported. */
+      let preparedRun: string | undefined;
       try {
         if (!state.db) throw new Error('Storage unavailable');
         while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
+          // Queued change records land first, so this save's cleanup covers every one of them.
+          await deps.changes.idle();
+          // Waiting yielded: Autosave may be off now, with private text typed since (#251 review).
+          // Never capture text unless every saving guard still holds.
+          if (state.deleting || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock) break;
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
+          // Taken with the text: the row says which change records it already contains (#37 R2c).
+          const log = deps.changes.upToForSave(saved.id, saved.text);
+          preparedRun = log.keepRun;
+          saved.upTo = log.upTo;
           const clearPendingAfterCommit = deps.preparePendingClear(saved);
           if (state.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
           const owner = await state.ownership.writeFence();
           const current = deps.currentJournal();
           const journal = current && current.documentId === saved.id && current.revision === state.active.revision && current.text === saved.text && current.title === saved.title ? current : undefined;
-          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner);
+          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, { keepRun: log.keepRun });
+          // A conflict copy is a new document: this document's row did not take the text.
+          deps.changes.saved(log.keepRun, !result.conflict);
+          preparedRun = undefined;
           clearPendingAfterCommit();
           const titleOnly = !result.conflict && saved.title !== state.active.title && saved.text === state.active.text;
           if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
@@ -117,6 +139,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
         }
         return { saved: !deps.workspace.dirty(), conflict: createdConflict };
       } catch (error) {
+        if (preparedRun) deps.changes.saved(preparedRun, false);
         if (error instanceof EditOwnershipLostError) {
           deps.loseOwnership();
           return { saved: false, conflict: createdConflict };
@@ -145,6 +168,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     deps.workspace.setDirty(true);
     deps.workspace.bumpContentRevision();
     deps.journalEdit();
+    deps.changes.edit();
     // With Autosave off nothing is committed, so refresh the Documents label from the
     // on-screen title (and mark unsaved) without waiting for a save (#114).
     if (!deps.autosave.checked && (becameDirty || fromTitle)) deps.renderDrafts();
@@ -165,5 +189,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     },
     /** The save that is running now, if any. */
     inFlight: (): Promise<SaveResult> | undefined => saving,
+    /** Resolves once every queued change-log record was written or skipped (#37 R2c). */
+    drainChanges: (): Promise<void> => deps.changes.idle(),
   };
 }

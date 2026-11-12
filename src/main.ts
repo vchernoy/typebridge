@@ -14,6 +14,7 @@ import { createReloadBackup } from './view/reload-backup';
 import { createEditorState } from './view/editor-state';
 import { createViewerMode } from './view/viewer-mode';
 import { createSaver } from './view/saver';
+import { createChangeWriter } from './view/change-writer';
 import { createAutosaveToggle, type AutosaveToggle } from './view/autosave-toggle';
 import { createDocumentActions } from './view/documents';
 import { createRecovery } from './view/recovery';
@@ -38,7 +39,7 @@ import {
 import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, type StoredDraft } from './editor/indexeddb';
+import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, type StoredDraft } from './editor/indexeddb';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
@@ -652,6 +653,19 @@ const takeover = createTakeover(state, {
 });
 const { captureHandoffSnapshot, hideEditHereBar, showEditHereBar, takeOverFromHandoff, retryOwnership } = takeover;
 /** Read-only pane B retries ownership when focused or the tab becomes visible again. */
+// Change log for crash recovery (#37 R2c): one small record per edit while Autosave is on.
+const changeWriter = createChangeWriter({
+  mayRecord: () => !viewMode && autosave.checked && !state.suppressEditTracking && !state.loadingDraft,
+  shown: () => ({ id: state.active.id, generation: workspace.sessionGeneration() }),
+  text: () => field.value,
+  append: async record => {
+    if (!state.db || state.ownership?.documentId !== record.documentId) throw new Error('Not editing this document');
+    const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
+    if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    await appendChange(state.db, record, await state.ownership.writeFence());
+  },
+  newRunId: () => crypto.randomUUID(),
+});
 const saver = createSaver(state, statusLine, {
   viewMode, autosave, draftTitle, workspace, writingPosition,
   snapshot: () => snapshot(),
@@ -662,6 +676,7 @@ const saver = createSaver(state, statusLine, {
   clearVersionNotice: () => { clearVersionNotice(); },
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   journalEdit: () => { journalEdit(); },
+  changes: changeWriter,
   rememberActive: () => { rememberActive(); },
   updateSaveIndicator: () => { updateSaveIndicator(); },
   syncTitleTooltip: () => { syncTitleTooltip(); },

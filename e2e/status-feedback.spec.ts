@@ -456,7 +456,7 @@ test('a database upgrade in another tab stays visible after action feedback and 
   const other = await context.newPage();
   await other.goto('/404');
   await other.evaluate(() => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 3);
+    const open = indexedDB.open('typebridge', 4);
     open.onsuccess = () => { open.result.close(); resolve(); };
     open.onerror = () => reject(open.error);
   }));
@@ -519,8 +519,10 @@ test('a database upgrade during an in-flight save keeps the storage warning', as
   await expect(status(page)).toHaveText('Saved locally');
   await page.evaluate(() => {
     // Simulate another tab upgrading the database while this save's write is in flight.
+    // Only the document write: change-log records (#37 R2c) use put too.
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      if (this.name !== 'documents') return put.apply(this, args);
       IDBObjectStore.prototype.put = put;
       const db = this.transaction.db;
       const result = put.apply(this, args);

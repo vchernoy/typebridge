@@ -7,7 +7,7 @@ const CHANNEL = 'typebridge.documents.v1';
 
 async function readDocs(page: Page): Promise<Row[]> {
   return page.evaluate(() => new Promise<Row[]>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge');
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
@@ -25,7 +25,7 @@ async function readDocs(page: Page): Promise<Row[]> {
 /** Commit a newer revision straight into IndexedDB without any signal (simulates a missed message). */
 async function writeSilently(page: Page, id: string, patch: { text?: string; title?: string }): Promise<number> {
   return page.evaluate(({ id, patch }) => new Promise<number>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge');
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
@@ -260,7 +260,7 @@ test('focus reconciliation covers a deletion that was missed', async ({ page, co
   const row = await saveDocument(page, 'Will vanish');
   const viewer = await openViewer(context, row.id, 'Will vanish');
   await page.evaluate(id => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge');
     open.onsuccess = () => {
       const db = open.result;
       const tx = db.transaction('documents', 'readwrite');

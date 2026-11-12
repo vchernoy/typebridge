@@ -23,7 +23,7 @@ export type DocumentActionsDeps = {
   autosave: HTMLInputElement;
   workspace: Workspace;
   writingPosition: { save: () => void; remove: (id: string) => void };
-  saver: { cancel: () => void; saveSoon: () => void; inFlight: () => Promise<SaveResult> | undefined };
+  saver: { cancel: () => void; saveSoon: () => void; inFlight: () => Promise<SaveResult> | undefined; drainChanges: () => Promise<void> };
   persist: () => Promise<SaveResult>;
   /** Resolves when an in-flight Autosave change finishes. */
   autosaveGate: () => Promise<void> | undefined;
@@ -173,6 +173,8 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       const deletedRevision = state.active.revision;
       if (!state.db) throw new Error('Storage unavailable');
       if (!state.ownership || state.ownership.documentId !== state.active.id) throw new EditOwnershipLostError();
+      // Queued change records must land before the delete removes them, never after (#251 review).
+      await deps.saver.drainChanges();
       if (!await deleteStoredDraft(state.db, state.active.id, state.active.revision, await state.ownership.writeFence(), true)) throw new Error('Draft changed in another tab');
       committed = true;
       deps.writingPosition.remove(requestedId);

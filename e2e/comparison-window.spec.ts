@@ -7,7 +7,7 @@ const MISSING_ID = 'b2c3d4e5-f6a7-4890-b123-456789abcdef';
 
 async function readDocs(page: Page): Promise<Row[]> {
   return page.evaluate(() => new Promise<Row[]>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge');
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
@@ -403,7 +403,7 @@ test('selecting a recovery-* document updates the URL so reload keeps it', async
   const first = await saveDocument(page, 'Ordinary saved');
   const recoveryId = `recovery-${MISSING_ID}`;
   await page.evaluate(({ id }) => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge');
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;

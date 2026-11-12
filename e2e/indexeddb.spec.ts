@@ -40,7 +40,7 @@ test('a blocked upgrade reports the blocker and closes a late connection', async
   await blocker.goto('/editor.html');
   await expect(blocker.locator('#editor')).toBeEnabled();
   await blocker.evaluate(() => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge');
     open.onsuccess = () => { (window as unknown as { held: IDBDatabase }).held = open.result; resolve(); };
     open.onerror = () => reject(open.error);
   }));
@@ -48,7 +48,7 @@ test('a blocked upgrade reports the blocker and closes a late connection', async
   const message = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
     const original = indexedDB.open.bind(indexedDB);
-    indexedDB.open = ((name: string) => original(name, 3)) as typeof indexedDB.open;
+    indexedDB.open = ((name: string) => original(name, 4)) as typeof indexedDB.open;
     try { await api.openDraftDatabase(); return 'unexpected success'; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
     finally { indexedDB.open = original; }
@@ -56,7 +56,7 @@ test('a blocked upgrade reports the blocker and closes a late connection', async
   expect(message).toContain('Close other TypeBridge tabs');
   await blocker.evaluate(() => (window as unknown as { held: IDBDatabase }).held.close());
   const nextUpgrade = await page.evaluate(() => new Promise<boolean>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 4);
+    const open = indexedDB.open('typebridge', 5);
     open.onblocked = () => resolve(false);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => { open.result.close(); resolve(true); };
@@ -106,7 +106,7 @@ test('the ownership fence gates commits and deletes in the same transaction (#15
     return { stores, first, second, saved: saved.draft.revision, staleCommit, wrongWindow, staleDelete, afterStale, copyCount: copies.length,
       conflict: { flag: conflict.conflict, id: conflict.draft.id }, notMine, released, afterRelease, deleted, droppedRecord, unsavedRecord };
   });
-  expect(result.stores).toEqual(['documents', 'editOwnership']);
+  expect(result.stores).toEqual(['changes', 'documents', 'editOwnership']);
   expect([result.first, result.second]).toEqual([1, 2]);
   expect(result.saved).toBe(1);
   expect(result.staleCommit).toBe('EditOwnershipLostError');
@@ -123,7 +123,7 @@ test('the ownership fence gates commits and deletes in the same transaction (#15
   expect(result.unsavedRecord).toBeUndefined();
 });
 
-test('upgrading a version 1 database keeps documents and adds the ownership store', async ({ page }) => {
+test('upgrading a version 1 database keeps documents and adds the ownership and change-log stores', async ({ page }) => {
   // A static asset: same origin, but the app does not run and create the database first.
   await page.goto('/icon-192.png');
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
@@ -140,7 +140,7 @@ test('upgrading a version 1 database keeps documents and adds the ownership stor
     open.onsuccess = () => { const db = open.result; resolve({ version: db.version, names: [...db.objectStoreNames].sort() }); db.close(); };
     open.onerror = () => reject(open.error);
   }));
-  expect(stores).toEqual({ version: 2, names: ['documents', 'editOwnership'] });
+  expect(stores).toEqual({ version: 3, names: ['changes', 'documents', 'editOwnership'] });
 });
 
 
@@ -185,3 +185,49 @@ for (const operation of ['direct', 'save'] as const) {
     expect(result.stored).toEqual({ ...result.base, revision: 1 });
   });
 }
+
+test('the change log: fenced appends, cleanup by upTo, clear on demand and on delete (#37 R2c)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const seqs = async (id: string) => (await api.listChanges(db, id)).map(r => r.seq);
+    const failure = async (run: () => Promise<unknown>) => { try { await run(); return 'wrote'; } catch (error) { return (error as Error).name; } };
+    const record = (documentId: string, seq: number) => ({ documentId, seq, run: 'run-a', change: [0, '', 'а'] as [number, string, string], length: seq });
+    const fence = await api.claimEditOwnership(db, 'log', 'window-a', 1);
+    const owner = { instanceId: 'window-a', fence };
+    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: '', updatedAt: 1 }, 0, 'copy-1', owner);
+    for (let seq = 1; seq <= 5; seq++) await api.appendChange(db, record('log', seq), owner);
+    const appended = await seqs('log');
+    // A save that contains changes up to 3 removes exactly those.
+    const saved = await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'ааа', updatedAt: 2, upTo: 3 }, 1, 'copy-2', owner);
+    const afterSave = await seqs('log');
+    // Another window took editing over: the old window cannot extend the log.
+    const taken = await api.claimEditOwnership(db, 'log', 'window-b', 3);
+    const staleAppend = await failure(() => api.appendChange(db, record('log', 6), owner));
+    const afterStale = await seqs('log');
+    // A save no run continues clears the log, except the new run that starts from its text.
+    await api.appendChange(db, record('log', 6), { instanceId: 'window-b', fence: taken });
+    await api.appendChange(db, { ...record('log', 1), run: 'run-new' }, { instanceId: 'window-b', fence: taken });
+    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новый', updatedAt: 3, upTo: 0 }, 2, 'copy-3', { instanceId: 'window-b', fence: taken }, { keepRun: 'run-new' });
+    const afterClear = await seqs('log');
+    // A crashed run's record past upTo never survives a save of the run that continues the text.
+    await api.appendChange(db, { ...record('log', 7), run: 'crashed' });
+    await api.appendChange(db, { ...record('log', 2), run: 'run-new' }, { instanceId: 'window-b', fence: taken });
+    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новыйа', updatedAt: 3, upTo: 1 }, 3, 'copy-4', { instanceId: 'window-b', fence: taken }, { keepRun: 'run-new' });
+    const afterPrune = await seqs('log');
+    // Deleting the document deletes its log; other documents keep theirs.
+    await api.appendChange(db, record('log', 1), { instanceId: 'window-b', fence: taken });
+    await api.appendChange(db, record('other', 1));
+    const deleted = await api.deleteStoredDraft(db, 'log', 4, { instanceId: 'window-b', fence: taken }, true);
+    const afterDelete = { log: await seqs('log'), other: await seqs('other') };
+    db.close();
+    return { appended, savedUpTo: saved.draft.upTo, afterSave, staleAppend, afterStale, afterClear, afterPrune, deleted, afterDelete };
+  });
+  expect(result).toEqual({
+    appended: [1, 2, 3, 4, 5], savedUpTo: 3, afterSave: [4, 5], staleAppend: 'EditOwnershipLostError', afterStale: [4, 5],
+    afterClear: [1], afterPrune: [2], deleted: true, afterDelete: { log: [], other: [1] },
+  });
+});

@@ -30,7 +30,7 @@ test('database version change closes the old connection and warns the editor', a
   await second.goto('/editor.html');
   await expect(second.locator('#editor')).toBeEnabled();
   const upgraded = await second.evaluate(() => new Promise<boolean>((resolve, reject) => {
-    const request = indexedDB.open('typebridge', 3);
+    const request = indexedDB.open('typebridge', 4);
     request.onsuccess = () => { request.result.close(); resolve(true); };
     request.onerror = () => reject(request.error);
   }));

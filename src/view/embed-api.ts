@@ -69,6 +69,8 @@ export type HostPageApi = {
  */
 export type TestKnobs = {
   __typebridgeDelayAcquireMs: number;
+  /** Hold each change-log write (#37 R2c), so a save waits for it. */
+  __typebridgeDelayChangeAppendMs: number;
   __typebridgeDelayAfterAcquireMs: number;
   __typebridgeDelayPersistMs: number;
   __typebridgeDelayRefreshMs: number;

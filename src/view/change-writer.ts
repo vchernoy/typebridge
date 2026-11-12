@@ -1,0 +1,123 @@
+/**
+ * Change-log writer for the shown document (#37 R2c). Each edit becomes one small record, written
+ * in change-id order through a single queue so typing never waits for storage. A full save takes
+ * `upTo` from here at the same moment it takes the text, so the saved row and the log agree.
+ *
+ * Every record continues text that is durable: the stored row, plus the records before it. A run
+ * belongs to one document shown once (its id and session generation) and only ever starts at a
+ * full save, never from the shown text, which can be unsaved (a reload backup, a handoff): the
+ * first edits after a document is shown reach storage through that first save. When a save stores
+ * text the log does not already produce (a new run, a write that failed, an edit that was not
+ * recorded), the records after it continue that text, so they are held until the save commits
+ * and dropped if it fails (#251 review).
+ * Nothing is written while Autosave is off or in a viewer, matching the privacy rule for saving.
+ */
+import { changeBetween, type ChangeRecord } from '../editor/change-log';
+
+export type ChangeWriterDeps = {
+  /** False while Autosave is off, in a viewer, or while edits must not be recorded. */
+  mayRecord: () => boolean;
+  /** The shown document and its session generation (bumped whenever it is shown again). */
+  shown: () => { id: string; generation: number };
+  text: () => string;
+  /** Write one record (with the ownership fence); rejects when it cannot be written. */
+  append: (record: ChangeRecord) => Promise<void>;
+  newRunId: () => string;
+};
+
+type Writer = {
+  documentId: string;
+  generation: number;
+  run: string;
+  /** Change-id of the last record queued. */
+  seq: number;
+  /** The text the next change starts from. */
+  base: string;
+  /** Set when a write failed or was refused: stop until a full save covers everything queued. */
+  failed: boolean;
+  /** While a save of text the log does not produce is in flight: resolves with its outcome. */
+  anchor?: Promise<boolean>;
+};
+
+export function createChangeWriter(deps: ChangeWriterDeps) {
+  let writer: Writer | undefined;
+  let queue: Promise<void> = Promise.resolve();
+  /** The save whose outcome releases (or drops) the held records. */
+  let pending: { run: string; writer: Writer; settle: (ok: boolean) => void } | undefined;
+
+  /** The run of the shown document, if a save started one; never one started from shown text. */
+  function current(): Writer | undefined {
+    const shown = deps.shown();
+    return writer && writer.documentId === shown.id && writer.generation === shown.generation ? writer : undefined;
+  }
+
+  return {
+    /** Record the edit that led to the current text. */
+    edit(): void {
+      if (!deps.mayRecord()) {
+        // Stop the run: after private edits the next run starts at the next save.
+        writer = undefined;
+        return;
+      }
+      const w = current();
+      if (!w || w.failed) return;
+      const text = deps.text();
+      const change = changeBetween(w.base, text);
+      if (!change) return;
+      w.seq += 1;
+      w.base = text;
+      const record: ChangeRecord = { documentId: w.documentId, seq: w.seq, run: w.run, change, length: text.length };
+      const anchor = w.anchor;
+      // Records queued behind a failed one are skipped, not written: the run stops at the failure
+      // until a save covers everything queued. Nothing lands once Autosave is off, not even a
+      // record queued before, and nothing continues a save that did not commit (#251 review).
+      queue = queue.then(async () => {
+        if (anchor && !await anchor) return;
+        if (w.failed) return;
+        if (!deps.mayRecord()) { w.failed = true; return; }
+        return deps.append(record);
+      }).catch(() => { w.failed = true; });
+    },
+    /**
+     * Called as a full save takes `savedText` of `documentId` (after `idle()`): `upTo` is the
+     * last change-id queued for that text, and `keepRun` the run that continues it. The save
+     * deletes every other run's records (a crashed run's tail must never replay onto this text)
+     * and this run's records up to `upTo`. Report the outcome with `saved(keepRun, ok)`.
+     *
+     * When the log already produces `savedText`, later records continue it either way. Otherwise
+     * (no current run, a failed write, an unrecorded edit), later records continue `savedText`
+     * only: they are held until the save commits, and dropped if it does not (#251 review).
+     */
+    upToForSave(documentId: string, savedText: string): { upTo: number; keepRun: string } {
+      const shown = deps.shown();
+      let w = writer;
+      if (!w || w.documentId !== documentId || shown.id !== documentId || w.generation !== shown.generation) {
+        w = { documentId, generation: shown.generation, run: deps.newRunId(), seq: 0, base: savedText, failed: false };
+        writer = shown.id === documentId ? w : undefined;
+      } else if (w.base === savedText && !w.failed && !w.anchor) {
+        return { upTo: w.seq, keepRun: w.run };
+      }
+      w.base = savedText;
+      w.failed = false;
+      let settle: (ok: boolean) => void = () => undefined;
+      w.anchor = new Promise<boolean>(resolve => { settle = resolve; });
+      pending?.settle(false);
+      pending = { run: w.run, writer: w, settle };
+      return { upTo: w.seq, keepRun: w.run };
+    },
+    /**
+     * The outcome of the save `upToForSave` prepared for `run`. On success the held records go
+     * ahead; otherwise they are dropped and the run ends: the next save starts a new one.
+     */
+    saved(run: string, ok: boolean): void {
+      if (!pending || pending.run !== run) return;
+      const { writer: w, settle } = pending;
+      pending = undefined;
+      w.anchor = undefined;
+      if (!ok && writer === w) writer = undefined;
+      settle(ok);
+    },
+    /** Resolves once every queued record was written, skipped or dropped. */
+    idle: (): Promise<void> => queue,
+  };
+}
