@@ -290,6 +290,78 @@ test('update reload asks every window about private text', async ({ page }) => {
   await expect(second.locator('#editor')).toHaveValue('Private only in second');
 });
 
+test('update-reload freeze blocks edits during deferred discard commit (#254)', async ({ page }) => {
+  // Fails if editors stay editable while commitUpdateReload awaits (#254 owner-account P1).
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await setHostAutosave(page, false);
+  await fillHostEditor(main, 'Private main before freeze');
+  await fillHostEditor(second, 'Private second before freeze');
+
+  const prepare = page.evaluate(async () => {
+    const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    for (const frame of frames) {
+      const prepareOne = (frame.contentWindow as Window & {
+        __typebridgePrepareUpdateReload?: () => Promise<boolean>;
+      }).__typebridgePrepareUpdateReload;
+      if (!prepareOne) continue;
+      if (!await prepareOne()) return false;
+    }
+    return true;
+  });
+  for (const frame of [main, second]) {
+    const dialog = frame.getByRole('dialog', { name: 'Reload without saving?' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
+  }
+  expect(await prepare).toBe(true);
+
+  await page.evaluate(() => {
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')) {
+      const hooks = frame.contentWindow as Window & {
+        __typebridgeAssertSafeUpdateReload?: () => void;
+        __typebridgeFreezeForUpdateReload?: () => void;
+        __typebridgeDelayChangeAppendMs?: number;
+      };
+      hooks.__typebridgeAssertSafeUpdateReload?.();
+      hooks.__typebridgeFreezeForUpdateReload?.();
+      hooks.__typebridgeDelayChangeAppendMs = 2_000;
+    }
+  });
+
+  const commitPromise = page.evaluate(async () => {
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')) {
+      await (frame.contentWindow as Window & {
+        __typebridgeCommitUpdateReload?: () => void | Promise<void>;
+      }).__typebridgeCommitUpdateReload?.();
+    }
+  });
+
+  await expect(main.locator('#editor')).toHaveAttribute('readonly', '');
+  await expect(second.locator('#editor')).toHaveAttribute('readonly', '');
+  await expect(main.locator('#draft-title')).toHaveAttribute('readonly', '');
+  await main.locator('#editor').pressSequentially('sneaky');
+  await expect(main.locator('#editor')).toHaveValue('Private main before freeze');
+  await main.locator('#draft-title').pressSequentially('sneaky-title');
+  await expect(main.locator('#draft-title')).toHaveValue('Untitled document');
+
+  await commitPromise;
+  await page.evaluate(() => {
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')) {
+      (frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void })
+        .__typebridgeCancelUpdateReload?.();
+    }
+  });
+  await expect(main.locator('#editor')).not.toHaveAttribute('readonly');
+  await expect(second.locator('#editor')).not.toHaveAttribute('readonly');
+  await expect(main.locator('#editor')).toHaveValue('Private main before freeze');
+  await expect(second.locator('#editor')).toHaveValue('Private second before freeze');
+});
+
 test('refused prepare cancels deferred discard on an earlier window (#254)', async ({ page }) => {
   // Fails if window A keeps pendingReloadDiscard after B refuses and commit still wipes recovery.
   test.setTimeout(90_000);

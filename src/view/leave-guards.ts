@@ -6,6 +6,7 @@
 import type { StoredDraft } from '../editor/indexeddb';
 import { clearRecovery, type RecoverySnapshot } from '../editor/recovery';
 import { askConfirmChoice } from '../ui/confirm-dialog';
+import { testKnob } from './embed-api';
 import type { EditorState } from './editor-state';
 import { sameContent } from './reload-backup';
 import type { SaveResult } from './saver';
@@ -59,6 +60,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
    * cancelUpdateReload keeps recovery if another window refuses or navigation stalls (#254).
    */
   let pendingReloadDiscard = false;
+  /**
+   * Host/standalone froze editors after the final assert and before awaited commit; thaw on
+   * cancel so a stalled or aborted reload restores editing (#254 owner-account P1).
+   */
+  let reloadFreezeArmed = false;
 
   function updateReloadReturnFocus(): HTMLElement {
     const local = document.querySelector<HTMLButtonElement>('#update-reload');
@@ -107,10 +113,25 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     deps.unfreezeAfterDiscard();
   }
 
+  /**
+   * Freeze body + title (and mutation controls) after every window has asserted and before any
+   * awaited commit/navigation, so private edits cannot sneak in during discard cleanup (#254).
+   */
+  function freezeForUpdateReload(): void {
+    if (reloadFreezeArmed) return;
+    deps.freezeForDiscard();
+    reloadFreezeArmed = true;
+  }
+
   /** Run deferred update-reload discard after every window has prepared and assert passed. */
   async function commitUpdateReload(): Promise<void> {
     if (!pendingReloadDiscard) return;
     pendingReloadDiscard = false;
+    // Optional e2e hold (reuses the change-append delay knob) so freeze can be probed (#254).
+    const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
+    if (typeof delayMs === 'number' && delayMs > 0) {
+      await new Promise<void>(resolve => { window.setTimeout(resolve, delayMs); });
+    }
     await deps.discardUnsavedRecovery();
   }
 
@@ -227,12 +248,17 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     reloadAfterUpdate,
     commitWindowClose,
     cancelWindowClose,
+    freezeForUpdateReload,
     commitUpdateReload,
     /** The update reload was cancelled: re-enable the unload warning and backups; keep recovery. */
     cancelUpdateReload(): void {
       allowUpdateReload = false;
       pendingReloadDiscard = false;
       deps.reloadBackup.setSuppressed(false);
+      if (reloadFreezeArmed) {
+        reloadFreezeArmed = false;
+        deps.unfreezeAfterDiscard();
+      }
     },
   };
 }

@@ -133,6 +133,10 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
               // Intentional throws ("Private edits changed", backup missing, busy) must abort.
               assertSafe();
             }
+            // Freeze every window before any awaited commit so private edits cannot sneak in (#254).
+            for (const frame of editorFrames()) {
+              editorHooks(frame).__typebridgeFreezeForUpdateReload?.();
+            }
             // Deferred discard from prepare runs only once every window has asserted (#254).
             for (const frame of editorFrames()) {
               await editorHooks(frame).__typebridgeCommitUpdateReload?.();

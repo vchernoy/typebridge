@@ -20,6 +20,8 @@ export type EditorWindowApi = {
   __typebridgePrepareUpdateReload: () => Promise<boolean>;
   /** Update reload: validate and arm it; throws to abort. Does not navigate. */
   __typebridgeAssertSafeUpdateReload: () => void;
+  /** After every window asserted: freeze editors before awaited discard/navigation (#254). */
+  __typebridgeFreezeForUpdateReload: () => void;
   /** After every window asserted: run deferred discard cleanup before navigation. */
   __typebridgeCommitUpdateReload: () => void | Promise<void>;
   __typebridgeCancelUpdateReload: () => void;

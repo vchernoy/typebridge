@@ -168,4 +168,31 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     await guards.commitUpdateReload();
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
   });
+
+  it('freezes before update-reload commit and thaws on cancel', async () => {
+    // Fails if commit runs while editors stay editable, or cancel leaves them frozen (#254 P1).
+    const { guards, discardUnsavedRecovery, freezeForDiscard, unfreezeAfterDiscard, isFrozen } =
+      harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    expect(freezeForDiscard).not.toHaveBeenCalled();
+    guards.freezeForUpdateReload();
+    expect(freezeForDiscard).toHaveBeenCalledOnce();
+    expect(isFrozen()).toBe(true);
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+    await guards.commitUpdateReload();
+    expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
+    expect(isFrozen()).toBe(true);
+    guards.cancelUpdateReload();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+    expect(isFrozen()).toBe(false);
+  });
+
+  it('thaws an update-reload freeze when cancel runs without a prior discard', () => {
+    const { guards, freezeForDiscard, unfreezeAfterDiscard, isFrozen } = harness();
+    guards.freezeForUpdateReload();
+    expect(freezeForDiscard).toHaveBeenCalledOnce();
+    guards.cancelUpdateReload();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+    expect(isFrozen()).toBe(false);
+  });
 });

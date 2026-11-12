@@ -72,6 +72,51 @@ for (const failSave of [false, true]) {
   });
 }
 
+test('standalone update-reload freeze blocks edits during deferred discard (#254)', async ({ page }) => {
+  // Fails if the editor stays editable while commitUpdateReload awaits (#254 owner-account P1).
+  await waitingUpdate(page);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await setAutosave(page, false);
+  await editor.fill('Private standalone before freeze');
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+
+  const prepare = page.evaluate(async () => {
+    const hooks = window as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
+    return hooks.__typebridgePrepareUpdateReload?.() ?? false;
+  });
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click();
+  expect(await prepare).toBe(true);
+
+  await page.evaluate(() => {
+    const hooks = window as Window & {
+      __typebridgeAssertSafeUpdateReload?: () => void;
+      __typebridgeFreezeForUpdateReload?: () => void;
+      __typebridgeDelayChangeAppendMs?: number;
+    };
+    hooks.__typebridgeAssertSafeUpdateReload?.();
+    hooks.__typebridgeFreezeForUpdateReload?.();
+    hooks.__typebridgeDelayChangeAppendMs = 2_000;
+  });
+  const commit = page.evaluate(async () => {
+    await (window as Window & { __typebridgeCommitUpdateReload?: () => void | Promise<void> })
+      .__typebridgeCommitUpdateReload?.();
+  });
+  await expect(editor).toHaveAttribute('readonly', '');
+  await expect(page.locator('#draft-title')).toHaveAttribute('readonly', '');
+  await editor.pressSequentially('sneaky');
+  await expect(editor).toHaveValue('Private standalone before freeze');
+  await commit;
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeCancelUpdateReload?: () => void }).__typebridgeCancelUpdateReload?.();
+  });
+  await expect(editor).not.toHaveAttribute('readonly');
+  await expect(editor).toHaveValue('Private standalone before freeze');
+});
+
 for (const discard of [false, true]) {
   test(`privacy mode requires explicit ${discard ? 'discard' : 'keep editing'} before update reload (#137 U9)`, async ({ page }) => {
     await waitingUpdate(page);

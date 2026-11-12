@@ -1044,6 +1044,16 @@ const leaveGuards = createLeaveGuards(state, {
   },
 });
 const { prepareUpdateReload } = leaveGuards;
+// Standalone update-reload probes (same names as the embed contract) for e2e freeze coverage (#254).
+if (!embedded) {
+  Object.assign(window, {
+    __typebridgePrepareUpdateReload: leaveGuards.prepareUpdateReload,
+    __typebridgeAssertSafeUpdateReload: leaveGuards.assertSafeToReloadAfterUpdate,
+    __typebridgeFreezeForUpdateReload: leaveGuards.freezeForUpdateReload,
+    __typebridgeCommitUpdateReload: () => leaveGuards.commitUpdateReload(),
+    __typebridgeCancelUpdateReload: () => { leaveGuards.cancelUpdateReload(); },
+  });
+}
 updateStats();
 
 if (!embedded) {
@@ -1079,12 +1089,14 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(registration => watchForUpdates(registration, {
         prepareReload: prepareUpdateReload,
-        // Assert first, then commit deferred discard, then navigate — same order as the host (#254).
+        // Assert, freeze, commit deferred discard, then navigate — same order as the host (#254).
         reload: async () => {
           leaveGuards.assertSafeToReloadAfterUpdate();
-          await leaveGuards.commitUpdateReload();
-          try { window.location.reload(); }
-          catch (error) {
+          leaveGuards.freezeForUpdateReload();
+          try {
+            await leaveGuards.commitUpdateReload();
+            window.location.reload();
+          } catch (error) {
             leaveGuards.cancelUpdateReload();
             throw error;
           }
