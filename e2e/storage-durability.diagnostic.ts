@@ -1,7 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { performance } from 'node:perf_hooks';
 import { expect, test, type Page } from '@playwright/test';
 import { ownedChromium } from './owned-chromium';
 
@@ -49,24 +48,33 @@ async function installHelpers(page: Page): Promise<void> {
   }, { db: DB, lsKey: LS_KEY });
 }
 
-/** Write with `mechanism`; resolve only once the browser reported success. Returns the expected hash. */
-async function write(page: Page, mechanism: Mechanism, length: number): Promise<string> {
+/**
+ * Write with `mechanism`; resolve once the browser reported success. Returns the expected hash,
+ * computed before the write, and the wall-clock time success was reported, so the kill delay is
+ * measured from that moment and nothing else runs in between (#249 review).
+ */
+async function write(page: Page, mechanism: Mechanism, length: number): Promise<{ expected: string; reportedAt: number; writeMs: number }> {
   return page.evaluate(async ({ mechanism, length, appends }) => {
     const w = window as unknown as {
       r2cText: (n: number) => string; r2cHash: (t: string) => string; r2cOpen: () => Promise<IDBDatabase>; r2cLsKey: string;
     };
     if (mechanism === 'localStorage') {
       const text = w.r2cText(length);
+      const expected = w.r2cHash(text);
+      const issued = Date.now();
       localStorage.setItem(w.r2cLsKey, text);
-      return w.r2cHash(text);
+      const reportedAt = Date.now();
+      return { expected, reportedAt, writeMs: reportedAt - issued };
     }
     const db = await w.r2cOpen();
+    let reportedAt = 0;
     const done = (tx: IDBTransaction) => new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+      tx.oncomplete = () => { reportedAt = Date.now(); resolve(); }; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
     });
     if (mechanism === 'idb-append') {
       // One transaction per change, issued back to back like keystrokes; all must report complete.
       const pending: Promise<void>[] = [];
+      const issued = Date.now();
       for (let seq = 1; seq <= appends; seq++) {
         const tx = db.transaction('log', 'readwrite');
         tx.objectStore('log').put({ seq, delta: [seq, '', 'а'] });
@@ -74,14 +82,16 @@ async function write(page: Page, mechanism: Mechanism, length: number): Promise<
       }
       await Promise.all(pending);
       db.close();
-      return 'seq:' + appends;
+      return { expected: 'seq:' + appends, reportedAt, writeMs: reportedAt - issued };
     }
     const text = w.r2cText(length);
+    const expected = w.r2cHash(text);
+    const issued = Date.now();
     const tx = db.transaction('docs', 'readwrite', { durability: mechanism === 'idb-strict' ? 'strict' : 'default' });
     tx.objectStore('docs').put({ id: 'doc', text });
     await done(tx);
     db.close();
-    return w.r2cHash(text);
+    return { expected, reportedAt, writeMs: reportedAt - issued };
   }, { mechanism, length, appends: APPENDS });
 }
 
@@ -137,13 +147,13 @@ for (const repeat of [1, 2]) for (const delayMs of [0, 1000]) for (const { mecha
       await page.goto(new URL(PAGE, baseURL!).href);
       await installHelpers(page);
       evidence.stage = 'write';
-      const started = performance.now();
-      const expected = await write(page, mechanism, length);
-      evidence.writeMs = Math.round(performance.now() - started);
-      const reportedAt = performance.now();
-      if (delayMs) await page.waitForTimeout(delayMs);
-      evidence.actualDelayMs = Math.round(performance.now() - reportedAt);
+      const { expected, reportedAt, writeMs } = await write(page, mechanism, length);
+      evidence.writeMs = writeMs;
+      // The delay counts from the reported success, including the round trip back to the test.
+      const remaining = delayMs - (Date.now() - reportedAt);
+      if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
       evidence.stage = 'kill';
+      evidence.actualDelayMs = Date.now() - reportedAt;
       await browser.kill();
       evidence.stage = 'restart';
       page = await (await browser.launch()).newPage();
@@ -166,60 +176,70 @@ for (const repeat of [1, 2]) for (const delayMs of [0, 1000]) for (const { mecha
   });
 }
 
-test('per-change cost: full copy vs append, by document size (#37 R2c)', async ({ page, baseURL }, testInfo) => {
+test('per-change cost: full copy vs append, by document size (#37 R2c)', async ({ playwright, baseURL }, testInfo) => {
   test.setTimeout(180_000);
-  await page.goto(new URL(PAGE, baseURL!).href);
-  await installHelpers(page);
-  const results = await page.evaluate(async ({ sizes, runs }) => {
-    const w = window as unknown as { r2cText: (n: number) => string; r2cOpen: () => Promise<IDBDatabase>; r2cLsKey: string };
-    const median = (values: number[]) => { const sorted = [...values].sort((a, b) => a - b); return Math.round(sorted[Math.floor(sorted.length / 2)]! * 100) / 100; };
-    const db = await w.r2cOpen();
-    const done = (tx: IDBTransaction) => new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
-    });
-    const out: Record<string, unknown>[] = [];
-    let seq = 0;
-    for (const size of sizes) {
-      const text = w.r2cText(size);
-      const row: Record<string, unknown> = { size };
-      // Today's journal: the whole text and title as JSON, synchronously, on every edit.
-      const ls: number[] = [];
-      try {
+  test.skip(process.platform !== 'linux', 'Requires Linux detached process groups; no claim for other platforms');
+  // Same launcher (and DIAGNOSTIC_CHROMIUM) as the kill cases, so cost and durability come from one browser (#249 review).
+  const profile = await mkdtemp(join(tmpdir(), 'typebridge-r2c-cost-'));
+  const browser = ownedChromium(playwright, profile);
+  try {
+    const page = await (await browser.launch()).newPage();
+    await page.goto(new URL(PAGE, baseURL!).href);
+    await installHelpers(page);
+    const results = await page.evaluate(async ({ sizes, runs }) => {
+      const w = window as unknown as { r2cText: (n: number) => string; r2cOpen: () => Promise<IDBDatabase>; r2cLsKey: string };
+      const median = (values: number[]) => { const sorted = [...values].sort((a, b) => a - b); return Math.round(sorted[Math.floor(sorted.length / 2)]! * 100) / 100; };
+      const db = await w.r2cOpen();
+      const done = (tx: IDBTransaction) => new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+      });
+      const out: Record<string, unknown>[] = [];
+      let seq = 0;
+      for (const size of sizes) {
+        const text = w.r2cText(size);
+        const row: Record<string, unknown> = { size };
+        // Today's journal: the whole text and title as JSON, synchronously, on every edit.
+        const ls: number[] = [];
+        try {
+          for (let i = 0; i < runs; i++) {
+            const t = performance.now();
+            localStorage.setItem(w.r2cLsKey, JSON.stringify({ title: 'T', text: text + i }));
+            ls.push(performance.now() - t);
+          }
+          row.localStorageFullMs = median(ls);
+        } catch { row.localStorageFullMs = 'quota-exceeded'; }
+        localStorage.removeItem(w.r2cLsKey);
+        // Today's Autosave: the whole record in one transaction, until it reports complete.
+        const full: number[] = [];
         for (let i = 0; i < runs; i++) {
           const t = performance.now();
-          localStorage.setItem(w.r2cLsKey, JSON.stringify({ title: 'T', text: text + i }));
-          ls.push(performance.now() - t);
+          const tx = db.transaction('docs', 'readwrite');
+          tx.objectStore('docs').put({ id: 'doc', text: text + i });
+          await done(tx);
+          full.push(performance.now() - t);
         }
-        row.localStorageFullMs = median(ls);
-      } catch { row.localStorageFullMs = 'quota-exceeded'; }
-      localStorage.removeItem(w.r2cLsKey);
-      // Today's Autosave: the whole record in one transaction, until it reports complete.
-      const full: number[] = [];
-      for (let i = 0; i < runs; i++) {
-        const t = performance.now();
-        const tx = db.transaction('docs', 'readwrite');
-        tx.objectStore('docs').put({ id: 'doc', text: text + i });
-        await done(tx);
-        full.push(performance.now() - t);
+        row.idbFullMs = median(full);
+        // Proposed: one small change record, until it reports complete; the document size should not matter.
+        const append: number[] = [];
+        for (let i = 0; i < runs; i++) {
+          const t = performance.now();
+          const tx = db.transaction('log', 'readwrite');
+          tx.objectStore('log').put({ seq: ++seq, delta: [size, '', 'а'] });
+          await done(tx);
+          append.push(performance.now() - t);
+        }
+        row.idbAppendMs = median(append);
+        out.push(row);
       }
-      row.idbFullMs = median(full);
-      // Proposed: one small change record, until it reports complete; the document size should not matter.
-      const append: number[] = [];
-      for (let i = 0; i < runs; i++) {
-        const t = performance.now();
-        const tx = db.transaction('log', 'readwrite');
-        tx.objectStore('log').put({ seq: ++seq, delta: [size, '', 'а'] });
-        await done(tx);
-        append.push(performance.now() - t);
-      }
-      row.idbAppendMs = median(append);
-      out.push(row);
-    }
-    db.close();
-    return out;
-  }, { sizes: [100_000, 1_000_000, 10_000_000], runs: 7 });
-  const evidence = { platform: process.platform, node: process.version, browserVersion: page.context().browser()?.version(), runs: 7, results };
-  await testInfo.attach('storage-cost-evidence.json', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
-  console.log('STORAGE_COST_EVIDENCE', JSON.stringify(evidence));
-  expect(results).toHaveLength(3);
+      db.close();
+      return out;
+    }, { sizes: [100_000, 1_000_000, 10_000_000], runs: 7 });
+    const evidence = { platform: process.platform, node: process.version, browserVersion: browser.version(), runs: 7, results };
+    await testInfo.attach('storage-cost-evidence.json', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
+    console.log('STORAGE_COST_EVIDENCE', JSON.stringify(evidence));
+    expect(results).toHaveLength(3);
+  } finally {
+    try { await browser.kill(); }
+    finally { await rm(profile, { recursive: true, force: true }); }
+  }
 });
