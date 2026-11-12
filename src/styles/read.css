@@ -1,0 +1,70 @@
+/* Reading page for share links (#39): a plain, quiet web page. Loaded only by read.html. */
+body.read-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--text);
+}
+.read-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 16px 20px 0;
+  box-sizing: border-box;
+}
+.read-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.read-edit {
+  min-height: 44px;
+  padding: 0 14px;
+}
+.read-main {
+  flex: 1;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 8px 20px 32px;
+  box-sizing: border-box;
+}
+.read-title {
+  margin: 16px 0 20px;
+  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.read-notice {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--warning);
+}
+/* The shared text as written: line breaks and spaces kept, long words wrapped. */
+.read-text {
+  font-size: 1.1rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+.read-text--message {
+  color: var(--muted);
+}
+.read-status:empty {
+  display: none;
+}
+.read-footer {
+  padding: 16px 20px 24px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}

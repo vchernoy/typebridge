@@ -40,7 +40,7 @@ export type SharedDocument = {
 
 export type DecodeFailure = 'missing' | 'version' | 'too-large' | 'malformed';
 /** A link is only offered when this build can open it again: same limits as decoding. */
-export type EncodedShare = { ok: true; payload: string } | { ok: false; reason: 'too-large' };
+export type EncodedShare = { ok: true; payload: string } | { ok: false; reason: 'too-large' | 'format' };
 export type DecodedShare =
   | { ok: true; document: SharedDocument; knownFormat: boolean }
   | { ok: false; reason: DecodeFailure };
@@ -95,11 +95,14 @@ async function decompress(bytes: Uint8Array<ArrayBuffer>, maxBytes: number): Pro
 
 /**
  * The payload for `#doc=`: `1.` followed by base64url of the compressed JSON. Refused
- * (`too-large`) whenever decoding would refuse it: more than SHARE_DECOMPRESSED_MAX_BYTES of
+ * whenever decoding would refuse it: `format` for a format name decoding rejects, and
+ * `too-large` for more than SHARE_DECOMPRESSED_MAX_BYTES of
  * JSON (very repetitive text compresses below the payload limit but still cannot be opened),
  * or a payload longer than SHARE_PAYLOAD_MAX_CHARS.
  */
 export async function encodeSharePayload(document: SharedDocument): Promise<EncodedShare> {
+  // Same format rule as decoding, so no link carries a format this build would reject.
+  if (!FORMAT_PATTERN.test(document.format)) return { ok: false, reason: 'format' };
   const json = JSON.stringify({
     title: document.title.slice(0, SHARE_TITLE_MAX),
     text: document.text,

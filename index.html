@@ -7,6 +7,16 @@
       // `/` is the multi-window host (#175). Editor links made before the cutover
       // (comparison `?doc=…&mode=view`, `?doc=`, `?window=`, `?embed=1`) still open the editor.
       (() => {
+        // A share link (#39): the document is in the #doc= fragment, which never reaches a server.
+        // Pasting one into an open TypeBridge tab changes only the fragment, so listen as well.
+        window.addEventListener('hashchange', () => {
+          if (location.hash.startsWith('#doc=')) location.assign('/read.html' + location.hash);
+        });
+        if (location.hash.startsWith('#doc=')) {
+          document.documentElement.dataset.forwarding = '1';
+          location.replace('/read.html' + location.hash);
+          return;
+        }
         const params = new URLSearchParams(location.search);
         if (['mode', 'doc', 'window', 'embed'].some(name => params.has(name))) {
           // src/host/entry.ts checks this and does not start the host while leaving.

@@ -76,7 +76,12 @@ export type WindowManager = {
   openDocumentIds: (exceptWindowId?: string) => string[];
   /** Live on-screen titles across windows (for distinct Untitled defaults). */
   openTitles: (exceptWindowId?: string) => string[];
-  addWindow: () => string | undefined;
+  addWindow: (documentId?: string) => string | undefined;
+  /**
+   * Show a saved document: activate the window that already shows it, else open a new window
+   * for it. Leaves host Focus first, so `full` only means every window is open (the cap).
+   */
+  openDocument: (documentId: string) => 'shown' | 'opened' | 'full';
   closeWindow: (id: string) => Promise<boolean>;
   tileSideBySide: () => void;
   tileStacked: () => void;
@@ -787,7 +792,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       }
       return titles;
     },
-    addWindow: () => {
+    addWindow: (documentId?: string) => {
       if (hostFocus || layouts.length >= MAX_HOST_WINDOWS) return undefined;
       const view = viewportOf(deps.root);
       const id = mintWindowId(layouts.map(w => w.id));
@@ -796,6 +801,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         id,
         ...defaultRectForIndex(layouts.length, view),
         z: maxZ + 1,
+        ...(documentId ? { documentId } : {}),
       };
       layouts = [...layouts, win];
       createShell(win);
@@ -804,6 +810,32 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       applyModeChrome();
       persist();
       return id;
+    },
+    openDocument: (documentId: string) => {
+      // The window's current document (it may have switched since the layout was saved).
+      const shownIn = (win: HostWindowLayout): string | undefined => {
+        const frame = frames.get(win.id);
+        return (frame && deps.readDocumentId ? deps.readDocumentId(frame) : undefined) ?? win.documentId;
+      };
+      // A restored Focus would refuse a new window although fewer than the cap are open, and
+      // its one maximized window cannot be closed (#246 review): show the copy outside Focus.
+      if (hostFocus) api.setHostFocusMode(false);
+      const existing = layouts.find(win => shownIn(win) === documentId);
+      if (existing) { setActive(existing.id); return 'shown'; }
+      // The primary window, still starting without a document (a first visit: no saved layout or
+      // remembered document), opens the newest saved one, which is this copy (view/boot.ts;
+      // other windows open a fresh document). Load the copy there instead of opening it twice
+      // (#246 review).
+      const unassigned = layouts.find(win => win.id === 'main' && shownIn(win) === undefined);
+      if (unassigned) {
+        layouts = layouts.map(win => (win.id === unassigned.id ? { ...win, documentId } : win));
+        const frame = frames.get(unassigned.id);
+        if (frame) frame.src = deps.editorSrc(unassigned.id, documentId);
+        setActive(unassigned.id);
+        persist();
+        return 'shown';
+      }
+      return api.addWindow(documentId) ? 'opened' : 'full';
     },
     closeWindow: async (id: string) => {
       if (layouts.length <= 1) return false;

@@ -380,3 +380,20 @@ body.host-focus-mode .host-window.is-host-focused {
 body.host-page .update-notice {
   position: relative;
 }
+/* Short confirmation over the windows (e.g. a shared document saved as a copy, #39). An
+   overlay, so showing and removing it never moves or resizes the windows. */
+.host-status {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  z-index: 1000;
+  transform: translateX(-50%);
+  max-width: min(90vw, 640px);
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+}

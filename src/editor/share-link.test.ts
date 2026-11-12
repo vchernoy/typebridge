@@ -127,6 +127,10 @@ describe('encoding refuses what decoding would refuse', () => {
     while (text.length < SHARE_PAYLOAD_MAX_CHARS) { seed = (seed * 48271) % 2147483647; text += String.fromCharCode(0x4e00 + (seed % 20000)); }
     expect(await encodeSharePayload(doc(text))).toEqual({ ok: false, reason: 'too-large' });
   });
+  it('refuses a format name that decoding would reject (#245 review)', async () => {
+    expect(await encodeSharePayload(doc('x', { format: '<script>' }))).toEqual({ ok: false, reason: 'format' });
+    expect(await encodeSharePayload(doc('x', { format: '' }))).toEqual({ ok: false, reason: 'format' });
+  });
   it('accepts the largest document that still opens', async () => {
     const text = 'Строка. '.repeat(50_000); // about 700 KB of UTF-8, very compressible
     const result = await encodeSharePayload(doc(text));
