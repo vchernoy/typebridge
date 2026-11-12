@@ -251,22 +251,32 @@ test('crash recovery from the change log keeps another run\'s text as a copy, on
     const copy = await api.salvageChanges(db, 'crash', owner, 'rec-1', undefined, 5);
     const left = await api.listChanges(db, 'crash');
     const again = await api.salvageChanges(db, 'crash', owner, 'rec-2', undefined, 6);
-    // Text this window already shows (a handoff) is not recovered again.
+    // Lost text that is only what this window shows (a reload backup, a handoff) is not stored
+    // yet: no copy, and the records stay (#252 review)...
     await api.appendChange(db, crashed(1, [6, '', '!'], 7), owner);
     const shown = await api.salvageChanges(db, 'crash', owner, 'rec-3', undefined, 7, 'Привет!');
+    const keptForShown = (await api.listChanges(db, 'crash')).length;
+    // ...so after another restart (nothing shown) the same text is still recovered.
+    const afterRestart = await api.salvageChanges(db, 'crash', owner, 'rec-3', undefined, 8);
+    // A save that stores the lost text itself removes the records with no copy, in one transaction.
+    await api.appendChange(db, crashed(1, [6, '', '#'], 7), owner);
+    const sameText = await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет#', updatedAt: 9, upTo: 0 }, 1, 'c3', owner, { keepRun: 'mine', recoveryId: 'rec-x' });
+    const afterSameText = (await api.listChanges(db, 'crash')).length;
     // A save of a new run first keeps a crashed run's text, in the same transaction.
-    await api.appendChange(db, crashed(1, [6, '', '?'], 7), owner);
-    const saved = await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет, друг', updatedAt: 8, upTo: 0 }, 1, 'c2', owner, { keepRun: 'mine', recoveryId: 'rec-4' });
+    await api.appendChange(db, crashed(1, [7, '', '?'], 8), owner);
+    const saved = await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет, друг', updatedAt: 10, upTo: 0 }, 2, 'c2', owner, { keepRun: 'mine', recoveryId: 'rec-4' });
     const original = await api.getStoredDraft(db, 'crash');
     const ids = (await api.listStoredDrafts(db)).map(d => d.id).sort();
     db.close();
     return {
-      copy: copy && { id: copy.id, title: copy.title, text: copy.text }, left: left.length, again, shown,
+      copy: copy && { id: copy.id, title: copy.title, text: copy.text }, left: left.length, again, shown, keptForShown,
+      afterRestart: afterRestart?.text, sameText: sameText.recovered, afterSameText,
       saved: saved.recovered && { id: saved.recovered.id, text: saved.recovered.text }, original: original?.text, ids,
     };
   });
   expect(result).toEqual({
-    copy: { id: 'rec-1', title: 'Заметка (recovered)', text: 'Привет, мир 🙂' }, left: 0, again: undefined, shown: undefined,
-    saved: { id: 'rec-4', text: 'Привет?' }, original: 'Привет, друг', ids: ['crash', 'rec-1', 'rec-4'],
+    copy: { id: 'rec-1', title: 'Заметка (recovered)', text: 'Привет, мир 🙂' }, left: 0, again: undefined, shown: undefined, keptForShown: 1,
+    afterRestart: 'Привет!', sameText: undefined, afterSameText: 0,
+    saved: { id: 'rec-4', text: 'Привет#?' }, original: 'Привет, друг', ids: ['crash', 'rec-1', 'rec-3', 'rec-4'],
   });
 });

@@ -37,8 +37,6 @@ export type SaverDeps = {
     edit: () => void;
     idle: () => Promise<void>;
     upToForSave: (documentId: string, savedText: string) => { upTo: number; keepRun: string };
-    /** The run this window has for `documentId`, if any (its records are never salvaged). */
-    runOf: (documentId: string) => string | undefined;
     /** Whether the save prepared by upToForSave for `run` committed its text. */
     saved: (run: string, ok: boolean) => void;
   };
