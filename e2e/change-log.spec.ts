@@ -156,3 +156,33 @@ test('upgrading a version 2 database keeps documents and ownership and adds the 
   await page.keyboard.type('?');
   await expect.poll(() => rebuilt(page)).toBe('Текст v2!?');
 });
+
+test('after a tab crash, unsaved text from the change log comes back as a copy without a click (#37 R2c)', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Page.crash requires Chromium CDP');
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.locator('#draft-title').fill('Заметка');
+  await field.fill('Оригинал');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  // Saves are held, so the unsaved text exists only in the change log (and the journal).
+  await holdSaves(page);
+  await field.press('End');
+  await page.keyboard.type(' — несохранённое 🙂');
+  await expect.poll(() => rebuilt(page)).toBe('Оригинал — несохранённое 🙂');
+  const crashed = page.waitForEvent('crash');
+  const cdp = await context.newCDPSession(page);
+  void cdp.send('Page.crash').catch(() => { /* The renderer closes the command; the crash event is required. */ });
+  await crashed;
+  const next = await context.newPage();
+  await next.goto('/editor.html');
+  await expect(next.locator('#editor')).toHaveValue('Оригинал');
+  await expect(next.locator('#status')).toContainText('Recovered unsaved text from an earlier session as “Заметка (recovered)”');
+  const log = await readLog(next);
+  expect(log.rows.find(row => row.text === 'Оригинал — несохранённое 🙂')).toBeDefined();
+  expect(log.rows.find(row => row.text === 'Оригинал')).toBeDefined();
+  expect(log.changes).toEqual([]);
+  // The journal held the same text and title: it is not offered a second time.
+  await expect(next.getByRole('button', { name: /^Recover / })).toHaveCount(0);
+  await page.close();
+});

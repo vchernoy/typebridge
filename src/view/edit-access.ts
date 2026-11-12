@@ -35,6 +35,8 @@ export type EditAccessDeps = {
   updateSaveIndicator: () => void;
   /** #175 step 7: pick up host Autosave changes made while this window was read-only. */
   syncAutosaveCheckboxFromStorage: () => void;
+  /** This window became the editing owner of `documentId` (#37 R2c crash recovery). */
+  onOwned: (documentId: string) => void;
   showDraft: () => void;
   cancelSave: () => void;
   saveSoon: () => void;
@@ -129,6 +131,7 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
     state.editBlock = next.block;
     if (previous && previous !== state.ownership) void previous.release();
     applyEditAccess();
+    if (state.ownership && state.editBlock === '') deps.onOwned(state.ownership.documentId);
     // #175 step 7: pick up host Autosave changes that arrived while this window was read-only.
     if (state.editBlock === '') syncAutosaveCheckboxFromStorage();
   }

@@ -1,4 +1,4 @@
-import type { ChangeRecord } from './change-log';
+import { replayText, type ChangeRecord } from './change-log';
 import type { EditorHistory } from './editor';
 import { EDIT_OWNERSHIP_STORE, nextOwnershipFence, ownershipFenceAllowsWrite, type EditOwnershipRecord } from '../view/ownership';
 
@@ -48,6 +48,25 @@ async function pruneChanges(store: IDBObjectStore, documentId: string, upTo: num
   for (const record of records) {
     if (record.run !== keepRun || record.seq <= upTo) await request(store.delete([documentId, record.seq]));
   }
+}
+
+/**
+ * Crash recovery from the change log (#37 R2c): what other runs' records (not `keepRun`'s) add to
+ * the stored row `current`, the text they continue. Undefined when they add nothing.
+ */
+async function replayOtherRuns(tx: IDBTransaction, current: StoredDraft | undefined, keepRun: string | undefined): Promise<string | undefined> {
+  if (!current) return undefined;
+  const records = (await request(tx.objectStore(CHANGES).getAll(changesOf(current.id))) as ChangeRecord[])
+    .filter(record => record.run !== keepRun);
+  const replay = replayText(current.id, current.text, current.upTo ?? 0, records);
+  return replay.applied === 0 || replay.text === current.text ? undefined : replay.text;
+}
+
+/** Keep recovered text as a new document "<title> (recovered)". */
+async function addRecoveredCopy(tx: IDBTransaction, current: StoredDraft, text: string, recoveryId: string, now: number): Promise<StoredDraft> {
+  const copy: StoredDraft = { id: recoveryId, title: current.title + ' (recovered)', text, updatedAt: now, revision: 1, upTo: 0 };
+  await request(tx.objectStore(STORE).add(copy));
+  return copy;
 }
 
 /** All change records of `documentId` with change-id at most `upTo` (all when omitted). */
@@ -158,11 +177,12 @@ export async function commitOrCreateConflictCopy(
   owner?: WriteFence,
   /**
    * The editing run that continues this text (#37 R2c): the commit keeps only its records
-   * after `upTo`. Without it (a new document from import or a share link), only records up to
-   * `upTo` are removed.
+   * after `upTo`, and first saves what other runs' records add to the stored text as a recovered
+   * copy with id `recoveryId`. Without it (a new document from import or a share link), only
+   * records up to `upTo` are removed.
    */
-  changes?: { keepRun: string },
-): Promise<{ draft: StoredDraft; conflict: boolean }> {
+  changes?: { keepRun: string; recoveryId: string },
+): Promise<{ draft: StoredDraft; conflict: boolean; recovered?: StoredDraft }> {
   if (!copyId || copyId === draft.id) throw new Error('Conflict copy requires a distinct ID');
   const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES] : [STORE, CHANGES], 'readwrite');
   const done = finished(tx);
@@ -174,14 +194,20 @@ export async function commitOrCreateConflictCopy(
     const next: StoredDraft = conflict
       ? { ...draft, id: copyId, title: draft.title + ' (conflict copy)', revision: 1, upTo: 0 }
       : { ...draft, revision: expectedRevision + 1, upTo: draft.upTo ?? 0 };
+    let recovered: StoredDraft | undefined;
     if (conflict) await request(store.add(next));
     else {
       await request(store.put(next));
-      if (changes) await pruneChanges(tx.objectStore(CHANGES), next.id, next.upTo ?? 0, changes.keepRun);
-      else if (next.upTo) await request(tx.objectStore(CHANGES).delete(changesOf(next.id, next.upTo)));
+      if (changes) {
+        // Other runs' text is kept as a copy before their records go, unless this very commit
+        // stores the same text (same transaction, so it is durable either way).
+        const lost = await replayOtherRuns(tx, current, changes.keepRun);
+        if (current && lost !== undefined && lost !== next.text) recovered = await addRecoveredCopy(tx, current, lost, changes.recoveryId, draft.updatedAt);
+        await pruneChanges(tx.objectStore(CHANGES), next.id, next.upTo ?? 0, changes.keepRun);
+      } else if (next.upTo) await request(tx.objectStore(CHANGES).delete(changesOf(next.id, next.upTo)));
     }
     await done;
-    return { draft: next, conflict };
+    return recovered ? { draft: next, conflict, recovered } : { draft: next, conflict };
   } catch (error) {
     try { tx.abort(); } catch { /* Already finished or aborted. */ }
     void done.catch(() => undefined);
@@ -293,4 +319,43 @@ export async function listChanges(db: IDBDatabase, documentId: string): Promise<
   const records = await request(tx.objectStore(CHANGES).getAll(changesOf(documentId))) as ChangeRecord[];
   await done;
   return records;
+}
+
+/**
+ * When a window starts editing `documentId` (#37 R2c): changes another run left after the stored
+ * row (a window that crashed or was killed) are replayed and kept as a recovered copy, and those
+ * records are removed, in one transaction under the ownership fence. `keepRun` is this window's
+ * own run, if it has one. Returns the copy, or undefined when nothing was lost or the lost text
+ * is what this window shows (then the records stay until a save commits it).
+ */
+export async function salvageChanges(
+  db: IDBDatabase, documentId: string, owner: WriteFence, recoveryId: string, keepRun: string | undefined, now: number,
+  /**
+   * Text this window shows (e.g. a reload backup or a handoff). When the lost text is exactly
+   * this, no copy is made and the records are kept: shown text is not stored yet.
+   */
+  shownText?: string,
+): Promise<StoredDraft | undefined> {
+  const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, documentId, owner);
+    const current = await request(tx.objectStore(STORE).get(documentId)) as StoredDraft | undefined;
+    const lost = await replayOtherRuns(tx, current, keepRun);
+    // Shown text is not durable (a reload backup, a handoff): when it is the lost text, keep the
+    // records; the save that commits that text removes them in its own transaction (#252 review).
+    if (lost !== undefined && lost === shownText) { await done; return undefined; }
+    const recovered = current && lost !== undefined ? await addRecoveredCopy(tx, current, lost, recoveryId, now) : undefined;
+    const store = tx.objectStore(CHANGES);
+    const records = await request(store.getAll(changesOf(documentId))) as ChangeRecord[];
+    for (const record of records) {
+      if (record.run !== keepRun) await request(store.delete([documentId, record.seq]));
+    }
+    await done;
+    return recovered;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
 }

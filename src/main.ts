@@ -39,7 +39,7 @@ import {
 import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, type StoredDraft } from './editor/indexeddb';
+import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, type StoredDraft } from './editor/indexeddb';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
@@ -47,7 +47,7 @@ import {
   contentCommandStillCurrent,
   type CommandGeneration,
 } from './view/session';
-import { writeRecovery } from './editor/recovery';
+import { clearRecovery, listRecovery, writeRecovery } from './editor/recovery';
 import { lineColumnAtOffset } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
 import { setupSearch } from './ui/search';
@@ -631,6 +631,7 @@ const editAccess = createEditAccess(state, statusLine, {
   syncMutationControls: () => { syncMutationControls(); },
   updateSaveIndicator: () => { updateSaveIndicator(); },
   syncAutosaveCheckboxFromStorage: () => { syncAutosaveCheckboxFromStorage(); },
+  onOwned: documentId => { void salvageOnOwn(documentId); },
   showDraft: () => { showDraft(); },
   cancelSave: () => { saver.cancel(); },
   saveSoon: () => { saver.saveSoon(); },
@@ -666,6 +667,29 @@ const changeWriter = createChangeWriter({
   },
   newRunId: () => crypto.randomUUID(),
 });
+/** A crashed window's unsaved text was kept as a copy (#37 R2c): list it and say so. */
+async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<void> {
+  postSignal('saved', copy.id, copy.revision);
+  // The localStorage journal may hold the same text: drop only an entry the copy exactly matches.
+  try {
+    for (const item of listRecovery(localStorage)) {
+      if (item.documentId === sourceId && item.text === copy.text && item.title + ' (recovered)' === copy.title) clearRecovery(localStorage, item);
+    }
+    void renderRecovery();
+  } catch { /* Storage blocked: the journal panel stays as it was. */ }
+  try { await refreshDrafts(); } catch { /* The copy is stored; the list catches up on focus. */ }
+  statusLine.announceAction(`Recovered unsaved text from an earlier session as “${copy.title}” in Documents. Your current document was kept.`);
+}
+/** On starting to edit a document, keep what a crashed window typed into it as a copy. */
+async function salvageOnOwn(documentId: string): Promise<void> {
+  if (viewMode || !state.db) return;
+  const ownership = state.ownership;
+  if (!ownership || ownership.documentId !== documentId) return;
+  try {
+    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value);
+    if (copy) await announceRecovered(copy, documentId);
+  } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
+}
 const saver = createSaver(state, statusLine, {
   viewMode, autosave, draftTitle, workspace, writingPosition,
   snapshot: () => snapshot(),
@@ -677,6 +701,7 @@ const saver = createSaver(state, statusLine, {
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   journalEdit: () => { journalEdit(); },
   changes: changeWriter,
+  onRecovered: (copy, sourceId) => { void announceRecovered(copy, sourceId); },
   rememberActive: () => { rememberActive(); },
   updateSaveIndicator: () => { updateSaveIndicator(); },
   syncTitleTooltip: () => { syncTitleTooltip(); },
