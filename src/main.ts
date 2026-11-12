@@ -1015,6 +1015,8 @@ const leaveGuards = createLeaveGuards(state, {
   viewMode, field, autosave, workspace, saver, reloadBackup, recovery,
   persist: () => persist(),
   snapshot: () => snapshot(),
+  freezeForDiscard: () => { freezeEditorsForTransition(); },
+  unfreezeAfterDiscard: () => { unfreezeEditorsAfterTransition(); },
   // Explicit discard: drop the journal and this run's change-log records so salvage cannot bring them back (#37 R2c 2d-2).
   discardUnsavedRecovery: async () => {
     const discardedJournal = recovery.takeCurrentJournal();

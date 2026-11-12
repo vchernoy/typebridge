@@ -32,6 +32,10 @@ export type LeaveGuardDeps = {
    * records for this document so a later owner does not recover what was discarded (#37 R2c 2d-2).
    */
   discardUnsavedRecovery: () => Promise<void>;
+  /** Freeze body + title editors (and mutation controls) for the discard-cleanup window. */
+  freezeForDiscard: () => void;
+  /** Undo freezeForDiscard when the leave aborts after cleanup. */
+  unfreezeAfterDiscard: () => void;
 };
 
 export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
@@ -73,22 +77,53 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     }
   }
 
+  /**
+   * Confirm discard, then clear recovery while the editors are frozen. Consent is bound to the
+   * content revision shown in the dialog: if edits arrive during the dialog, abort before clearing;
+   * freeze blocks further edits during the async clear so consent stays bound (#254 Codex P1).
+   *
+   * `keepFrozenOnSuccess`: for window close, leave editors frozen until the host commits removal.
+   * For update-reload, thaw so a later private edit can bump contentRevision and fail the assert.
+   */
+  async function confirmDiscardAndClear(
+    prompt: { title: string; message: string; confirmLabel: string },
+    keepFrozenOnSuccess: boolean,
+  ): Promise<boolean> {
+    const contentAtPrompt = deps.workspace.contentRevision();
+    const discard = await askConfirmChoice({
+      ...prompt,
+      cancelLabel: 'Keep editing',
+      returnFocus: updateReloadReturnFocus(),
+    });
+    if (!discard) return false;
+    // Edits while the dialog was open: do not clear recovery for a newer, unconsented version.
+    if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
+    deps.freezeForDiscard();
+    try {
+      await deps.discardUnsavedRecovery();
+      const stillSame = deps.workspace.contentRevision() === contentAtPrompt;
+      if (!stillSame || !keepFrozenOnSuccess) deps.unfreezeAfterDiscard();
+      return stillSame;
+    } catch (error) {
+      deps.unfreezeAfterDiscard();
+      throw error;
+    }
+  }
+
   async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
     if (state.transitioning || state.deleting || deps.field.disabled) return false;
     privateReloadChoice = undefined;
     if (deps.workspace.dirty() && !deps.autosave.checked) {
-      const discard = await askConfirmChoice({
+      const contentAtPrompt = deps.workspace.contentRevision();
+      const discarded = await confirmDiscardAndClear({
         title: kind === 'close' ? 'Close without saving?' : 'Reload without saving?',
         message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
         confirmLabel: kind === 'close' ? 'Discard changes and close' : 'Discard changes and reload',
-        cancelLabel: 'Keep editing',
-        returnFocus: updateReloadReturnFocus(),
-      });
-      if (discard) {
-        privateReloadChoice = { id: state.active.id, generation: deps.workspace.contentRevision() };
-        await deps.discardUnsavedRecovery();
+      }, kind === 'close');
+      if (discarded) {
+        privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
       }
-      return discard;
+      return discarded;
     }
     deps.reloadBackup.save();
     if (deps.workspace.dirty()) await deps.persist();
@@ -99,15 +134,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     if (kind === 'reload') return primaryOk;
     // Close: a session backup is not enough — closing removes the iframe and must not
     // silently destroy the only copy after a failed save. Ask for explicit discard.
-    const discard = await askConfirmChoice({
+    return confirmDiscardAndClear({
       title: 'Close and discard unsaved changes?',
       message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
       confirmLabel: 'Discard changes and close',
-      cancelLabel: 'Keep editing',
-      returnFocus: updateReloadReturnFocus(),
-    });
-    if (discard) await deps.discardUnsavedRecovery();
-    return discard;
+    }, true);
   }
   async function prepareUpdateReload(): Promise<boolean> {
     return prepareLeaveWithUnsaved('reload');
