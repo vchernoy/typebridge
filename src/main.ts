@@ -754,6 +754,7 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   refreshDrafts: () => refreshDrafts(),
   loseOwnership: () => { loseOwnership(); },
+  abandonChangeRun: () => { changeWriter.abandon(); },
 });
 const applyAutosaveChange = autosaveToggle.apply;
 const syncAutosaveCheckboxFromStorage = autosaveToggle.syncFromStorage;

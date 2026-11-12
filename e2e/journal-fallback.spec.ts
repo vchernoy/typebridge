@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setAutosave } from './settings-helpers';
 
 /** Keys for the emergency localStorage journal (#53 / #37 R2c). */
 async function journalKeys(page: import('@playwright/test').Page): Promise<string[]> {
@@ -148,6 +149,35 @@ test('after a later change-log failure the journal is written again (#254)', asy
   await page.keyboard.type('!');
   await expect.poll(() => journalPayloads(page)).toEqual(
     expect.arrayContaining([expect.objectContaining({ text: 'Основа!' })]),
+  );
+});
+
+test('after Delete saved copy, Autosave-on typing journals until a new save commits (#254)', async ({ page }) => {
+  // Fails if protects() stays true after deleteStoredDraft removed the durable base (#254 Codex P1).
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Сохранённая база');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await field.press('End');
+  await page.keyboard.type('!');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    for (const key of Object.keys(localStorage).filter(k => k.startsWith('typebridge.recovery.v1.'))) localStorage.removeItem(key);
+  });
+  expect(await journalKeys(page)).toEqual([]);
+
+  await setAutosave(page, false, 'delete');
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+  // Turn Autosave back on with no edit yet, then hold the ensuing full save.
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 60_000;
+  });
+  await setAutosave(page, true);
+  await field.press('End');
+  await page.keyboard.type('?');
+  await expect.poll(() => journalPayloads(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ text: 'Сохранённая база!?' })]),
   );
 });
 
