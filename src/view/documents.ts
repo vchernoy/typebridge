@@ -45,6 +45,11 @@ export type DocumentActionsDeps = {
   refreshDrafts: () => Promise<void>;
   openDocumentIdsElsewhere: () => Set<string>;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
+  /**
+   * After explicit discard consent: clear journal + change-log for the document still under this
+   * window's fence, before freeze/release (#254 Codex P1 / switch path).
+   */
+  discardUnsavedRecovery: () => Promise<void>;
 };
 
 export function createDocumentActions(state: EditorState, status: StatusLine, deps: DocumentActionsDeps) {
@@ -90,6 +95,17 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
           }
           // Edit-in-this-pane must not cancel discard (persist token ignores paneGeneration),
           // but a document-identity change during the dialog must.
+          if (!sessionPersistStillCurrent(persistToken, {
+            sessionId: deps.workspace.sessionId,
+            sessionGeneration: deps.workspace.sessionGeneration(),
+          }) || deps.workspace.contentRevision() !== contentAtPrompt) {
+            status.announceAction('Discard cancelled — the document changed while the dialog was open.');
+            announceAbortedFlushConflict();
+            return { opened: false, conflict: flushConflict };
+          }
+          // Same consent as close: clear journal/change-log while this document's fence is live.
+          await deps.discardUnsavedRecovery();
+          // Typing during the awaited clear must cancel the switch (main had no await here) (#254).
           if (!sessionPersistStillCurrent(persistToken, {
             sessionId: deps.workspace.sessionId,
             sessionGeneration: deps.workspace.sessionGeneration(),

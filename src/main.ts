@@ -39,7 +39,7 @@ import {
 import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, type StoredDraft } from './editor/indexeddb';
+import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, clearDocumentChanges, type StoredDraft } from './editor/indexeddb';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
@@ -471,11 +471,17 @@ const writingPosition = setupWritingPosition(
   () => state.loadingDraft || field.disabled || state.viewMissing ? undefined : state.active.id,
   writingPositionNamespace(windowId, viewMode),
 );
+/** Filled once the change-log writer exists; until then the journal treats the log as unprotected. */
+let changeLogProtects = (): boolean => false;
+let changeLogIdle = (): Promise<void> => Promise.resolve();
 const recovery = createRecovery(state, statusLine, {
   viewMode, autosave, field, draftTitle,
   anchor: status.parentElement!,
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   refreshDrafts: () => refreshDrafts(),
+  changeLogProtects: () => changeLogProtects(),
+  changeLogIdle: () => changeLogIdle(),
+  indexedDbUsable: () => !!state.db && !state.storageProblem,
 });
 const { ownerReady, journalEdit, renderRecovery } = recovery;
 
@@ -668,6 +674,10 @@ const changeWriter = createChangeWriter({
   },
   newRunId: () => crypto.randomUUID(),
 });
+changeLogProtects = () => changeWriter.protects();
+changeLogIdle = () => changeWriter.idle();
+// When the change log stops covering the latest edit (failed append or failed held save), journal now.
+changeWriter.onUnprotected(() => { journalEdit(); });
 /** A crashed window's unsaved text was kept as a copy (#37 R2c): list it and say so. */
 async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<void> {
   postSignal('saved', copy.id, copy.revision);
@@ -744,6 +754,7 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   refreshDrafts: () => refreshDrafts(),
   loseOwnership: () => { loseOwnership(); },
+  abandonChangeRun: () => { changeWriter.abandon(); },
 });
 const applyAutosaveChange = autosaveToggle.apply;
 const syncAutosaveCheckboxFromStorage = autosaveToggle.syncFromStorage;
@@ -753,6 +764,32 @@ autosave.addEventListener('change', () => {
     persistPreference: true,
   });
 });
+/** Explicit discard: drop the journal and every change-log record for this document (#37 R2c 2d-2 / #254). */
+async function discardUnsavedRecovery(): Promise<void> {
+  // E2E: widen the post-confirm window so typing during cleanup can be asserted (#254).
+  const delayMs = testKnob('__typebridgeDelayDiscardMs');
+  if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  const discardedJournal = recovery.takeCurrentJournal();
+  if (discardedJournal) {
+    try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
+  }
+  const documentId = state.active.id;
+  changeWriter.abandon();
+  // Drain after abandon so a late append rejection cannot recreate a journal (#254 Codex P2).
+  try { await saver.drainChanges(); } catch { /* Leaving anyway. */ }
+  const lateJournal = recovery.takeCurrentJournal();
+  if (lateJournal) {
+    try { clearRecovery(localStorage, lateJournal); } catch { /* Optional backup. */ }
+  }
+  // Only clear under a live fence for this document: never wipe another owner's log (#254 Codex P1).
+  // Ownership-loss salvage into a copy is intentional when another window already took over
+  // (maintainer: leave as-is on #254; possible follow-up).
+  const ownership = state.ownership;
+  if (!state.db || !ownership || ownership.documentId !== documentId) return;
+  try {
+    await clearDocumentChanges(state.db, documentId, await ownership.writeFence());
+  } catch { /* Leaving anyway; a later owner may still see records if the clear failed. */ }
+}
 const documents = createDocumentActions(state, statusLine, {
   viewMode, autosave, workspace, writingPosition, saver,
   persist: () => persist(),
@@ -773,6 +810,7 @@ const documents = createDocumentActions(state, statusLine, {
   refreshDrafts: () => refreshDrafts(),
   openDocumentIdsElsewhere: () => openDocumentIdsElsewhere(),
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
+  discardUnsavedRecovery: () => discardUnsavedRecovery(),
 });
 const switchDraft = documents.switchDraft;
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
@@ -811,6 +849,8 @@ function handleDatabaseUpgrade(): void {
   state.storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   recoveryNotice.hidden = false;
   recoveryNotice.textContent = state.storageProblem;
+  // IndexedDB is gone: fall back to the localStorage journal with the current text and title (#37 R2c 2d-2).
+  journalEdit();
   // A later upgrade must not erase an earlier conflict-copy notice (#66).
   setRiskStatus('', 'failure');
   applyEditAccess();
@@ -886,6 +926,8 @@ if (!viewMode) {
         returnFocus: field,
       });
       if (!discard) return false;
+      // Same consent as switch/close: clear journal/change-log while a fence may still be live.
+      await discardUnsavedRecovery();
       // Apply the discard immediately (same as the switch path) so a failed takeover
       // cannot resurrect the private text the user already agreed to drop.
       if (state.db) {
@@ -1006,6 +1048,9 @@ const leaveGuards = createLeaveGuards(state, {
   viewMode, field, autosave, workspace, saver, reloadBackup, recovery,
   persist: () => persist(),
   snapshot: () => snapshot(),
+  freezeForDiscard: () => { freezeEditorsForTransition(); },
+  unfreezeAfterDiscard: () => { unfreezeEditorsAfterTransition(); },
+  discardUnsavedRecovery: () => discardUnsavedRecovery(),
 });
 const { prepareUpdateReload, reloadAfterUpdate } = leaveGuards;
 updateStats();

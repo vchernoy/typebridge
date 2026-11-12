@@ -24,7 +24,9 @@ export type EditorWindowApi = {
   /** Host asks before removing this window's iframe (#175 step 5). */
   __typebridgePrepareWindowClose: () => Promise<boolean>;
   /** Host calls this immediately before removing the iframe once close was allowed. */
-  __typebridgeCommitWindowClose: () => void;
+  __typebridgeCommitWindowClose: () => void | Promise<void>;
+  /** Host prepared close then aborted (e.g. last-window race); thaw a discard freeze. */
+  __typebridgeCancelWindowClose: () => void;
   __typebridgeSetFocusMode: (enabled: boolean) => void;
   /** Host Settings asks every window to apply a shared preference (#175 step 7). */
   __typebridgeApplyPrefs: (name: PrefName, origin?: string) => void;
@@ -73,6 +75,10 @@ export type TestKnobs = {
   __typebridgeDelayChangeAppendMs: number;
   __typebridgeDelayAfterAcquireMs: number;
   __typebridgeDelayPersistMs: number;
+  /** Hold a save after `upToForSave` so e2e can type while the run is anchored (#254). */
+  __typebridgeDelayAfterUpToMs: number;
+  /** Hold `discardUnsavedRecovery` so e2e can type during switch discard cleanup (#254). */
+  __typebridgeDelayDiscardMs: number;
   __typebridgeDelayRefreshMs: number;
   __typebridgeIgnoreHandoffRequests: boolean;
 };

@@ -1,8 +1,9 @@
 /**
- * Emergency recovery (#53): while Autosave is on, each edit is journaled to localStorage under
- * this tab's id, providing best-effort recovery before IndexedDB commits. A synchronous
- * localStorage write does not guarantee durability after whole-browser termination. Journals whose
- * owner is gone are offered in a recovery panel: recover as a copy, or discard.
+ * Emergency recovery (#53 / #37 R2c 2d-2): while Autosave is on, the localStorage journal holds the
+ * full text and title only when the IndexedDB change log cannot protect the latest edit (no run
+ * yet, a failed or held write, or IndexedDB unusable). A synchronous localStorage write does not
+ * guarantee durability after whole-browser termination. Journals whose owner is gone are offered
+ * in a recovery panel: recover as a copy, or discard. Exact-version cleanup is unchanged.
  */
 import { UNTITLED_TITLE } from '../editor/drafts';
 import { commitDraft, getStoredDraft } from '../editor/indexeddb';
@@ -21,6 +22,15 @@ export type RecoveryDeps = {
   anchor: Element;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
   refreshDrafts: () => Promise<void>;
+  /**
+   * True when the change log covers the latest edit (#37 R2c 2d-2). When true and IndexedDB is
+   * usable, journalEdit writes nothing; this tab's superseded working journal is cleared once idle.
+   */
+  changeLogProtects: () => boolean;
+  /** Resolves when every queued change-log record has been written, skipped, or dropped. */
+  changeLogIdle: () => Promise<void>;
+  /** False when IndexedDB cannot take change records or saves (`!db` or a storage problem). */
+  indexedDbUsable: () => boolean;
 };
 
 export function createRecovery(state: EditorState, status: StatusLine, deps: RecoveryDeps) {
@@ -39,16 +49,58 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   const journalWarning = document.createElement('p');
   journalWarning.setAttribute('role', 'alert');
   journalWarning.hidden = true;
+  /** Why the alert is showing: only a stale journal-write failure is cleared on protected edits. */
+  let journalWarningKind: 'write' | 'read' | undefined;
   deps.anchor.before(journalWarning);
   const recoveryPanel = document.createElement('section');
   recoveryPanel.setAttribute('aria-label', 'Recover unsaved documents');
   recoveryPanel.className = 'recovery-panel'; // Hidden by CSS while empty (#118).
   deps.anchor.before(recoveryPanel);
+  /**
+   * Once the change log protects again, drop this tab's superseded working journal for the shown
+   * document (written while a first save held records, then left behind because exact-version
+   * cleanup looks for the committed text, not the newer journal). Wait for the queue to idle and
+   * recheck protects so we never clear under a failed or held run (#254 Claude P2).
+   */
+  async function clearSupersededJournal(entry: RecoverySnapshot): Promise<void> {
+    await deps.changeLogIdle();
+    if (deps.viewMode || !deps.autosave.checked) return;
+    if (!deps.changeLogProtects() || !deps.indexedDbUsable()) return;
+    if (currentJournal !== entry || entry.documentId !== state.active.id) return;
+    try {
+      clearRecovery(localStorage, entry);
+      if (currentJournal === entry) currentJournal = undefined;
+    } catch { /* Keep the entry if storage blocks the clear. */ }
+  }
+
   function journalEdit(): void {
     if (deps.viewMode || !deps.autosave.checked) return;
+    // Change log covers this edit and IndexedDB can take it: do not write (#37 R2c 2d-2).
+    // Clear a stale "backup unavailable" warning from an earlier unprotected write (#254 Codex P2).
+    // Clear this tab's superseded working journal once the log is idle and still protects (#254 Claude P2).
+    if (deps.changeLogProtects() && deps.indexedDbUsable()) {
+      // Do not hide an unrelated “backups cannot be read” alert from renderRecovery (#254 Codex P2).
+      if (journalWarningKind === 'write') {
+        journalWarning.hidden = true;
+        journalWarningKind = undefined;
+      }
+      const stale = currentJournal;
+      if (stale && stale.tab === journalTab && stale.documentId === state.active.id) {
+        void clearSupersededJournal(stale);
+      }
+      return;
+    }
     const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
-    try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
-    catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
+    try {
+      writeRecovery(localStorage, entry);
+      currentJournal = entry;
+      journalWarning.hidden = true;
+      journalWarningKind = undefined;
+    } catch {
+      journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.';
+      journalWarning.hidden = false;
+      journalWarningKind = 'write';
+    }
   }
   let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   let recoveryRenderVersion = 0;
@@ -67,7 +119,17 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
     const version = ++recoveryRenderVersion;
     let entries: RecoverySnapshot[];
     try { entries = listRecovery(localStorage).filter(item => item.tab !== journalTab); }
-    catch { journalWarning.textContent = 'Emergency backups cannot be read. Copy or export unsaved text.'; journalWarning.hidden = false; return; }
+    catch {
+      journalWarning.textContent = 'Emergency backups cannot be read. Copy or export unsaved text.';
+      journalWarning.hidden = false;
+      journalWarningKind = 'read';
+      return;
+    }
+    // A later successful list clears a transient read failure (#254 Codex P2).
+    if (journalWarningKind === 'read') {
+      journalWarning.hidden = true;
+      journalWarningKind = undefined;
+    }
     const candidates: { item: RecoverySnapshot; unknown: boolean }[] = [];
     for (const item of entries) {
       const activeOwner = await ownerIsActive(item.tab);
@@ -141,7 +203,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   return {
     /** Resolves once this tab holds (or cannot hold) its recovery-owner lock. */
     ownerReady,
-    /** Journal the current text after an edit (Autosave on only). */
+    /** Journal the current text when the change log cannot protect it (Autosave on only). */
     journalEdit,
     /** The journal entry for the current unsaved text, if any. */
     currentJournal: (): RecoverySnapshot | undefined => currentJournal,

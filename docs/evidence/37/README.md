@@ -100,4 +100,16 @@ Cost and durability use the same owned browser launcher. An earlier run of the f
 
 The saved original survived every attempt; Autosave-off controls still journaled nothing; no change records were left after recovery. At 1000 ms and later, Chromium restored the killed tab on restart (4 pages instead of 2): that tab opened the document first and made the copy, so the newly opened tab showed the recovered copy (the newest document) instead of the original. Both texts are stored either way.
 
-**Reading.** In this harness and this Chromium, text whose change records were written survived a whole-browser kill even immediately after the failed save, where the localStorage journal did not. The copy is text only: an unsaved title change is not in the log. Linux Chromium process kill only, small sample, not OS crash, power loss or other engines; a record still in flight at the kill is not covered.
+**Reading.** In this harness and this Chromium, text whose change records were written survived a whole-browser kill even immediately after the failed save, where the localStorage journal did not. As of 2d-1 the copy also carries an unsaved title from the log. Linux Chromium process kill only, small sample, not OS crash, power loss or other engines; a record still in flight at the kill is not covered.
+
+### R2c 2d-2: journal only as a fallback (re-run)
+
+After gating the localStorage journal so it writes only when the change log cannot protect the latest edit, the same opt-in diagnostic was re-run locally (Linux, Playwright Chromium 156.0.8078.4, Node 22.23.4, `DIAGNOSTIC_CHROMIUM` = Playwright's Chromium build):
+
+| Kill after the failed save | localStorage journal (R2b matrix) | Change log |
+|---|---|---|
+| 0 ms | lost 2/2 | recovered exact copy 2/2 |
+| 1000 ms | lost 2/2 | recovered exact copy 2/2 |
+| 6000 ms | recovered (after a click) 2/2 | recovered exact copy 2/2 |
+
+Autosave-off controls still journaled nothing. Outcomes are no worse than [change-log-recovery-r2c.json](change-log-recovery-r2c.json). In the protected state after a committed save, normal typing no longer writes `typebridge.recovery.v1.*` keys (covered by `e2e/journal-fallback.spec.ts`).

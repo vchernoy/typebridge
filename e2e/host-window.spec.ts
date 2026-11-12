@@ -266,11 +266,20 @@ test('update reload asks every window about private text', async ({ page }) => {
 
   const prepare = page.evaluate(async () => {
     const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    const cancelAll = (): void => {
+      for (const frame of frames) {
+        const hooks = frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void };
+        hooks.__typebridgeCancelUpdateReload?.();
+      }
+    };
     for (const frame of frames) {
       const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
       const prepareOne = hooks.__typebridgePrepareUpdateReload;
       if (!prepareOne) continue;
-      if (!await prepareOne()) return false;
+      if (!await prepareOne()) {
+        cancelAll();
+        return false;
+      }
     }
     return true;
   });
@@ -405,9 +414,18 @@ test('refused multi-window update leaves backups and visibility saves working', 
 
   const prepare = page.evaluate(async () => {
     const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    const cancelAll = (): void => {
+      for (const frame of frames) {
+        (frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void })
+          .__typebridgeCancelUpdateReload?.();
+      }
+    };
     for (const frame of frames) {
       const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
-      if (!await hooks.__typebridgePrepareUpdateReload?.()) return false;
+      if (!await hooks.__typebridgePrepareUpdateReload?.()) {
+        cancelAll();
+        return false;
+      }
     }
     return true;
   });
@@ -415,13 +433,6 @@ test('refused multi-window update leaves backups and visibility saves working', 
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Keep editing' }).click();
   expect(await prepare).toBe(false);
-
-  await page.evaluate(() => {
-    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')) {
-      const hooks = frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void };
-      hooks.__typebridgeCancelUpdateReload?.();
-    }
-  });
 
   // Shared Autosave was off for the private refuse path; turn it back on for the
   // post-refuse save / backup checks on the first window.
@@ -446,6 +457,51 @@ test('refused multi-window update leaves backups and visibility saves working', 
   ).toContain('Pending after refused reload');
 });
 
+test('discard after Autosave-off private edit clears change-log so salvage cannot revive (#254)', async ({ page }) => {
+  // Fails on d43f237 if discard still needs runOf and a private edit cleared the writer (#254 Codex P1).
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const secondShell = page.locator('.host-window[data-window-id="w2"]');
+  const second = secondShell.frameLocator('iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+
+  await fillHostEditor(second, 'Committed base');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await fillHostEditor(second, 'Committed base with log');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await setHostAutosave(page, false);
+  await fillHostEditor(second, 'Private after keep saved copy');
+  await expect(second.locator('#save-indicator')).toHaveText('Not saved');
+
+  await secondShell.locator('.host-window-close').click();
+  const dialog = second.getByRole('dialog', { name: 'Close without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'New window' }).click();
+  const revived = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(revived.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(revived.locator('#status')).not.toContainText('Recovered unsaved text');
+  await expect(revived.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  const titles = await page.evaluate(() => new Promise<string[]>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readonly');
+      const req = tx.objectStore('documents').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as Array<{ title?: string }>).map(doc => doc.title ?? ''));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  expect(titles.some(title => title.includes('(recovered)'))).toBe(false);
+});
+
 test('discarded close after save failure does not revive text under a reused id', async ({ page }) => {
   test.setTimeout(90_000);
   await page.addInitScript(() => {
@@ -463,18 +519,31 @@ test('discarded close after save failure does not revive text under a reused id'
   const second = secondShell.frameLocator('iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
-  // Save once successfully so the stub is known-live, then block further puts.
+  // Save once successfully so the stub is known-live, then block further document puts.
+  // The change log still works (#37 R2c 2d-2): the journal is not required while it protects.
   await fillHostEditor(second, 'Before block');
   await expect(second.locator('#save-indicator')).toHaveText('Saved');
   await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
   await fillHostEditor(second, 'Discarded after failed save');
   await expect(second.locator('#save-indicator')).toHaveText('Save failed');
-  await expect.poll(() => page.evaluate(() =>
-    Object.keys(localStorage).some(key =>
-      key.startsWith('typebridge.recovery.v1.')
-      && (localStorage.getItem(key) ?? '').includes('Discarded after failed save'),
-    ),
-  )).toBe(true);
+  // Unsaved text must be in the change log (documents puts fail; changes still land).
+  await expect.poll(() => page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as Array<{ change?: [number, string, string] }>).some(record =>
+          JSON.stringify(record.change ?? []).includes('Discarded after failed save')
+          || (typeof record === 'object' && JSON.stringify(record).includes('Discarded after failed save')),
+        ));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(true);
 
   await secondShell.locator('.host-window-close').click();
   const dialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
@@ -482,12 +551,29 @@ test('discarded close after save failure does not revive text under a reused id'
   await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
   await expect(page.locator('.host-window')).toHaveCount(1);
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
+  // Discard clears journal entries and change-log records for that document.
   expect(await page.evaluate(() =>
     Object.keys(localStorage).filter(key =>
       key.startsWith('typebridge.recovery.v1.')
       && (localStorage.getItem(key) ?? '').includes('Discarded after failed save'),
     ),
   )).toEqual([]);
+  await expect.poll(() => page.evaluate(() => new Promise<number>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).filter(record =>
+          JSON.stringify(record).includes('Discarded after failed save'),
+        ).length);
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(0);
 
   await page.getByRole('button', { name: 'New window' }).click();
   const revived = page.frameLocator('.host-window[data-window-id="w2"] iframe');
@@ -496,7 +582,9 @@ test('discarded close after save failure does not revive text under a reused id'
   await expect(revived.locator('#editor')).not.toHaveValue('Discarded after failed save');
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
   await expect(revived.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  await expect(revived.locator('#status')).not.toContainText('Recovered unsaved text');
 });
+
 
 test('resize keeps the dragged size instead of snapping to a half', async ({ page }) => {
   test.setTimeout(90_000);
@@ -529,6 +617,113 @@ test('resize keeps the dragged size instead of snapping to a half', async ({ pag
   expect(host).toBeTruthy();
   expect(after!.w).not.toBeCloseTo(host!.width / 2, 0);
   expect(after!.h).not.toBeCloseTo(host!.height / 2, 0);
+});
+
+test('aborted close after discard prepare thaws the surviving editor (#254)', async ({ page }) => {
+  // Fails if keepFrozenOnSuccess leaves the editor frozen with no host cancel path (#254 Codex/Claude P1).
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await fillHostEditor(second, 'Before block');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await fillHostEditor(second, 'Frozen then thawed');
+  await expect(second.locator('#save-indicator')).toHaveText('Save failed');
+
+  const prepare = page.evaluate(async () => {
+    const frame = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="w2"] iframe.host-editor')!;
+    const hooks = frame.contentWindow as Window & { __typebridgePrepareWindowClose?: () => Promise<boolean> };
+    return hooks.__typebridgePrepareWindowClose?.() ?? false;
+  });
+  const dialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
+  expect(await prepare).toBe(true);
+  // Host would call cancelClose when the post-await last-window check refuses removal.
+  // Destructive clear is deferred until commit, so cancel must leave change-log recovery intact (#254).
+  await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="w2"] iframe.host-editor')!;
+    (frame.contentWindow as Window & { __typebridgeCancelWindowClose?: () => void }).__typebridgeCancelWindowClose?.();
+  });
+  await expect(second.locator('#editor')).toBeEditable();
+  await expect.poll(() => page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).some(record =>
+          JSON.stringify(record).includes('Frozen then thawed'),
+        ));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(true);
+  await fillHostEditor(second, 'Editable again after abort');
+  await expect(second.locator('#editor')).toHaveValue('Editable again after abort');
+});
+
+test('racing closes of the last two windows leave exactly one (#254)', async ({ page }) => {
+  // Fails if async commitClose lets both final windows pass the last-window check then both remove (#254 Codex P1).
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const mainShell = page.locator('.host-window[data-window-id="main"]');
+  const secondShell = page.locator('.host-window[data-window-id="w2"]');
+  const main = mainShell.frameLocator('iframe');
+  const second = secondShell.frameLocator('iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await fillHostEditor(main, 'Main before block');
+  await expect(main.locator('#save-indicator')).toHaveText('Saved');
+  await fillHostEditor(second, 'Second before block');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await fillHostEditor(main, 'Main discarded race');
+  await expect(main.locator('#save-indicator')).toHaveText('Save failed');
+  await fillHostEditor(second, 'Second discarded race');
+  await expect(second.locator('#save-indicator')).toHaveText('Save failed');
+
+  // Drive both closes via the host close buttons' click handlers (not pointer hit-testing), so
+  // both prepares await discard confirm; confirming together races the async commit path.
+  await page.evaluate(() => {
+    for (const id of ['main', 'w2']) {
+      document.querySelector<HTMLButtonElement>(`.host-window[data-window-id="${id}"] .host-window-close`)?.click();
+    }
+  });
+  const mainDialog = main.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
+  const secondDialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
+  await expect(mainDialog).toBeVisible();
+  await expect(secondDialog).toBeVisible();
+  await Promise.all([
+    mainDialog.getByRole('button', { name: 'Discard changes and close' }).click(),
+    secondDialog.getByRole('button', { name: 'Discard changes and close' }).click(),
+  ]);
+  await expect(page.locator('.host-window')).toHaveCount(1);
+  const survivor = page.frameLocator('.host-window iframe').first();
+  await expect(survivor.locator('#editor')).toBeEditable();
 });
 
 test('closing a dirty Autosave-off window asks before removing it', async ({ page }) => {

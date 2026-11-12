@@ -81,6 +81,11 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           const log = deps.changes.upToForSave(saved.id, saved.text, saved.title);
           preparedRun = log.keepRun;
           saved.upTo = log.upTo;
+          // E2e may type while the run is anchored (protects false) before the row commits (#254).
+          const afterUpToMs = testKnob('__typebridgeDelayAfterUpToMs');
+          if (typeof afterUpToMs === 'number' && afterUpToMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, afterUpToMs));
+          }
           const clearPendingAfterCommit = deps.preparePendingClear(saved);
           if (state.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
           const owner = await state.ownership.writeFence();

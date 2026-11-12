@@ -44,7 +44,9 @@ export type WindowManagerDeps = {
   /** Ask the iframe whether it is safe to close (unsaved/private prompts). */
   prepareClose: (frame: HTMLIFrameElement) => Promise<boolean>;
   /** After prepareClose succeeds, arm discard/unload suppression before removing the iframe. */
-  commitClose?: (frame: HTMLIFrameElement) => void;
+  commitClose?: (frame: HTMLIFrameElement) => void | Promise<void>;
+  /** prepareClose succeeded but this close will not commit (e.g. last-window race); thaw the editor. */
+  cancelClose?: (frame: HTMLIFrameElement) => void;
   /** Optional document-id probe for layout persistence (never text). */
   readDocumentId?: (frame: HTMLIFrameElement) => string | undefined;
 };
@@ -115,6 +117,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   }
 
   let layouts: HostWindowLayout[] = [];
+  /** Window ids reserved between last-window check and finished commitClose (async discard). */
+  const closingIds = new Set<string>();
+  /** Close already preparing or committing — ignore duplicate close clicks (#254 Codex P1). */
+  const closeInFlight = new Set<string>();
   const shells = new Map<string, HTMLElement>();
   /** Per-window "start renaming" actions (title bar ✎ and the Documents menu). */
   const renameHandlers = new Map<string, () => void>();
@@ -161,7 +167,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   const syncToolbar = (): void => {
     const addBtn = deps.toolbar.querySelector<HTMLButtonElement>('[data-host-action="new-window"]');
-    if (addBtn) addBtn.disabled = layouts.length >= MAX_HOST_WINDOWS || hostFocus;
+    // closingIds still occupy slots until commit finishes (#254 optional P3).
+    if (addBtn) addBtn.disabled = layouts.length + closingIds.size >= MAX_HOST_WINDOWS || hostFocus;
     for (const action of ['tile-side', 'tile-stack'] as const) {
       const btn = deps.toolbar.querySelector<HTMLButtonElement>(`[data-host-action="${action}"]`);
       if (btn) btn.hidden = mode === 'stacked' || hostFocus;
@@ -793,9 +800,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       return titles;
     },
     addWindow: (documentId?: string) => {
-      if (hostFocus || layouts.length >= MAX_HOST_WINDOWS) return undefined;
+      // closingIds still occupy their shells/frames until commit finishes — do not reuse or overflow.
+      if (hostFocus || layouts.length + closingIds.size >= MAX_HOST_WINDOWS) return undefined;
       const view = viewportOf(deps.root);
-      const id = mintWindowId(layouts.map(w => w.id));
+      const id = mintWindowId([...layouts.map(w => w.id), ...closingIds]);
       const maxZ = layouts.reduce((m, win) => Math.max(m, win.z), 0);
       const win: HostWindowLayout = {
         id,
@@ -839,72 +847,104 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     },
     closeWindow: async (id: string) => {
       if (layouts.length <= 1) return false;
-      const frame = frames.get(id);
-      if (frame) {
-        try {
-          if (frame.contentDocument && frame.contentDocument.readyState !== 'complete') {
+      // Coalesce duplicate close clicks: a second prepare must not cancelClose the first's
+      // in-flight commit and thaw the editor while removal is still committed (#254 Codex P1).
+      if (closingIds.has(id) || closeInFlight.has(id)) return false;
+      closeInFlight.add(id);
+      try {
+        const frame = frames.get(id);
+        if (frame) {
+          try {
+            if (frame.contentDocument && frame.contentDocument.readyState !== 'complete') {
+              return false;
+            }
+          } catch { /* Cross-origin unexpectedly — fall through to prepareClose. */ }
+          const ok = await deps.prepareClose(frame);
+          if (!ok) return false;
+          // Another close may have finished while we awaited consent — never drop the last window.
+          if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
+            // prepareClose may have left editors frozen for discard; thaw the surviving window (#254).
+            deps.cancelClose?.(frame);
             return false;
           }
-        } catch { /* Cross-origin unexpectedly — fall through to prepareClose. */ }
-        const ok = await deps.prepareClose(frame);
-        if (!ok) return false;
-        // Another close may have finished while we awaited consent — never drop the last window.
-        if (layouts.length <= 1 || !layouts.some(win => win.id === id)) return false;
-        deps.commitClose?.(frame);
-      } else if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
-        return false;
-      }
-      if (hostFocus && activeId === id) {
-        hostFocus = false;
-        placeFocusChrome();
-        hostFocus = true;
-      }
-      shells.get(id)?.remove();
-      shells.delete(id);
-      renameHandlers.delete(id);
-      frames.delete(id);
-      layouts = layouts.filter(win => win.id !== id);
-      if (preFocusLayouts) {
-        preFocusLayouts = preFocusLayouts.filter(win => win.id !== id);
-      }
-      if (hostFocus && activeId === id) {
-        // Closing the Focus window exits Focus — restore remaining windows first so
-        // earlier F6 maximize cycles do not leave full-viewport leftovers (Codex P1).
-        restorePreFocusGeometry();
-        hostFocus = false;
-        preFocusLayouts = undefined;
-        syncEmbeddedFocusChrome(false);
-      }
-      if (activeId === id) {
-        // Prefer the frontmost remaining window (not layouts[0]) so free-layout
-        // stacking and the next F6 origin stay aligned with what the user sees.
-        const topmost = layouts.reduce<HostWindowLayout | undefined>(
-          (best, win) => (!best || win.z > best.z ? win : best),
-          undefined,
-        );
-        if (topmost) markActiveChrome(topmost.id);
-        else activeId = 'main';
-      }
-      // Drop scoped session keys after the iframe is gone. prepareClose only returns
-      // true for a clean close or an explicit discard, so pendingDraft is safe to
-      // remove here — and doing it *after* unload beats a pagehide that recreates it.
-      try {
-        const marker = `::w:${id}`;
-        const writingMarker = `w:${id}.`;
-        const remove: string[] = [];
-        for (let i = 0; i < sessionStorage.length; i++) {
-          const key = sessionStorage.key(i);
-          if (!key) continue;
-          if (key.includes(marker) || key.includes(writingMarker)) remove.push(key);
+          // Reserve before awaiting commit: commitClose is async (discard cleanup), and without a
+          // reservation two closes of the final pair can both pass the check above then both remove
+          // their iframes, leaving zero windows (#254 Codex P1). Keep the id in closingIds so
+          // addWindow cannot mint/reuse it while shells/frames still hold the closing iframe (#254).
+          const reserved = layouts.find(win => win.id === id)!;
+          layouts = layouts.filter(win => win.id !== id);
+          closingIds.add(id);
+          syncToolbar();
+          try {
+            await deps.commitClose?.(frame);
+          } catch (error) {
+            layouts = [...layouts, reserved];
+            closingIds.delete(id);
+            syncToolbar();
+            deps.cancelClose?.(frame);
+            throw error;
+          }
+        } else if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
+          return false;
+        } else {
+          layouts = layouts.filter(win => win.id !== id);
+          closingIds.add(id);
+          syncToolbar();
         }
-        for (const key of remove) sessionStorage.removeItem(key);
-        sessionStorage.removeItem(`typebridge.pendingDraft.v1${marker}`);
-      } catch { /* Blocked sessionStorage — layout still closes. */ }
-      if (mode === 'stacked' && !hostFocus) enterStacked();
-      else applyAllGeometry();
-      applyModeChrome();
-      persist();
-      return true;
+        if (hostFocus && activeId === id) {
+          hostFocus = false;
+          placeFocusChrome();
+          hostFocus = true;
+        }
+        shells.get(id)?.remove();
+        shells.delete(id);
+        renameHandlers.delete(id);
+        frames.delete(id);
+        closingIds.delete(id);
+        if (preFocusLayouts) {
+          preFocusLayouts = preFocusLayouts.filter(win => win.id !== id);
+        }
+        if (hostFocus && activeId === id) {
+          // Closing the Focus window exits Focus — restore remaining windows first so
+          // earlier F6 maximize cycles do not leave full-viewport leftovers (Codex P1).
+          restorePreFocusGeometry();
+          hostFocus = false;
+          preFocusLayouts = undefined;
+          syncEmbeddedFocusChrome(false);
+        }
+        if (activeId === id) {
+          // Prefer the frontmost remaining window (not layouts[0]) so free-layout
+          // stacking and the next F6 origin stay aligned with what the user sees.
+          const topmost = layouts.reduce<HostWindowLayout | undefined>(
+            (best, win) => (!best || win.z > best.z ? win : best),
+            undefined,
+          );
+          if (topmost) markActiveChrome(topmost.id);
+          else activeId = 'main';
+        }
+        // Drop scoped session keys after the iframe is gone. prepareClose only returns
+        // true for a clean close or an explicit discard, so pendingDraft is safe to
+        // remove here — and doing it *after* unload beats a pagehide that recreates it.
+        try {
+          const marker = `::w:${id}`;
+          const writingMarker = `w:${id}.`;
+          const remove: string[] = [];
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (!key) continue;
+            if (key.includes(marker) || key.includes(writingMarker)) remove.push(key);
+          }
+          for (const key of remove) sessionStorage.removeItem(key);
+          sessionStorage.removeItem(`typebridge.pendingDraft.v1${marker}`);
+        } catch { /* Blocked sessionStorage — layout still closes. */ }
+        if (mode === 'stacked' && !hostFocus) enterStacked();
+        else applyAllGeometry();
+        applyModeChrome();
+        persist();
+        return true;
+      } finally {
+        closeInFlight.delete(id);
+      }
     },
     tileSideBySide: () => {
       if (mode === 'stacked' || hostFocus) return;

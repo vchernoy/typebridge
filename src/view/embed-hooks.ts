@@ -15,7 +15,8 @@ export type EmbedHooksDeps = {
     assertSafeToReloadAfterUpdate: () => void;
     cancelUpdateReload: () => void;
     prepareWindowClose: () => Promise<boolean>;
-    commitWindowClose: () => void;
+    commitWindowClose: () => void | Promise<void>;
+    cancelWindowClose: () => void;
   };
   setFocusMode: (enabled: boolean) => void;
   getTitle: () => string;
@@ -34,6 +35,7 @@ export function installEmbedHooks(deps: EmbedHooksDeps): void {
     __typebridgeCancelUpdateReload: () => { leaveGuards.cancelUpdateReload(); },
     __typebridgePrepareWindowClose: leaveGuards.prepareWindowClose,
     __typebridgeCommitWindowClose: leaveGuards.commitWindowClose,
+    __typebridgeCancelWindowClose: () => { leaveGuards.cancelWindowClose(); },
     __typebridgeSetFocusMode: deps.setFocusMode,
     __typebridgeApplyPrefs: (name: PrefName, origin?: string) => {
       if (origin && origin === deps.prefsOrigin) return;

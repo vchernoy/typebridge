@@ -225,6 +225,31 @@ export async function commitOrCreateConflictCopy(
 
 
 /**
+ * Remove every change-log record for `documentId` (#37 R2c 2d-2 / #254). Used when the user
+ * explicitly discards unsaved edits so salvage cannot resurrect them. Requires the ownership
+ * fence: never clears without it, so a stale window cannot wipe another owner's log. Clears all
+ * runs of this document — the fence holder is the only live writer; crashed runs were salvaged
+ * at ownership, and open-time kept records match the text being discarded.
+ */
+export async function clearDocumentChanges(
+  db: IDBDatabase, documentId: string, owner: WriteFence,
+): Promise<void> {
+  // Require a fence at runtime too: a missing owner must not fall through assertEditOwner's no-op.
+  if (!owner?.instanceId || !Number.isSafeInteger(owner.fence)) throw new EditOwnershipLostError();
+  const tx = db.transaction([CHANGES, OWNERSHIP], 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, documentId, owner);
+    await request(tx.objectStore(CHANGES).delete(changesOf(documentId)));
+    await done;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
  * Delete only the exact revision selected by the user, with its change log. With `owner`, the fence is verified in the
  * same transaction. `dropOwnership` also removes the fence record (the document is gone for good);
  * keep it when this window goes on editing the same id privately.

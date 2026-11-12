@@ -12,6 +12,9 @@
  * and dropped if it fails (#251 review). Title changes are recorded with an optional `title` on
  * the record (#37 R2c 2d-1). Nothing is written while Autosave is off or in a viewer, matching
  * the privacy rule for saving.
+ *
+ * `protects()` is true while a live run covers the latest edit (no failure, no hold). The
+ * localStorage journal writes only when this is false or IndexedDB is unusable (#37 R2c 2d-2).
  */
 import { changeBetween, TITLE_ONLY_CHANGE, type ChangeRecord } from '../editor/change-log';
 
@@ -49,11 +52,27 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
   let queue: Promise<void> = Promise.resolve();
   /** The save whose outcome releases (or drops) the held records. */
   let pending: { run: string; writer: Writer; settle: (ok: boolean) => void } | undefined;
+  const unprotectedListeners: Array<() => void> = [];
 
   /** The run of the shown document, if a save started one; never one started from shown text. */
   function current(): Writer | undefined {
     const shown = deps.shown();
     return writer && writer.documentId === shown.id && writer.generation === shown.generation ? writer : undefined;
+  }
+
+  function notifyUnprotected(): void {
+    for (const listener of unprotectedListeners) {
+      try { listener(); } catch { /* A journal listener must not break the writer. */ }
+    }
+  }
+
+  function markFailed(w: Writer): void {
+    if (w.failed) return;
+    w.failed = true;
+    // An abandoned or replaced run must not fire journal fallback — discard may already have
+    // cleared the journal, and a late queue rejection would recreate it (#254 Codex P2).
+    if (writer !== w) return;
+    notifyUnprotected();
   }
 
   function enqueue(w: Writer, record: ChangeRecord): void {
@@ -64,9 +83,9 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
     queue = queue.then(async () => {
       if (anchor && !await anchor) return;
       if (w.failed) return;
-      if (!deps.mayRecord()) { w.failed = true; return; }
+      if (!deps.mayRecord()) { markFailed(w); return; }
       return deps.append(record);
-    }).catch(() => { w.failed = true; });
+    }).catch(() => { markFailed(w); });
   }
 
   return {
@@ -135,8 +154,37 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       const { writer: w, settle } = pending;
       pending = undefined;
       w.anchor = undefined;
-      if (!ok && writer === w) writer = undefined;
+      if (!ok && writer === w) {
+        // Mark failed rather than dropping: protects() stays false until the next committed
+        // save starts a fresh run. Discard clears all of this document's records under the
+        // fence and no longer needs the run id (#254).
+        w.failed = true;
+      }
       settle(ok);
+      if (!ok) notifyUnprotected();
+    },
+    /**
+     * True when the change log covers the latest edit of the shown document: a current run exists
+     * for its id and session generation, recording is allowed, the run has not failed, and no
+     * save is holding later records (#37 R2c 2d-2).
+     */
+    protects(): boolean {
+      if (!deps.mayRecord()) return false;
+      const w = current();
+      return !!w && !w.failed && !w.anchor;
+    },
+    /** Called when an append fails or a held save is reported failed (protection lost asynchronously). */
+    onUnprotected(listener: () => void): void {
+      unprotectedListeners.push(listener);
+    },
+    /**
+     * Drop the in-memory run after the user discards unsaved edits (storage clear is separate).
+     * Later edits wait for the next committed save to start a run again.
+     */
+    abandon(): void {
+      pending?.settle(false);
+      pending = undefined;
+      writer = undefined;
     },
     /** The run this window has for `documentId`, if any. */
     runOf: (documentId: string): string | undefined => writer?.documentId === documentId ? writer.run : undefined,

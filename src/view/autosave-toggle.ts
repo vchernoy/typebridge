@@ -33,6 +33,11 @@ export type AutosaveToggleDeps = {
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
   refreshDrafts: () => Promise<void>;
   loseOwnership: () => void;
+  /**
+   * Drop the in-memory change-log run after Delete saved copy removed the durable base (#254).
+   * Without this, `protects()` can stay true with no stored row until the next full save.
+   */
+  abandonChangeRun: () => void;
 };
 
 export function createAutosaveToggle(state: EditorState, status: StatusLine, deps: AutosaveToggleDeps) {
@@ -165,6 +170,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
           // bring the deleted text back: let every one land first (#251 review).
           await deps.saver.drainChanges();
           if (!await deleteStoredDraft(state.db, targetId, targetRevision, await targetOwnership.writeFence())) throw new Error('Draft changed');
+          // Durable base + change records are gone; do not claim protection until a new save (#254).
+          deps.abandonChangeRun();
           if (targetRevision >= 1) deps.postSignal('deleted', targetId, targetRevision);
           if (state.active.id === targetId) {
             state.active = { ...state.active, revision: 0 };
