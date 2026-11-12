@@ -595,11 +595,28 @@ test('aborted close after discard prepare thaws the surviving editor (#254)', as
   await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
   expect(await prepare).toBe(true);
   // Host would call cancelClose when the post-await last-window check refuses removal.
+  // Destructive clear is deferred until commit, so cancel must leave change-log recovery intact (#254).
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="w2"] iframe.host-editor')!;
     (frame.contentWindow as Window & { __typebridgeCancelWindowClose?: () => void }).__typebridgeCancelWindowClose?.();
   });
   await expect(second.locator('#editor')).toBeEditable();
+  await expect.poll(() => page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).some(record =>
+          JSON.stringify(record).includes('Frozen then thawed'),
+        ));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(true);
   await fillHostEditor(second, 'Editable again after abort');
   await expect(second.locator('#editor')).toHaveValue('Editable again after abort');
 });

@@ -62,9 +62,7 @@ const manager = installWindowManager({
     if (!prepare) return true;
     return prepare();
   },
-  commitClose: frame => {
-    editorHooks(frame).__typebridgeCommitWindowClose?.();
-  },
+  commitClose: frame => editorHooks(frame).__typebridgeCommitWindowClose?.(),
   cancelClose: frame => {
     editorHooks(frame).__typebridgeCancelWindowClose?.();
   },

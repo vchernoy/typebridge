@@ -49,6 +49,8 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   const journalWarning = document.createElement('p');
   journalWarning.setAttribute('role', 'alert');
   journalWarning.hidden = true;
+  /** Why the alert is showing: only a stale journal-write failure is cleared on protected edits. */
+  let journalWarningKind: 'write' | 'read' | undefined;
   deps.anchor.before(journalWarning);
   const recoveryPanel = document.createElement('section');
   recoveryPanel.setAttribute('aria-label', 'Recover unsaved documents');
@@ -77,7 +79,11 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
     // Clear a stale "backup unavailable" warning from an earlier unprotected write (#254 Codex P2).
     // Clear this tab's superseded working journal once the log is idle and still protects (#254 Claude P2).
     if (deps.changeLogProtects() && deps.indexedDbUsable()) {
-      journalWarning.hidden = true;
+      // Do not hide an unrelated “backups cannot be read” alert from renderRecovery (#254 Codex P2).
+      if (journalWarningKind === 'write') {
+        journalWarning.hidden = true;
+        journalWarningKind = undefined;
+      }
       const stale = currentJournal;
       if (stale && stale.tab === journalTab && stale.documentId === state.active.id) {
         void clearSupersededJournal(stale);
@@ -85,8 +91,16 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
       return;
     }
     const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
-    try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
-    catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
+    try {
+      writeRecovery(localStorage, entry);
+      currentJournal = entry;
+      journalWarning.hidden = true;
+      journalWarningKind = undefined;
+    } catch {
+      journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.';
+      journalWarning.hidden = false;
+      journalWarningKind = 'write';
+    }
   }
   let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   let recoveryRenderVersion = 0;
@@ -105,7 +119,12 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
     const version = ++recoveryRenderVersion;
     let entries: RecoverySnapshot[];
     try { entries = listRecovery(localStorage).filter(item => item.tab !== journalTab); }
-    catch { journalWarning.textContent = 'Emergency backups cannot be read. Copy or export unsaved text.'; journalWarning.hidden = false; return; }
+    catch {
+      journalWarning.textContent = 'Emergency backups cannot be read. Copy or export unsaved text.';
+      journalWarning.hidden = false;
+      journalWarningKind = 'read';
+      return;
+    }
     const candidates: { item: RecoverySnapshot; unknown: boolean }[] = [];
     for (const item of entries) {
       const activeOwner = await ownerIsActive(item.tab);

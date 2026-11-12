@@ -44,7 +44,7 @@ export type WindowManagerDeps = {
   /** Ask the iframe whether it is safe to close (unsaved/private prompts). */
   prepareClose: (frame: HTMLIFrameElement) => Promise<boolean>;
   /** After prepareClose succeeds, arm discard/unload suppression before removing the iframe. */
-  commitClose?: (frame: HTMLIFrameElement) => void;
+  commitClose?: (frame: HTMLIFrameElement) => void | Promise<void>;
   /** prepareClose succeeded but this close will not commit (e.g. last-window race); thaw the editor. */
   cancelClose?: (frame: HTMLIFrameElement) => void;
   /** Optional document-id probe for layout persistence (never text). */
@@ -856,7 +856,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           deps.cancelClose?.(frame);
           return false;
         }
-        deps.commitClose?.(frame);
+        await deps.commitClose?.(frame);
       } else if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
         return false;
       }

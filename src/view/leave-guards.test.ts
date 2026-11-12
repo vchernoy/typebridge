@@ -61,7 +61,7 @@ function makeWorkspace(): Workspace {
   };
 }
 
-describe('leave-guards discard consent (#37 R2c 2d-2 / #254 Codex P1)', () => {
+describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
   beforeEach(() => {
     vi.mocked(askConfirmChoice).mockReset();
     vi.mocked(askConfirmChoice).mockResolvedValue(true);
@@ -73,14 +73,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254 Codex P1)', () => {
     const workspace = makeWorkspace();
     const field = makeField('a');
     const autosave = { checked: options.autosaveOn !== false } as HTMLInputElement;
-    let clearStarted: (() => void) | undefined;
-    const clearGate = new Promise<void>(resolve => { clearStarted = resolve; });
-    let resolveClear!: () => void;
-    const clearDone = new Promise<void>(resolve => { resolveClear = resolve; });
-    const discardUnsavedRecovery = vi.fn(async () => {
-      clearStarted?.();
-      await clearDone;
-    });
+    const discardUnsavedRecovery = vi.fn(async () => undefined);
     let frozen = false;
     const freezeForDiscard = vi.fn(() => { frozen = true; });
     const unfreezeAfterDiscard = vi.fn(() => { frozen = false; });
@@ -106,71 +99,49 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254 Codex P1)', () => {
     };
     const guards = createLeaveGuards(state, deps);
     return {
-      guards, workspace, field, discardUnsavedRecovery, clearGate, resolveClear,
+      guards, workspace, field, discardUnsavedRecovery,
       freezeForDiscard, unfreezeAfterDiscard, isFrozen: () => frozen,
     };
   }
 
   it('aborts close when content changes during the discard dialog', async () => {
-    // Fails if prepareWindowClose clears recovery after the user edited while the dialog was open.
-    const { guards, workspace, discardUnsavedRecovery, resolveClear } = harness();
+    const { guards, workspace, discardUnsavedRecovery } = harness();
     vi.mocked(askConfirmChoice).mockImplementation(async () => {
       workspace.bumpContentRevision();
       return true;
     });
     await expect(guards.prepareWindowClose()).resolves.toBe(false);
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
-    resolveClear();
   });
 
-  it('aborts close when content changes during async discard cleanup', async () => {
-    // Fails if prepareWindowClose returns true after edits land during discardUnsavedRecovery.
-    const { guards, workspace, field, discardUnsavedRecovery, clearGate, resolveClear, unfreezeAfterDiscard } = harness();
-    const closing = guards.prepareWindowClose();
-    await clearGate;
-    workspace.bumpContentRevision();
-    field.value = 'newer';
-    resolveClear();
-    await expect(closing).resolves.toBe(false);
-    expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
-    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
-  });
-
-  it('freezes editors while discard cleanup runs and keeps freeze on successful close', async () => {
-    const { guards, clearGate, resolveClear, freezeForDiscard, unfreezeAfterDiscard, isFrozen } = harness();
-    const closing = guards.prepareWindowClose();
-    await clearGate;
+  it('defers destructive clear until commit so cancel keeps recovery', async () => {
+    // Fails if prepareWindowClose clears journal/change-log before host commit (#254 Codex P1).
+    const { guards, discardUnsavedRecovery, freezeForDiscard, unfreezeAfterDiscard, isFrozen } = harness();
+    await expect(guards.prepareWindowClose()).resolves.toBe(true);
     expect(freezeForDiscard).toHaveBeenCalledOnce();
     expect(isFrozen()).toBe(true);
-    resolveClear();
-    await expect(closing).resolves.toBe(true);
-    // Successful close leaves freeze armed until the host commits removal.
-    expect(unfreezeAfterDiscard).not.toHaveBeenCalled();
-  });
-
-  it('thaws after discard on update-reload so later private edits are detected', async () => {
-    const { guards, clearGate, resolveClear, freezeForDiscard, unfreezeAfterDiscard } = harness({ autosaveOn: false });
-    const reloading = guards.prepareUpdateReload();
-    await clearGate;
-    expect(freezeForDiscard).toHaveBeenCalledOnce();
-    resolveClear();
-    await expect(reloading).resolves.toBe(true);
-    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
-  });
-
-  it('cancelWindowClose thaws after a successful close prepare the host then aborts', async () => {
-    // Fails if keepFrozenOnSuccess leaves the editor frozen with no host cancel hook (#254 Codex P1).
-    const { guards, clearGate, resolveClear, unfreezeAfterDiscard, isFrozen } = harness();
-    const closing = guards.prepareWindowClose();
-    await clearGate;
-    resolveClear();
-    await expect(closing).resolves.toBe(true);
-    expect(isFrozen()).toBe(true);
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
     guards.cancelWindowClose();
     expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
     expect(isFrozen()).toBe(false);
-    // Idempotent: a second cancel must not unfreeze again.
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
     guards.cancelWindowClose();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+  });
+
+  it('runs discardUnsavedRecovery on commit after a deferred close prepare', async () => {
+    const { guards, discardUnsavedRecovery } = harness();
+    await expect(guards.prepareWindowClose()).resolves.toBe(true);
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+    await guards.commitWindowClose();
+    expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
+  });
+
+  it('clears immediately on update-reload discard then thaws', async () => {
+    const { guards, discardUnsavedRecovery, freezeForDiscard, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    expect(freezeForDiscard).toHaveBeenCalledOnce();
+    expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
     expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
   });
 });

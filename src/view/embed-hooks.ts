@@ -15,7 +15,7 @@ export type EmbedHooksDeps = {
     assertSafeToReloadAfterUpdate: () => void;
     cancelUpdateReload: () => void;
     prepareWindowClose: () => Promise<boolean>;
-    commitWindowClose: () => void;
+    commitWindowClose: () => void | Promise<void>;
     cancelWindowClose: () => void;
   };
   setFocusMode: (enabled: boolean) => void;

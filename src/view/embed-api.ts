@@ -24,7 +24,7 @@ export type EditorWindowApi = {
   /** Host asks before removing this window's iframe (#175 step 5). */
   __typebridgePrepareWindowClose: () => Promise<boolean>;
   /** Host calls this immediately before removing the iframe once close was allowed. */
-  __typebridgeCommitWindowClose: () => void;
+  __typebridgeCommitWindowClose: () => void | Promise<void>;
   /** Host prepared close then aborted (e.g. last-window race); thaw a discard freeze. */
   __typebridgeCancelWindowClose: () => void;
   __typebridgeSetFocusMode: (enabled: boolean) => void;
