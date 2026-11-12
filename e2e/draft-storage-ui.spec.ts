@@ -229,7 +229,7 @@ test('reload recovery preserves another tab’s newer revision', async ({ page }
   await field.fill('Исходный документ');
   await expect(page.locator('#status')).toContainText('Saved locally');
   const pending = await page.evaluate(() => new Promise<{ id: string; title: string; text: string; updatedAt: number; revision: number }>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 2);
+    const open = indexedDB.open('typebridge');
     open.onerror = () => reject(open.error);
     open.onsuccess = () => { const db = open.result; const tx = db.transaction('documents'); const get = tx.objectStore('documents').getAll(); get.onsuccess = () => { db.close(); resolve({ ...get.result[0], text: 'Несохранённый вариант 🙂', history: undefined }); }; get.onerror = () => reject(get.error); };
   }));

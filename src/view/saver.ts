@@ -32,6 +32,12 @@ export type SaverDeps = {
   clearVersionNotice: () => void;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
   journalEdit: () => void;
+  /** Change log of the shown document (#37 R2c). */
+  changes: {
+    edit: () => void;
+    idle: () => Promise<void>;
+    upToForSave: (documentId: string, savedText: string) => { upTo: number; clearAll: boolean };
+  };
   rememberActive: () => void;
   updateSaveIndicator: () => void;
   syncTitleTooltip: () => void;
@@ -58,14 +64,19 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       try {
         if (!state.db) throw new Error('Storage unavailable');
         while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
+          // Queued change records land first, so this save's cleanup covers every one of them.
+          await deps.changes.idle();
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
+          // Taken with the text: the row says which change records it already contains (#37 R2c).
+          const log = deps.changes.upToForSave(saved.id, saved.text);
+          saved.upTo = log.upTo;
           const clearPendingAfterCommit = deps.preparePendingClear(saved);
           if (state.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
           const owner = await state.ownership.writeFence();
           const current = deps.currentJournal();
           const journal = current && current.documentId === saved.id && current.revision === state.active.revision && current.text === saved.text && current.title === saved.title ? current : undefined;
-          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner);
+          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, log.clearAll);
           clearPendingAfterCommit();
           const titleOnly = !result.conflict && saved.title !== state.active.title && saved.text === state.active.text;
           if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
@@ -145,6 +156,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     deps.workspace.setDirty(true);
     deps.workspace.bumpContentRevision();
     deps.journalEdit();
+    deps.changes.edit();
     // With Autosave off nothing is committed, so refresh the Documents label from the
     // on-screen title (and mark unsaved) without waiting for a save (#114).
     if (!deps.autosave.checked && (becameDirty || fromTitle)) deps.renderDrafts();

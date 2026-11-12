@@ -1,3 +1,4 @@
+import type { ChangeRecord } from './change-log';
 import type { EditorHistory } from './editor';
 import { EDIT_OWNERSHIP_STORE, nextOwnershipFence, ownershipFenceAllowsWrite, type EditOwnershipRecord } from '../view/ownership';
 
@@ -8,6 +9,11 @@ export type StoredDraft = {
   updatedAt: number;
   history?: EditorHistory;
   revision: number;
+  /**
+   * Change-id of the last change-log record this text already contains (#37 R2c). Records of
+   * this document after it continue this text; missing means 0 (rows from before the log).
+   */
+  upTo?: number;
 };
 export type CommitResult =
   | { ok: true; draft: StoredDraft }
@@ -22,10 +28,21 @@ export class EditOwnershipLostError extends Error {
 }
 
 const DATABASE = 'typebridge';
-/** Version 2 adds the editOwnership store; documents rows are unchanged. */
-export const DATABASE_VERSION = 2;
+/**
+ * Version 2 adds the editOwnership store; version 3 adds the changes store (#37 R2c).
+ * Documents rows are unchanged; rows without `upTo` mean 0.
+ */
+export const DATABASE_VERSION = 3;
 const STORE = 'documents';
 const OWNERSHIP = EDIT_OWNERSHIP_STORE;
+/** Change-log records, keyed [documentId, seq]. */
+export const CHANGES_STORE = 'changes';
+const CHANGES = CHANGES_STORE;
+
+/** All change records of `documentId` with change-id at most `upTo` (all when omitted). */
+function changesOf(documentId: string, upTo = Number.MAX_SAFE_INTEGER): IDBKeyRange {
+  return IDBKeyRange.bound([documentId, 0], [documentId, upTo]);
+}
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -50,6 +67,7 @@ export function openDraftDatabase(onVersionChange?: () => void): Promise<IDBData
       const db = open.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(OWNERSHIP)) db.createObjectStore(OWNERSHIP, { keyPath: 'documentId' });
+      if (!db.objectStoreNames.contains(CHANGES)) db.createObjectStore(CHANGES, { keyPath: ['documentId', 'seq'] });
     };
     open.onsuccess = () => {
       const db = open.result;
@@ -118,6 +136,8 @@ async function assertEditOwner(tx: IDBTransaction, documentId: string, owner: Wr
  * Commit the expected revision or atomically preserve the entire edit as a new draft.
  * With `owner`, the fence for `draft.id` is verified in the same transaction; a mismatch writes nothing.
  * Revision CAS still guards against app versions that do not take part in ownership.
+ * A commit also deletes the document's change records up to its `upTo`, which the text now
+ * contains (#37 R2c). A conflict copy is a new document with no change log (`upTo` 0).
  */
 export async function commitOrCreateConflictCopy(
   db: IDBDatabase,
@@ -125,9 +145,11 @@ export async function commitOrCreateConflictCopy(
   expectedRevision: number,
   copyId: string,
   owner?: WriteFence,
+  /** Remove the document's whole change log: no run continues this text (#37 R2c). */
+  clearChanges = false,
 ): Promise<{ draft: StoredDraft; conflict: boolean }> {
   if (!copyId || copyId === draft.id) throw new Error('Conflict copy requires a distinct ID');
-  const tx = db.transaction(owner ? [STORE, OWNERSHIP] : STORE, 'readwrite');
+  const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES] : [STORE, CHANGES], 'readwrite');
   const done = finished(tx);
   try {
     await assertEditOwner(tx, draft.id, owner);
@@ -135,10 +157,14 @@ export async function commitOrCreateConflictCopy(
     const current = await request(store.get(draft.id)) as StoredDraft | undefined;
     const conflict = (current?.revision ?? 0) !== expectedRevision;
     const next: StoredDraft = conflict
-      ? { ...draft, id: copyId, title: draft.title + ' (conflict copy)', revision: 1 }
-      : { ...draft, revision: expectedRevision + 1 };
+      ? { ...draft, id: copyId, title: draft.title + ' (conflict copy)', revision: 1, upTo: 0 }
+      : { ...draft, revision: expectedRevision + 1, upTo: draft.upTo ?? 0 };
     if (conflict) await request(store.add(next));
-    else await request(store.put(next));
+    else {
+      await request(store.put(next));
+      if (clearChanges) await request(tx.objectStore(CHANGES).delete(changesOf(next.id)));
+      else if (next.upTo) await request(tx.objectStore(CHANGES).delete(changesOf(next.id, next.upTo)));
+    }
     await done;
     return { draft: next, conflict };
   } catch (error) {
@@ -150,7 +176,7 @@ export async function commitOrCreateConflictCopy(
 
 
 /**
- * Delete only the exact revision selected by the user. With `owner`, the fence is verified in the
+ * Delete only the exact revision selected by the user, with its change log. With `owner`, the fence is verified in the
  * same transaction. `dropOwnership` also removes the fence record (the document is gone for good);
  * keep it when this window goes on editing the same id privately.
  */
@@ -161,7 +187,7 @@ export async function deleteStoredDraft(
   owner?: WriteFence,
   dropOwnership = false,
 ): Promise<boolean> {
-  const tx = db.transaction(owner ? [STORE, OWNERSHIP] : STORE, 'readwrite');
+  const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES] : [STORE, CHANGES], 'readwrite');
   const done = finished(tx);
   try {
     await assertEditOwner(tx, id, owner);
@@ -169,6 +195,8 @@ export async function deleteStoredDraft(
     const current = await request(store.get(id)) as StoredDraft | undefined;
     if ((current?.revision ?? 0) !== revision) { await done; return false; }
     if (current) await request(store.delete(id));
+    // The change log continued the deleted text; it must never be replayed onto a later one.
+    await request(tx.objectStore(CHANGES).delete(changesOf(id)));
     if (owner && dropOwnership) await request(tx.objectStore(OWNERSHIP).delete(id));
     await done;
     return true;
@@ -222,4 +250,32 @@ export async function releaseEditOwnership(db: IDBDatabase, documentId: string, 
     void done.catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Append one change record (#37 R2c). With `owner`, the fence is verified in the same
+ * transaction, so a window that lost editing cannot extend the log. `put` replaces a record a
+ * crashed earlier run left at the same change-id: replay never mixes runs.
+ */
+export async function appendChange(db: IDBDatabase, record: ChangeRecord, owner?: WriteFence): Promise<void> {
+  const tx = db.transaction(owner ? [CHANGES, OWNERSHIP] : CHANGES, 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, record.documentId, owner);
+    await request(tx.objectStore(CHANGES).put(record));
+    await done;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}
+
+/** The change records of `documentId`, in change-id order. */
+export async function listChanges(db: IDBDatabase, documentId: string): Promise<ChangeRecord[]> {
+  const tx = db.transaction(CHANGES, 'readonly');
+  const done = finished(tx);
+  const records = await request(tx.objectStore(CHANGES).getAll(changesOf(documentId))) as ChangeRecord[];
+  await done;
+  return records;
 }
