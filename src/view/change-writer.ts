@@ -4,10 +4,12 @@
  * `upTo` from here at the same moment it takes the text, so the saved row and the log agree.
  *
  * Every record continues text that is durable: the stored row, plus the records before it. A run
- * belongs to one document shown once (its id and session generation) and starts right after the
- * stored row's `upTo`. When a save stores text the log does not already produce (a new run after
- * Autosave was off, a write that failed, an edit that was not recorded), the records after it
- * continue that new text, so they are held until the save commits and dropped if it fails.
+ * belongs to one document shown once (its id and session generation) and only ever starts at a
+ * full save, never from the shown text, which can be unsaved (a reload backup, a handoff): the
+ * first edits after a document is shown reach storage through that first save. When a save stores
+ * text the log does not already produce (a new run, a write that failed, an edit that was not
+ * recorded), the records after it continue that text, so they are held until the save commits
+ * and dropped if it fails (#251 review).
  * Nothing is written while Autosave is off or in a viewer, matching the privacy rule for saving.
  */
 import { changeBetween, type ChangeRecord } from '../editor/change-log';
@@ -15,8 +17,8 @@ import { changeBetween, type ChangeRecord } from '../editor/change-log';
 export type ChangeWriterDeps = {
   /** False while Autosave is off, in a viewer, or while edits must not be recorded. */
   mayRecord: () => boolean;
-  /** The shown document: id, the stored row's text and `upTo` (revision 0: no stored row). */
-  shown: () => { id: string; generation: number; storedText: string; upTo: number; revision: number };
+  /** The shown document and its session generation (bumped whenever it is shown again). */
+  shown: () => { id: string; generation: number };
   text: () => string;
   /** Write one record (with the ownership fence); rejects when it cannot be written. */
   append: (record: ChangeRecord) => Promise<void>;
@@ -43,26 +45,17 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
   /** The save whose outcome releases (or drops) the held records. */
   let pending: { run: string; writer: Writer; settle: (ok: boolean) => void } | undefined;
 
+  /** The run of the shown document, if a save started one; never one started from shown text. */
   function current(): Writer | undefined {
     const shown = deps.shown();
-    if (writer && writer.documentId === shown.id && writer.generation === shown.generation) return writer;
-    // A newly shown document (or a new generation of it) starts a new run after the stored row.
-    writer = {
-      documentId: shown.id,
-      generation: shown.generation,
-      run: deps.newRunId(),
-      seq: shown.revision > 0 ? shown.upTo : 0,
-      base: shown.revision > 0 ? shown.storedText : '',
-      failed: false,
-    };
-    return writer;
+    return writer && writer.documentId === shown.id && writer.generation === shown.generation ? writer : undefined;
   }
 
   return {
     /** Record the edit that led to the current text. */
     edit(): void {
       if (!deps.mayRecord()) {
-        // Stop the run: after private edits the next run restarts from the stored row.
+        // Stop the run: after private edits the next run starts at the next save.
         writer = undefined;
         return;
       }
@@ -114,7 +107,7 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
     },
     /**
      * The outcome of the save `upToForSave` prepared for `run`. On success the held records go
-     * ahead; otherwise they are dropped and the next edit starts again from the stored row.
+     * ahead; otherwise they are dropped and the run ends: the next save starts a new one.
      */
     saved(run: string, ok: boolean): void {
       if (!pending || pending.run !== run) return;

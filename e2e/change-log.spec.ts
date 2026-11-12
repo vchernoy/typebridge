@@ -44,10 +44,10 @@ test('each edit is logged so the saved row plus the log is the shown text', asyn
   await expect(field).toBeEnabled();
   await field.fill('Первая версия');
   await expect(page.locator('#status')).toContainText('Saved locally');
-  // The save contains every record so far, and removed them.
+  // The first save starts the run (a run never starts from shown text): it contains no records yet.
   let log = await readLog(page);
   expect(log.rows).toHaveLength(1);
-  expect(log.rows[0]!.upTo).toBeGreaterThanOrEqual(1);
+  expect(log.rows[0]!.upTo).toBe(0);
   expect(log.changes).toEqual([]);
   // With saves held, typing reaches storage only through the log.
   await holdSaves(page);
@@ -148,9 +148,11 @@ test('upgrading a version 2 database keeps documents and ownership and adds the 
   }));
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toHaveValue('Текст v2');
-  // A row from before the log has no upTo; its first logged change continues it.
-  await holdSaves(page);
+  // A row from before the log has no upTo. A run starts at the first save, never from shown text.
   await page.locator('#editor').press('End');
   await page.keyboard.type('!');
-  await expect.poll(() => rebuilt(page)).toBe('Текст v2!');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await holdSaves(page);
+  await page.keyboard.type('?');
+  await expect.poll(() => rebuilt(page)).toBe('Текст v2!?');
 });

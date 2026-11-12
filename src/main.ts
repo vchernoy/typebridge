@@ -656,10 +656,7 @@ const { captureHandoffSnapshot, hideEditHereBar, showEditHereBar, takeOverFromHa
 // Change log for crash recovery (#37 R2c): one small record per edit while Autosave is on.
 const changeWriter = createChangeWriter({
   mayRecord: () => !viewMode && autosave.checked && !state.suppressEditTracking && !state.loadingDraft,
-  shown: () => ({
-    id: state.active.id, generation: workspace.sessionGeneration(), storedText: state.active.text,
-    upTo: state.active.upTo ?? 0, revision: state.active.revision,
-  }),
+  shown: () => ({ id: state.active.id, generation: workspace.sessionGeneration() }),
   text: () => field.value,
   append: async record => {
     if (!state.db || state.ownership?.documentId !== record.documentId) throw new Error('Not editing this document');
