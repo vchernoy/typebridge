@@ -241,4 +241,54 @@ describe('change writer', () => {
     await writer.idle();
     expect(env.records).toEqual([]);
   });
+
+  // --- #37 R2c 2d-2: protects() and onUnprotected for the journal fallback ---
+
+  it('protects() is false with no run, true after a committed save, false after failure/anchor/Autosave off', async () => {
+    // Fails on old code: protects() does not exist.
+    const { env, writer, type, save } = harness();
+    expect(writer.protects()).toBe(false);
+    await save();
+    expect(writer.protects()).toBe(true);
+    type('Сохранено!');
+    await writer.idle();
+    expect(writer.protects()).toBe(true);
+
+    env.failNext = 1;
+    type('Сохранено!!');
+    await writer.idle();
+    expect(writer.protects()).toBe(false);
+
+    await save(); // covers the failed run and starts a new one
+    expect(writer.protects()).toBe(true);
+    env.text = 'held'; // unrecorded: save must anchor
+    const log = writer.upToForSave(env.id, env.text, env.title);
+    expect(writer.protects()).toBe(false); // anchor pending
+    writer.saved(log.keepRun, true);
+    expect(writer.protects()).toBe(true);
+
+    env.autosave = false;
+    expect(writer.protects()).toBe(false);
+  });
+
+  it('onUnprotected fires on an append failure and on a failed held save', async () => {
+    // Fails on old code: onUnprotected does not exist or never fires.
+    const { env, writer, type, save } = harness();
+    const events: string[] = [];
+    writer.onUnprotected(() => { events.push('unprotected'); });
+
+    await save();
+    env.failNext = 1;
+    type('x');
+    await writer.idle();
+    expect(events).toEqual(['unprotected']);
+
+    events.length = 0;
+    env.text = 'new';
+    const log = writer.upToForSave(env.id, env.text, env.title);
+    type('new!');
+    writer.saved(log.keepRun, false);
+    await writer.idle();
+    expect(events).toEqual(['unprotected']);
+  });
 });

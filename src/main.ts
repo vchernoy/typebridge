@@ -471,11 +471,15 @@ const writingPosition = setupWritingPosition(
   () => state.loadingDraft || field.disabled || state.viewMissing ? undefined : state.active.id,
   writingPositionNamespace(windowId, viewMode),
 );
+/** Filled once the change-log writer exists; until then the journal treats the log as unprotected. */
+let changeLogProtects = (): boolean => false;
 const recovery = createRecovery(state, statusLine, {
   viewMode, autosave, field, draftTitle,
   anchor: status.parentElement!,
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   refreshDrafts: () => refreshDrafts(),
+  changeLogProtects: () => changeLogProtects(),
+  indexedDbUsable: () => !!state.db && !state.storageProblem,
 });
 const { ownerReady, journalEdit, renderRecovery } = recovery;
 
@@ -668,6 +672,9 @@ const changeWriter = createChangeWriter({
   },
   newRunId: () => crypto.randomUUID(),
 });
+changeLogProtects = () => changeWriter.protects();
+// When the change log stops covering the latest edit (failed append or failed held save), journal now.
+changeWriter.onUnprotected(() => { journalEdit(); });
 /** A crashed window's unsaved text was kept as a copy (#37 R2c): list it and say so. */
 async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<void> {
   postSignal('saved', copy.id, copy.revision);
@@ -811,6 +818,8 @@ function handleDatabaseUpgrade(): void {
   state.storageProblem = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   recoveryNotice.hidden = false;
   recoveryNotice.textContent = state.storageProblem;
+  // IndexedDB is gone: fall back to the localStorage journal with the current text and title (#37 R2c 2d-2).
+  journalEdit();
   // A later upgrade must not erase an earlier conflict-copy notice (#66).
   setRiskStatus('', 'failure');
   applyEditAccess();

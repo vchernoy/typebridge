@@ -1,8 +1,9 @@
 /**
- * Emergency recovery (#53): while Autosave is on, each edit is journaled to localStorage under
- * this tab's id, providing best-effort recovery before IndexedDB commits. A synchronous
- * localStorage write does not guarantee durability after whole-browser termination. Journals whose
- * owner is gone are offered in a recovery panel: recover as a copy, or discard.
+ * Emergency recovery (#53 / #37 R2c 2d-2): while Autosave is on, the localStorage journal holds the
+ * full text and title only when the IndexedDB change log cannot protect the latest edit (no run
+ * yet, a failed or held write, or IndexedDB unusable). A synchronous localStorage write does not
+ * guarantee durability after whole-browser termination. Journals whose owner is gone are offered
+ * in a recovery panel: recover as a copy, or discard. Exact-version cleanup is unchanged.
  */
 import { UNTITLED_TITLE } from '../editor/drafts';
 import { commitDraft, getStoredDraft } from '../editor/indexeddb';
@@ -21,6 +22,13 @@ export type RecoveryDeps = {
   anchor: Element;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
   refreshDrafts: () => Promise<void>;
+  /**
+   * True when the change log covers the latest edit (#37 R2c 2d-2). When true and IndexedDB is
+   * usable, journalEdit writes nothing; existing entries stay until exact-version cleanup.
+   */
+  changeLogProtects: () => boolean;
+  /** False when IndexedDB cannot take change records or saves (`!db` or a storage problem). */
+  indexedDbUsable: () => boolean;
 };
 
 export function createRecovery(state: EditorState, status: StatusLine, deps: RecoveryDeps) {
@@ -46,6 +54,8 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   deps.anchor.before(recoveryPanel);
   function journalEdit(): void {
     if (deps.viewMode || !deps.autosave.checked) return;
+    // Change log covers this edit and IndexedDB can take it: leave the journal alone (#37 R2c 2d-2).
+    if (deps.changeLogProtects() && deps.indexedDbUsable()) return;
     const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
     try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
     catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }
@@ -141,7 +151,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   return {
     /** Resolves once this tab holds (or cannot hold) its recovery-owner lock. */
     ownerReady,
-    /** Journal the current text after an edit (Autosave on only). */
+    /** Journal the current text when the change log cannot protect it (Autosave on only). */
     journalEdit,
     /** The journal entry for the current unsaved text, if any. */
     currentJournal: (): RecoverySnapshot | undefined => currentJournal,
