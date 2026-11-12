@@ -1,0 +1,295 @@
+{
+  "description": "#37 R2c step 1: whole-browser SIGKILL after a write reported success, and per-change cost. Linux, local, measurement only; no application change. actualDelayMs counts from the reported success (transaction complete / setItem returned) to the kill; writeMs from issuing the write to that success.",
+  "playwright": "1.64.1 (diagnostic harness)",
+  "browserVersion": "153.0.8010.12",
+  "node": "v22.22.0",
+  "application": "read.html page; separate spike database, no application storage",
+  "durability": [
+    {
+      "mechanism": "localStorage",
+      "length": 2000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 1,
+      "writeMs": 0,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "localStorage",
+      "length": 1000000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 1,
+      "writeMs": 12,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 2000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 2,
+      "repeat": 1,
+      "writeMs": 6,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 5000000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 2,
+      "repeat": 1,
+      "writeMs": 76,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 2000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 2,
+      "repeat": 1,
+      "writeMs": 2,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 5000000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 2,
+      "repeat": 1,
+      "writeMs": 87,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-append",
+      "length": 0,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 2,
+      "repeat": 1,
+      "writeMs": 72,
+      "outcome": "survived-exact",
+      "found": "seq:200",
+      "appends": 200
+    },
+    {
+      "mechanism": "localStorage",
+      "length": 2000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 1,
+      "writeMs": 0,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "localStorage",
+      "length": 1000000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 1,
+      "writeMs": 16,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 2000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 1,
+      "writeMs": 2,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 5000000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1001,
+      "repeat": 1,
+      "writeMs": 110,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 2000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 1,
+      "writeMs": 5,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 5000000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1001,
+      "repeat": 1,
+      "writeMs": 172,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-append",
+      "length": 0,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1001,
+      "repeat": 1,
+      "writeMs": 57,
+      "outcome": "survived-exact",
+      "found": "seq:200",
+      "appends": 200
+    },
+    {
+      "mechanism": "localStorage",
+      "length": 2000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 2,
+      "writeMs": 0,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "localStorage",
+      "length": 1000000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 2,
+      "writeMs": 14,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 2000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 2,
+      "writeMs": 4,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 5000000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 2,
+      "writeMs": 216,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 2000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 5,
+      "repeat": 2,
+      "writeMs": 9,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 5000000,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 2,
+      "writeMs": 205,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-append",
+      "length": 0,
+      "requestedDelayMs": 0,
+      "actualDelayMs": 3,
+      "repeat": 2,
+      "writeMs": 113,
+      "outcome": "survived-exact",
+      "found": "seq:200",
+      "appends": 200
+    },
+    {
+      "mechanism": "localStorage",
+      "length": 2000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1001,
+      "repeat": 2,
+      "writeMs": 1,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "localStorage",
+      "length": 1000000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 2,
+      "writeMs": 12,
+      "outcome": "lost"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 2000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 2,
+      "writeMs": 3,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-default",
+      "length": 5000000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 2,
+      "writeMs": 126,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 2000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 2,
+      "writeMs": 6,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-strict",
+      "length": 5000000,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 2,
+      "writeMs": 109,
+      "outcome": "survived-exact"
+    },
+    {
+      "mechanism": "idb-append",
+      "length": 0,
+      "requestedDelayMs": 1000,
+      "actualDelayMs": 1000,
+      "repeat": 2,
+      "writeMs": 45,
+      "outcome": "survived-exact",
+      "found": "seq:200",
+      "appends": 200
+    }
+  ],
+  "cost": {
+    "platform": "linux",
+    "node": "v22.22.0",
+    "browserVersion": "153.0.8010.12",
+    "runs": 7,
+    "results": [
+      {
+        "size": 100000,
+        "localStorageFullMs": 3.5,
+        "idbFullMs": 3.3,
+        "idbAppendMs": 0.4
+      },
+      {
+        "size": 1000000,
+        "localStorageFullMs": 17.8,
+        "idbFullMs": 15.8,
+        "idbAppendMs": 0.6
+      },
+      {
+        "size": 10000000,
+        "localStorageFullMs": "quota-exceeded",
+        "idbFullMs": 145,
+        "idbAppendMs": 0.3
+      }
+    ]
+  }
+}

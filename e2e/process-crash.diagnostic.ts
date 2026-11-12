@@ -1,9 +1,9 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import { ownedChromium } from './owned-chromium';
 import { selectDocument, setAutosave } from './settings-helpers';
 
 const original = 'Сохранённый оригинал';
@@ -20,46 +20,17 @@ for (const repeat of [1, 2]) for (const autosave of [true, false]) for (const de
   test(`process kill: autosave=${autosave}, delay=${delayMs}ms, repeat=${repeat} (#37 R2b)`, async ({ playwright, baseURL }, testInfo) => {
     test.skip(process.platform !== 'linux', 'Requires Linux detached process groups; no claim for other platforms');
     const profile = await mkdtemp(join(tmpdir(), 'typebridge-process-crash-'));
-    let child: ChildProcess | undefined;
-    let browser: Browser | undefined;
-    let exit: Promise<void> | undefined;
+    const owned = ownedChromium(playwright, profile);
     const evidence: Record<string, unknown> = {
       platform: process.platform, node: process.version, repeat, autosave, requestedDelayMs: delayMs,
       phase: autosave ? 'after-save-failure-and-readable-journal' : 'after-private-edit',
       stage: 'launch', outcome: 'incomplete',
     };
-    async function killOwnedProcess(): Promise<void> {
-      if (!child) return;
-      // PID is obtained exclusively from this test's fresh detached spawn. Never kill by name/port.
-      if (child.pid && child.exitCode === null && child.signalCode === null) process.kill(-child.pid, 'SIGKILL');
-      await exit;
-      child = undefined;
-      browser = undefined;
-    }
+    const killOwnedProcess = () => owned.kill();
     async function launch() {
-      // Never reconnect to the previous process's stale endpoint.
-      await rm(join(profile, 'DevToolsActivePort'), { force: true });
-      const owned = spawn(playwright.chromium.executablePath(), [
-        '--headless', '--no-sandbox', '--disable-dev-shm-usage',
-        `--user-data-dir=${profile}`, '--remote-debugging-port=0', 'about:blank',
-      ], { detached: true, stdio: 'ignore' });
-      child = owned;
-      // Attach handlers immediately, including startup failures, before any awaits.
-      let spawnError: Error | undefined;
-      exit = new Promise<void>(resolve => {
-        owned.once('exit', () => resolve());
-        owned.once('error', error => { spawnError = error; resolve(); });
-      });
-      let port = '';
-      await expect.poll(async () => {
-        if (spawnError || owned.exitCode !== null || owned.signalCode !== null) throw new Error('Diagnostic Chromium exited before connection');
-        try { port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]!; }
-        catch { return false; }
-        return /^\d+$/.test(port);
-      }, { timeout: 10_000 }).toBe(true);
-      browser = await playwright.chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-      evidence.browserVersion = browser.version();
-      return browser.contexts()[0]!;
+      const context = await owned.launch();
+      evidence.browserVersion = owned.version();
+      return context;
     }
     try {
       let context = await launch();

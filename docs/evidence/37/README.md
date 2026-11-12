@@ -53,3 +53,35 @@ The delay matrix samples browser behavior; no delay is a guaranteed durability t
 ### Recorded baseline
 
 [Machine-readable baseline](process-crash-baseline.json): local Linux, Playwright 1.64.1, Chromium 156.0.8078.4, Node 24.22.1, application commit `5d4d078` (no runtime changes in R2b). All 12 diagnostic attempts completed. Both Autosave-on attempts lost the journal at 0 ms, both lost it at 1000 ms, and both recovered an exact copy at 6000 ms. All six Autosave-off controls retained no journal/recovery copy. Saved original text survived every attempt. This small sample is a repeatable baseline for R2c, not a universal timing boundary or a durability guarantee.
+
+## R2c step 1: does a reported write survive a whole-browser kill?
+
+Measurement only; the application is unchanged. `e2e/storage-durability.diagnostic.ts` runs with the same opt-in configuration as R2b (`npx playwright test --config=playwright.diagnostics.config.ts`, which now runs both files; narrow with `--grep 'R2c'`). Each attempt uses its own Chromium process and profile (shared helper `e2e/owned-chromium.ts`), writes synthetic text on the reading page (which opens no application storage) into a separate spike database or `localStorage` key, waits until the browser **reports success** (`setItem` returned; transaction `complete`), then kills about 0 or 1000 ms after that moment (the expected hash is computed before the write, and the recorded delay runs from the reported success to the kill; "0 ms" was 2–5 ms in practice), SIGKILLs the process group, restarts on the same profile and compares a hash and length. Append cases issue 200 one-record transactions back to back, like keystrokes, and require 1..200 all present. Set `DIAGNOSTIC_CHROMIUM` to another installed Chromium when Playwright's own build is absent.
+
+[Machine-readable result](storage-durability-r2c.json): local Linux, Playwright 1.64.1, Chromium 153.0.8010.12, Node 22.22.0; 2 attempts per case.
+
+| Write | Size (characters) | Kill 0 ms after success | Kill 1000 ms after success |
+|---|---|---|---|
+| `localStorage.setItem` | 2,000 | lost 2/2 | lost 2/2 |
+| `localStorage.setItem` | 1,000,000 | lost 2/2 | lost 2/2 |
+| IndexedDB put, default durability | 2,000 | survived exactly 2/2 | survived exactly 2/2 |
+| IndexedDB put, default durability | 5,000,000 | survived exactly 2/2 | survived exactly 2/2 |
+| IndexedDB put, `strict` durability | 2,000 | survived exactly 2/2 | survived exactly 2/2 |
+| IndexedDB put, `strict` durability | 5,000,000 | survived exactly 2/2 | survived exactly 2/2 |
+| 200 IndexedDB appends | one small record each | all 200, no gap, 2/2 | all 200, no gap, 2/2 |
+
+A 5,000,000-character put took about 75–220 ms from issue to reported completion; 200 appends took about 45–115 ms together.
+
+Cost of one write until it reports success (median of 7, same browser):
+
+| Document size | Today's journal: whole text as JSON to `localStorage` | Today's Autosave: whole record to IndexedDB | Proposed: one change record to IndexedDB |
+|---|---|---|---|
+| 100,000 | 3.5 ms | 3.3 ms | 0.4 ms |
+| 1,000,000 | 17.8 ms | 15.8 ms | 0.6 ms |
+| 10,000,000 | quota exceeded | 145 ms | 0.3 ms |
+
+Cost and durability use the same owned browser launcher. An earlier run of the full diagnostic configuration also repeated the R2b matrix through the shared helper, with the same outcomes as the [R2b baseline](process-crash-baseline.json): the application's `localStorage` journal was lost at 0 and 1000 ms and recovered at 6000 ms; Autosave off never journaled; the saved original always survived.
+
+**Reading.** In this harness and this Chromium, every IndexedDB write that had reported `complete` survived a whole-browser kill 2–5 ms or about 1 s later, including multi-megabyte records, and every returned `localStorage.setItem` was lost, even 1 s later. This is evidence from a small sample, not a guarantee. Strict durability made no observable difference for a process kill (it targets OS crash and power loss, which this does not test). A change record costs well under 1 ms regardless of document size, while full copies grow with the document. This supports building the [R2c design](https://github.com/vchernoy/typebridge/issues/37#issuecomment-6821462575): a change log in the existing IndexedDB database plus snapshots, replacing the `localStorage` journal. If that holds, the expected loss window becomes "changes whose transaction had not reported complete" instead of "everything since the last pause". The implementation must show this with its own before/after runs of the R2b harness, plus coverage for contention, quota, privacy and exact-version cleanup.
+
+**Limits.** Linux Chromium process kill only: not Firefox/WebKit, real phones, OS crash or power loss. Two attempts per case is a small sample, not a guarantee. A write still in flight at the kill is not covered by "reported success" and can be lost.
