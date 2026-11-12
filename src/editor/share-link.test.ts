@@ -12,6 +12,13 @@ import {
   type SharedDocument,
 } from './share-link';
 
+/** Encode, failing the test if the document is refused. */
+async function encodeSharePayloadOk(document: SharedDocument): Promise<string> {
+  const result = await encodeSharePayload(document);
+  if (!result.ok) throw new Error('refused: ' + result.reason);
+  return result.payload;
+}
+
 const doc = (text: string, extra: Partial<SharedDocument> = {}): SharedDocument => ({
   title: 'Письмо', text, format: 'plain', view: 'source', edit: true, ...extra,
 });
@@ -28,29 +35,29 @@ async function payloadOf(json: string): Promise<string> {
 describe('share link round trip', () => {
   it('keeps Cyrillic, emoji, combining marks, tabs and newlines exactly', async () => {
     for (const text of ['', 'Привет, мир!', 'Ёлка 🙂👩‍💻 é', 'line 1\nline 2\r\n\tindented', 'a'.repeat(10_000)]) {
-      const result = await decodeSharePayload(await encodeSharePayload(doc(text)));
+      const result = await decodeSharePayload(await encodeSharePayloadOk(doc(text)));
       expect(result).toEqual({ ok: true, document: doc(text), knownFormat: true });
     }
   });
 
   it('keeps the view and edit hints', async () => {
     const shared = doc('Текст', { view: 'rendered', edit: false });
-    expect(await decodeSharePayload(await encodeSharePayload(shared))).toEqual({ ok: true, document: shared, knownFormat: true });
+    expect(await decodeSharePayload(await encodeSharePayloadOk(shared))).toEqual({ ok: true, document: shared, knownFormat: true });
   });
 
   it('uses only URL-safe characters after the version prefix', async () => {
-    const payload = await encodeSharePayload(doc('Привет 🙂 '.repeat(200)));
+    const payload = await encodeSharePayloadOk(doc('Привет 🙂 '.repeat(200)));
     expect(payload).toMatch(/^1\.[A-Za-z0-9_-]+$/);
   });
 
   it('compresses repetitive text well below its size', async () => {
     const text = 'Строка текста для проверки. '.repeat(500);
-    const payload = await encodeSharePayload(doc(text));
+    const payload = await encodeSharePayloadOk(doc(text));
     expect(payload.length).toBeLessThan(text.length / 10);
   });
 
   it('builds and reads back a #doc= link on the site root', async () => {
-    const payload = await encodeSharePayload(doc('Привет'));
+    const payload = await encodeSharePayloadOk(doc('Привет'));
     const url = shareUrl('https://typebridge.vchernoy.xyz/', payload);
     expect(url).toBe(`https://typebridge.vchernoy.xyz/#doc=${payload}`);
     expect(sharePayloadFromHash(new URL(url).hash)).toBe(payload);
@@ -102,9 +109,28 @@ describe('parseSharedDocument', () => {
 });
 
 describe('shareLinkLength', () => {
-  it('warns above the messenger-friendly length and refuses above the payload limit', () => {
-    expect(shareLinkLength('https://x/#doc=1.abc', '1.abc')).toBe('ok');
-    expect(shareLinkLength('https://x/#doc=' + 'a'.repeat(SHARE_LINK_WARN_CHARS), '1.' + 'a'.repeat(SHARE_LINK_WARN_CHARS))).toBe('long');
-    expect(shareLinkLength('x', '1.' + 'a'.repeat(SHARE_PAYLOAD_MAX_CHARS + 1))).toBe('too-long');
+  it('warns above the messenger-friendly length', () => {
+    expect(shareLinkLength('https://x/#doc=1.abc')).toBe('ok');
+    expect(shareLinkLength('https://x/#doc=' + 'a'.repeat(SHARE_LINK_WARN_CHARS))).toBe('long');
+  });
+});
+
+describe('encoding refuses what decoding would refuse', () => {
+  it('refuses very repetitive text that compresses small but is too large to open (#245 review)', async () => {
+    const text = 'a'.repeat(SHARE_DECOMPRESSED_MAX_BYTES);
+    expect(await encodeSharePayload(doc(text))).toEqual({ ok: false, reason: 'too-large' });
+  });
+  it('refuses text that does not compress below the payload limit', async () => {
+    // Random code points barely compress.
+    let text = '';
+    let seed = 1;
+    while (text.length < SHARE_PAYLOAD_MAX_CHARS) { seed = (seed * 48271) % 2147483647; text += String.fromCharCode(0x4e00 + (seed % 20000)); }
+    expect(await encodeSharePayload(doc(text))).toEqual({ ok: false, reason: 'too-large' });
+  });
+  it('accepts the largest document that still opens', async () => {
+    const text = 'Строка. '.repeat(50_000); // about 700 KB of UTF-8, very compressible
+    const result = await encodeSharePayload(doc(text));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect((await decodeSharePayload(result.payload)).ok).toBe(true);
   });
 });

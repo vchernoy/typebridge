@@ -28,6 +28,7 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 - Decompression stops at 2 MB of output, so a small link cannot expand into a huge document.
 - JSON must have a string `title` and `text` and a format matching `[a-z0-9][a-z0-9+.-]{0,31}`. Unknown `view` falls back to `source`; a missing `edit` means allowed.
 - A format this build does not know (e.g. a future `markdown`) is still decoded, so the reading page can show its raw text with a notice instead of failing.
+- **Encoding refuses what decoding would refuse:** a document whose JSON exceeds 2 MB (even when very repetitive text would compress into a short link), or whose payload exceeds 48,000 characters, gets `too-large` instead of a link, so nobody is offered a link that cannot be opened.
 - Links longer than 2,000 characters are allowed but should be flagged to the sender: messengers, mail clients and social sites often cut or refuse long links.
 
 `e2e/share-link-format.spec.ts` checks that a payload made in Node decodes in Chromium, Firefox and WebKit, and that each browser's payload decodes in Node.

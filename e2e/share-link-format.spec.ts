@@ -20,7 +20,9 @@ test('share link payloads decode the same in Node and in this browser', async ({
   const result = await page.evaluate(async ({ golden, document }) => {
     const api = (window as unknown as { TypeBridgeShare: typeof import('../src/editor/share-link') }).TypeBridgeShare;
     const fromNode = await api.decodeSharePayload(golden);
-    const made = await api.encodeSharePayload(document);
+    const encoded = await api.encodeSharePayload(document);
+    if (!encoded.ok) throw new Error('refused');
+    const made = encoded.payload;
     return { fromNode, made, roundTrip: await api.decodeSharePayload(made) };
   }, { golden: GOLDEN, document: DOCUMENT });
   expect(result.fromNode).toEqual({ ok: true, document: DOCUMENT, knownFormat: true });
