@@ -621,6 +621,55 @@ test('aborted close after discard prepare thaws the surviving editor (#254)', as
   await expect(second.locator('#editor')).toHaveValue('Editable again after abort');
 });
 
+test('racing closes of the last two windows leave exactly one (#254)', async ({ page }) => {
+  // Fails if async commitClose lets both final windows pass the last-window check then both remove (#254 Codex P1).
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const mainShell = page.locator('.host-window[data-window-id="main"]');
+  const secondShell = page.locator('.host-window[data-window-id="w2"]');
+  const main = mainShell.frameLocator('iframe');
+  const second = secondShell.frameLocator('iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await fillHostEditor(main, 'Main before block');
+  await expect(main.locator('#save-indicator')).toHaveText('Saved');
+  await fillHostEditor(second, 'Second before block');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await fillHostEditor(main, 'Main discarded race');
+  await expect(main.locator('#save-indicator')).toHaveText('Save failed');
+  await fillHostEditor(second, 'Second discarded race');
+  await expect(second.locator('#save-indicator')).toHaveText('Save failed');
+
+  // Drive both closes via the host close buttons' click handlers (not pointer hit-testing), so
+  // both prepares await discard confirm; confirming together races the async commit path.
+  await page.evaluate(() => {
+    for (const id of ['main', 'w2']) {
+      document.querySelector<HTMLButtonElement>(`.host-window[data-window-id="${id}"] .host-window-close`)?.click();
+    }
+  });
+  const mainDialog = main.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
+  const secondDialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
+  await expect(mainDialog).toBeVisible();
+  await expect(secondDialog).toBeVisible();
+  await Promise.all([
+    mainDialog.getByRole('button', { name: 'Discard changes and close' }).click(),
+    secondDialog.getByRole('button', { name: 'Discard changes and close' }).click(),
+  ]);
+  await expect(page.locator('.host-window')).toHaveCount(1);
+  const survivor = page.frameLocator('.host-window iframe').first();
+  await expect(survivor.locator('#editor')).toBeEditable();
+});
+
 test('closing a dirty Autosave-off window asks before removing it', async ({ page }) => {
   test.setTimeout(90_000);
   const editor = await openHost(page);

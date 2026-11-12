@@ -856,9 +856,22 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
           deps.cancelClose?.(frame);
           return false;
         }
-        await deps.commitClose?.(frame);
+        // Reserve before awaiting commit: commitClose is async (discard cleanup), and without a
+        // reservation two closes of the final pair can both pass the check above then both remove
+        // their iframes, leaving zero windows (#254 Codex P1).
+        const reserved = layouts.find(win => win.id === id)!;
+        layouts = layouts.filter(win => win.id !== id);
+        try {
+          await deps.commitClose?.(frame);
+        } catch (error) {
+          layouts = [...layouts, reserved];
+          deps.cancelClose?.(frame);
+          throw error;
+        }
       } else if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
         return false;
+      } else {
+        layouts = layouts.filter(win => win.id !== id);
       }
       if (hostFocus && activeId === id) {
         hostFocus = false;
@@ -869,7 +882,6 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       shells.delete(id);
       renameHandlers.delete(id);
       frames.delete(id);
-      layouts = layouts.filter(win => win.id !== id);
       if (preFocusLayouts) {
         preFocusLayouts = preFocusLayouts.filter(win => win.id !== id);
       }
