@@ -91,3 +91,36 @@ test('a long link is flagged and a too-large document is refused', async ({ page
   await expect(dialog(page)).toContainText('too large to share as a link');
   await expect(linkField(page)).toHaveCount(0);
 });
+
+test('a slow regenerate never leaves a link that disagrees with the checkbox (#247 review)', async ({ page }) => {
+  // Hold the next compression (the first regenerate) so a later toggle finishes first.
+  await page.addInitScript(() => {
+    const Native = CompressionStream;
+    const w = window as unknown as { holdNextCompress?: boolean; heldCompressDone?: boolean; CompressionStream: unknown };
+    w.CompressionStream = class extends Native {
+      constructor(format: CompressionFormat) {
+        super(format);
+        if (!w.holdNextCompress) return;
+        w.holdNextCompress = false;
+        const readable = this.readable.pipeThrough(new TransformStream({
+          async transform(chunk, controller) { await new Promise(resolve => setTimeout(resolve, 800)); controller.enqueue(chunk); },
+          flush() { w.heldCompressDone = true; },
+        }));
+        Object.defineProperty(this, 'readable', { value: readable });
+      }
+    };
+  });
+  await setText(page, 'Гонка', 'Текст');
+  await documentAction(page, '#share-link');
+  const checkbox = dialog(page).getByLabel('Readers can edit a copy');
+  await page.evaluate(() => { (window as unknown as { holdNextCompress: boolean }).holdNextCompress = true; });
+  await checkbox.uncheck(); // edit: false, held
+  await expect(dialog(page).getByRole('button', { name: 'Copy link' })).toBeDisabled();
+  await checkbox.check(); // edit: true, finishes first
+  await expect.poll(() => page.evaluate(() => (window as unknown as { heldCompressDone?: boolean }).heldCompressDone)).toBe(true);
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+  await expect(dialog(page).getByRole('button', { name: 'Copy link' })).toBeEnabled();
+  const { decoded } = await decodeShown(page);
+  expect(decoded.ok && decoded.document.edit).toBe(true);
+  await expect(checkbox).toBeChecked();
+});
