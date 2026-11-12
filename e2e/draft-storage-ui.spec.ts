@@ -217,7 +217,11 @@ test('closing a tab immediately after editing saves or offers recovery', async (
   await next.goto('/editor.html');
   await expect(next.locator('#editor')).toBeEnabled();
   if (await next.locator('#editor').inputValue() !== 'Начало — последняя фраза') {
-    await next.getByRole('button', { name: /Recover Untitled document/ }).click();
+    // Recovered either from the change log, automatically (#37 R2c), or from the journal with a click.
+    const recover = next.getByRole('button', { name: /Recover Untitled document/ });
+    const recovered = next.locator('#status', { hasText: 'Recovered unsaved text' });
+    await expect(recover.or(recovered)).toBeVisible();
+    if (await recover.isVisible()) await recover.click();
     await selectDocument(next, { label: 'Untitled document (recovered)' });
   }
   await expect(next.locator('#editor')).toHaveValue('Начало — последняя фраза');
