@@ -165,7 +165,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   const syncToolbar = (): void => {
     const addBtn = deps.toolbar.querySelector<HTMLButtonElement>('[data-host-action="new-window"]');
-    if (addBtn) addBtn.disabled = layouts.length >= MAX_HOST_WINDOWS || hostFocus;
+    // closingIds still occupy slots until commit finishes (#254 optional P3).
+    if (addBtn) addBtn.disabled = layouts.length + closingIds.size >= MAX_HOST_WINDOWS || hostFocus;
     for (const action of ['tile-side', 'tile-stack'] as const) {
       const btn = deps.toolbar.querySelector<HTMLButtonElement>(`[data-host-action="${action}"]`);
       if (btn) btn.hidden = mode === 'stacked' || hostFocus;
@@ -866,11 +867,13 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         const reserved = layouts.find(win => win.id === id)!;
         layouts = layouts.filter(win => win.id !== id);
         closingIds.add(id);
+        syncToolbar();
         try {
           await deps.commitClose?.(frame);
         } catch (error) {
           layouts = [...layouts, reserved];
           closingIds.delete(id);
+          syncToolbar();
           deps.cancelClose?.(frame);
           throw error;
         }
@@ -879,6 +882,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       } else {
         layouts = layouts.filter(win => win.id !== id);
         closingIds.add(id);
+        syncToolbar();
       }
       if (hostFocus && activeId === id) {
         hostFocus = false;
