@@ -68,8 +68,13 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       w.base = text;
       const record: ChangeRecord = { documentId: w.documentId, seq: w.seq, run: w.run, change, length: text.length };
       // Records queued behind a failed one are skipped, not written: the run stops at the failure
-      // until a save covers everything queued (#251 review).
-      queue = queue.then(() => w.failed ? undefined : deps.append(record)).catch(() => { w.failed = true; });
+      // until a save covers everything queued. Nothing lands once Autosave is off, not even a
+      // record queued before (#251 review).
+      queue = queue.then(() => {
+        if (w.failed) return;
+        if (!deps.mayRecord()) { w.failed = true; return; }
+        return deps.append(record);
+      }).catch(() => { w.failed = true; });
     },
     /**
      * Called as a full save takes `savedText` of `documentId` (after `idle()`): `upTo` is the

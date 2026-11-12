@@ -69,6 +69,7 @@ describe('change writer', () => {
   it('writes nothing while Autosave is off, and after it the next save clears the old log', async () => {
     const { env, writer, type, save, recovered } = harness();
     type('A');
+    await writer.idle();
     env.autosave = false;
     type('частное'); type('частное 2');
     await writer.idle();
@@ -97,6 +98,14 @@ describe('change writer', () => {
     commit(log, 'Личное');
     expect(env.records).toMatchObject([{ seq: 1 }, { seq: 2 }]);
     expect(await recovered()).toMatchObject({ text: 'Личное!!', lastSeq: 2 });
+  });
+
+  it('records still queued when Autosave goes off are never written (#251 review)', async () => {
+    const { env, writer, type } = harness();
+    type('S'); type('Se');
+    env.autosave = false; // before the queued writes run
+    await writer.idle();
+    expect(env.records).toEqual([]);
   });
 
   it('a document shown again starts a new run; its first save clears the earlier log', async () => {
