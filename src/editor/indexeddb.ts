@@ -39,11 +39,14 @@ const OWNERSHIP = EDIT_OWNERSHIP_STORE;
 export const CHANGES_STORE = 'changes';
 const CHANGES = CHANGES_STORE;
 
-/** Delete every change record of `documentId` that does not belong to `keepRun`. */
-async function deleteOtherRuns(store: IDBObjectStore, documentId: string, keepRun: string): Promise<void> {
+/**
+ * After a save of `documentId` at `upTo`: delete every record another run wrote (it can never
+ * continue this text) and `keepRun`'s records up to `upTo` (the text contains them).
+ */
+async function pruneChanges(store: IDBObjectStore, documentId: string, upTo: number, keepRun: string): Promise<void> {
   const records = await request(store.getAll(changesOf(documentId))) as ChangeRecord[];
   for (const record of records) {
-    if (record.run !== keepRun) await request(store.delete([documentId, record.seq]));
+    if (record.run !== keepRun || record.seq <= upTo) await request(store.delete([documentId, record.seq]));
   }
 }
 
@@ -154,10 +157,11 @@ export async function commitOrCreateConflictCopy(
   copyId: string,
   owner?: WriteFence,
   /**
-   * Remove the document's change log except `keepRun`'s records: no earlier run continues this
-   * text; `keepRun` starts from it (#37 R2c).
+   * The editing run that continues this text (#37 R2c): the commit keeps only its records
+   * after `upTo`. Without it (a new document from import or a share link), only records up to
+   * `upTo` are removed.
    */
-  clearChanges?: { keepRun: string },
+  changes?: { keepRun: string },
 ): Promise<{ draft: StoredDraft; conflict: boolean }> {
   if (!copyId || copyId === draft.id) throw new Error('Conflict copy requires a distinct ID');
   const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES] : [STORE, CHANGES], 'readwrite');
@@ -173,7 +177,7 @@ export async function commitOrCreateConflictCopy(
     if (conflict) await request(store.add(next));
     else {
       await request(store.put(next));
-      if (clearChanges) await deleteOtherRuns(tx.objectStore(CHANGES), next.id, clearChanges.keepRun);
+      if (changes) await pruneChanges(tx.objectStore(CHANGES), next.id, next.upTo ?? 0, changes.keepRun);
       else if (next.upTo) await request(tx.objectStore(CHANGES).delete(changesOf(next.id, next.upTo)));
     }
     await done;

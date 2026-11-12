@@ -118,6 +118,23 @@ test('turning Autosave off while a save waits for the change log saves no privat
   expect(rows.map(row => row.text).join()).not.toContain('секрет');
 });
 
+test('deleting the saved copy when turning Autosave off leaves no change records behind (#251 review)', async ({ page }) => {
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Удалить всё');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  // Hold the change-log write so it is still queued when the saved copy is deleted.
+  await page.evaluate(() => { (window as unknown as { __typebridgeDelayChangeAppendMs: number }).__typebridgeDelayChangeAppendMs = 800; });
+  await field.press('End');
+  await page.keyboard.type('!?');
+  await setAutosave(page, false, 'delete');
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 2_000))); // every held write has landed
+  const log = await readLog(page);
+  expect(log.rows).toEqual([]);
+  expect(log.changes).toEqual([]);
+});
+
 test('upgrading a version 2 database keeps documents and ownership and adds the change log', async ({ page }) => {
   await page.goto('/icon-192.png');
   await page.evaluate(() => new Promise<void>((resolve, reject) => {

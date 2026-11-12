@@ -29,7 +29,7 @@ export type AutosaveToggleDeps = {
   preferenceSaved: (name: string, saved: boolean) => void;
   journalEdit: () => void;
   persist: () => Promise<SaveResult>;
-  saver: { cancel: () => void; inFlight: () => Promise<SaveResult> | undefined };
+  saver: { cancel: () => void; inFlight: () => Promise<SaveResult> | undefined; drainChanges: () => Promise<void> };
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
   refreshDrafts: () => Promise<void>;
   loseOwnership: () => void;
@@ -161,6 +161,9 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
           if (state.active.id !== targetId || state.ownership !== targetOwnership || state.editBlock || deps.transferFrozen() || state.transitioning) {
             throw new Error('Document changed');
           }
+          // This window keeps its fence, so a change record still queued would pass it and
+          // bring the deleted text back: let every one land first (#251 review).
+          await deps.saver.drainChanges();
           if (!await deleteStoredDraft(state.db, targetId, targetRevision, await targetOwnership.writeFence())) throw new Error('Draft changed');
           if (targetRevision >= 1) deps.postSignal('deleted', targetId, targetRevision);
           if (state.active.id === targetId) {

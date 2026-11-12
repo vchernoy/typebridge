@@ -74,13 +74,13 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
     /**
      * Called as a full save takes `savedText` of `documentId` (after `idle()`): `upTo` is the
      * last change-id queued for that text, so later changes continue from `savedText` and a
-     * failed writer resumes. With no current run for the document (Autosave was off, or the
-     * document was shown again), `clearAll`: records an earlier run left must never be replayed
-     * onto this text, so the save removes every record except those of `keepRun`, the new run
-     * that starts here from `savedText` at change-id 1. Edits made while that save is in
-     * flight belong to it and stay replayable (#251 review).
+     * failed writer resumes. `keepRun` is the run that continues this text: the save deletes
+     * every other run's records (a crashed run's tail must never replay onto this text) and this
+     * run's records up to `upTo`. With no current run (Autosave was off, or the document was
+     * shown again) a new run starts here from `savedText` at change-id 1, so edits made while
+     * the save is in flight stay replayable (#251 review).
      */
-    upToForSave(documentId: string, savedText: string): { upTo: number; clearAll: false } | { upTo: 0; clearAll: true; keepRun: string } {
+    upToForSave(documentId: string, savedText: string): { upTo: number; keepRun: string } {
       const shown = deps.shown();
       const w = writer;
       if (!w || w.documentId !== documentId || shown.id !== documentId || w.generation !== shown.generation) {
@@ -88,11 +88,11 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
         writer = shown.id === documentId
           ? { documentId, generation: shown.generation, run, seq: 0, base: savedText, failed: false }
           : undefined;
-        return { upTo: 0, clearAll: true, keepRun: run };
+        return { upTo: 0, keepRun: run };
       }
       w.base = savedText;
       w.failed = false;
-      return { upTo: w.seq, clearAll: false };
+      return { upTo: w.seq, keepRun: w.run };
     },
     /** Resolves once every queued record was written or failed (tests and shutdown). */
     idle: (): Promise<void> => queue,

@@ -30,7 +30,7 @@ function harness(stored = { text: 'Сохранено', upTo: 0, revision: 1 }) 
   };
   /** The commit transaction: the row, then the cleanup it does. */
   const commit = (log: ReturnType<typeof writer.upToForSave>, text: string) => {
-    env.records = env.records.filter(r => log.clearAll ? r.run === log.keepRun : r.seq > log.upTo);
+    env.records = env.records.filter(r => r.run === log.keepRun && r.seq > log.upTo);
     env.row = { text, upTo: log.upTo, revision: env.row.revision + 1 };
   };
   const recovered = async () => { await writer.idle(); return replayText(env.id, env.row.revision > 0 ? env.row.text : '', env.row.upTo, env.records); };
@@ -91,7 +91,7 @@ describe('change writer', () => {
     // The save captures text and upTo, then waits for its transaction; the user keeps typing.
     await writer.idle();
     const log = writer.upToForSave(env.id, env.text);
-    expect(log).toMatchObject({ upTo: 0, clearAll: true });
+    expect(log).toMatchObject({ upTo: 0 });
     type('Личное!'); type('Личное!!');
     await writer.idle();
     commit(log, 'Личное');
@@ -103,10 +103,26 @@ describe('change writer', () => {
     const { env, writer, type, save } = harness();
     type('X');
     env.generation = 2; // shown again (e.g. reloaded); nothing typed yet
-    expect(writer.upToForSave(env.id, env.text)).toMatchObject({ upTo: 0, clearAll: true });
+    expect(writer.upToForSave(env.id, env.text)).toMatchObject({ upTo: 0 });
     type('XY');
     await save();
     expect(env.records).toEqual([]);
+  });
+
+  it('the first save of a new run removes a crashed run\'s longer tail (#251 review)', async () => {
+    const { env, writer, type, save, recovered } = harness({ text: 'a', upTo: 0, revision: 1 });
+    // A crashed window left two records after the stored row.
+    env.records = [
+      { documentId: 'doc', seq: 1, run: 'crashed', change: [1, '', 'b'], length: 2 },
+      { documentId: 'doc', seq: 2, run: 'crashed', change: [2, '', 'c'], length: 3 },
+    ];
+    type('ax');
+    await writer.idle();
+    await save();
+    expect(env.records).toEqual([]);
+    expect((await recovered()).text).toBe('ax');
+    type('axy');
+    expect((await recovered()).text).toBe('axy');
   });
 
   it('after a failed write it stops, and the next save covers everything and resumes', async () => {
