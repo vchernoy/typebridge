@@ -61,6 +61,7 @@ import { parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
 import { editorWindowApi, exposeEditorWindowApi, hostPageApi, testKnob } from './view/embed-api';
 import { setupExportImport } from './ui/export-import';
+import { openShareDialog } from './ui/share-dialog';
 import { setupComparisonOpen } from './ui/comparison-open';
 import { setupFindGotoBars } from './ui/find-goto-bars';
 import { parseEmbedMode } from './view/embed';
@@ -947,6 +948,17 @@ setupExportImport({
     postSignal('saved', result.draft.id, result.draft.revision);
     return switchDraft(result.draft.id);
   },
+});
+// Documents → Share link… (#39): the shown title and text, like Export.
+document.querySelector<HTMLButtonElement>('#share-link')!.addEventListener('click', () => {
+  void openShareDialog({
+    surface: () => ({
+    title: draftTitle.value.trim() || UNTITLED_TITLE,
+    text: field.value,
+  }),
+    base: () => new URL('/', location.href).toString(),
+    returnFocus: () => document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
+  });
 });
 const leaveGuards = createLeaveGuards(state, {
   viewMode, field, autosave, workspace, saver, reloadBackup, recovery,
