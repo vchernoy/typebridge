@@ -369,6 +369,68 @@ test('update-reload freeze blocks edits during deferred discard commit (#254)', 
   await expect(second.locator('#editor')).toHaveValue('Private second before freeze');
 });
 
+test('host New window is blocked while update-reload commit awaits (#254)', async ({ page }) => {
+  // Fails if New window stays enabled/usable during awaited commitUpdateReload (#254 Codex P1).
+  test.setTimeout(90_000);
+  await openHost(page);
+  await setHostAutosave(page, false);
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await fillHostEditor(main, 'Private host before reload commit');
+  await expect(main.locator('#save-indicator')).toHaveText('Not saved');
+
+  const prepare = page.evaluate(async () => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe.host-editor');
+    return (frame?.contentWindow as Window & {
+      __typebridgePrepareUpdateReload?: () => Promise<boolean>;
+    })?.__typebridgePrepareUpdateReload?.() ?? false;
+  });
+  const dialog = main.getByRole('dialog', { name: 'Reload without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
+  expect(await prepare).toBe(true);
+
+  await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe.host-editor')!;
+    const win = frame.contentWindow as Window & {
+      __typebridgeAssertSafeUpdateReload?: () => void;
+      __typebridgeFreezeForUpdateReload?: () => void;
+      __typebridgeDelayChangeAppendMs?: number;
+    };
+    win.__typebridgeAssertSafeUpdateReload?.();
+    win.__typebridgeFreezeForUpdateReload?.();
+    win.__typebridgeDelayChangeAppendMs = 2_000;
+    // Same gate host reload sets before awaiting commit (#254).
+    (window as Window & {
+      __typebridgeSetWindowCreationBlocked?: (blocked: boolean) => void;
+    }).__typebridgeSetWindowCreationBlocked?.(true);
+  });
+
+  const commit = page.evaluate(async () => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe.host-editor')!;
+    await (frame.contentWindow as Window & {
+      __typebridgeCommitUpdateReload?: () => void | Promise<void>;
+    }).__typebridgeCommitUpdateReload?.();
+  });
+  await expect(page.getByRole('button', { name: 'New window' })).toBeDisabled();
+  await page.getByRole('button', { name: 'New window' }).evaluate((btn: HTMLButtonElement) => {
+    btn.click();
+  });
+  await expect(page.locator('.host-window')).toHaveCount(1);
+  await commit;
+
+  await page.evaluate(() => {
+    (window as Window & {
+      __typebridgeSetWindowCreationBlocked?: (blocked: boolean) => void;
+    }).__typebridgeSetWindowCreationBlocked?.(false);
+    const frame = document.querySelector<HTMLIFrameElement>('iframe.host-editor')!;
+    (frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void })
+      .__typebridgeCancelUpdateReload?.();
+  });
+  await expect(page.getByRole('button', { name: 'New window' })).toBeEnabled();
+  await page.getByRole('button', { name: 'New window' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(2);
+});
+
 test('refused prepare cancels deferred discard on an earlier window (#254)', async ({ page }) => {
   // Fails if window A keeps pendingReloadDiscard after B refuses and commit still wipes recovery.
   test.setTimeout(90_000);

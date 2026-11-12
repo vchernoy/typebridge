@@ -85,6 +85,11 @@ export type WindowManager = {
    */
   openDocument: (documentId: string) => 'shown' | 'opened' | 'full';
   closeWindow: (id: string) => Promise<boolean>;
+  /**
+   * Block New window while an update-reload commit/navigation is in flight so a fresh iframe
+   * cannot be typed into without prepare/assert/freeze (#254 Codex P1).
+   */
+  setWindowCreationBlocked: (blocked: boolean) => void;
   tileSideBySide: () => void;
   tileStacked: () => void;
   layoutMode: () => EffectiveLayoutMode;
@@ -121,6 +126,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const closingIds = new Set<string>();
   /** Close already preparing or committing — ignore duplicate close clicks (#254 Codex P1). */
   const closeInFlight = new Set<string>();
+  /** Update-reload commit/navigation in flight — refuse New window (#254 Codex P1). */
+  let windowCreationBlocked = false;
   const shells = new Map<string, HTMLElement>();
   /** Per-window "start renaming" actions (title bar ✎ and the Documents menu). */
   const renameHandlers = new Map<string, () => void>();
@@ -168,7 +175,12 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   const syncToolbar = (): void => {
     const addBtn = deps.toolbar.querySelector<HTMLButtonElement>('[data-host-action="new-window"]');
     // closingIds still occupy slots until commit finishes (#254 optional P3).
-    if (addBtn) addBtn.disabled = layouts.length + closingIds.size >= MAX_HOST_WINDOWS || hostFocus;
+    // windowCreationBlocked covers the update-reload commit gap (#254 Codex P1).
+    if (addBtn) {
+      addBtn.disabled = windowCreationBlocked
+        || layouts.length + closingIds.size >= MAX_HOST_WINDOWS
+        || hostFocus;
+    }
     for (const action of ['tile-side', 'tile-stack'] as const) {
       const btn = deps.toolbar.querySelector<HTMLButtonElement>(`[data-host-action="${action}"]`);
       if (btn) btn.hidden = mode === 'stacked' || hostFocus;
@@ -801,7 +813,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     },
     addWindow: (documentId?: string) => {
       // closingIds still occupy their shells/frames until commit finishes — do not reuse or overflow.
-      if (hostFocus || layouts.length + closingIds.size >= MAX_HOST_WINDOWS) return undefined;
+      if (windowCreationBlocked || hostFocus || layouts.length + closingIds.size >= MAX_HOST_WINDOWS) {
+        return undefined;
+      }
       const view = viewportOf(deps.root);
       const id = mintWindowId([...layouts.map(w => w.id), ...closingIds]);
       const maxZ = layouts.reduce((m, win) => Math.max(m, win.z), 0);
@@ -1004,6 +1018,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       applyModeChrome();
       syncEmbeddedFocusChrome(false);
       persist();
+    },
+    setWindowCreationBlocked: (blocked: boolean) => {
+      windowCreationBlocked = blocked;
+      syncToolbar();
     },
     dispose: () => {
       if (disposed) return;

@@ -67,6 +67,11 @@ export type HostPageApi = {
   /** Read-only probes of the window layout (used by e2e). */
   __typebridgeHostWindows: () => unknown[];
   __typebridgeHostLayoutMode: () => string;
+  /**
+   * Block or unblock New window (update-reload commit gap). Host reload sets this; e2e drives it
+   * the same way when it exercises prepare/assert/freeze/commit without the SW path (#254).
+   */
+  __typebridgeSetWindowCreationBlocked: (blocked: boolean) => void;
 };
 
 /**

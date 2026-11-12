@@ -88,6 +88,8 @@ exposeHostPageApi({
   __typebridgeHostRename: windowId => { manager.renameWindow(windowId); },
   __typebridgeOpenDocumentIds: exceptWindowId => manager.openDocumentIds(exceptWindowId),
   __typebridgeOpenTitles: exceptWindowId => manager.openTitles(exceptWindowId),
+  // Same gate the SW reload path uses — e2e calls it around held commitUpdateReload (#254).
+  __typebridgeSetWindowCreationBlocked: blocked => { manager.setWindowCreationBlocked(blocked); },
 });
 
 installToolbarFit(toolbar);
@@ -126,6 +128,8 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
           return true;
         },
         reload: async () => {
+          // No New window while commit awaits — a fresh iframe would skip prepare/freeze (#254).
+          manager.setWindowCreationBlocked(true);
           try {
             for (const frame of editorFrames()) {
               const assertSafe = editorHooks(frame).__typebridgeAssertSafeUpdateReload;
@@ -148,10 +152,12 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
             for (const frame of editorFrames()) {
               editorHooks(frame).__typebridgeCancelUpdateReload?.();
             }
+            manager.setWindowCreationBlocked(false);
             throw error;
           }
         },
         cancelReload: () => {
+          manager.setWindowCreationBlocked(false);
           for (const frame of editorFrames()) {
             editorHooks(frame).__typebridgeCancelUpdateReload?.();
           }
