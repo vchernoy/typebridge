@@ -1,7 +1,7 @@
 /** Waiting workers activate only after an explicit, safely prepared reload. */
 export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   prepareReload: () => Promise<boolean>;
-  reload: () => void;
+  reload: () => void | Promise<void>;
   cancelReload: () => void;
   /** sessionStorage key for dismissal (#175 window scoping). */
   dismissedKey?: string;
@@ -98,7 +98,7 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
       }
       message.textContent = 'Installing update…';
       await activateWaitingWorker(waiting, workerContainer);
-      deps.reload();
+      await deps.reload();
       navigating = true;
       // If navigation was canceled or stalls, stop it before allowing new edits.
       // Successful navigation destroys this page and its timer.

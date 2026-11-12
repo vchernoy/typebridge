@@ -1043,7 +1043,7 @@ const leaveGuards = createLeaveGuards(state, {
     } catch { /* Closing anyway; a later owner may still see records if the clear failed. */ }
   },
 });
-const { prepareUpdateReload, reloadAfterUpdate } = leaveGuards;
+const { prepareUpdateReload } = leaveGuards;
 updateStats();
 
 if (!embedded) {
@@ -1079,7 +1079,16 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(registration => watchForUpdates(registration, {
         prepareReload: prepareUpdateReload,
-        reload: reloadAfterUpdate,
+        // Assert first, then commit deferred discard, then navigate — same order as the host (#254).
+        reload: async () => {
+          leaveGuards.assertSafeToReloadAfterUpdate();
+          await leaveGuards.commitUpdateReload();
+          try { window.location.reload(); }
+          catch (error) {
+            leaveGuards.cancelUpdateReload();
+            throw error;
+          }
+        },
         cancelReload: () => { leaveGuards.cancelUpdateReload(); },
         dismissedKey: updateDismissKey,
       }))

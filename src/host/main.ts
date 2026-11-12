@@ -119,13 +119,17 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
           }
           return true;
         },
-        reload: () => {
+        reload: async () => {
           try {
             for (const frame of editorFrames()) {
               const assertSafe = editorHooks(frame).__typebridgeAssertSafeUpdateReload;
               if (!assertSafe) throw new Error('Editor reload unavailable');
               // Intentional throws ("Private edits changed", backup missing, busy) must abort.
               assertSafe();
+            }
+            // Deferred discard from prepare runs only once every window has asserted (#254).
+            for (const frame of editorFrames()) {
+              await editorHooks(frame).__typebridgeCommitUpdateReload?.();
             }
             window.location.reload();
           } catch (error) {

@@ -54,6 +54,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
    * cancel can thaw without wiping journal/change-log recovery (#254 Codex P1).
    */
   let pendingCloseDiscard = false;
+  /**
+   * Update-reload prepare confirmed discard but deferred clear until commitUpdateReload, so
+   * cancelUpdateReload keeps recovery if another window refuses or navigation stalls (#254).
+   */
+  let pendingReloadDiscard = false;
 
   function updateReloadReturnFocus(): HTMLElement {
     const local = document.querySelector<HTMLButtonElement>('#update-reload');
@@ -102,17 +107,21 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     deps.unfreezeAfterDiscard();
   }
 
+  /** Run deferred update-reload discard after every window has prepared and assert passed. */
+  async function commitUpdateReload(): Promise<void> {
+    if (!pendingReloadDiscard) return;
+    pendingReloadDiscard = false;
+    await deps.discardUnsavedRecovery();
+  }
+
   /**
    * Confirm discard. Consent is bound to the content revision shown in the dialog.
-   *
-   * For window close (`deferDestructiveClear`): freeze and defer journal/change-log clear until
-   * host commit, so a host cancel thaws without destroying recovery (#254 Codex P1).
-   * For update-reload: clear immediately while frozen, then thaw so a later private edit can
-   * bump contentRevision and fail the assert.
+   * Destructive journal/change-log clear is deferred until host commit (close) or
+   * commitUpdateReload (update), so cancel keeps recovery (#254 Codex P1).
    */
   async function confirmDiscardAndClear(
     prompt: { title: string; message: string; confirmLabel: string },
-    options: { deferDestructiveClear: boolean },
+    mode: 'close' | 'reload',
   ): Promise<boolean> {
     const contentAtPrompt = deps.workspace.contentRevision();
     const discard = await askConfirmChoice({
@@ -123,25 +132,15 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     if (!discard) return false;
     // Edits while the dialog was open: do not clear recovery for a newer, unconsented version.
     if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
-    deps.freezeForDiscard();
-    if (options.deferDestructiveClear) {
+    if (mode === 'close') {
+      deps.freezeForDiscard();
       pendingCloseDiscard = true;
       closeFreezeArmed = true;
       return true;
     }
-    try {
-      await deps.discardUnsavedRecovery();
-      const stillSame = deps.workspace.contentRevision() === contentAtPrompt;
-      deps.unfreezeAfterDiscard();
-      closeFreezeArmed = false;
-      pendingCloseDiscard = false;
-      return stillSame;
-    } catch (error) {
-      closeFreezeArmed = false;
-      pendingCloseDiscard = false;
-      deps.unfreezeAfterDiscard();
-      throw error;
-    }
+    // Reload: stay editable so a later private edit bumps contentRevision and fails the assert.
+    pendingReloadDiscard = true;
+    return true;
   }
 
   async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
@@ -153,7 +152,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         title: kind === 'close' ? 'Close without saving?' : 'Reload without saving?',
         message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
         confirmLabel: kind === 'close' ? 'Discard changes and close' : 'Discard changes and reload',
-      }, { deferDestructiveClear: kind === 'close' });
+      }, kind);
       if (discarded) {
         privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
       }
@@ -172,7 +171,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       title: 'Close and discard unsaved changes?',
       message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
       confirmLabel: 'Discard changes and close',
-    }, { deferDestructiveClear: true });
+    }, 'close');
   }
   async function prepareUpdateReload(): Promise<boolean> {
     return prepareLeaveWithUnsaved('reload');
@@ -223,9 +222,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     reloadAfterUpdate,
     commitWindowClose,
     cancelWindowClose,
-    /** The update reload was cancelled: re-enable the unload warning and backups. */
+    commitUpdateReload,
+    /** The update reload was cancelled: re-enable the unload warning and backups; keep recovery. */
     cancelUpdateReload(): void {
       allowUpdateReload = false;
+      pendingReloadDiscard = false;
       deps.reloadBackup.setSuppressed(false);
     },
   };

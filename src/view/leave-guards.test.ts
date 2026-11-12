@@ -137,11 +137,16 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
   });
 
-  it('clears immediately on update-reload discard then thaws', async () => {
-    const { guards, discardUnsavedRecovery, freezeForDiscard, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+  it('defers update-reload discard until commitUpdateReload; cancel keeps recovery', async () => {
+    // Fails if prepareUpdateReload clears before reload is committed (#254 Codex P1).
+    const { guards, discardUnsavedRecovery, freezeForDiscard } = harness({ autosaveOn: false });
     await expect(guards.prepareUpdateReload()).resolves.toBe(true);
-    expect(freezeForDiscard).toHaveBeenCalledOnce();
+    expect(freezeForDiscard).not.toHaveBeenCalled();
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+    guards.cancelUpdateReload();
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    await guards.commitUpdateReload();
     expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
-    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
   });
 });

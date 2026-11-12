@@ -20,6 +20,8 @@ export type EditorWindowApi = {
   __typebridgePrepareUpdateReload: () => Promise<boolean>;
   /** Update reload: validate and arm it; throws to abort. Does not navigate. */
   __typebridgeAssertSafeUpdateReload: () => void;
+  /** After every window asserted: run deferred discard cleanup before navigation. */
+  __typebridgeCommitUpdateReload: () => void | Promise<void>;
   __typebridgeCancelUpdateReload: () => void;
   /** Host asks before removing this window's iframe (#175 step 5). */
   __typebridgePrepareWindowClose: () => Promise<boolean>;
