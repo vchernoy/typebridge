@@ -69,6 +69,9 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
   function markFailed(w: Writer): void {
     if (w.failed) return;
     w.failed = true;
+    // An abandoned or replaced run must not fire journal fallback — discard may already have
+    // cleared the journal, and a late queue rejection would recreate it (#254 Codex P2).
+    if (writer !== w) return;
     notifyUnprotected();
   }
 

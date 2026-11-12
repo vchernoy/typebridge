@@ -311,4 +311,17 @@ describe('change writer', () => {
     writer.abandon();
     expect(writer.runOf(env.id)).toBeUndefined();
   });
+
+  it('abandon suppresses onUnprotected from a late queue rejection (#254 Codex P2)', async () => {
+    // Fails if markFailed still notifies after abandon: discard would recreate a journal.
+    const { env, writer, type, save } = harness();
+    const events: string[] = [];
+    writer.onUnprotected(() => { events.push('unprotected'); });
+    await save();
+    env.failNext = 1;
+    type('late');
+    writer.abandon();
+    await writer.idle();
+    expect(events).toEqual([]);
+  });
 });

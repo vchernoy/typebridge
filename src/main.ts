@@ -1029,11 +1029,16 @@ const leaveGuards = createLeaveGuards(state, {
     const documentId = state.active.id;
     const run = changeWriter.runOf(documentId);
     changeWriter.abandon();
+    // Drain after abandon so a late append rejection cannot recreate a journal (#254 Codex P2).
+    try { await saver.drainChanges(); } catch { /* Closing anyway. */ }
+    const lateJournal = recovery.takeCurrentJournal();
+    if (lateJournal) {
+      try { clearRecovery(localStorage, lateJournal); } catch { /* Optional backup. */ }
+    }
     // Only clear under a live fence for this document: never wipe another owner's log (#254 Codex P1).
     const ownership = state.ownership;
     if (!state.db || !run || !ownership || ownership.documentId !== documentId) return;
     try {
-      await saver.drainChanges();
       await clearDocumentChanges(state.db, documentId, run, await ownership.writeFence());
     } catch { /* Closing anyway; a later owner may still see records if the clear failed. */ }
   },
