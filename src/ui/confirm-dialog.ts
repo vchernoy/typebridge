@@ -89,8 +89,13 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
 
     // Long sheets (e.g. Keyboard shortcuts) make the message scrollable; include
     // it in the tab order only then so short confirms keep Cancel↔Confirm wrap.
+    // Controls inside structured content (e.g. the Share link field and checkbox) join the
+    // cycle in document order, before the actions.
+    const messageControls = (): HTMLElement[] => [...message.querySelectorAll<HTMLElement>(
+      'button, input, select, textarea, a[href]',
+    )].filter(element => !(element as HTMLButtonElement).disabled && !element.hidden);
     const focusables = (): HTMLElement[] =>
-      [...(message.tabIndex >= 0 ? [message] : []), cancel, ...(options.confirmLabel === undefined ? [] : [confirm])];
+      [...(message.tabIndex >= 0 ? [message] : []), ...messageControls(), cancel, ...(options.confirmLabel === undefined ? [] : [confirm])];
 
     const close = (accepted: boolean): void => {
       document.removeEventListener('keydown', onKeyDown, true);

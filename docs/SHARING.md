@@ -1,6 +1,6 @@
 # Share links
 
-Status: the **link format** (`src/editor/share-link.ts`) and the **reading page** (`read.html`, `src/read/main.ts`) exist. The **Share link…** dialog that creates links is the next #39 step and is not built yet. Design for later formats, rendered views, images and active documents is in [#244](https://github.com/vchernoy/typebridge/issues/244).
+Status: #39 v1 is built: the **link format** (`src/editor/share-link.ts`), the **reading page** (`read.html`, `src/read/main.ts`) and **Documents → Share link…** (`src/ui/share-dialog.ts`). Plain text only; later formats are designed in [#244](https://github.com/vchernoy/typebridge/issues/244). Design for later formats, rendered views, images and active documents is in [#244](https://github.com/vchernoy/typebridge/issues/244).
 
 ## What a link carries
 
@@ -32,6 +32,18 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 - Links longer than 2,000 characters are allowed but should be flagged to the sender: messengers, mail clients and social sites often cut or refuse long links.
 
 `e2e/share-link-format.spec.ts` checks that a payload made in Node decodes in Chromium, Firefox and WebKit, and that each browser's payload decodes in Node.
+
+## Share link… (sender)
+
+**▾ Documents → Share link…** shares the title and text shown in that window, including unsaved changes, like Export. The dialog:
+
+- says plainly: "Anyone with the link can read this document. The text travels inside the link itself; nothing is uploaded. The link also stays in your browser history and wherever you paste it."
+- previews what the reader sees first (title and the start of the text);
+- has **Readers can edit a copy** (on by default; off hides Edit a copy on the reading page, which is presentation only);
+- shows the link in a read-only field and **Copy link** (if the browser refuses clipboard access, the link is selected for the device's copy command);
+- warns when the link is longer than 2,000 characters, and refuses a document too large for a link, suggesting Export instead.
+
+Every control in the dialog is reachable with Tab; Escape or Close returns to ▾.
 
 ## Reading page
 

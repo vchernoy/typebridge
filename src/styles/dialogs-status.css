@@ -95,3 +95,40 @@
 .recovery-panel:empty {
   display: none;
 }
+/* Documents → Share link… (#39). */
+.share-dialog {
+  display: grid;
+  gap: 10px;
+}
+.share-dialog p {
+  margin: 0;
+}
+.share-preview {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  overflow-wrap: anywhere;
+}
+.share-preview-text {
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.share-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.share-link-row {
+  display: flex;
+  gap: 8px;
+}
+.share-link-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  font: inherit;
+}
+.share-status:empty {
+  display: none;
+}
