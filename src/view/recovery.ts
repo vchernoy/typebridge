@@ -125,6 +125,11 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
       journalWarningKind = 'read';
       return;
     }
+    // A later successful list clears a transient read failure (#254 Codex P2).
+    if (journalWarningKind === 'read') {
+      journalWarning.hidden = true;
+      journalWarningKind = undefined;
+    }
     const candidates: { item: RecoverySnapshot; unknown: boolean }[] = [];
     for (const item of entries) {
       const activeOwner = await ownerIsActive(item.tab);

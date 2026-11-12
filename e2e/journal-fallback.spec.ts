@@ -206,3 +206,51 @@ test('a stale journal warning clears once the change log protects edits (#37 R2c
   await page.keyboard.type('!');
   await expect(page.getByRole('alert').filter({ hasText: 'Emergency backup unavailable' })).toHaveCount(0);
 });
+
+test('a transient journal read warning clears after a successful retry (#254)', async ({ page }) => {
+  // Fails if renderRecovery leaves journalWarningKind=read after listRecovery succeeds (#254 Codex P2).
+  test.setTimeout(30_000);
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.evaluate(() => {
+    // A foreign journal key so listRecovery's storage.key() runs and can throw outside its per-item try.
+    localStorage.setItem('typebridge.recovery.v1.other.doc', JSON.stringify({
+      token: 'tok', tab: 'other', documentId: 'doc', revision: 0, timestamp: Date.now(),
+      title: 'Foreign', text: 'x',
+    }));
+    const original = Storage.prototype.key;
+    const hook = window as unknown as { __typebridgeFailRecoveryKey?: boolean; __typebridgeRestoreKey?: () => void };
+    hook.__typebridgeFailRecoveryKey = true;
+    hook.__typebridgeRestoreKey = () => {
+      hook.__typebridgeFailRecoveryKey = false;
+      Storage.prototype.key = original;
+    };
+    Storage.prototype.key = function (index) {
+      const key = original.call(this, index);
+      if (hook.__typebridgeFailRecoveryKey && key?.startsWith('typebridge.recovery.v1.')) {
+        throw new DOMException('blocked', 'UnknownError');
+      }
+      return key;
+    };
+  });
+  // Same-tab storage listener queues renderRecovery (~1.2s); 5s poll is a backup.
+  await page.evaluate(() => {
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'typebridge.recovery.v1.other.doc',
+      newValue: 'changed',
+      storageArea: localStorage,
+    }));
+  });
+  const readAlert = page.getByRole('alert').filter({ hasText: 'Emergency backups cannot be read' });
+  await expect(readAlert).toBeVisible({ timeout: 15_000 });
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeRestoreKey?: () => void }).__typebridgeRestoreKey?.();
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'typebridge.recovery.v1.other.doc',
+      newValue: null,
+      storageArea: localStorage,
+    }));
+  });
+  await expect(readAlert).toHaveCount(0, { timeout: 15_000 });
+});
