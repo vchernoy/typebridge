@@ -4,7 +4,7 @@ import { setAutosave } from './settings-helpers';
 
 // The change log (#37 R2c step 2b): every edit with Autosave on is a small record; a full save
 // says which records it contains (upTo) and removes them. Recovery from it comes in step 2c.
-type Row = { id: string; text: string; revision: number; upTo?: number };
+type Row = { id: string; title: string; text: string; revision: number; upTo?: number };
 
 async function readLog(page: Page): Promise<{ rows: Row[]; changes: ChangeRecord[] }> {
   return page.evaluate(() => new Promise<{ rows: Row[]; changes: ChangeRecord[] }>((resolve, reject) => {
@@ -18,7 +18,7 @@ async function readLog(page: Page): Promise<{ rows: Row[]; changes: ChangeRecord
       tx.oncomplete = () => {
         db.close();
         resolve({
-          rows: (rows.result as Row[]).map(({ id, text, revision, upTo }) => ({ id, text, revision, upTo })),
+          rows: (rows.result as Row[]).map(({ id, title, text, revision, upTo }) => ({ id, title, text, revision, upTo })),
           changes: changes.result as ChangeRecord[],
         });
       };
@@ -165,11 +165,19 @@ test('after a tab crash, unsaved text from the change log comes back as a copy w
   await page.locator('#draft-title').fill('Заметка');
   await field.fill('Оригинал');
   await expect(page.locator('#status')).toContainText('Saved locally');
-  // Saves are held, so the unsaved text exists only in the change log (and the journal).
+  // Saves are held, so the unsaved text and title exist only in the change log (and the journal).
+  // Renaming before the crash must land in the recovered copy's title (#37 R2c 2d-1); fails on
+  // old code that recovers with the stored title "Заметка (recovered)".
   await holdSaves(page);
+  await page.locator('#draft-title').fill('Новое имя');
+  await field.click();
   await field.press('End');
   await page.keyboard.type(' — несохранённое 🙂');
   await expect.poll(() => rebuilt(page)).toBe('Оригинал — несохранённое 🙂');
+  await expect.poll(async () => {
+    const { changes } = await readLog(page);
+    return changes.some(c => c.title === 'Новое имя');
+  }).toBe(true);
   const crashed = page.waitForEvent('crash');
   const cdp = await context.newCDPSession(page);
   void cdp.send('Page.crash').catch(() => { /* The renderer closes the command; the crash event is required. */ });
@@ -177,9 +185,9 @@ test('after a tab crash, unsaved text from the change log comes back as a copy w
   const next = await context.newPage();
   await next.goto('/editor.html');
   await expect(next.locator('#editor')).toHaveValue('Оригинал');
-  await expect(next.locator('#status')).toContainText('Recovered unsaved text from an earlier session as “Заметка (recovered)”');
+  await expect(next.locator('#status')).toContainText('Recovered unsaved text from an earlier session as “Новое имя (recovered)”');
   const log = await readLog(next);
-  expect(log.rows.find(row => row.text === 'Оригинал — несохранённое 🙂')).toBeDefined();
+  expect(log.rows.find(row => row.text === 'Оригинал — несохранённое 🙂' && row.title === 'Новое имя (recovered)')).toBeDefined();
   expect(log.rows.find(row => row.text === 'Оригинал')).toBeDefined();
   expect(log.changes).toEqual([]);
   // The journal held the same text and title: it is not offered a second time.

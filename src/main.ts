@@ -659,6 +659,7 @@ const changeWriter = createChangeWriter({
   mayRecord: () => !viewMode && autosave.checked && !state.suppressEditTracking && !state.loadingDraft,
   shown: () => ({ id: state.active.id, generation: workspace.sessionGeneration() }),
   text: () => field.value,
+  title: () => draftTitle.value.trim() || UNTITLED_TITLE,
   append: async record => {
     if (!state.db || state.ownership?.documentId !== record.documentId) throw new Error('Not editing this document');
     const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
@@ -670,7 +671,7 @@ const changeWriter = createChangeWriter({
 /** A crashed window's unsaved text was kept as a copy (#37 R2c): list it and say so. */
 async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<void> {
   postSignal('saved', copy.id, copy.revision);
-  // The localStorage journal may hold the same text: drop only an entry the copy exactly matches.
+  // The localStorage journal may hold the same text and title: drop only an entry the copy exactly matches.
   try {
     for (const item of listRecovery(localStorage)) {
       if (item.documentId === sourceId && item.text === copy.text && item.title + ' (recovered)' === copy.title) clearRecovery(localStorage, item);
@@ -686,7 +687,8 @@ async function salvageOnOwn(documentId: string): Promise<void> {
   const ownership = state.ownership;
   if (!ownership || ownership.documentId !== documentId) return;
   try {
-    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value);
+    const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
+    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);
     if (copy) await announceRecovered(copy, documentId);
   } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
 }

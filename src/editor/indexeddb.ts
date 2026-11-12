@@ -50,21 +50,27 @@ async function pruneChanges(store: IDBObjectStore, documentId: string, upTo: num
   }
 }
 
+/** Lost state another run's records add to the stored row: text and the title that goes with it. */
+type LostState = { text: string; title: string };
+
 /**
  * Crash recovery from the change log (#37 R2c): what other runs' records (not `keepRun`'s) add to
- * the stored row `current`, the text they continue. Undefined when they add nothing.
+ * the stored row `current`. Undefined when they add nothing (or only reproduce the row's text and
+ * title). The title is the last one an applied record set, else the stored title (#37 R2c 2d-1).
  */
-async function replayOtherRuns(tx: IDBTransaction, current: StoredDraft | undefined, keepRun: string | undefined): Promise<string | undefined> {
+async function replayOtherRuns(tx: IDBTransaction, current: StoredDraft | undefined, keepRun: string | undefined): Promise<LostState | undefined> {
   if (!current) return undefined;
   const records = (await request(tx.objectStore(CHANGES).getAll(changesOf(current.id))) as ChangeRecord[])
     .filter(record => record.run !== keepRun);
   const replay = replayText(current.id, current.text, current.upTo ?? 0, records);
-  return replay.applied === 0 || replay.text === current.text ? undefined : replay.text;
+  const title = replay.title ?? current.title;
+  if (replay.applied === 0 || (replay.text === current.text && title === current.title)) return undefined;
+  return { text: replay.text, title };
 }
 
-/** Keep recovered text as a new document "<title> (recovered)". */
-async function addRecoveredCopy(tx: IDBTransaction, current: StoredDraft, text: string, recoveryId: string, now: number): Promise<StoredDraft> {
-  const copy: StoredDraft = { id: recoveryId, title: current.title + ' (recovered)', text, updatedAt: now, revision: 1, upTo: 0 };
+/** Keep recovered text (and title) as a new document "<title> (recovered)". */
+async function addRecoveredCopy(tx: IDBTransaction, lost: LostState, recoveryId: string, now: number): Promise<StoredDraft> {
+  const copy: StoredDraft = { id: recoveryId, title: lost.title + ' (recovered)', text: lost.text, updatedAt: now, revision: 1, upTo: 0 };
   await request(tx.objectStore(STORE).add(copy));
   return copy;
 }
@@ -199,10 +205,12 @@ export async function commitOrCreateConflictCopy(
     else {
       await request(store.put(next));
       if (changes) {
-        // Other runs' text is kept as a copy before their records go, unless this very commit
-        // stores the same text (same transaction, so it is durable either way).
+        // Other runs' lost state is kept as a copy before their records go, unless this very
+        // commit stores the same text and title (same transaction, so it is durable either way).
         const lost = await replayOtherRuns(tx, current, changes.keepRun);
-        if (current && lost !== undefined && lost !== next.text) recovered = await addRecoveredCopy(tx, current, lost, changes.recoveryId, draft.updatedAt);
+        if (current && lost !== undefined && (lost.text !== next.text || lost.title !== next.title)) {
+          recovered = await addRecoveredCopy(tx, lost, changes.recoveryId, draft.updatedAt);
+        }
         await pruneChanges(tx.objectStore(CHANGES), next.id, next.upTo ?? 0, changes.keepRun);
       } else if (next.upTo) await request(tx.objectStore(CHANGES).delete(changesOf(next.id, next.upTo)));
     }
@@ -326,15 +334,16 @@ export async function listChanges(db: IDBDatabase, documentId: string): Promise<
  * row (a window that crashed or was killed) are replayed and kept as a recovered copy, and those
  * records are removed, in one transaction under the ownership fence. `keepRun` is this window's
  * own run, if it has one. Returns the copy, or undefined when nothing was lost or the lost text
- * is what this window shows (then the records stay until a save commits it).
+ * and title are what this window shows (then the records stay until a save commits them).
  */
 export async function salvageChanges(
   db: IDBDatabase, documentId: string, owner: WriteFence, recoveryId: string, keepRun: string | undefined, now: number,
   /**
-   * Text this window shows (e.g. a reload backup or a handoff). When the lost text is exactly
-   * this, no copy is made and the records are kept: shown text is not stored yet.
+   * Text and title this window shows (e.g. a reload backup or a handoff). When the lost state is
+   * exactly both, no copy is made and the records are kept: shown state is not stored yet.
    */
   shownText?: string,
+  shownTitle?: string,
 ): Promise<StoredDraft | undefined> {
   const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readwrite');
   const done = finished(tx);
@@ -342,10 +351,13 @@ export async function salvageChanges(
     await assertEditOwner(tx, documentId, owner);
     const current = await request(tx.objectStore(STORE).get(documentId)) as StoredDraft | undefined;
     const lost = await replayOtherRuns(tx, current, keepRun);
-    // Shown text is not durable (a reload backup, a handoff): when it is the lost text, keep the
-    // records; the save that commits that text removes them in its own transaction (#252 review).
-    if (lost !== undefined && lost === shownText) { await done; return undefined; }
-    const recovered = current && lost !== undefined ? await addRecoveredCopy(tx, current, lost, recoveryId, now) : undefined;
+    // Shown text/title are not durable (a reload backup, a handoff): when they are the lost
+    // state, keep the records; the save that commits them removes them (#252 review, #37 2d-1).
+    if (lost !== undefined && shownText !== undefined && lost.text === shownText && lost.title === shownTitle) {
+      await done;
+      return undefined;
+    }
+    const recovered = current && lost !== undefined ? await addRecoveredCopy(tx, lost, recoveryId, now) : undefined;
     const store = tx.objectStore(CHANGES);
     const records = await request(store.getAll(changesOf(documentId))) as ChangeRecord[];
     for (const record of records) {

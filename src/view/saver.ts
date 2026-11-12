@@ -36,7 +36,7 @@ export type SaverDeps = {
   changes: {
     edit: () => void;
     idle: () => Promise<void>;
-    upToForSave: (documentId: string, savedText: string) => { upTo: number; keepRun: string };
+    upToForSave: (documentId: string, savedText: string, savedTitle: string) => { upTo: number; keepRun: string };
     /** Whether the save prepared by upToForSave for `run` committed its text. */
     saved: (run: string, ok: boolean) => void;
   };
@@ -77,8 +77,8 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           if (state.deleting || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock) break;
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
-          // Taken with the text: the row says which change records it already contains (#37 R2c).
-          const log = deps.changes.upToForSave(saved.id, saved.text);
+          // Taken with the text and title: the row says which change records it already contains (#37 R2c).
+          const log = deps.changes.upToForSave(saved.id, saved.text, saved.title);
           preparedRun = log.keepRun;
           saved.upTo = log.upTo;
           const clearPendingAfterCommit = deps.preparePendingClear(saved);
