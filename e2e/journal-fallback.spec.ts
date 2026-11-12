@@ -299,3 +299,40 @@ test('switch discard clears change-log so salvage cannot revive (#254)', async (
   }));
   expect(titles.some(title => title.includes('(recovered)'))).toBe(false);
 });
+
+test('switch discard cancels when typing during discard hold (#254)', async ({ page }) => {
+  // Fails if switchDraft ignores a contentRevision bump while awaiting discardUnsavedRecovery.
+  test.setTimeout(60_000);
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Hold queue base');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  const docId = await page.locator('#drafts option:checked').getAttribute('value');
+  expect(docId).toBeTruthy();
+
+  await setAutosave(page, false, 'keep');
+  await field.press('End');
+  await page.keyboard.type('!');
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+  // Hold discard cleanup so typing after confirm is observable (Autosave-off skips change appends).
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayDiscardMs: number }).__typebridgeDelayDiscardMs = 2_000;
+  });
+
+  await documentAction(page, '#new-draft');
+  const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+  await expect(dialog).toBeVisible();
+  const discardStarted = Date.now();
+  await dialog.getByRole('button', { name: 'Discard changes' }).click();
+  // Digits are not transliterated; typing during the held clear must cancel the switch.
+  await field.pressSequentially('99');
+  await expect(field).toHaveValue('Hold queue base!99');
+  // Must observe the post-hold outcome: without the recheck, showDraft clears the field.
+  await expect.poll(async () => {
+    if (Date.now() - discardStarted < 2_400) return 'holding';
+    const value = await field.inputValue();
+    const id = await page.locator('#drafts option:checked').getAttribute('value');
+    return value === 'Hold queue base!99' && id === docId ? 'kept' : `lost:${id}:${value}`;
+  }, { timeout: 8_000 }).toBe('kept');
+});

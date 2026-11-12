@@ -77,6 +77,8 @@ export type TestKnobs = {
   __typebridgeDelayPersistMs: number;
   /** Hold a save after `upToForSave` so e2e can type while the run is anchored (#254). */
   __typebridgeDelayAfterUpToMs: number;
+  /** Hold `discardUnsavedRecovery` so e2e can type during switch discard cleanup (#254). */
+  __typebridgeDelayDiscardMs: number;
   __typebridgeDelayRefreshMs: number;
   __typebridgeIgnoreHandoffRequests: boolean;
 };

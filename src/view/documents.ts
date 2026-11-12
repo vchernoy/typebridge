@@ -105,6 +105,15 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
           }
           // Same consent as close: clear journal/change-log while this document's fence is live.
           await deps.discardUnsavedRecovery();
+          // Typing during the awaited clear must cancel the switch (main had no await here) (#254).
+          if (!sessionPersistStillCurrent(persistToken, {
+            sessionId: deps.workspace.sessionId,
+            sessionGeneration: deps.workspace.sessionGeneration(),
+          }) || deps.workspace.contentRevision() !== contentAtPrompt) {
+            status.announceAction('Discard cancelled — the document changed while the dialog was open.');
+            announceAbortedFlushConflict();
+            return { opened: false, conflict: flushConflict };
+          }
         }
         const version = deps.workspace.contentRevision();
         next = id && state.db ? await getStoredDraft(state.db, id) : undefined;

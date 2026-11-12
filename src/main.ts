@@ -766,6 +766,9 @@ autosave.addEventListener('change', () => {
 });
 /** Explicit discard: drop the journal and every change-log record for this document (#37 R2c 2d-2 / #254). */
 async function discardUnsavedRecovery(): Promise<void> {
+  // E2E: widen the post-confirm window so typing during cleanup can be asserted (#254).
+  const delayMs = testKnob('__typebridgeDelayDiscardMs');
+  if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   const discardedJournal = recovery.takeCurrentJournal();
   if (discardedJournal) {
     try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
@@ -779,6 +782,8 @@ async function discardUnsavedRecovery(): Promise<void> {
     try { clearRecovery(localStorage, lateJournal); } catch { /* Optional backup. */ }
   }
   // Only clear under a live fence for this document: never wipe another owner's log (#254 Codex P1).
+  // Ownership-loss salvage into a copy is intentional when another window already took over
+  // (maintainer: leave as-is on #254; possible follow-up).
   const ownership = state.ownership;
   if (!state.db || !ownership || ownership.documentId !== documentId) return;
   try {
