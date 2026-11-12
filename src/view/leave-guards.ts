@@ -174,7 +174,12 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     }, 'close');
   }
   async function prepareUpdateReload(): Promise<boolean> {
-    return prepareLeaveWithUnsaved('reload');
+    // Drop a prior deferred discard that never committed (e.g. another window refused)
+    // so a later Autosave-on retry cannot wipe recovery with stale consent (#254 Codex P1).
+    pendingReloadDiscard = false;
+    const ok = await prepareLeaveWithUnsaved('reload');
+    if (!ok) pendingReloadDiscard = false;
+    return ok;
   }
   async function prepareWindowClose(): Promise<boolean> {
     return prepareLeaveWithUnsaved('close');

@@ -93,6 +93,8 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
     };
     try {
       if (!await deps.prepareReload()) {
+        // A prior window may have armed deferred discard; reset every window (#254 Codex P1).
+        deps.cancelReload();
         message.textContent = 'Update is waiting. Keep editing, or copy/export your work before reloading.';
         return;
       }

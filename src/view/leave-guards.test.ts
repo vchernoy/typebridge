@@ -149,4 +149,23 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     await guards.commitUpdateReload();
     expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
   });
+
+  it('drops a deferred reload discard when a later prepare is refused', async () => {
+    // Fails if pendingReloadDiscard survives a refused prepare and still fires on commit (#254 Codex P1).
+    const { guards, discardUnsavedRecovery } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+    vi.mocked(askConfirmChoice).mockResolvedValueOnce(false);
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    await guards.commitUpdateReload();
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+  });
+
+  it('cancelUpdateReload clears a deferred reload discard without wiping recovery', async () => {
+    const { guards, discardUnsavedRecovery } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    guards.cancelUpdateReload();
+    await guards.commitUpdateReload();
+    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+  });
 });

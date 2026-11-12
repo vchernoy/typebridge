@@ -266,11 +266,20 @@ test('update reload asks every window about private text', async ({ page }) => {
 
   const prepare = page.evaluate(async () => {
     const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    const cancelAll = (): void => {
+      for (const frame of frames) {
+        const hooks = frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void };
+        hooks.__typebridgeCancelUpdateReload?.();
+      }
+    };
     for (const frame of frames) {
       const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
       const prepareOne = hooks.__typebridgePrepareUpdateReload;
       if (!prepareOne) continue;
-      if (!await prepareOne()) return false;
+      if (!await prepareOne()) {
+        cancelAll();
+        return false;
+      }
     }
     return true;
   });
@@ -279,6 +288,60 @@ test('update reload asks every window about private text', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Keep editing' }).click();
   expect(await prepare).toBe(false);
   await expect(second.locator('#editor')).toHaveValue('Private only in second');
+});
+
+test('refused prepare cancels deferred discard on an earlier window (#254)', async ({ page }) => {
+  // Fails if window A keeps pendingReloadDiscard after B refuses and commit still wipes recovery.
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await setHostAutosave(page, false);
+  await fillHostEditor(main, 'Private in main for deferred discard');
+  await fillHostEditor(second, 'Private in second for refuse');
+  await expect(main.locator('#save-indicator')).toHaveText('Not saved');
+  await expect(second.locator('#save-indicator')).toHaveText('Not saved');
+
+  const prepare = page.evaluate(async () => {
+    const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    const cancelAll = (): void => {
+      for (const frame of frames) {
+        (frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void })
+          .__typebridgeCancelUpdateReload?.();
+      }
+    };
+    for (const frame of frames) {
+      const prepareOne = (frame.contentWindow as Window & {
+        __typebridgePrepareUpdateReload?: () => Promise<boolean>;
+      }).__typebridgePrepareUpdateReload;
+      if (!prepareOne) continue;
+      if (!await prepareOne()) {
+        cancelAll();
+        return false;
+      }
+    }
+    return true;
+  });
+  const mainDialog = main.getByRole('dialog', { name: 'Reload without saving?' });
+  await expect(mainDialog).toBeVisible();
+  await mainDialog.getByRole('button', { name: 'Discard changes and reload' }).click();
+  const secondDialog = second.getByRole('dialog', { name: 'Reload without saving?' });
+  await expect(secondDialog).toBeVisible();
+  await secondDialog.getByRole('button', { name: 'Keep editing' }).click();
+  expect(await prepare).toBe(false);
+
+  // Stale deferred discard must not fire after cancel-on-refuse (#254 Codex P1).
+  await page.evaluate(async () => {
+    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')) {
+      await (frame.contentWindow as Window & {
+        __typebridgeCommitUpdateReload?: () => void | Promise<void>;
+      }).__typebridgeCommitUpdateReload?.();
+    }
+  });
+  await expect(main.locator('#editor')).toHaveValue('Private in main for deferred discard');
+  await expect(second.locator('#editor')).toHaveValue('Private in second for refuse');
 });
 
 test('failed second-window assert cancels prior allowUpdateReload', async ({ page }) => {
@@ -405,9 +468,18 @@ test('refused multi-window update leaves backups and visibility saves working', 
 
   const prepare = page.evaluate(async () => {
     const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
+    const cancelAll = (): void => {
+      for (const frame of frames) {
+        (frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void })
+          .__typebridgeCancelUpdateReload?.();
+      }
+    };
     for (const frame of frames) {
       const hooks = frame.contentWindow as Window & { __typebridgePrepareUpdateReload?: () => Promise<boolean> };
-      if (!await hooks.__typebridgePrepareUpdateReload?.()) return false;
+      if (!await hooks.__typebridgePrepareUpdateReload?.()) {
+        cancelAll();
+        return false;
+      }
     }
     return true;
   });
@@ -415,13 +487,6 @@ test('refused multi-window update leaves backups and visibility saves working', 
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Keep editing' }).click();
   expect(await prepare).toBe(false);
-
-  await page.evaluate(() => {
-    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')) {
-      const hooks = frame.contentWindow as Window & { __typebridgeCancelUpdateReload?: () => void };
-      hooks.__typebridgeCancelUpdateReload?.();
-    }
-  });
 
   // Shared Autosave was off for the private refuse path; turn it back on for the
   // post-refuse save / backup checks on the first window.

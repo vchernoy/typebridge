@@ -115,7 +115,13 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
           for (const frame of editorFrames()) {
             const prepare = editorHooks(frame).__typebridgePrepareUpdateReload;
             if (!prepare) continue;
-            if (!await prepare()) return false;
+            if (!await prepare()) {
+              // Reset windows that already armed deferred discard on this attempt (#254).
+              for (const armed of editorFrames()) {
+                editorHooks(armed).__typebridgeCancelUpdateReload?.();
+              }
+              return false;
+            }
           }
           return true;
         },
