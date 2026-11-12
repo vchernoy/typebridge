@@ -76,7 +76,12 @@ export type WindowManager = {
   openDocumentIds: (exceptWindowId?: string) => string[];
   /** Live on-screen titles across windows (for distinct Untitled defaults). */
   openTitles: (exceptWindowId?: string) => string[];
-  addWindow: () => string | undefined;
+  addWindow: (documentId?: string) => string | undefined;
+  /**
+   * Show a saved document: activate the window that already shows it, else open a new window
+   * for it. `full` when no window can be added (the window cap or host Focus).
+   */
+  openDocument: (documentId: string) => 'shown' | 'opened' | 'full';
   closeWindow: (id: string) => Promise<boolean>;
   tileSideBySide: () => void;
   tileStacked: () => void;
@@ -787,7 +792,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       }
       return titles;
     },
-    addWindow: () => {
+    addWindow: (documentId?: string) => {
       if (hostFocus || layouts.length >= MAX_HOST_WINDOWS) return undefined;
       const view = viewportOf(deps.root);
       const id = mintWindowId(layouts.map(w => w.id));
@@ -796,6 +801,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         id,
         ...defaultRectForIndex(layouts.length, view),
         z: maxZ + 1,
+        ...(documentId ? { documentId } : {}),
       };
       layouts = [...layouts, win];
       createShell(win);
@@ -804,6 +810,16 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       applyModeChrome();
       persist();
       return id;
+    },
+    openDocument: (documentId: string) => {
+      // The window's current document (it may have switched since the layout was saved).
+      const shownIn = (win: HostWindowLayout): string | undefined => {
+        const frame = frames.get(win.id);
+        return (frame && deps.readDocumentId ? deps.readDocumentId(frame) : undefined) ?? win.documentId;
+      };
+      const existing = layouts.find(win => shownIn(win) === documentId);
+      if (existing) { setActive(existing.id); return 'shown'; }
+      return api.addWindow(documentId) ? 'opened' : 'full';
     },
     closeWindow: async (id: string) => {
       if (layouts.length <= 1) return false;

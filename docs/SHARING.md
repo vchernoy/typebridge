@@ -1,6 +1,6 @@
 # Share links
 
-Status: the **link format** exists (`src/editor/share-link.ts`). The reading page and the **Share link…** dialog are the next #39 steps and are not built yet. Design for later formats, rendered views, images and active documents is in [#244](https://github.com/vchernoy/typebridge/issues/244).
+Status: the **link format** (`src/editor/share-link.ts`) and the **reading page** (`read.html`, `src/read/main.ts`) exist. The **Share link…** dialog that creates links is the next #39 step and is not built yet. Design for later formats, rendered views, images and active documents is in [#244](https://github.com/vchernoy/typebridge/issues/244).
 
 ## What a link carries
 
@@ -28,7 +28,16 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 - Decompression stops at 2 MB of output, so a small link cannot expand into a huge document.
 - JSON must have a string `title` and `text` and a format matching `[a-z0-9][a-z0-9+.-]{0,31}`. Unknown `view` falls back to `source`; a missing `edit` means allowed.
 - A format this build does not know (e.g. a future `markdown`) is still decoded, so the reading page can show its raw text with a notice instead of failing.
-- **Encoding refuses what decoding would refuse:** a document whose JSON exceeds 2 MB (even when very repetitive text would compress into a short link), or whose payload exceeds 48,000 characters, gets `too-large` instead of a link, so nobody is offered a link that cannot be opened.
+- **Encoding refuses what decoding would refuse:** a document whose JSON exceeds 2 MB (even when very repetitive text would compress into a short link), or whose payload exceeds 48,000 characters, gets `too-large` instead of a link, and a format name decoding would reject gets `format`, so nobody is offered a link that cannot be opened.
 - Links longer than 2,000 characters are allowed but should be flagged to the sender: messengers, mail clients and social sites often cut or refuse long links.
 
 `e2e/share-link-format.spec.ts` checks that a payload made in Node decodes in Chromium, Firefox and WebKit, and that each browser's payload decodes in Node.
+
+## Reading page
+
+`/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page looks like a plain read-only web page: the title, the text exactly as written (line breaks and spaces kept), a quiet **Shared document · read-only** label and **Written with TypeBridge**. The text is always written as text, never parsed as HTML. It works offline once the site has been visited.
+
+- **Nothing is stored while reading.** No database is opened and no history or settings are written.
+- **Edit a copy** (shown unless the sender turned it off) saves the text as a **new** document and never overwrites an existing one. It then opens `/?open=<id>`: the host shows the copy in a new editor window, or activates the window that already shows it, and confirms "Saved as a new document in your Documents." When every window is open (the cap is 4), the copy is still saved, and the confirmation says to close a window and open it from ▾ Documents.
+- **A link that cannot be opened explains why:** it has no document, it was made by a newer version, it is too large, or it is incomplete or damaged (messengers sometimes cut long links). A format this version cannot show yet is displayed as its raw text with a notice.
+

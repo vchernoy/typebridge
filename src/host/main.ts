@@ -5,6 +5,7 @@ import '../style.css';
 import { ACTIVE_DRAFT_KEY_BASE } from '../editor/drafts';
 import { watchForUpdates } from '../ui/update-notice';
 import { editorWindowApi, exposeHostPageApi, type EditorWindowApi } from '../view/embed-api';
+import { isDocumentId } from '../view/route';
 import { scopeSessionKey } from '../view/window-id';
 import { installHostSettings } from './settings';
 import { readHostLayout } from './layout';
@@ -143,4 +144,27 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       }))
       .catch(() => { /* Editor remains usable without service worker support. */ });
   });
+}
+
+// `/?open=<id>` (Edit a copy from a shared link, #39): show that saved document in a window,
+// then drop the parameter so a reload does not open it again.
+{
+  const params = new URLSearchParams(location.search);
+  const requested = params.get('open');
+  if (requested !== null) {
+    params.delete('open');
+    const query = params.toString();
+    history.replaceState(history.state, '', location.pathname + (query ? '?' + query : '') + location.hash);
+    if (isDocumentId(requested)) {
+      const outcome = manager.openDocument(requested);
+      const status = document.createElement('p');
+      status.className = 'host-status';
+      status.setAttribute('role', 'status');
+      toolbar.after(status);
+      status.textContent = outcome === 'full'
+        ? 'Saved as a new document in your Documents. Close a window, then open it from ▾ Documents.'
+        : 'Saved as a new document in your Documents.';
+      window.setTimeout(() => { status.remove(); }, 8000);
+    }
+  }
 }
