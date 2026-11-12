@@ -26,12 +26,15 @@ function harness(stored = { text: 'Сохранено', upTo: 0, revision: 1 }) 
   /** A full save the way the saver does it: wait for queued records, then text + upTo together. */
   const save = async () => {
     await writer.idle();
-    const { upTo, clearAll } = writer.upToForSave(env.id, env.text);
-    env.records = env.records.filter(r => clearAll ? false : r.seq > upTo);
-    env.row = { text: env.text, upTo, revision: env.row.revision + 1 };
+    commit(writer.upToForSave(env.id, env.text), env.text);
+  };
+  /** The commit transaction: the row, then the cleanup it does. */
+  const commit = (log: ReturnType<typeof writer.upToForSave>, text: string) => {
+    env.records = env.records.filter(r => log.clearAll ? r.run === log.keepRun : r.seq > log.upTo);
+    env.row = { text, upTo: log.upTo, revision: env.row.revision + 1 };
   };
   const recovered = async () => { await writer.idle(); return replayText(env.id, env.row.revision > 0 ? env.row.text : '', env.row.upTo, env.records); };
-  return { env, writer, type, save, recovered };
+  return { env, writer, type, save, commit, recovered };
 }
 
 describe('change writer', () => {
@@ -80,11 +83,27 @@ describe('change writer', () => {
     expect((await recovered()).text).toBe('частное 2!');
   });
 
+  it('edits made while a clearing save is in flight continue the saved text (#251 review)', async () => {
+    const { env, writer, type, commit, recovered } = harness({ text: 'Старое', upTo: 5, revision: 2 });
+    env.autosave = false;
+    type('Личное');
+    env.autosave = true;
+    // The save captures text and upTo, then waits for its transaction; the user keeps typing.
+    await writer.idle();
+    const log = writer.upToForSave(env.id, env.text);
+    expect(log).toMatchObject({ upTo: 0, clearAll: true });
+    type('Личное!'); type('Личное!!');
+    await writer.idle();
+    commit(log, 'Личное');
+    expect(env.records).toMatchObject([{ seq: 1 }, { seq: 2 }]);
+    expect(await recovered()).toMatchObject({ text: 'Личное!!', lastSeq: 2 });
+  });
+
   it('a document shown again starts a new run; its first save clears the earlier log', async () => {
     const { env, writer, type, save } = harness();
     type('X');
     env.generation = 2; // shown again (e.g. reloaded); nothing typed yet
-    expect(writer.upToForSave(env.id, env.text)).toEqual({ upTo: 0, clearAll: true });
+    expect(writer.upToForSave(env.id, env.text)).toMatchObject({ upTo: 0, clearAll: true });
     type('XY');
     await save();
     expect(env.records).toEqual([]);

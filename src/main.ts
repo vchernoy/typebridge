@@ -663,6 +663,8 @@ const changeWriter = createChangeWriter({
   text: () => field.value,
   append: async record => {
     if (!state.db || state.ownership?.documentId !== record.documentId) throw new Error('Not editing this document');
+    const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
+    if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     await appendChange(state.db, record, await state.ownership.writeFence());
   },
   newRunId: () => crypto.randomUUID(),

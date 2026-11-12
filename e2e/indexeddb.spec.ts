@@ -208,20 +208,22 @@ test('the change log: fenced appends, cleanup by upTo, clear on demand and on de
     const taken = await api.claimEditOwnership(db, 'log', 'window-b', 3);
     const staleAppend = await failure(() => api.appendChange(db, record('log', 6), owner));
     const afterStale = await seqs('log');
-    // A save no run continues clears the whole log.
+    // A save no run continues clears the log, except the new run that starts from its text.
     await api.appendChange(db, record('log', 6), { instanceId: 'window-b', fence: taken });
-    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новый', updatedAt: 3, upTo: 0 }, 2, 'copy-3', { instanceId: 'window-b', fence: taken }, true);
+    await api.appendChange(db, { ...record('log', 1), run: 'run-new' }, { instanceId: 'window-b', fence: taken });
+    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новый', updatedAt: 3, upTo: 0 }, 2, 'copy-3', { instanceId: 'window-b', fence: taken }, { keepRun: 'run-new' });
     const afterClear = await seqs('log');
+    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новыйа', updatedAt: 3, upTo: 1 }, 3, 'copy-4', { instanceId: 'window-b', fence: taken });
     // Deleting the document deletes its log; other documents keep theirs.
     await api.appendChange(db, record('log', 1), { instanceId: 'window-b', fence: taken });
     await api.appendChange(db, record('other', 1));
-    const deleted = await api.deleteStoredDraft(db, 'log', 3, { instanceId: 'window-b', fence: taken }, true);
+    const deleted = await api.deleteStoredDraft(db, 'log', 4, { instanceId: 'window-b', fence: taken }, true);
     const afterDelete = { log: await seqs('log'), other: await seqs('other') };
     db.close();
     return { appended, savedUpTo: saved.draft.upTo, afterSave, staleAppend, afterStale, afterClear, deleted, afterDelete };
   });
   expect(result).toEqual({
     appended: [1, 2, 3, 4, 5], savedUpTo: 3, afterSave: [4, 5], staleAppend: 'EditOwnershipLostError', afterStale: [4, 5],
-    afterClear: [], deleted: true, afterDelete: { log: [], other: [1] },
+    afterClear: [1], deleted: true, afterDelete: { log: [], other: [1] },
   });
 });

@@ -74,13 +74,19 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
      * last change-id queued for that text, so later changes continue from `savedText` and a
      * failed writer resumes. With no current run for the document (Autosave was off, or the
      * document was shown again), `clearAll`: records an earlier run left must never be replayed
-     * onto this text, so the save removes the whole log and the next run starts after 0.
+     * onto this text, so the save removes every record except those of `keepRun`, the new run
+     * that starts here from `savedText` at change-id 1. Edits made while that save is in
+     * flight belong to it and stay replayable (#251 review).
      */
-    upToForSave(documentId: string, savedText: string): { upTo: number; clearAll: boolean } {
+    upToForSave(documentId: string, savedText: string): { upTo: number; clearAll: false } | { upTo: 0; clearAll: true; keepRun: string } {
       const shown = deps.shown();
       const w = writer;
       if (!w || w.documentId !== documentId || shown.id !== documentId || w.generation !== shown.generation) {
-        return { upTo: 0, clearAll: true };
+        const run = deps.newRunId();
+        writer = shown.id === documentId
+          ? { documentId, generation: shown.generation, run, seq: 0, base: savedText, failed: false }
+          : undefined;
+        return { upTo: 0, clearAll: true, keepRun: run };
       }
       w.base = savedText;
       w.failed = false;

@@ -94,6 +94,30 @@ test('with Autosave off nothing reaches the change log', async ({ page }) => {
   expect((await readLog(page)).changes).toEqual([]);
 });
 
+test('turning Autosave off while a save waits for the change log saves no private text (#251 review)', async ({ page }) => {
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Видно');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  // Hold the change-log write so the next save is still waiting for it.
+  await page.evaluate(() => { (window as unknown as { __typebridgeDelayChangeAppendMs: number }).__typebridgeDelayChangeAppendMs = 2_000; });
+  await field.press('End');
+  await page.keyboard.type('!');
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 500))); // the save starts and waits
+  // Autosave goes off and private text is typed before the held write lands.
+  await page.evaluate(() => {
+    const box = document.querySelector<HTMLInputElement>('#autosave')!;
+    box.checked = false;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await field.press('End');
+  await page.keyboard.type(' секрет');
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 2_500))); // the held write lands
+  const { rows } = await readLog(page);
+  expect(rows.map(row => row.text).join()).not.toContain('секрет');
+});
+
 test('upgrading a version 2 database keeps documents and ownership and adds the change log', async ({ page }) => {
   await page.goto('/icon-192.png');
   await page.evaluate(() => new Promise<void>((resolve, reject) => {

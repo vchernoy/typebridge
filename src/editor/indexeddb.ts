@@ -39,6 +39,14 @@ const OWNERSHIP = EDIT_OWNERSHIP_STORE;
 export const CHANGES_STORE = 'changes';
 const CHANGES = CHANGES_STORE;
 
+/** Delete every change record of `documentId` that does not belong to `keepRun`. */
+async function deleteOtherRuns(store: IDBObjectStore, documentId: string, keepRun: string): Promise<void> {
+  const records = await request(store.getAll(changesOf(documentId))) as ChangeRecord[];
+  for (const record of records) {
+    if (record.run !== keepRun) await request(store.delete([documentId, record.seq]));
+  }
+}
+
 /** All change records of `documentId` with change-id at most `upTo` (all when omitted). */
 function changesOf(documentId: string, upTo = Number.MAX_SAFE_INTEGER): IDBKeyRange {
   return IDBKeyRange.bound([documentId, 0], [documentId, upTo]);
@@ -145,8 +153,11 @@ export async function commitOrCreateConflictCopy(
   expectedRevision: number,
   copyId: string,
   owner?: WriteFence,
-  /** Remove the document's whole change log: no run continues this text (#37 R2c). */
-  clearChanges = false,
+  /**
+   * Remove the document's change log except `keepRun`'s records: no earlier run continues this
+   * text; `keepRun` starts from it (#37 R2c).
+   */
+  clearChanges?: { keepRun: string },
 ): Promise<{ draft: StoredDraft; conflict: boolean }> {
   if (!copyId || copyId === draft.id) throw new Error('Conflict copy requires a distinct ID');
   const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES] : [STORE, CHANGES], 'readwrite');
@@ -162,7 +173,7 @@ export async function commitOrCreateConflictCopy(
     if (conflict) await request(store.add(next));
     else {
       await request(store.put(next));
-      if (clearChanges) await request(tx.objectStore(CHANGES).delete(changesOf(next.id)));
+      if (clearChanges) await deleteOtherRuns(tx.objectStore(CHANGES), next.id, clearChanges.keepRun);
       else if (next.upTo) await request(tx.objectStore(CHANGES).delete(changesOf(next.id, next.upTo)));
     }
     await done;
