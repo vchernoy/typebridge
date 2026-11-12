@@ -97,3 +97,29 @@ test('when all IndexedDB writes fail, the journal still holds the unsaved edit (
     expect.arrayContaining([expect.objectContaining({ text: 'Несохранённое' })]),
   );
 });
+
+test('a stale journal warning clears once the change log protects edits (#37 R2c 2d-2)', async ({ page }) => {
+  // Fails if the protected path returns without clearing journalWarning (#254 Codex P2).
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    (window as unknown as { __typebridgeRestoreSetItem?: () => void }).__typebridgeRestoreSetItem = () => {
+      Storage.prototype.setItem = original;
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (String(key).startsWith('typebridge.recovery.v1.')) throw new DOMException('quota', 'QuotaExceededError');
+      return original.call(this, key, value);
+    };
+  });
+  await field.fill('Пока без журнала');
+  await expect(page.getByRole('alert').filter({ hasText: 'Emergency backup unavailable' })).toBeVisible();
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeRestoreSetItem?: () => void }).__typebridgeRestoreSetItem?.();
+  });
+  await field.press('End');
+  await page.keyboard.type('!');
+  await expect(page.getByRole('alert').filter({ hasText: 'Emergency backup unavailable' })).toHaveCount(0);
+});

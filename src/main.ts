@@ -1015,19 +1015,21 @@ const leaveGuards = createLeaveGuards(state, {
   viewMode, field, autosave, workspace, saver, reloadBackup, recovery,
   persist: () => persist(),
   snapshot: () => snapshot(),
-  // Explicit discard: drop the journal and change-log tail so salvage cannot bring them back (#37 R2c 2d-2).
+  // Explicit discard: drop the journal and this run's change-log records so salvage cannot bring them back (#37 R2c 2d-2).
   discardUnsavedRecovery: async () => {
     const discardedJournal = recovery.takeCurrentJournal();
     if (discardedJournal) {
       try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
     }
+    const documentId = state.active.id;
+    const run = changeWriter.runOf(documentId);
     changeWriter.abandon();
-    if (!state.db) return;
+    // Only clear under a live fence for this document: never wipe another owner's log (#254 Codex P1).
+    const ownership = state.ownership;
+    if (!state.db || !run || !ownership || ownership.documentId !== documentId) return;
     try {
       await saver.drainChanges();
-      const ownership = state.ownership;
-      const owner = ownership && ownership.documentId === state.active.id ? await ownership.writeFence() : undefined;
-      await clearDocumentChanges(state.db, state.active.id, owner);
+      await clearDocumentChanges(state.db, documentId, run, await ownership.writeFence());
     } catch { /* Closing anyway; a later owner may still see records if the clear failed. */ }
   },
 });

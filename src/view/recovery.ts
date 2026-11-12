@@ -55,7 +55,8 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   function journalEdit(): void {
     if (deps.viewMode || !deps.autosave.checked) return;
     // Change log covers this edit and IndexedDB can take it: leave the journal alone (#37 R2c 2d-2).
-    if (deps.changeLogProtects() && deps.indexedDbUsable()) return;
+    // Clear a stale "backup unavailable" warning from an earlier unprotected write (#254 Codex P2).
+    if (deps.changeLogProtects() && deps.indexedDbUsable()) { journalWarning.hidden = true; return; }
     const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
     try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
     catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }

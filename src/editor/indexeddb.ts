@@ -225,15 +225,25 @@ export async function commitOrCreateConflictCopy(
 
 
 /**
- * Remove every change-log record for `documentId` (#37 R2c 2d-2). Used when the user explicitly
- * discards unsaved edits so a later owner does not salvage text they chose to throw away.
+ * Remove change-log records of one editing `run` for `documentId` (#37 R2c 2d-2). Used when the
+ * user explicitly discards unsaved edits so a later owner does not salvage that run. Requires the
+ * ownership fence: never clears without it, so a stale window cannot wipe another owner's log.
  */
-export async function clearDocumentChanges(db: IDBDatabase, documentId: string, owner?: WriteFence): Promise<void> {
-  const tx = db.transaction(owner ? [CHANGES, OWNERSHIP] : CHANGES, 'readwrite');
+export async function clearDocumentChanges(
+  db: IDBDatabase, documentId: string, run: string, owner: WriteFence,
+): Promise<void> {
+  // Require a fence at runtime too: a missing owner must not fall through assertEditOwner's no-op.
+  if (!owner?.instanceId || !Number.isSafeInteger(owner.fence)) throw new EditOwnershipLostError();
+  if (!run) throw new Error('clearDocumentChanges requires a run id');
+  const tx = db.transaction([CHANGES, OWNERSHIP], 'readwrite');
   const done = finished(tx);
   try {
     await assertEditOwner(tx, documentId, owner);
-    await request(tx.objectStore(CHANGES).delete(changesOf(documentId)));
+    const store = tx.objectStore(CHANGES);
+    const records = await request(store.getAll(changesOf(documentId))) as ChangeRecord[];
+    for (const record of records) {
+      if (record.run === run) await request(store.delete([documentId, record.seq]));
+    }
     await done;
   } catch (error) {
     try { tx.abort(); } catch { /* Already finished or aborted. */ }

@@ -283,6 +283,54 @@ test('crash recovery from the change log keeps another run\'s text as a copy, on
   });
 });
 
+test('clearDocumentChanges removes only the discarding run under the ownership fence (#37 R2c 2d-2)', async ({ page }) => {
+  // Fails if clearDocumentChanges deletes every run without a fence, or deletes other runs' records.
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const fence = await api.claimEditOwnership(db, 'discard', 'window-a', 1);
+    const owner = { instanceId: 'window-a', fence };
+    await api.commitOrCreateConflictCopy(db, { id: 'discard', title: 'T', text: 'a', updatedAt: 1 }, 0, 'c1', owner);
+    const rec = (seq: number, run: string, inserted: string) => ({
+      documentId: 'discard', seq, run, change: [1, '', inserted] as [number, string, string], length: 1 + inserted.length,
+    });
+    await api.appendChange(db, rec(1, 'mine', 'b'), owner);
+    await api.appendChange(db, rec(2, 'other', 'c')); // other run (e.g. crashed); no fence on append for this test helper path
+    await api.clearDocumentChanges(db, 'discard', 'mine', owner);
+    const left = await api.listChanges(db, 'discard');
+    // Stale window without a fence must not clear: require owner at runtime too.
+    const stale = await (async () => {
+      try {
+        await api.clearDocumentChanges(db, 'discard', 'other', undefined as unknown as { instanceId: string; fence: number });
+        return 'cleared-without-owner';
+      } catch (error) {
+        return (error as Error).name === 'EditOwnershipLostError' ? 'refused' : 'other-error';
+      }
+    })();
+    // Another instance's fence cannot clear either.
+    const foreign = await (async () => {
+      try {
+        await api.clearDocumentChanges(db, 'discard', 'other', { instanceId: 'window-b', fence: 1 });
+        return 'cleared-by-foreign';
+      } catch (error) {
+        return (error as Error).name === 'EditOwnershipLostError' ? 'fenced' : 'other-error';
+      }
+    })();
+    const afterForeign = await api.listChanges(db, 'discard');
+    db.close();
+    return { left: left.map(r => ({ seq: r.seq, run: r.run })), stale, foreign, afterForeign: afterForeign.map(r => r.run) };
+  });
+  expect(result).toEqual({
+    left: [{ seq: 2, run: 'other' }],
+    stale: 'refused',
+    foreign: 'fenced',
+    afterForeign: ['other'],
+  });
+});
+
 test('crash recovery restores a renamed title from the change log (#37 R2c 2d-1)', async ({ page }) => {
   // Fails on old code: recovered copy uses the stored title; title-only loss makes no copy;
   // shownText alone (wrong title) still keeps records incorrectly, or drops them without matching title.
