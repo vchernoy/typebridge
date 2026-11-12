@@ -98,6 +98,59 @@ test('when all IndexedDB writes fail, the journal still holds the unsaved edit (
   );
 });
 
+test('a journal written while a save is held is cleared once the change log protects again (#254)', async ({ page }) => {
+  // Fails if protected journalEdit leaves this tab's superseded working journal forever (#254 Claude P2).
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayAfterUpToMs: number }).__typebridgeDelayAfterUpToMs = 1500;
+  });
+  await field.fill('Текст1');
+  await expect(page.locator('#status')).toContainText('Saving');
+  // While the first save holds an anchor, type newer text so the journal advances past the commit.
+  await expect.poll(() => journalPayloads(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ text: 'Текст1' })]),
+  );
+  await field.press('End');
+  await page.keyboard.type('!');
+  await expect.poll(() => journalPayloads(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ text: 'Текст1!' })]),
+  );
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  // Protected typing must clear the superseded journal once the queue is idle.
+  await field.press('End');
+  await page.keyboard.type('?');
+  await expect.poll(() => journalKeys(page)).toEqual([]);
+  await expect(field).toHaveValue('Текст1!?');
+});
+
+test('after a later change-log failure the journal is written again (#254)', async ({ page }) => {
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('Основа');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    for (const key of Object.keys(localStorage).filter(k => k.startsWith('typebridge.recovery.v1.'))) localStorage.removeItem(key);
+    const put = IDBObjectStore.prototype.put;
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['put']>) {
+      if (this.name === 'changes') throw new Error('change log full');
+      return put.apply(this, args);
+    };
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
+      if (this.name === 'changes') throw new Error('change log full');
+      return add.apply(this, args);
+    };
+  });
+  await field.press('End');
+  await page.keyboard.type('!');
+  await expect.poll(() => journalPayloads(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ text: 'Основа!' })]),
+  );
+});
+
 test('a stale journal warning clears once the change log protects edits (#37 R2c 2d-2)', async ({ page }) => {
   // Fails if the protected path returns without clearing journalWarning (#254 Codex P2).
   await page.goto('/editor.html');

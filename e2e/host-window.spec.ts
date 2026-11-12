@@ -563,6 +563,47 @@ test('resize keeps the dragged size instead of snapping to a half', async ({ pag
   expect(after!.h).not.toBeCloseTo(host!.height / 2, 0);
 });
 
+test('aborted close after discard prepare thaws the surviving editor (#254)', async ({ page }) => {
+  // Fails if keepFrozenOnSuccess leaves the editor frozen with no host cancel path (#254 Codex/Claude P1).
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await fillHostEditor(second, 'Before block');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await fillHostEditor(second, 'Frozen then thawed');
+  await expect(second.locator('#save-indicator')).toHaveText('Save failed');
+
+  const prepare = page.evaluate(async () => {
+    const frame = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="w2"] iframe.host-editor')!;
+    const hooks = frame.contentWindow as Window & { __typebridgePrepareWindowClose?: () => Promise<boolean> };
+    return hooks.__typebridgePrepareWindowClose?.() ?? false;
+  });
+  const dialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
+  expect(await prepare).toBe(true);
+  // Host would call cancelClose when the post-await last-window check refuses removal.
+  await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="w2"] iframe.host-editor')!;
+    (frame.contentWindow as Window & { __typebridgeCancelWindowClose?: () => void }).__typebridgeCancelWindowClose?.();
+  });
+  await expect(second.locator('#editor')).toBeEditable();
+  await fillHostEditor(second, 'Editable again after abort');
+  await expect(second.locator('#editor')).toHaveValue('Editable again after abort');
+});
+
 test('closing a dirty Autosave-off window asks before removing it', async ({ page }) => {
   test.setTimeout(90_000);
   const editor = await openHost(page);

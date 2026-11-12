@@ -24,9 +24,11 @@ export type RecoveryDeps = {
   refreshDrafts: () => Promise<void>;
   /**
    * True when the change log covers the latest edit (#37 R2c 2d-2). When true and IndexedDB is
-   * usable, journalEdit writes nothing; existing entries stay until exact-version cleanup.
+   * usable, journalEdit writes nothing; this tab's superseded working journal is cleared once idle.
    */
   changeLogProtects: () => boolean;
+  /** Resolves when every queued change-log record has been written, skipped, or dropped. */
+  changeLogIdle: () => Promise<void>;
   /** False when IndexedDB cannot take change records or saves (`!db` or a storage problem). */
   indexedDbUsable: () => boolean;
 };
@@ -52,11 +54,36 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   recoveryPanel.setAttribute('aria-label', 'Recover unsaved documents');
   recoveryPanel.className = 'recovery-panel'; // Hidden by CSS while empty (#118).
   deps.anchor.before(recoveryPanel);
+  /**
+   * Once the change log protects again, drop this tab's superseded working journal for the shown
+   * document (written while a first save held records, then left behind because exact-version
+   * cleanup looks for the committed text, not the newer journal). Wait for the queue to idle and
+   * recheck protects so we never clear under a failed or held run (#254 Claude P2).
+   */
+  async function clearSupersededJournal(entry: RecoverySnapshot): Promise<void> {
+    await deps.changeLogIdle();
+    if (deps.viewMode || !deps.autosave.checked) return;
+    if (!deps.changeLogProtects() || !deps.indexedDbUsable()) return;
+    if (currentJournal !== entry || entry.documentId !== state.active.id) return;
+    try {
+      clearRecovery(localStorage, entry);
+      if (currentJournal === entry) currentJournal = undefined;
+    } catch { /* Keep the entry if storage blocks the clear. */ }
+  }
+
   function journalEdit(): void {
     if (deps.viewMode || !deps.autosave.checked) return;
-    // Change log covers this edit and IndexedDB can take it: leave the journal alone (#37 R2c 2d-2).
+    // Change log covers this edit and IndexedDB can take it: do not write (#37 R2c 2d-2).
     // Clear a stale "backup unavailable" warning from an earlier unprotected write (#254 Codex P2).
-    if (deps.changeLogProtects() && deps.indexedDbUsable()) { journalWarning.hidden = true; return; }
+    // Clear this tab's superseded working journal once the log is idle and still protects (#254 Claude P2).
+    if (deps.changeLogProtects() && deps.indexedDbUsable()) {
+      journalWarning.hidden = true;
+      const stale = currentJournal;
+      if (stale && stale.tab === journalTab && stale.documentId === state.active.id) {
+        void clearSupersededJournal(stale);
+      }
+      return;
+    }
     const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
     try { writeRecovery(localStorage, entry); currentJournal = entry; journalWarning.hidden = true; }
     catch { journalWarning.textContent = 'Emergency backup unavailable. Keep this tab open until saved, or copy or export your text.'; journalWarning.hidden = false; }

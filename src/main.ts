@@ -473,12 +473,14 @@ const writingPosition = setupWritingPosition(
 );
 /** Filled once the change-log writer exists; until then the journal treats the log as unprotected. */
 let changeLogProtects = (): boolean => false;
+let changeLogIdle = (): Promise<void> => Promise.resolve();
 const recovery = createRecovery(state, statusLine, {
   viewMode, autosave, field, draftTitle,
   anchor: status.parentElement!,
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   refreshDrafts: () => refreshDrafts(),
   changeLogProtects: () => changeLogProtects(),
+  changeLogIdle: () => changeLogIdle(),
   indexedDbUsable: () => !!state.db && !state.storageProblem,
 });
 const { ownerReady, journalEdit, renderRecovery } = recovery;
@@ -673,6 +675,7 @@ const changeWriter = createChangeWriter({
   newRunId: () => crypto.randomUUID(),
 });
 changeLogProtects = () => changeWriter.protects();
+changeLogIdle = () => changeWriter.idle();
 // When the change log stops covering the latest edit (failed append or failed held save), journal now.
 changeWriter.onUnprotected(() => { journalEdit(); });
 /** A crashed window's unsaved text was kept as a copy (#37 R2c): list it and say so. */
