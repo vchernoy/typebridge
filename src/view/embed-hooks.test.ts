@@ -21,6 +21,7 @@ function install(): { win: FakeWindow; events: CustomEvent[]; calls: string[] } 
       cancelUpdateReload: note('cancel'),
       prepareWindowClose: async () => true,
       commitWindowClose: note('commit'),
+      cancelWindowClose: note('cancelClose'),
     },
     setFocusMode: note('focus'),
     getTitle: () => 'Имя',
@@ -40,12 +41,13 @@ describe('installEmbedHooks', () => {
     expect(win.__typebridgeGetTitle?.()).toBe('Имя');
     win.__typebridgeCancelUpdateReload?.();
     win.__typebridgeCommitWindowClose?.();
+    win.__typebridgeCancelWindowClose?.();
     win.__typebridgeToggleTransliteration?.();
     win.__typebridgeOpenFind?.();
     win.__typebridgeSetFocusMode?.(true);
-    expect(calls).toEqual(['cancel', 'commit', 'toggle', 'find', 'focus']);
+    expect(calls).toEqual(['cancel', 'commit', 'cancelClose', 'toggle', 'find', 'focus']);
     for (const name of ['__typebridgePrepareUpdateReload', '__typebridgeAssertSafeUpdateReload', '__typebridgePrepareWindowClose',
-      '__typebridgeSetTitle', '__typebridgeTitleCommit', '__typebridgeTitleEdit'] as const) {
+      '__typebridgeSetTitle', '__typebridgeTitleCommit', '__typebridgeTitleEdit', '__typebridgeCancelWindowClose'] as const) {
       expect(typeof win[name]).toBe('function');
     }
   });

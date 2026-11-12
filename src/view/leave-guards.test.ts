@@ -157,4 +157,20 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254 Codex P1)', () => {
     await expect(reloading).resolves.toBe(true);
     expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
   });
+
+  it('cancelWindowClose thaws after a successful close prepare the host then aborts', async () => {
+    // Fails if keepFrozenOnSuccess leaves the editor frozen with no host cancel hook (#254 Codex P1).
+    const { guards, clearGate, resolveClear, unfreezeAfterDiscard, isFrozen } = harness();
+    const closing = guards.prepareWindowClose();
+    await clearGate;
+    resolveClear();
+    await expect(closing).resolves.toBe(true);
+    expect(isFrozen()).toBe(true);
+    guards.cancelWindowClose();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+    expect(isFrozen()).toBe(false);
+    // Idempotent: a second cancel must not unfreeze again.
+    guards.cancelWindowClose();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+  });
 });

@@ -66,7 +66,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
    * Host calls this immediately before removing the iframe. Arming suppress here — not during
    * prepare — keeps reload/close consent cancellable without disabling backups for the session.
    */
+  /** True after a successful close prepare that left editors frozen pending host commit/cancel. */
+  let closeFreezeArmed = false;
+
   function commitWindowClose(): void {
+    closeFreezeArmed = false;
     deps.reloadBackup.setSuppressed(true);
     clearPendingBackups();
     // Confirmed discard must forget this window's emergency journals so another
@@ -78,12 +82,24 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   }
 
   /**
+   * Host prepared a close that left editors frozen, then aborted (e.g. another close finished
+   * first and this would have been the last window). Thaw so the remaining window stays editable
+   * (#254 Codex P1).
+   */
+  function cancelWindowClose(): void {
+    if (!closeFreezeArmed) return;
+    closeFreezeArmed = false;
+    deps.unfreezeAfterDiscard();
+  }
+
+  /**
    * Confirm discard, then clear recovery while the editors are frozen. Consent is bound to the
    * content revision shown in the dialog: if edits arrive during the dialog, abort before clearing;
    * freeze blocks further edits during the async clear so consent stays bound (#254 Codex P1).
    *
-   * `keepFrozenOnSuccess`: for window close, leave editors frozen until the host commits removal.
-   * For update-reload, thaw so a later private edit can bump contentRevision and fail the assert.
+   * `keepFrozenOnSuccess`: for window close, leave editors frozen until the host commits or
+   * cancels removal. For update-reload, thaw so a later private edit can bump contentRevision
+   * and fail the assert.
    */
   async function confirmDiscardAndClear(
     prompt: { title: string; message: string; confirmLabel: string },
@@ -102,9 +118,15 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     try {
       await deps.discardUnsavedRecovery();
       const stillSame = deps.workspace.contentRevision() === contentAtPrompt;
-      if (!stillSame || !keepFrozenOnSuccess) deps.unfreezeAfterDiscard();
+      if (!stillSame || !keepFrozenOnSuccess) {
+        deps.unfreezeAfterDiscard();
+        closeFreezeArmed = false;
+      } else {
+        closeFreezeArmed = true;
+      }
       return stillSame;
     } catch (error) {
+      closeFreezeArmed = false;
       deps.unfreezeAfterDiscard();
       throw error;
     }
@@ -188,6 +210,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     assertSafeToReloadAfterUpdate,
     reloadAfterUpdate,
     commitWindowClose,
+    cancelWindowClose,
     /** The update reload was cancelled: re-enable the unload warning and backups. */
     cancelUpdateReload(): void {
       allowUpdateReload = false;

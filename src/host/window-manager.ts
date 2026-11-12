@@ -45,6 +45,8 @@ export type WindowManagerDeps = {
   prepareClose: (frame: HTMLIFrameElement) => Promise<boolean>;
   /** After prepareClose succeeds, arm discard/unload suppression before removing the iframe. */
   commitClose?: (frame: HTMLIFrameElement) => void;
+  /** prepareClose succeeded but this close will not commit (e.g. last-window race); thaw the editor. */
+  cancelClose?: (frame: HTMLIFrameElement) => void;
   /** Optional document-id probe for layout persistence (never text). */
   readDocumentId?: (frame: HTMLIFrameElement) => string | undefined;
 };
@@ -849,7 +851,11 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         const ok = await deps.prepareClose(frame);
         if (!ok) return false;
         // Another close may have finished while we awaited consent — never drop the last window.
-        if (layouts.length <= 1 || !layouts.some(win => win.id === id)) return false;
+        if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
+          // prepareClose may have left editors frozen for discard; thaw the surviving window (#254).
+          deps.cancelClose?.(frame);
+          return false;
+        }
         deps.commitClose?.(frame);
       } else if (layouts.length <= 1 || !layouts.some(win => win.id === id)) {
         return false;
