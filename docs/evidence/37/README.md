@@ -28,7 +28,7 @@ Local exploratory probes used Linux, Playwright 1.64.1, Chrome for Testing 156.0
 
 These timings are observations, not a guaranteed flush boundary or suggested delay. The exploratory browser-process test was not part of R2a CI: it demonstrated a real remaining recovery gap. The opt-in R2b diagnostic harness below now provides explicit phase/result reporting. Do not turn it into a passing test by waiting arbitrarily for localStorage to reach disk. A successful synchronous localStorage write does not prove whole-browser crash durability. This experiment is not an OS/power-loss test.
 
-Next research/implementation: repeat process-kill phases with owned-process/profile cleanup, browser versions and journal presence before/after restart; include Autosave-off controls. Evaluate a separately persisted emergency journal and transaction/durability behavior under contention and quota before making runtime changes. Preserve typing performance, privacy, exact-version cleanup and recover-as-copy. Retained version history remains a separate design stage.
+Delivered by R2b (#241, below): process-kill phases with owned-process/profile cleanup, browser versions, journal presence before/after restart and Autosave-off controls. Next (R2c): evaluate a separately persisted emergency journal and transaction/durability behavior under contention and quota before making runtime changes. Preserve typing performance, privacy, exact-version cleanup and recover-as-copy. Retained version history remains a separate design stage.
 
 ## Not verified by this slice
 
