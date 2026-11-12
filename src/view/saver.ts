@@ -37,9 +37,13 @@ export type SaverDeps = {
     edit: () => void;
     idle: () => Promise<void>;
     upToForSave: (documentId: string, savedText: string) => { upTo: number; keepRun: string };
+    /** The run this window has for `documentId`, if any (its records are never salvaged). */
+    runOf: (documentId: string) => string | undefined;
     /** Whether the save prepared by upToForSave for `run` committed its text. */
     saved: (run: string, ok: boolean) => void;
   };
+  /** A save kept what a crashed run had typed as a recovered copy (#37 R2c). */
+  onRecovered: (copy: StoredDraft, sourceId: string) => void;
   rememberActive: () => void;
   updateSaveIndicator: () => void;
   syncTitleTooltip: () => void;
@@ -84,7 +88,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           const owner = await state.ownership.writeFence();
           const current = deps.currentJournal();
           const journal = current && current.documentId === saved.id && current.revision === state.active.revision && current.text === saved.text && current.title === saved.title ? current : undefined;
-          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, { keepRun: log.keepRun });
+          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, { keepRun: log.keepRun, recoveryId: crypto.randomUUID() });
           // A conflict copy is a new document: this document's row did not take the text.
           deps.changes.saved(log.keepRun, !result.conflict);
           preparedRun = undefined;
@@ -94,6 +98,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           state.active = result.draft;
           deps.clearVersionNotice();
           deps.postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
+          if (result.recovered) deps.onRecovered(result.recovered, result.draft.id);
           deps.writingPosition.save();
           if (deps.workspace.contentRevision() !== version && deps.autosave.checked) deps.journalEdit();
           deps.rememberActive();

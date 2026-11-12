@@ -6,7 +6,9 @@ const transpile = (path: string): string => ts.transpileModule(readFileSync(path
 /** indexeddb.ts as a browser script exposing window.TypeBridgeDb; its one import is the ownership helpers. */
 function compiledDatabaseModule(): string {
   return `{ const ownership = {}; ((exports) => { ${transpile('src/view/ownership.ts')} })(ownership);
-    const exports = {}; const require = () => ownership; ${transpile('src/editor/indexeddb.ts')} window.TypeBridgeDb = exports; }`;
+    const changeLog = {}; ((exports) => { ${transpile('src/editor/change-log.ts')} })(changeLog);
+    const modules = { './change-log': changeLog, '../view/ownership': ownership };
+    const exports = {}; const require = name => modules[name]; ${transpile('src/editor/indexeddb.ts')} window.TypeBridgeDb = exports; }`;
 }
 
 test('stale edits are committed as a separate complete conflict draft', async ({ page }) => {
@@ -211,12 +213,12 @@ test('the change log: fenced appends, cleanup by upTo, clear on demand and on de
     // A save no run continues clears the log, except the new run that starts from its text.
     await api.appendChange(db, record('log', 6), { instanceId: 'window-b', fence: taken });
     await api.appendChange(db, { ...record('log', 1), run: 'run-new' }, { instanceId: 'window-b', fence: taken });
-    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новый', updatedAt: 3, upTo: 0 }, 2, 'copy-3', { instanceId: 'window-b', fence: taken }, { keepRun: 'run-new' });
+    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новый', updatedAt: 3, upTo: 0 }, 2, 'copy-3', { instanceId: 'window-b', fence: taken }, { keepRun: 'run-new', recoveryId: 'unused' });
     const afterClear = await seqs('log');
     // A crashed run's record past upTo never survives a save of the run that continues the text.
     await api.appendChange(db, { ...record('log', 7), run: 'crashed' });
     await api.appendChange(db, { ...record('log', 2), run: 'run-new' }, { instanceId: 'window-b', fence: taken });
-    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новыйа', updatedAt: 3, upTo: 1 }, 3, 'copy-4', { instanceId: 'window-b', fence: taken }, { keepRun: 'run-new' });
+    await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: 'новыйа', updatedAt: 3, upTo: 1 }, 3, 'copy-4', { instanceId: 'window-b', fence: taken }, { keepRun: 'run-new', recoveryId: 'unused' });
     const afterPrune = await seqs('log');
     // Deleting the document deletes its log; other documents keep theirs.
     await api.appendChange(db, record('log', 1), { instanceId: 'window-b', fence: taken });
@@ -229,5 +231,42 @@ test('the change log: fenced appends, cleanup by upTo, clear on demand and on de
   expect(result).toEqual({
     appended: [1, 2, 3, 4, 5], savedUpTo: 3, afterSave: [4, 5], staleAppend: 'EditOwnershipLostError', afterStale: [4, 5],
     afterClear: [1], afterPrune: [2], deleted: true, afterDelete: { log: [], other: [1] },
+  });
+});
+
+test('crash recovery from the change log keeps another run\'s text as a copy, once (#37 R2c)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const fence = await api.claimEditOwnership(db, 'crash', 'window-a', 1);
+    const owner = { instanceId: 'window-a', fence };
+    await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет', updatedAt: 1 }, 0, 'c1', owner);
+    // A window that crashed had typed ", мир 🙂" after the stored row.
+    const crashed = (seq: number, change: [number, string, string], length: number) => ({ documentId: 'crash', seq, run: 'crashed', change, length });
+    await api.appendChange(db, crashed(1, [6, '', ', мир'], 11), owner);
+    await api.appendChange(db, crashed(2, [11, '', ' 🙂'], 14), owner);
+    const copy = await api.salvageChanges(db, 'crash', owner, 'rec-1', undefined, 5);
+    const left = await api.listChanges(db, 'crash');
+    const again = await api.salvageChanges(db, 'crash', owner, 'rec-2', undefined, 6);
+    // Text this window already shows (a handoff) is not recovered again.
+    await api.appendChange(db, crashed(1, [6, '', '!'], 7), owner);
+    const shown = await api.salvageChanges(db, 'crash', owner, 'rec-3', undefined, 7, 'Привет!');
+    // A save of a new run first keeps a crashed run's text, in the same transaction.
+    await api.appendChange(db, crashed(1, [6, '', '?'], 7), owner);
+    const saved = await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет, друг', updatedAt: 8, upTo: 0 }, 1, 'c2', owner, { keepRun: 'mine', recoveryId: 'rec-4' });
+    const original = await api.getStoredDraft(db, 'crash');
+    const ids = (await api.listStoredDrafts(db)).map(d => d.id).sort();
+    db.close();
+    return {
+      copy: copy && { id: copy.id, title: copy.title, text: copy.text }, left: left.length, again, shown,
+      saved: saved.recovered && { id: saved.recovered.id, text: saved.recovered.text }, original: original?.text, ids,
+    };
+  });
+  expect(result).toEqual({
+    copy: { id: 'rec-1', title: 'Заметка (recovered)', text: 'Привет, мир 🙂' }, left: 0, again: undefined, shown: undefined,
+    saved: { id: 'rec-4', text: 'Привет?' }, original: 'Привет, друг', ids: ['crash', 'rec-1', 'rec-4'],
   });
 });

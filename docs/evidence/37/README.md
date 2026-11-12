@@ -85,3 +85,19 @@ Cost and durability use the same owned browser launcher. An earlier run of the f
 **Reading.** In this harness and this Chromium, every IndexedDB write that had reported `complete` survived a whole-browser kill 2–5 ms or about 1 s later, including multi-megabyte records, and every returned `localStorage.setItem` was lost, even 1 s later. This is evidence from a small sample, not a guarantee. Strict durability made no observable difference for a process kill (it targets OS crash and power loss, which this does not test). A change record costs well under 1 ms regardless of document size, while full copies grow with the document. This supports building the [R2c design](https://github.com/vchernoy/typebridge/issues/37#issuecomment-6821462575): a change log in the existing IndexedDB database plus snapshots, replacing the `localStorage` journal. If that holds, the expected loss window becomes "changes whose transaction had not reported complete" instead of "everything since the last pause". The implementation must show this with its own before/after runs of the R2b harness, plus coverage for contention, quota, privacy and exact-version cleanup.
 
 **Limits.** Linux Chromium process kill only: not Firefox/WebKit, real phones, OS crash or power loss. Two attempts per case is a small sample, not a guarantee. A write still in flight at the kill is not covered by "reported success" and can be lost.
+
+## R2c step 2c: recovery from the change log after a whole-browser kill
+
+`e2e/process-crash.diagnostic.ts` now also runs a change-log variant (`--grep 'change log'`). It kills the owned process the same way as R2b, but only **document** saves fail, so change-log records still reach storage. Recovery needs no click: when a window starts editing the document, the records another run left after the stored row are replayed and kept as a new document "<title> (recovered)" in one transaction with their removal (`salvageChanges`; a save of a new run does the same before it prunes). The diagnostic records whether the exact latest text is stored as a copy and the original row is unchanged.
+
+[Machine-readable result](change-log-recovery-r2c.json): local Linux, Playwright 1.64.1, Chromium 153.0.8010.12, Node 22.22.0, 2 attempts per case, same run for both rows.
+
+| Kill after the failed save | localStorage journal (R2b matrix) | Change log (this step) |
+|---|---|---|
+| 0 ms | lost 2/2 | **recovered exact copy 2/2** |
+| 1000 ms | lost 2/2 | **recovered exact copy 2/2** |
+| 6000 ms | recovered (after a click) 2/2 | **recovered exact copy 2/2** |
+
+The saved original survived every attempt; Autosave-off controls still journaled nothing; no change records were left after recovery. At 1000 ms and later, Chromium restored the killed tab on restart (4 pages instead of 2): that tab opened the document first and made the copy, so the newly opened tab showed the recovered copy (the newest document) instead of the original. Both texts are stored either way.
+
+**Reading.** In this harness and this Chromium, text whose change records were written survived a whole-browser kill even immediately after the failed save, where the localStorage journal did not. The copy is text only: an unsaved title change is not in the log. Linux Chromium process kill only, small sample, not OS crash, power loss or other engines; a record still in flight at the kill is not covered.

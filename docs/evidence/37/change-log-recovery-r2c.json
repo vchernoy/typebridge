@@ -1,0 +1,208 @@
+{
+  "description": "#37 R2c step 2c: whole-browser SIGKILL after a failed document save. 'journal' rows repeat the R2b matrix (all writes fail; localStorage journal). 'changeLog' rows fail only document saves, so the change log keeps working; recovery is automatic when the document is opened. Linux, local, small sample; not a guarantee.",
+  "playwright": "1.64.1",
+  "browserVersion": "153.0.8010.12",
+  "node": "v22.22.0",
+  "journal": [
+    {
+      "repeat": 1,
+      "autosave": true,
+      "requestedDelayMs": 0,
+      "phase": "after-save-failure-and-readable-journal",
+      "outcome": "journal-lost-original-retained",
+      "journalsBefore": 1,
+      "actualDelayMs": 0,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 1,
+      "autosave": true,
+      "requestedDelayMs": 1000,
+      "phase": "after-save-failure-and-readable-journal",
+      "outcome": "journal-lost-original-retained",
+      "journalsBefore": 1,
+      "actualDelayMs": 1003,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 1,
+      "autosave": true,
+      "requestedDelayMs": 6000,
+      "phase": "after-save-failure-and-readable-journal",
+      "outcome": "recovered-exact-copy-original-retained",
+      "journalsBefore": 1,
+      "actualDelayMs": 6003,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 1
+    },
+    {
+      "repeat": 1,
+      "autosave": false,
+      "requestedDelayMs": 0,
+      "phase": "after-private-edit",
+      "outcome": "private-edits-not-journaled-original-retained",
+      "journalsBefore": 0,
+      "actualDelayMs": 0,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 1,
+      "autosave": false,
+      "requestedDelayMs": 1000,
+      "phase": "after-private-edit",
+      "outcome": "private-edits-not-journaled-original-retained",
+      "journalsBefore": 0,
+      "actualDelayMs": 1004,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 1,
+      "autosave": false,
+      "requestedDelayMs": 6000,
+      "phase": "after-private-edit",
+      "outcome": "private-edits-not-journaled-original-retained",
+      "journalsBefore": 0,
+      "actualDelayMs": 6003,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 2,
+      "autosave": true,
+      "requestedDelayMs": 0,
+      "phase": "after-save-failure-and-readable-journal",
+      "outcome": "journal-lost-original-retained",
+      "journalsBefore": 1,
+      "actualDelayMs": 0,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 2,
+      "autosave": true,
+      "requestedDelayMs": 1000,
+      "phase": "after-save-failure-and-readable-journal",
+      "outcome": "journal-lost-original-retained",
+      "journalsBefore": 1,
+      "actualDelayMs": 1002,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 2,
+      "autosave": true,
+      "requestedDelayMs": 6000,
+      "phase": "after-save-failure-and-readable-journal",
+      "outcome": "recovered-exact-copy-original-retained",
+      "journalsBefore": 1,
+      "actualDelayMs": 6004,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 1
+    },
+    {
+      "repeat": 2,
+      "autosave": false,
+      "requestedDelayMs": 0,
+      "phase": "after-private-edit",
+      "outcome": "private-edits-not-journaled-original-retained",
+      "journalsBefore": 0,
+      "actualDelayMs": 0,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 2,
+      "autosave": false,
+      "requestedDelayMs": 1000,
+      "phase": "after-private-edit",
+      "outcome": "private-edits-not-journaled-original-retained",
+      "journalsBefore": 0,
+      "actualDelayMs": 1002,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    },
+    {
+      "repeat": 2,
+      "autosave": false,
+      "requestedDelayMs": 6000,
+      "phase": "after-private-edit",
+      "outcome": "private-edits-not-journaled-original-retained",
+      "journalsBefore": 0,
+      "actualDelayMs": 6004,
+      "unloadMarkerAfter": null,
+      "journalsAfter": 0
+    }
+  ],
+  "changeLog": [
+    {
+      "repeat": 1,
+      "requestedDelayMs": 0,
+      "phase": "after-document-save-failure-with-change-log",
+      "outcome": "log-recovered-exact-copy-original-retained",
+      "changesBefore": 1,
+      "actualDelayMs": 0,
+      "pagesAfterRestart": 2,
+      "changesAfter": 0,
+      "shownAfter": "original"
+    },
+    {
+      "repeat": 1,
+      "requestedDelayMs": 1000,
+      "phase": "after-document-save-failure-with-change-log",
+      "outcome": "log-recovered-exact-copy-original-retained",
+      "changesBefore": 1,
+      "actualDelayMs": 1004,
+      "pagesAfterRestart": 4,
+      "changesAfter": 0,
+      "shownAfter": "recovered-copy"
+    },
+    {
+      "repeat": 1,
+      "requestedDelayMs": 6000,
+      "phase": "after-document-save-failure-with-change-log",
+      "outcome": "log-recovered-exact-copy-original-retained",
+      "changesBefore": 1,
+      "actualDelayMs": 6002,
+      "pagesAfterRestart": 4,
+      "changesAfter": 0,
+      "shownAfter": "recovered-copy"
+    },
+    {
+      "repeat": 2,
+      "requestedDelayMs": 0,
+      "phase": "after-document-save-failure-with-change-log",
+      "outcome": "log-recovered-exact-copy-original-retained",
+      "changesBefore": 1,
+      "actualDelayMs": 0,
+      "pagesAfterRestart": 2,
+      "changesAfter": 0,
+      "shownAfter": "original"
+    },
+    {
+      "repeat": 2,
+      "requestedDelayMs": 1000,
+      "phase": "after-document-save-failure-with-change-log",
+      "outcome": "log-recovered-exact-copy-original-retained",
+      "changesBefore": 1,
+      "actualDelayMs": 1006,
+      "pagesAfterRestart": 4,
+      "changesAfter": 0,
+      "shownAfter": "recovered-copy"
+    },
+    {
+      "repeat": 2,
+      "requestedDelayMs": 6000,
+      "phase": "after-document-save-failure-with-change-log",
+      "outcome": "log-recovered-exact-copy-original-retained",
+      "changesBefore": 1,
+      "actualDelayMs": 6004,
+      "pagesAfterRestart": 4,
+      "changesAfter": 0,
+      "shownAfter": "recovered-copy"
+    }
+  ]
+}

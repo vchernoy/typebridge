@@ -117,6 +117,8 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       if (!ok && writer === w) writer = undefined;
       settle(ok);
     },
+    /** The run this window has for `documentId`, if any. */
+    runOf: (documentId: string): string | undefined => writer?.documentId === documentId ? writer.run : undefined,
     /** Resolves once every queued record was written, skipped or dropped. */
     idle: (): Promise<void> => queue,
   };
