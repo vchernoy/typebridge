@@ -85,15 +85,21 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
 
   // Regenerating is async: only the latest request may write the link, and Copy link waits for
   // it, so a copied link always matches the checkbox (#247 review).
+  // The field is emptied meanwhile, so no stale link can be copied by hand either.
   let generation = 0;
   edit.addEventListener('change', () => {
     const current = ++generation;
     copy.disabled = true;
+    link.value = '';
+    link.placeholder = 'Updating link…';
     void make(edit.checked).then(url => {
       if (current !== generation) return;
-      copy.disabled = false;
-      if (!url) return;
+      if (!url) {
+        status.textContent = TOO_LARGE_TEXT;
+        return;
+      }
       link.value = url;
+      copy.disabled = false;
       status.textContent = lengthNote();
     });
   });

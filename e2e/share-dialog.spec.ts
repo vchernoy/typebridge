@@ -116,6 +116,9 @@ test('a slow regenerate never leaves a link that disagrees with the checkbox (#2
   await page.evaluate(() => { (window as unknown as { holdNextCompress: boolean }).holdNextCompress = true; });
   await checkbox.uncheck(); // edit: false, held
   await expect(dialog(page).getByRole('button', { name: 'Copy link' })).toBeDisabled();
+  // No stale link stays in the field to copy by hand meanwhile.
+  await expect(linkField(page)).toHaveValue('');
+  await expect(linkField(page)).toHaveAttribute('placeholder', 'Updating link…');
   await checkbox.check(); // edit: true, finishes first
   await expect.poll(() => page.evaluate(() => (window as unknown as { heldCompressDone?: boolean }).heldCompressDone)).toBe(true);
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
