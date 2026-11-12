@@ -26,7 +26,9 @@ function harness(stored = { text: 'Сохранено', upTo: 0, revision: 1 }) 
   /** A full save the way the saver does it: wait for queued records, then text + upTo together. */
   const save = async () => {
     await writer.idle();
-    commit(writer.upToForSave(env.id, env.text), env.text);
+    const log = writer.upToForSave(env.id, env.text);
+    commit(log, env.text);
+    writer.saved(log.keepRun, true);
   };
   /** The commit transaction: the row, then the cleanup it does. */
   const commit = (log: ReturnType<typeof writer.upToForSave>, text: string) => {
@@ -94,8 +96,9 @@ describe('change writer', () => {
     const log = writer.upToForSave(env.id, env.text);
     expect(log).toMatchObject({ upTo: 0 });
     type('Личное!'); type('Личное!!');
-    await writer.idle();
     commit(log, 'Личное');
+    writer.saved(log.keepRun, true);
+    await writer.idle();
     expect(env.records).toMatchObject([{ seq: 1 }, { seq: 2 }]);
     expect(await recovered()).toMatchObject({ text: 'Личное!!', lastSeq: 2 });
   });
@@ -109,13 +112,54 @@ describe('change writer', () => {
   });
 
   it('a document shown again starts a new run; its first save clears the earlier log', async () => {
-    const { env, writer, type, save } = harness();
+    const { env, writer, type, save, commit } = harness();
     type('X');
     env.generation = 2; // shown again (e.g. reloaded); nothing typed yet
-    expect(writer.upToForSave(env.id, env.text)).toMatchObject({ upTo: 0 });
+    const log = writer.upToForSave(env.id, env.text);
+    expect(log).toMatchObject({ upTo: 0 });
+    commit(log, env.text);
+    writer.saved(log.keepRun, true); // the saver always reports the outcome
     type('XY');
     await save();
     expect(env.records).toEqual([]);
+  });
+
+  it('records after a save of new text wait for it, and continue the stored row if it fails (#251 review)', async () => {
+    const { env, writer, type, recovered } = harness({ text: 'a', upTo: 0, revision: 1 });
+    env.autosave = false;
+    type('b'); // private: the log knows nothing of it
+    env.autosave = true;
+    const log = writer.upToForSave(env.id, env.text); // the save of 'b' is in flight
+    type('bc');
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(env.records).toEqual([]); // held: 'bc' continues 'b', which is not stored yet
+    writer.saved(log.keepRun, false); // the save failed: the row is still 'a'
+    await writer.idle();
+    expect(env.records).toEqual([]);
+    type('bcd'); // starts again from the stored row
+    expect(await recovered()).toMatchObject({ text: 'bcd' });
+  });
+
+  it('held records go ahead once the save of new text commits', async () => {
+    const { env, writer, type, commit, recovered } = harness({ text: 'a', upTo: 0, revision: 1 });
+    env.autosave = false;
+    type('b');
+    env.autosave = true;
+    const log = writer.upToForSave(env.id, env.text);
+    type('bc');
+    commit(log, 'b');
+    writer.saved(log.keepRun, true);
+    expect(await recovered()).toMatchObject({ text: 'bc', lastSeq: 1 });
+  });
+
+  it('a save that only continues the log holds nothing', async () => {
+    const { env, writer, type } = harness();
+    type('X');
+    await writer.idle();
+    writer.upToForSave(env.id, env.text); // in flight, never reported
+    type('XY');
+    await writer.idle();
+    expect(env.records.map(r => r.seq)).toEqual([1, 2]);
   });
 
   it('the first save of a new run removes a crashed run\'s longer tail (#251 review)', async () => {
