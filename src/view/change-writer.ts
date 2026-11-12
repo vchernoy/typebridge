@@ -155,9 +155,9 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       pending = undefined;
       w.anchor = undefined;
       if (!ok && writer === w) {
-        // Keep the failed run so discard can still clearDocumentChanges for its committed
-        // prefix; dropping the writer here left salvageable records after an explicit discard
-        // (#254 Codex P1). The next upToForSave covers or replaces this run.
+        // Mark failed rather than dropping: protects() stays false until the next committed
+        // save starts a fresh run. Discard clears all of this document's records under the
+        // fence and no longer needs the run id (#254).
         w.failed = true;
       }
       settle(ok);
