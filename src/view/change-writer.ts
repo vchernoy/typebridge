@@ -151,7 +151,12 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       const { writer: w, settle } = pending;
       pending = undefined;
       w.anchor = undefined;
-      if (!ok && writer === w) writer = undefined;
+      if (!ok && writer === w) {
+        // Keep the failed run so discard can still clearDocumentChanges for its committed
+        // prefix; dropping the writer here left salvageable records after an explicit discard
+        // (#254 Codex P1). The next upToForSave covers or replaces this run.
+        w.failed = true;
+      }
       settle(ok);
       if (!ok) notifyUnprotected();
     },

@@ -291,4 +291,24 @@ describe('change writer', () => {
     await writer.idle();
     expect(events).toEqual(['unprotected']);
   });
+
+  it('runOf survives a failed anchored save so discard can clear the run (#254)', async () => {
+    // Fails if saved(false) drops the writer: discardUnsavedRecovery then skips clearDocumentChanges
+    // and salvage can resurrect the committed prefix after an explicit discard.
+    const { env, writer, type, save } = harness();
+    const started = await save();
+    type('Сохранено!');
+    await writer.idle();
+    expect(writer.runOf(env.id)).toBe(started.keepRun);
+    env.failNext = 1;
+    type('Сохранено!!');
+    await writer.idle();
+    env.text = 'held-after-fail';
+    const log = writer.upToForSave(env.id, env.text, env.title);
+    writer.saved(log.keepRun, false);
+    expect(writer.protects()).toBe(false);
+    expect(writer.runOf(env.id)).toBe(log.keepRun);
+    writer.abandon();
+    expect(writer.runOf(env.id)).toBeUndefined();
+  });
 });

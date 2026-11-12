@@ -117,6 +117,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   }
 
   let layouts: HostWindowLayout[] = [];
+  /** Window ids reserved between last-window check and finished commitClose (async discard). */
+  const closingIds = new Set<string>();
   const shells = new Map<string, HTMLElement>();
   /** Per-window "start renaming" actions (title bar ✎ and the Documents menu). */
   const renameHandlers = new Map<string, () => void>();
@@ -795,9 +797,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       return titles;
     },
     addWindow: (documentId?: string) => {
-      if (hostFocus || layouts.length >= MAX_HOST_WINDOWS) return undefined;
+      // closingIds still occupy their shells/frames until commit finishes — do not reuse or overflow.
+      if (hostFocus || layouts.length + closingIds.size >= MAX_HOST_WINDOWS) return undefined;
       const view = viewportOf(deps.root);
-      const id = mintWindowId(layouts.map(w => w.id));
+      const id = mintWindowId([...layouts.map(w => w.id), ...closingIds]);
       const maxZ = layouts.reduce((m, win) => Math.max(m, win.z), 0);
       const win: HostWindowLayout = {
         id,
@@ -858,13 +861,16 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         }
         // Reserve before awaiting commit: commitClose is async (discard cleanup), and without a
         // reservation two closes of the final pair can both pass the check above then both remove
-        // their iframes, leaving zero windows (#254 Codex P1).
+        // their iframes, leaving zero windows (#254 Codex P1). Keep the id in closingIds so
+        // addWindow cannot mint/reuse it while shells/frames still hold the closing iframe (#254).
         const reserved = layouts.find(win => win.id === id)!;
         layouts = layouts.filter(win => win.id !== id);
+        closingIds.add(id);
         try {
           await deps.commitClose?.(frame);
         } catch (error) {
           layouts = [...layouts, reserved];
+          closingIds.delete(id);
           deps.cancelClose?.(frame);
           throw error;
         }
@@ -872,6 +878,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         return false;
       } else {
         layouts = layouts.filter(win => win.id !== id);
+        closingIds.add(id);
       }
       if (hostFocus && activeId === id) {
         hostFocus = false;
@@ -882,6 +889,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       shells.delete(id);
       renameHandlers.delete(id);
       frames.delete(id);
+      closingIds.delete(id);
       if (preFocusLayouts) {
         preFocusLayouts = preFocusLayouts.filter(win => win.id !== id);
       }
