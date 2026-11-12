@@ -110,14 +110,18 @@ describe('change writer', () => {
   });
 
   it('after a failed write it stops, and the next save covers everything and resumes', async () => {
-    const { env, type, save, recovered } = harness();
+    const { env, writer, type, save, recovered } = harness();
     env.failNext = 1;
-    type('1'); await Promise.resolve(); await Promise.resolve();
-    type('12');
+    type('1'); type('12'); type('123');
+    await writer.idle();
+    expect(env.records).toEqual([]); // 1 failed; 2 and 3 were skipped
+    type('1234'); // still stopped
+    await writer.idle();
+    expect(env.records).toEqual([]);
     await save();
-    expect(env.row).toMatchObject({ text: '12' });
-    type('123');
-    expect((await recovered()).text).toBe('123');
+    expect(env.row).toMatchObject({ text: '1234', upTo: 3 });
+    type('12345');
+    expect(await recovered()).toMatchObject({ text: '12345', lastSeq: 4 });
   });
 
   it('a failed write leaves a gap that replay stops at, never wrong text', async () => {
@@ -127,7 +131,8 @@ describe('change writer', () => {
     env.failNext = 1;
     type('abc');
     type('abcd');
-    // Record 3 failed and the writer stopped: replay keeps 'ab', never a text that skips a change.
+    // Record 3 failed and the writer stopped: record 4, queued behind it, is not written either.
     expect(await recovered()).toMatchObject({ text: 'ab', lastSeq: 2 });
+    expect(env.records.map(r => r.seq)).toEqual([1, 2]);
   });
 });

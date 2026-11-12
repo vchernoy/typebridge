@@ -67,7 +67,9 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       w.seq += 1;
       w.base = text;
       const record: ChangeRecord = { documentId: w.documentId, seq: w.seq, run: w.run, change, length: text.length };
-      queue = queue.then(() => deps.append(record)).catch(() => { w.failed = true; });
+      // Records queued behind a failed one are skipped, not written: the run stops at the failure
+      // until a save covers everything queued (#251 review).
+      queue = queue.then(() => w.failed ? undefined : deps.append(record)).catch(() => { w.failed = true; });
     },
     /**
      * Called as a full save takes `savedText` of `documentId` (after `idle()`): `upTo` is the
@@ -92,8 +94,6 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       w.failed = false;
       return { upTo: w.seq, clearAll: false };
     },
-    /** Forget the run, e.g. when the document is deleted or editing moves elsewhere. */
-    reset(): void { writer = undefined; },
     /** Resolves once every queued record was written or failed (tests and shutdown). */
     idle: (): Promise<void> => queue,
   };
