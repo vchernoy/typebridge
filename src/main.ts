@@ -1021,14 +1021,13 @@ const leaveGuards = createLeaveGuards(state, {
   snapshot: () => snapshot(),
   freezeForDiscard: () => { freezeEditorsForTransition(); },
   unfreezeAfterDiscard: () => { unfreezeEditorsAfterTransition(); },
-  // Explicit discard: drop the journal and this run's change-log records so salvage cannot bring them back (#37 R2c 2d-2).
+  // Explicit discard: drop the journal and every change-log record for this document (#37 R2c 2d-2 / #254).
   discardUnsavedRecovery: async () => {
     const discardedJournal = recovery.takeCurrentJournal();
     if (discardedJournal) {
       try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
     }
     const documentId = state.active.id;
-    const run = changeWriter.runOf(documentId);
     changeWriter.abandon();
     // Drain after abandon so a late append rejection cannot recreate a journal (#254 Codex P2).
     try { await saver.drainChanges(); } catch { /* Closing anyway. */ }
@@ -1038,9 +1037,9 @@ const leaveGuards = createLeaveGuards(state, {
     }
     // Only clear under a live fence for this document: never wipe another owner's log (#254 Codex P1).
     const ownership = state.ownership;
-    if (!state.db || !run || !ownership || ownership.documentId !== documentId) return;
+    if (!state.db || !ownership || ownership.documentId !== documentId) return;
     try {
-      await clearDocumentChanges(state.db, documentId, run, await ownership.writeFence());
+      await clearDocumentChanges(state.db, documentId, await ownership.writeFence());
     } catch { /* Closing anyway; a later owner may still see records if the clear failed. */ }
   },
 });

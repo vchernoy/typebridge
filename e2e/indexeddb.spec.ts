@@ -283,8 +283,8 @@ test('crash recovery from the change log keeps another run\'s text as a copy, on
   });
 });
 
-test('clearDocumentChanges removes only the discarding run under the ownership fence (#37 R2c 2d-2)', async ({ page }) => {
-  // Fails if clearDocumentChanges deletes every run without a fence, or deletes other runs' records.
+test('clearDocumentChanges removes every run of the document under the ownership fence (#254)', async ({ page }) => {
+  // Fails if clear still requires a run id, leaves other runs, clears without a fence, or touches other docs.
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.addScriptTag({ content: compiledDatabaseModule() });
@@ -294,40 +294,48 @@ test('clearDocumentChanges removes only the discarding run under the ownership f
     const fence = await api.claimEditOwnership(db, 'discard', 'window-a', 1);
     const owner = { instanceId: 'window-a', fence };
     await api.commitOrCreateConflictCopy(db, { id: 'discard', title: 'T', text: 'a', updatedAt: 1 }, 0, 'c1', owner);
-    const rec = (seq: number, run: string, inserted: string) => ({
-      documentId: 'discard', seq, run, change: [1, '', inserted] as [number, string, string], length: 1 + inserted.length,
+    await api.commitOrCreateConflictCopy(db, { id: 'other-doc', title: 'O', text: 'x', updatedAt: 1 }, 0, 'c2');
+    const rec = (documentId: string, seq: number, run: string, inserted: string) => ({
+      documentId, seq, run, change: [1, '', inserted] as [number, string, string], length: 1 + inserted.length,
     });
-    await api.appendChange(db, rec(1, 'mine', 'b'), owner);
-    await api.appendChange(db, rec(2, 'other', 'c')); // other run (e.g. crashed); no fence on append for this test helper path
-    await api.clearDocumentChanges(db, 'discard', 'mine', owner);
+    await api.appendChange(db, rec('discard', 1, 'mine', 'b'), owner);
+    await api.appendChange(db, rec('discard', 2, 'other', 'c'));
+    await api.appendChange(db, rec('other-doc', 1, 'keep', 'y'));
+    await api.clearDocumentChanges(db, 'discard', owner);
     const left = await api.listChanges(db, 'discard');
-    // Stale window without a fence must not clear: require owner at runtime too.
+    const otherDoc = await api.listChanges(db, 'other-doc');
     const stale = await (async () => {
       try {
-        await api.clearDocumentChanges(db, 'discard', 'other', undefined as unknown as { instanceId: string; fence: number });
+        await api.clearDocumentChanges(db, 'discard', undefined as unknown as { instanceId: string; fence: number });
         return 'cleared-without-owner';
       } catch (error) {
         return (error as Error).name === 'EditOwnershipLostError' ? 'refused' : 'other-error';
       }
     })();
-    // Another instance's fence cannot clear either.
     const foreign = await (async () => {
       try {
-        await api.clearDocumentChanges(db, 'discard', 'other', { instanceId: 'window-b', fence: 1 });
+        await api.clearDocumentChanges(db, 'other-doc', { instanceId: 'window-b', fence: 1 });
         return 'cleared-by-foreign';
       } catch (error) {
         return (error as Error).name === 'EditOwnershipLostError' ? 'fenced' : 'other-error';
       }
     })();
-    const afterForeign = await api.listChanges(db, 'discard');
+    const afterForeign = await api.listChanges(db, 'other-doc');
     db.close();
-    return { left: left.map(r => ({ seq: r.seq, run: r.run })), stale, foreign, afterForeign: afterForeign.map(r => r.run) };
+    return {
+      left: left.length,
+      otherDoc: otherDoc.map(r => r.run),
+      stale,
+      foreign,
+      afterForeign: afterForeign.map(r => r.run),
+    };
   });
   expect(result).toEqual({
-    left: [{ seq: 2, run: 'other' }],
+    left: 0,
+    otherDoc: ['keep'],
     stale: 'refused',
     foreign: 'fenced',
-    afterForeign: ['other'],
+    afterForeign: ['keep'],
   });
 });
 

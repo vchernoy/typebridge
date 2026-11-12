@@ -55,6 +55,8 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
     deps.clearHeldEdits();
     deps.focusHandoff()?.cancel();
     if (id === state.active.id) { deps.renderDrafts(); return { opened: true, conflict: false }; }
+    // Update-reload freeze: New / picker / import must not change identity mid-commit (#254).
+    if (state.reloadFrozen) return { opened: false, conflict: false };
     state.transitioning = true;
     // Autosave cannot change mid-switch: turning it off would offer to delete a conflict copy
     // whose notice is only shown once the switch finishes (#97). Re-enabled on unfreeze.
@@ -142,7 +144,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
     }
   }
   async function deleteActive(): Promise<void> {
-    if (deps.readOnlyNow() || state.transitioning) return;
+    if (deps.readOnlyNow() || state.transitioning || state.reloadFrozen) return;
     deps.focusHandoff()?.cancel();
     deps.saver.cancel();
     const requestedId = state.active.id;

@@ -115,6 +115,11 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
   }
 
   function unfreezeEditorsAfterTransition(): void {
+    // An update-reload freeze must outlive unrelated switch/delete finally blocks (#254).
+    if (state.reloadFrozen) {
+      freezeEditorsForTransition();
+      return;
+    }
     state.transferFrozen = false;
     applyEditAccess();
   }

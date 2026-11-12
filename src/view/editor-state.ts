@@ -42,6 +42,11 @@ export type EditorState = {
   deletedElsewhere: boolean;
   /** True only during the post-flush ownership acquire/reread window (not while flushing). */
   transferFrozen: boolean;
+  /**
+   * Update-reload freeze after the final assert (#254): blocks New/picker/import and must not be
+   * cleared by an unrelated transition's unfreeze until cancel or navigation.
+   */
+  reloadFrozen: boolean;
   /** Bumped on IndexedDB versionchange so in-flight acquires cannot install after storage dies. */
   storageGeneration: number;
   /** Suppress scheduleSave while applying handoff snapshots (not a content edit). */
@@ -63,6 +68,7 @@ export function createEditorState(): EditorState {
     viewMissing: false,
     deletedElsewhere: false,
     transferFrozen: false,
+    reloadFrozen: false,
     storageGeneration: 0,
     suppressEditTracking: false,
   };

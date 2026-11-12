@@ -113,13 +113,24 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     deps.unfreezeAfterDiscard();
   }
 
+  /** New / Documents / Import must stay disabled for the whole update-reload freeze (#254). */
+  function setDocumentChangingControlsEnabled(enabled: boolean): void {
+    for (const id of ['new-draft', 'drafts', 'import-draft'] as const) {
+      const el = document.querySelector<HTMLButtonElement | HTMLSelectElement>('#' + id);
+      if (el) el.disabled = !enabled;
+    }
+  }
+
   /**
    * Freeze body + title (and mutation controls) after every window has asserted and before any
    * awaited commit/navigation, so private edits cannot sneak in during discard cleanup (#254).
+   * Also arms `state.reloadFrozen` so New/picker/import cannot change identity or thaw mid-commit.
    */
   function freezeForUpdateReload(): void {
     if (reloadFreezeArmed) return;
+    state.reloadFrozen = true;
     deps.freezeForDiscard();
+    setDocumentChangingControlsEnabled(false);
     reloadFreezeArmed = true;
   }
 
@@ -255,6 +266,8 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       allowUpdateReload = false;
       pendingReloadDiscard = false;
       deps.reloadBackup.setSuppressed(false);
+      state.reloadFrozen = false;
+      setDocumentChangingControlsEnabled(true);
       if (reloadFreezeArmed) {
         reloadFreezeArmed = false;
         deps.unfreezeAfterDiscard();

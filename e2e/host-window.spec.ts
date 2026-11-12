@@ -344,10 +344,16 @@ test('update-reload freeze blocks edits during deferred discard commit (#254)', 
   await expect(main.locator('#editor')).toHaveAttribute('readonly', '');
   await expect(second.locator('#editor')).toHaveAttribute('readonly', '');
   await expect(main.locator('#draft-title')).toHaveAttribute('readonly', '');
+  await expect(main.locator('#new-draft')).toBeDisabled();
+  await expect(main.locator('#drafts')).toBeDisabled();
   await main.locator('#editor').pressSequentially('sneaky');
   await expect(main.locator('#editor')).toHaveValue('Private main before freeze');
   await main.locator('#draft-title').pressSequentially('sneaky-title');
   await expect(main.locator('#draft-title')).toHaveValue('Untitled document');
+  // New must not change identity or thaw while commit is held (#254 owner-account P1).
+  await main.locator('#new-draft').evaluate((btn: HTMLButtonElement) => { btn.click(); });
+  await expect(main.locator('#editor')).toHaveAttribute('readonly', '');
+  await expect(main.locator('#editor')).toHaveValue('Private main before freeze');
 
   await commitPromise;
   await page.evaluate(() => {
@@ -358,6 +364,7 @@ test('update-reload freeze blocks edits during deferred discard commit (#254)', 
   });
   await expect(main.locator('#editor')).not.toHaveAttribute('readonly');
   await expect(second.locator('#editor')).not.toHaveAttribute('readonly');
+  await expect(main.locator('#new-draft')).toBeEnabled();
   await expect(main.locator('#editor')).toHaveValue('Private main before freeze');
   await expect(second.locator('#editor')).toHaveValue('Private second before freeze');
 });
@@ -581,6 +588,51 @@ test('refused multi-window update leaves backups and visibility saves working', 
   await expect.poll(async () =>
     page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:main') ?? ''),
   ).toContain('Pending after refused reload');
+});
+
+test('discard after Autosave-off private edit clears change-log so salvage cannot revive (#254)', async ({ page }) => {
+  // Fails on d43f237 if discard still needs runOf and a private edit cleared the writer (#254 Codex P1).
+  test.setTimeout(90_000);
+  await openHost(page);
+  await page.getByRole('button', { name: 'New window' }).click();
+  const secondShell = page.locator('.host-window[data-window-id="w2"]');
+  const second = secondShell.frameLocator('iframe');
+  await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+
+  await fillHostEditor(second, 'Committed base');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await fillHostEditor(second, 'Committed base with log');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  await setHostAutosave(page, false);
+  await fillHostEditor(second, 'Private after keep saved copy');
+  await expect(second.locator('#save-indicator')).toHaveText('Not saved');
+
+  await secondShell.locator('.host-window-close').click();
+  const dialog = second.getByRole('dialog', { name: 'Close without saving?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
+  await expect(page.locator('.host-window')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'New window' }).click();
+  const revived = page.frameLocator('.host-window[data-window-id="w2"] iframe');
+  await expect(revived.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(revived.locator('#status')).not.toContainText('Recovered unsaved text');
+  await expect(revived.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  const titles = await page.evaluate(() => new Promise<string[]>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readonly');
+      const req = tx.objectStore('documents').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as Array<{ title?: string }>).map(doc => doc.title ?? ''));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  expect(titles.some(title => title.includes('(recovered)'))).toBe(false);
 });
 
 test('discarded close after save failure does not revive text under a reused id', async ({ page }) => {
