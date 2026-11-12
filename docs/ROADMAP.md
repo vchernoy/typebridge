@@ -24,17 +24,21 @@ Each feature has its own [GitHub Issue](https://github.com/vchernoy/typebridge/i
 | [#159](https://github.com/vchernoy/typebridge/issues/159) | In-tab split (superseded) | Closed / not planned for further S-slices. W1–W4 kept; in-page split removed in #175 step 10. See [ADR 159](adr/159-comparison-window.md) |
 | [#175](https://github.com/vchernoy/typebridge/issues/175) | Movable editor windows in one tab | **Shipped (closed).** Replaced the #159 split. `/` is the multi-window host (cutover #205); each window is `/editor.html` with tab-style editing/ownership, free layout on desktop, stacked on phone, two-line Focus. Paused split/handoff PRs #164 and #174 are closed. [ADR 175](adr/175-editor-windows.md), [evidence/175](evidence/175/README.md) |
 
-## Next (as of 2026-11-09)
+## Next (as of 2026-11-12)
 
-Proposed order after the #175 cutover; each item is one or a few small PRs.
+Done since the #175 cutover: the `main.ts` split ([#99](https://github.com/vchernoy/typebridge/issues/99), PRs #208–#229, see the [code map](ARCHITECTURE.md#code-map)), the flaky tests found in CI ([#207](https://github.com/vchernoy/typebridge/pull/207), including the [#155](https://github.com/vchernoy/typebridge/issues/155) menu race), writing-position follow-ups ([#107](https://github.com/vchernoy/typebridge/issues/107), PRs #234–#238), the conflict re-announce P2s ([#97](https://github.com/vchernoy/typebridge/issues/97), PR #232), the search audit ([#62](https://github.com/vchernoy/typebridge/issues/62), PR #233) and the first #37 recovery evidence (PRs #239–#241). Current findings are collected in [#242](https://github.com/vchernoy/typebridge/issues/242).
 
-1. **Test reliability.** Find the race behind each intermittent e2e failure and fix it in code or test (no retries, skips or quarantine): `edit-ownership.spec.ts:365` (also fails on `main` under parallel load), `focus-handoff.spec.ts:242`, `host-shared-settings.spec.ts:214`, `find-replace.spec.ts:43`, and the Firefox document-menu race in [#155](https://github.com/vchernoy/typebridge/issues/155).
-2. **Test hooks out of production.** The `__typebridge*` globals used by e2e are exposed in the production build; expose them only in test builds.
-3. ~~**Split `src/main.ts`**~~ **Done** ([#99](https://github.com/vchernoy/typebridge/issues/99), PRs #208–#229): about 3,000 → 1,015 lines in focused modules, plus the host title bar out of `window-manager.ts` and `style.css` into ordered stylesheets; no behavior change. See the [code map](ARCHITECTURE.md#code-map).
-4. **Small P2/P3 follow-ups:** [#107](https://github.com/vchernoy/typebridge/issues/107) writing-position write debounce, [#97](https://github.com/vchernoy/typebridge/issues/97) conflict re-announce timing, picker label length, [#62](https://github.com/vchernoy/typebridge/issues/62) search audit.
-5. **Next feature (maintainer to choose):** [#39](https://github.com/vchernoy/typebridge/issues/39) portable share links (ready for implementation) or [#37](https://github.com/vchernoy/typebridge/issues/37) retained version history.
+Proposed order; each item is one or a few small PRs.
 
-Open questions: whether [#7](https://github.com/vchernoy/typebridge/issues/7) (a source pane with a derived transliterated output pane) is still wanted now that windows exist; [#70](https://github.com/vchernoy/typebridge/issues/70) only concerns the single editor page `/editor.html`, since host windows resize by their edges; [#12](https://github.com/vchernoy/typebridge/issues/12) awaits only its manual release checks.
+1. **Next feature: [#39](https://github.com/vchernoy/typebridge/issues/39) portable share links** (ready for implementation; scope to be agreed before starting).
+2. **[#37](https://github.com/vchernoy/typebridge/issues/37) R2c: a recovery journal that survives a browser kill.** The [process-crash baseline](evidence/37/README.md) lost the journal when the browser was killed within about a second of typing; committed documents always survived. Retained version history stays a later stage.
+3. **Test reliability.** Find the race behind each remaining intermittent failure and fix it in code or test (no retries, skips or quarantine): Firefox `indexeddb.spec.ts:35` (blocked upgrade never reports, seen on #232), and the single sightings listed in #207 (`title-takeover-buffer:116`, `writing-view:71`, `macos-shortcut:11`, `recovery:156`, `edit-ownership:464`, `focus-handoff:242`, `host-shared-settings:214`). `find-replace.spec.ts:43` fails only locally with a newer Chromium that names Cyrillic downloads `download`.
+4. **Small follow-ups:** the three P3s left in [#97](https://github.com/vchernoy/typebridge/issues/97); per-edit work on multi-megabyte documents (status counts, caret readout and recovery journal run on every edit; see [search timings](SEARCH.md#responsiveness-on-large-documents)).
+5. **Test knobs in production.** The `TestKnobs` in `src/view/embed-api.ts` are read-only, default off and ship because CI tests the deployed build. Moving them to a test-only build needs CI to test that build instead; low priority. The `__typebridge*` host↔window calls are the real multi-window contract and stay.
+
+Manual checks that automation cannot do (VoiceOver/NVDA, physical phones and tablets, 200% zoom) are tracked in [#11](https://github.com/vchernoy/typebridge/issues/11).
+
+Open questions: none from the previous list ([#7](https://github.com/vchernoy/typebridge/issues/7) closed as not planned; [#70](https://github.com/vchernoy/typebridge/issues/70) and [#12](https://github.com/vchernoy/typebridge/issues/12) closed).
 
 ## Audit and current reliability follow-ups
 

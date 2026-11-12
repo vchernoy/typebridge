@@ -31,4 +31,4 @@ Scope: the layout from #123 and its document/title, typing-mode, save-state, Set
 - Actual browser 200% zoom and OS high-contrast themes. CSS viewport and forced-color emulation are useful coverage, not equivalent evidence.
 - Real IME composition, touch resizing, orientation changes and browser/tab-discard recovery on physical devices.
 
-Do not close #11 or mark the manual part of U10 complete from this automated run alone. Record device/browser/assistive-technology versions and concrete results when those sessions occur.
+Do not close #11 or mark the manual part of U10 complete from this automated run alone (#137 is closed; the manual part continues in #11). Items added since: the repeated conflict notice (#232) and Apple-symbol shortcut labels under VoiceOver (#231). Record device/browser/assistive-technology versions and concrete results when those sessions occur.
