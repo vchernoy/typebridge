@@ -168,3 +168,31 @@ test('a slow decode of an earlier link never replaces a newer one (#246 review)'
   await expect(page.locator('#read-title')).toHaveText('This shared document cannot be opened');
   await expect(page.locator('#edit-copy')).toBeHidden();
 });
+
+test('on a first visit Edit a copy opens the copy once, in the main window (#246 review)', async ({ page }) => {
+  // No saved layout and no remembered document: the host's first window is still starting.
+  const document = shared({ text: 'Первый визит' });
+  await page.goto(await linkFor(document));
+  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await expect(page.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
+  const copyId = (await readStoredDocs(page)).find(row => row.text === document.text)?.id;
+  const editor = page.frameLocator(`.host-window iframe[src*="doc=${copyId}"]`).locator('#editor');
+  await expect(editor).toHaveValue(document.text);
+  await expect(editor).toBeEditable();
+  await expect(page.locator('.host-window')).toHaveCount(1);
+});
+
+test('returning to the reading page from the back-forward cache makes Edit a copy usable again (#246 review)', async ({ page }) => {
+  // Leave the page mid-save, the state a back-forward cache restore brings back after the copy
+  // was saved and opened: the database open never completes here.
+  await page.addInitScript(() => {
+    indexedDB.open = (() => ({}) as IDBOpenDBRequest) as typeof indexedDB.open;
+  });
+  await page.goto(await linkFor(shared()));
+  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await expect(page.locator('#edit-copy')).toBeDisabled();
+  await expect(page.locator('#read-status')).toHaveText('Saving a copy…');
+  await page.evaluate(() => { window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
+  await expect(page.locator('#edit-copy')).toBeEnabled();
+  await expect(page.locator('#read-status')).toBeEmpty();
+});

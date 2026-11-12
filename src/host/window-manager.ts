@@ -822,6 +822,19 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       if (hostFocus) api.setHostFocusMode(false);
       const existing = layouts.find(win => shownIn(win) === documentId);
       if (existing) { setActive(existing.id); return 'shown'; }
+      // The primary window, still starting without a document (a first visit: no saved layout or
+      // remembered document), opens the newest saved one, which is this copy (view/boot.ts;
+      // other windows open a fresh document). Load the copy there instead of opening it twice
+      // (#246 review).
+      const unassigned = layouts.find(win => win.id === 'main' && shownIn(win) === undefined);
+      if (unassigned) {
+        layouts = layouts.map(win => (win.id === unassigned.id ? { ...win, documentId } : win));
+        const frame = frames.get(unassigned.id);
+        if (frame) frame.src = deps.editorSrc(unassigned.id, documentId);
+        setActive(unassigned.id);
+        persist();
+        return 'shown';
+      }
       return api.addWindow(documentId) ? 'opened' : 'full';
     },
     closeWindow: async (id: string) => {

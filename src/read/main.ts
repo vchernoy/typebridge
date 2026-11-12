@@ -95,6 +95,14 @@ async function render(): Promise<void> {
   else showFailure(result.reason);
 }
 
+// Back from the editor can restore this page from the back-forward cache mid-"Saving a copy…":
+// the copy was saved and opened, so make the page usable again (#246 review).
+window.addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  saving = false;
+  editCopy.disabled = false;
+  status.textContent = '';
+});
 // Pasting another share link into the address bar only changes the fragment.
 window.addEventListener('hashchange', () => { status.textContent = ''; void render(); });
 void render();
