@@ -19,7 +19,10 @@ async function setText(page: Page, title: string, text: string): Promise<void> {
   }, text);
 }
 
+/** Decode the link shown once it is ready: while it regenerates the field is empty (#247 review). */
 async function decodeShown(page: Page) {
+  await expect(dialog(page).getByRole('button', { name: 'Copy link' })).toBeEnabled();
+  await expect(linkField(page)).not.toHaveValue('');
   const url = new URL(await linkField(page).inputValue());
   return { url, decoded: await decodeSharePayload(sharePayloadFromHash(url.hash)) };
 }
@@ -54,6 +57,7 @@ test('the sender can turn off Edit a copy for readers', async ({ page }) => {
   const before = await linkField(page).inputValue();
   await dialog(page).getByLabel('Readers can edit a copy').uncheck();
   await expect(linkField(page)).not.toHaveValue(before);
+  await expect(linkField(page)).not.toHaveValue('');
   const { decoded } = await decodeShown(page);
   expect(decoded.ok && decoded.document.edit).toBe(false);
 });
