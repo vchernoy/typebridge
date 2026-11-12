@@ -113,6 +113,9 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
         freezeSurface: () => allEditorWorkspaces(),
         dismissedKey: 'typebridge.updateNotice.dismissed.v1',
         prepareReload: async () => {
+          // Block New window for the whole prepare → activate → commit interval (#254 residual P2).
+          // cancelReload clears this on refuse / catch / stall; reload keeps it armed.
+          manager.setWindowCreationBlocked(true);
           // Ask each window in turn so each Autosave-off dialog appears in its iframe.
           for (const frame of editorFrames()) {
             const prepare = editorHooks(frame).__typebridgePrepareUpdateReload;
@@ -128,7 +131,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
           return true;
         },
         reload: async () => {
-          // No New window while commit awaits — a fresh iframe would skip prepare/freeze (#254).
+          // Keep New window blocked through assert → freeze → await commit (#254).
           manager.setWindowCreationBlocked(true);
           try {
             for (const frame of editorFrames()) {

@@ -370,13 +370,21 @@ test('update-reload freeze blocks edits during deferred discard commit (#254)', 
 });
 
 test('host New window is blocked while update-reload commit awaits (#254)', async ({ page }) => {
-  // Fails if New window stays enabled/usable during awaited commitUpdateReload (#254 Codex P1).
+  // Fails if New window stays enabled/usable during prepare or awaited commit (#254 Codex P1 / residual P2).
   test.setTimeout(90_000);
   await openHost(page);
   await setHostAutosave(page, false);
   const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await fillHostEditor(main, 'Private host before reload commit');
   await expect(main.locator('#save-indicator')).toHaveText('Not saved');
+
+  // Production prepareReload arms the gate before dialogs; e2e mirrors that (#254 residual P2).
+  await page.evaluate(() => {
+    (window as Window & {
+      __typebridgeSetWindowCreationBlocked?: (blocked: boolean) => void;
+    }).__typebridgeSetWindowCreationBlocked?.(true);
+  });
+  await expect(page.getByRole('button', { name: 'New window' })).toBeDisabled();
 
   const prepare = page.evaluate(async () => {
     const frame = document.querySelector<HTMLIFrameElement>('iframe.host-editor');
@@ -386,6 +394,8 @@ test('host New window is blocked while update-reload commit awaits (#254)', asyn
   });
   const dialog = main.getByRole('dialog', { name: 'Reload without saving?' });
   await expect(dialog).toBeVisible();
+  // Still blocked while the Autosave-off dialog is up.
+  await expect(page.getByRole('button', { name: 'New window' })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Discard changes and reload' }).click();
   expect(await prepare).toBe(true);
 
@@ -399,10 +409,6 @@ test('host New window is blocked while update-reload commit awaits (#254)', asyn
     win.__typebridgeAssertSafeUpdateReload?.();
     win.__typebridgeFreezeForUpdateReload?.();
     win.__typebridgeDelayChangeAppendMs = 2_000;
-    // Same gate host reload sets before awaiting commit (#254).
-    (window as Window & {
-      __typebridgeSetWindowCreationBlocked?: (blocked: boolean) => void;
-    }).__typebridgeSetWindowCreationBlocked?.(true);
   });
 
   const commit = page.evaluate(async () => {
