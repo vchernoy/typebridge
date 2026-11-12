@@ -137,62 +137,13 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
   });
 
-  it('defers update-reload discard until commitUpdateReload; cancel keeps recovery', async () => {
-    // Fails if prepareUpdateReload clears before reload is committed (#254 Codex P1).
+  it('update-reload consent does not clear recovery (deferred to #255)', async () => {
+    // Maintainer split: Discard changes and reload matches main — no change-log clear yet.
     const { guards, discardUnsavedRecovery, freezeForDiscard } = harness({ autosaveOn: false });
     await expect(guards.prepareUpdateReload()).resolves.toBe(true);
     expect(freezeForDiscard).not.toHaveBeenCalled();
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
     guards.cancelUpdateReload();
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
-    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
-    await guards.commitUpdateReload();
-    expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
-  });
-
-  it('drops a deferred reload discard when a later prepare is refused', async () => {
-    // Fails if pendingReloadDiscard survives a refused prepare and still fires on commit (#254 Codex P1).
-    const { guards, discardUnsavedRecovery } = harness({ autosaveOn: false });
-    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
-    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
-    vi.mocked(askConfirmChoice).mockResolvedValueOnce(false);
-    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
-    await guards.commitUpdateReload();
-    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
-  });
-
-  it('cancelUpdateReload clears a deferred reload discard without wiping recovery', async () => {
-    const { guards, discardUnsavedRecovery } = harness({ autosaveOn: false });
-    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
-    guards.cancelUpdateReload();
-    await guards.commitUpdateReload();
-    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
-  });
-
-  it('freezes before update-reload commit and thaws on cancel', async () => {
-    // Fails if commit runs while editors stay editable, or cancel leaves them frozen (#254 P1).
-    const { guards, discardUnsavedRecovery, freezeForDiscard, unfreezeAfterDiscard, isFrozen } =
-      harness({ autosaveOn: false });
-    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
-    expect(freezeForDiscard).not.toHaveBeenCalled();
-    guards.freezeForUpdateReload();
-    expect(freezeForDiscard).toHaveBeenCalledOnce();
-    expect(isFrozen()).toBe(true);
-    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
-    await guards.commitUpdateReload();
-    expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
-    expect(isFrozen()).toBe(true);
-    guards.cancelUpdateReload();
-    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
-    expect(isFrozen()).toBe(false);
-  });
-
-  it('thaws an update-reload freeze when cancel runs without a prior discard', () => {
-    const { guards, freezeForDiscard, unfreezeAfterDiscard, isFrozen } = harness();
-    guards.freezeForUpdateReload();
-    expect(freezeForDiscard).toHaveBeenCalledOnce();
-    guards.cancelUpdateReload();
-    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
-    expect(isFrozen()).toBe(false);
   });
 });

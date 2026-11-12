@@ -20,10 +20,6 @@ export type EditorWindowApi = {
   __typebridgePrepareUpdateReload: () => Promise<boolean>;
   /** Update reload: validate and arm it; throws to abort. Does not navigate. */
   __typebridgeAssertSafeUpdateReload: () => void;
-  /** After every window asserted: freeze editors before awaited discard/navigation (#254). */
-  __typebridgeFreezeForUpdateReload: () => void;
-  /** After every window asserted: run deferred discard cleanup before navigation. */
-  __typebridgeCommitUpdateReload: () => void | Promise<void>;
   __typebridgeCancelUpdateReload: () => void;
   /** Host asks before removing this window's iframe (#175 step 5). */
   __typebridgePrepareWindowClose: () => Promise<boolean>;
@@ -67,11 +63,6 @@ export type HostPageApi = {
   /** Read-only probes of the window layout (used by e2e). */
   __typebridgeHostWindows: () => unknown[];
   __typebridgeHostLayoutMode: () => string;
-  /**
-   * Block or unblock New window (update-reload commit gap). Host reload sets this; e2e drives it
-   * the same way when it exercises prepare/assert/freeze/commit without the SW path (#254).
-   */
-  __typebridgeSetWindowCreationBlocked: (blocked: boolean) => void;
 };
 
 /**

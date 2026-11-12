@@ -88,8 +88,6 @@ exposeHostPageApi({
   __typebridgeHostRename: windowId => { manager.renameWindow(windowId); },
   __typebridgeOpenDocumentIds: exceptWindowId => manager.openDocumentIds(exceptWindowId),
   __typebridgeOpenTitles: exceptWindowId => manager.openTitles(exceptWindowId),
-  // Same gate the SW reload path uses — e2e calls it around held commitUpdateReload (#254).
-  __typebridgeSetWindowCreationBlocked: blocked => { manager.setWindowCreationBlocked(blocked); },
 });
 
 installToolbarFit(toolbar);
@@ -113,40 +111,21 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
         freezeSurface: () => allEditorWorkspaces(),
         dismissedKey: 'typebridge.updateNotice.dismissed.v1',
         prepareReload: async () => {
-          // Block New window for the whole prepare → activate → commit interval (#254 residual P2).
-          // cancelReload clears this on refuse / catch / stall; reload keeps it armed.
-          manager.setWindowCreationBlocked(true);
           // Ask each window in turn so each Autosave-off dialog appears in its iframe.
           for (const frame of editorFrames()) {
             const prepare = editorHooks(frame).__typebridgePrepareUpdateReload;
             if (!prepare) continue;
-            if (!await prepare()) {
-              // Reset windows that already armed deferred discard on this attempt (#254).
-              for (const armed of editorFrames()) {
-                editorHooks(armed).__typebridgeCancelUpdateReload?.();
-              }
-              return false;
-            }
+            if (!await prepare()) return false;
           }
           return true;
         },
-        reload: async () => {
-          // Keep New window blocked through assert → freeze → await commit (#254).
-          manager.setWindowCreationBlocked(true);
+        reload: () => {
           try {
             for (const frame of editorFrames()) {
               const assertSafe = editorHooks(frame).__typebridgeAssertSafeUpdateReload;
               if (!assertSafe) throw new Error('Editor reload unavailable');
               // Intentional throws ("Private edits changed", backup missing, busy) must abort.
               assertSafe();
-            }
-            // Freeze every window before any awaited commit so private edits cannot sneak in (#254).
-            for (const frame of editorFrames()) {
-              editorHooks(frame).__typebridgeFreezeForUpdateReload?.();
-            }
-            // Deferred discard from prepare runs only once every window has asserted (#254).
-            for (const frame of editorFrames()) {
-              await editorHooks(frame).__typebridgeCommitUpdateReload?.();
             }
             window.location.reload();
           } catch (error) {
@@ -155,12 +134,10 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
             for (const frame of editorFrames()) {
               editorHooks(frame).__typebridgeCancelUpdateReload?.();
             }
-            manager.setWindowCreationBlocked(false);
             throw error;
           }
         },
         cancelReload: () => {
-          manager.setWindowCreationBlocked(false);
           for (const frame of editorFrames()) {
             editorHooks(frame).__typebridgeCancelUpdateReload?.();
           }

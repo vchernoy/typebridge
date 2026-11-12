@@ -45,6 +45,11 @@ export type DocumentActionsDeps = {
   refreshDrafts: () => Promise<void>;
   openDocumentIdsElsewhere: () => Set<string>;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
+  /**
+   * After explicit discard consent: clear journal + change-log for the document still under this
+   * window's fence, before freeze/release (#254 Codex P1 / switch path).
+   */
+  discardUnsavedRecovery: () => Promise<void>;
 };
 
 export function createDocumentActions(state: EditorState, status: StatusLine, deps: DocumentActionsDeps) {
@@ -55,8 +60,6 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
     deps.clearHeldEdits();
     deps.focusHandoff()?.cancel();
     if (id === state.active.id) { deps.renderDrafts(); return { opened: true, conflict: false }; }
-    // Update-reload freeze: New / picker / import must not change identity mid-commit (#254).
-    if (state.reloadFrozen) return { opened: false, conflict: false };
     state.transitioning = true;
     // Autosave cannot change mid-switch: turning it off would offer to delete a conflict copy
     // whose notice is only shown once the switch finishes (#97). Re-enabled on unfreeze.
@@ -100,6 +103,8 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
             announceAbortedFlushConflict();
             return { opened: false, conflict: flushConflict };
           }
+          // Same consent as close: clear journal/change-log while this document's fence is live.
+          await deps.discardUnsavedRecovery();
         }
         const version = deps.workspace.contentRevision();
         next = id && state.db ? await getStoredDraft(state.db, id) : undefined;
@@ -144,7 +149,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
     }
   }
   async function deleteActive(): Promise<void> {
-    if (deps.readOnlyNow() || state.transitioning || state.reloadFrozen) return;
+    if (deps.readOnlyNow() || state.transitioning) return;
     deps.focusHandoff()?.cancel();
     deps.saver.cancel();
     const requestedId = state.active.id;

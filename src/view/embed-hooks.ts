@@ -13,8 +13,6 @@ export type EmbedHooksDeps = {
   leaveGuards: {
     prepareUpdateReload: () => Promise<boolean>;
     assertSafeToReloadAfterUpdate: () => void;
-    freezeForUpdateReload: () => void;
-    commitUpdateReload: () => void | Promise<void>;
     cancelUpdateReload: () => void;
     prepareWindowClose: () => Promise<boolean>;
     commitWindowClose: () => void | Promise<void>;
@@ -34,8 +32,6 @@ export function installEmbedHooks(deps: EmbedHooksDeps): void {
   exposeEditorWindowApi({
     __typebridgePrepareUpdateReload: leaveGuards.prepareUpdateReload,
     __typebridgeAssertSafeUpdateReload: leaveGuards.assertSafeToReloadAfterUpdate,
-    __typebridgeFreezeForUpdateReload: () => { leaveGuards.freezeForUpdateReload(); },
-    __typebridgeCommitUpdateReload: () => leaveGuards.commitUpdateReload(),
     __typebridgeCancelUpdateReload: () => { leaveGuards.cancelUpdateReload(); },
     __typebridgePrepareWindowClose: leaveGuards.prepareWindowClose,
     __typebridgeCommitWindowClose: leaveGuards.commitWindowClose,

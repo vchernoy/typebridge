@@ -764,6 +764,27 @@ autosave.addEventListener('change', () => {
     persistPreference: true,
   });
 });
+/** Explicit discard: drop the journal and every change-log record for this document (#37 R2c 2d-2 / #254). */
+async function discardUnsavedRecovery(): Promise<void> {
+  const discardedJournal = recovery.takeCurrentJournal();
+  if (discardedJournal) {
+    try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
+  }
+  const documentId = state.active.id;
+  changeWriter.abandon();
+  // Drain after abandon so a late append rejection cannot recreate a journal (#254 Codex P2).
+  try { await saver.drainChanges(); } catch { /* Leaving anyway. */ }
+  const lateJournal = recovery.takeCurrentJournal();
+  if (lateJournal) {
+    try { clearRecovery(localStorage, lateJournal); } catch { /* Optional backup. */ }
+  }
+  // Only clear under a live fence for this document: never wipe another owner's log (#254 Codex P1).
+  const ownership = state.ownership;
+  if (!state.db || !ownership || ownership.documentId !== documentId) return;
+  try {
+    await clearDocumentChanges(state.db, documentId, await ownership.writeFence());
+  } catch { /* Leaving anyway; a later owner may still see records if the clear failed. */ }
+}
 const documents = createDocumentActions(state, statusLine, {
   viewMode, autosave, workspace, writingPosition, saver,
   persist: () => persist(),
@@ -784,6 +805,7 @@ const documents = createDocumentActions(state, statusLine, {
   refreshDrafts: () => refreshDrafts(),
   openDocumentIdsElsewhere: () => openDocumentIdsElsewhere(),
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
+  discardUnsavedRecovery: () => discardUnsavedRecovery(),
 });
 const switchDraft = documents.switchDraft;
 document.querySelector<HTMLButtonElement>('#new-draft')!.addEventListener('click', () => { void switchDraft(); });
@@ -899,6 +921,8 @@ if (!viewMode) {
         returnFocus: field,
       });
       if (!discard) return false;
+      // Same consent as switch/close: clear journal/change-log while a fence may still be live.
+      await discardUnsavedRecovery();
       // Apply the discard immediately (same as the switch path) so a failed takeover
       // cannot resurrect the private text the user already agreed to drop.
       if (state.db) {
@@ -1021,39 +1045,9 @@ const leaveGuards = createLeaveGuards(state, {
   snapshot: () => snapshot(),
   freezeForDiscard: () => { freezeEditorsForTransition(); },
   unfreezeAfterDiscard: () => { unfreezeEditorsAfterTransition(); },
-  // Explicit discard: drop the journal and every change-log record for this document (#37 R2c 2d-2 / #254).
-  discardUnsavedRecovery: async () => {
-    const discardedJournal = recovery.takeCurrentJournal();
-    if (discardedJournal) {
-      try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
-    }
-    const documentId = state.active.id;
-    changeWriter.abandon();
-    // Drain after abandon so a late append rejection cannot recreate a journal (#254 Codex P2).
-    try { await saver.drainChanges(); } catch { /* Closing anyway. */ }
-    const lateJournal = recovery.takeCurrentJournal();
-    if (lateJournal) {
-      try { clearRecovery(localStorage, lateJournal); } catch { /* Optional backup. */ }
-    }
-    // Only clear under a live fence for this document: never wipe another owner's log (#254 Codex P1).
-    const ownership = state.ownership;
-    if (!state.db || !ownership || ownership.documentId !== documentId) return;
-    try {
-      await clearDocumentChanges(state.db, documentId, await ownership.writeFence());
-    } catch { /* Closing anyway; a later owner may still see records if the clear failed. */ }
-  },
+  discardUnsavedRecovery: () => discardUnsavedRecovery(),
 });
-const { prepareUpdateReload } = leaveGuards;
-// Standalone update-reload probes (same names as the embed contract) for e2e freeze coverage (#254).
-if (!embedded) {
-  Object.assign(window, {
-    __typebridgePrepareUpdateReload: leaveGuards.prepareUpdateReload,
-    __typebridgeAssertSafeUpdateReload: leaveGuards.assertSafeToReloadAfterUpdate,
-    __typebridgeFreezeForUpdateReload: leaveGuards.freezeForUpdateReload,
-    __typebridgeCommitUpdateReload: () => leaveGuards.commitUpdateReload(),
-    __typebridgeCancelUpdateReload: () => { leaveGuards.cancelUpdateReload(); },
-  });
-}
+const { prepareUpdateReload, reloadAfterUpdate } = leaveGuards;
 updateStats();
 
 if (!embedded) {
@@ -1089,18 +1083,7 @@ if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {
     void navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(registration => watchForUpdates(registration, {
         prepareReload: prepareUpdateReload,
-        // Assert, freeze, commit deferred discard, then navigate — same order as the host (#254).
-        reload: async () => {
-          leaveGuards.assertSafeToReloadAfterUpdate();
-          leaveGuards.freezeForUpdateReload();
-          try {
-            await leaveGuards.commitUpdateReload();
-            window.location.reload();
-          } catch (error) {
-            leaveGuards.cancelUpdateReload();
-            throw error;
-          }
-        },
+        reload: reloadAfterUpdate,
         cancelReload: () => { leaveGuards.cancelUpdateReload(); },
         dismissedKey: updateDismissKey,
       }))

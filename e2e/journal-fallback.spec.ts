@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { setAutosave } from './settings-helpers';
+import { documentAction, selectDocument, setAutosave } from './settings-helpers';
 
 /** Keys for the emergency localStorage journal (#53 / #37 R2c). */
 async function journalKeys(page: import('@playwright/test').Page): Promise<string[]> {
@@ -253,4 +253,49 @@ test('a transient journal read warning clears after a successful retry (#254)', 
     }));
   });
   await expect(readAlert).toHaveCount(0, { timeout: 15_000 });
+});
+
+test('switch discard clears change-log so salvage cannot revive (#254)', async ({ page }) => {
+  // Fails if switchDraft consent never calls discardUnsavedRecovery (#254 Codex P1).
+  test.setTimeout(60_000);
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await expect(field).toBeEnabled();
+  await field.fill('First committed');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await field.press('End');
+  await page.keyboard.type(' with log');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  const firstDocId = await page.locator('#drafts option:checked').getAttribute('value');
+  expect(firstDocId).toBeTruthy();
+
+  await setAutosave(page, false, 'keep');
+  await field.fill('Private after keep saved copy');
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+
+  await documentAction(page, '#new-draft');
+  const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(field).toHaveValue('');
+
+  await selectDocument(page, firstDocId!);
+  await expect(page.locator('#status')).not.toContainText('Recovered unsaved text');
+  await expect(page.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  await expect(field).not.toHaveValue('Private after keep saved copy');
+  const titles = await page.evaluate(() => new Promise<string[]>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readonly');
+      const req = tx.objectStore('documents').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as Array<{ title?: string }>).map(doc => doc.title ?? ''));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  expect(titles.some(title => title.includes('(recovered)'))).toBe(false);
 });

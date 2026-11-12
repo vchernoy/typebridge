@@ -2,11 +2,13 @@
  * Leaving an editing window safely: reload after an app update, closing a host window, and
  * the browser's own unload. Unsaved text is saved or backed up first; with Autosave off the
  * user confirms discarding it, and that choice is bound to the exact text it was made for.
+ *
+ * Window-close discard clears the journal and change log on commit (deferred so cancel can thaw
+ * without wiping recovery). Update-reload does not clear change records yet — see #255.
  */
 import type { StoredDraft } from '../editor/indexeddb';
 import { clearRecovery, type RecoverySnapshot } from '../editor/recovery';
 import { askConfirmChoice } from '../ui/confirm-dialog';
-import { testKnob } from './embed-api';
 import type { EditorState } from './editor-state';
 import { sameContent } from './reload-backup';
 import type { SaveResult } from './saver';
@@ -55,16 +57,6 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
    * cancel can thaw without wiping journal/change-log recovery (#254 Codex P1).
    */
   let pendingCloseDiscard = false;
-  /**
-   * Update-reload prepare confirmed discard but deferred clear until commitUpdateReload, so
-   * cancelUpdateReload keeps recovery if another window refuses or navigation stalls (#254).
-   */
-  let pendingReloadDiscard = false;
-  /**
-   * Host/standalone froze editors after the final assert and before awaited commit; thaw on
-   * cancel so a stalled or aborted reload restores editing (#254 owner-account P1).
-   */
-  let reloadFreezeArmed = false;
 
   function updateReloadReturnFocus(): HTMLElement {
     const local = document.querySelector<HTMLButtonElement>('#update-reload');
@@ -113,48 +105,14 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     deps.unfreezeAfterDiscard();
   }
 
-  /** New / Documents / Import must stay disabled for the whole update-reload freeze (#254). */
-  function setDocumentChangingControlsEnabled(enabled: boolean): void {
-    for (const id of ['new-draft', 'drafts', 'import-draft'] as const) {
-      const el = document.querySelector<HTMLButtonElement | HTMLSelectElement>('#' + id);
-      if (el) el.disabled = !enabled;
-    }
-  }
-
   /**
-   * Freeze body + title (and mutation controls) after every window has asserted and before any
-   * awaited commit/navigation, so private edits cannot sneak in during discard cleanup (#254).
-   * Also arms `state.reloadFrozen` so New/picker/import cannot change identity or thaw mid-commit.
+   * Confirm close discard. Consent is bound to the content revision shown in the dialog.
+   * Destructive journal/change-log clear is deferred until host commit so cancel keeps recovery.
+   * Update-reload does not clear change records yet (#255).
    */
-  function freezeForUpdateReload(): void {
-    if (reloadFreezeArmed) return;
-    state.reloadFrozen = true;
-    deps.freezeForDiscard();
-    setDocumentChangingControlsEnabled(false);
-    reloadFreezeArmed = true;
-  }
-
-  /** Run deferred update-reload discard after every window has prepared and assert passed. */
-  async function commitUpdateReload(): Promise<void> {
-    if (!pendingReloadDiscard) return;
-    pendingReloadDiscard = false;
-    // Optional e2e hold (reuses the change-append delay knob) so freeze can be probed (#254).
-    const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
-    if (typeof delayMs === 'number' && delayMs > 0) {
-      await new Promise<void>(resolve => { window.setTimeout(resolve, delayMs); });
-    }
-    await deps.discardUnsavedRecovery();
-  }
-
-  /**
-   * Confirm discard. Consent is bound to the content revision shown in the dialog.
-   * Destructive journal/change-log clear is deferred until host commit (close) or
-   * commitUpdateReload (update), so cancel keeps recovery (#254 Codex P1).
-   */
-  async function confirmDiscardAndClear(
-    prompt: { title: string; message: string; confirmLabel: string },
-    mode: 'close' | 'reload',
-  ): Promise<boolean> {
+  async function confirmCloseDiscard(prompt: {
+    title: string; message: string; confirmLabel: string;
+  }): Promise<boolean> {
     const contentAtPrompt = deps.workspace.contentRevision();
     const discard = await askConfirmChoice({
       ...prompt,
@@ -164,14 +122,9 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     if (!discard) return false;
     // Edits while the dialog was open: do not clear recovery for a newer, unconsented version.
     if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
-    if (mode === 'close') {
-      deps.freezeForDiscard();
-      pendingCloseDiscard = true;
-      closeFreezeArmed = true;
-      return true;
-    }
-    // Reload: stay editable so a later private edit bumps contentRevision and fails the assert.
-    pendingReloadDiscard = true;
+    deps.freezeForDiscard();
+    pendingCloseDiscard = true;
+    closeFreezeArmed = true;
     return true;
   }
 
@@ -179,16 +132,30 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     if (state.transitioning || state.deleting || deps.field.disabled) return false;
     privateReloadChoice = undefined;
     if (deps.workspace.dirty() && !deps.autosave.checked) {
-      const contentAtPrompt = deps.workspace.contentRevision();
-      const discarded = await confirmDiscardAndClear({
-        title: kind === 'close' ? 'Close without saving?' : 'Reload without saving?',
-        message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
-        confirmLabel: kind === 'close' ? 'Discard changes and close' : 'Discard changes and reload',
-      }, kind);
-      if (discarded) {
-        privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
+      if (kind === 'close') {
+        const contentAtPrompt = deps.workspace.contentRevision();
+        const discarded = await confirmCloseDiscard({
+          title: 'Close without saving?',
+          message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
+          confirmLabel: 'Discard changes and close',
+        });
+        if (discarded) {
+          privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
+        }
+        return discarded;
       }
-      return discarded;
+      // Update-reload: consent only — change-log/journal clear is #255.
+      const discard = await askConfirmChoice({
+        title: 'Reload without saving?',
+        message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
+        confirmLabel: 'Discard changes and reload',
+        cancelLabel: 'Keep editing',
+        returnFocus: updateReloadReturnFocus(),
+      });
+      if (discard) {
+        privateReloadChoice = { id: state.active.id, generation: deps.workspace.contentRevision() };
+      }
+      return discard;
     }
     deps.reloadBackup.save();
     if (deps.workspace.dirty()) await deps.persist();
@@ -199,19 +166,14 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     if (kind === 'reload') return primaryOk;
     // Close: a session backup is not enough — closing removes the iframe and must not
     // silently destroy the only copy after a failed save. Ask for explicit discard.
-    return confirmDiscardAndClear({
+    return confirmCloseDiscard({
       title: 'Close and discard unsaved changes?',
       message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
       confirmLabel: 'Discard changes and close',
-    }, 'close');
+    });
   }
   async function prepareUpdateReload(): Promise<boolean> {
-    // Drop a prior deferred discard that never committed (e.g. another window refused)
-    // so a later Autosave-on retry cannot wipe recovery with stale consent (#254 Codex P1).
-    pendingReloadDiscard = false;
-    const ok = await prepareLeaveWithUnsaved('reload');
-    if (!ok) pendingReloadDiscard = false;
-    return ok;
+    return prepareLeaveWithUnsaved('reload');
   }
   async function prepareWindowClose(): Promise<boolean> {
     return prepareLeaveWithUnsaved('close');
@@ -259,19 +221,10 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     reloadAfterUpdate,
     commitWindowClose,
     cancelWindowClose,
-    freezeForUpdateReload,
-    commitUpdateReload,
-    /** The update reload was cancelled: re-enable the unload warning and backups; keep recovery. */
+    /** The update reload was cancelled: re-enable the unload warning and backups. */
     cancelUpdateReload(): void {
       allowUpdateReload = false;
-      pendingReloadDiscard = false;
       deps.reloadBackup.setSuppressed(false);
-      state.reloadFrozen = false;
-      setDocumentChangingControlsEnabled(true);
-      if (reloadFreezeArmed) {
-        reloadFreezeArmed = false;
-        deps.unfreezeAfterDiscard();
-      }
     },
   };
 }

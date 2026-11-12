@@ -1,7 +1,7 @@
 /** Waiting workers activate only after an explicit, safely prepared reload. */
 export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   prepareReload: () => Promise<boolean>;
-  reload: () => void | Promise<void>;
+  reload: () => void;
   cancelReload: () => void;
   /** sessionStorage key for dismissal (#175 window scoping). */
   dismissedKey?: string;
@@ -93,14 +93,12 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
     };
     try {
       if (!await deps.prepareReload()) {
-        // A prior window may have armed deferred discard; reset every window (#254 Codex P1).
-        deps.cancelReload();
         message.textContent = 'Update is waiting. Keep editing, or copy/export your work before reloading.';
         return;
       }
       message.textContent = 'Installing update…';
       await activateWaitingWorker(waiting, workerContainer);
-      await deps.reload();
+      deps.reload();
       navigating = true;
       // If navigation was canceled or stalls, stop it before allowing new edits.
       // Successful navigation destroys this page and its timer.

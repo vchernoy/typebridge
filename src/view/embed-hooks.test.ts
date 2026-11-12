@@ -18,8 +18,6 @@ function install(): { win: FakeWindow; events: CustomEvent[]; calls: string[] } 
     leaveGuards: {
       prepareUpdateReload: async () => true,
       assertSafeToReloadAfterUpdate: note('assert'),
-      freezeForUpdateReload: note('freezeReload'),
-      commitUpdateReload: note('commitReload'),
       cancelUpdateReload: note('cancel'),
       prepareWindowClose: async () => true,
       commitWindowClose: note('commit'),
@@ -42,16 +40,14 @@ describe('installEmbedHooks', () => {
     const { win, calls } = install();
     expect(win.__typebridgeGetTitle?.()).toBe('Имя');
     win.__typebridgeCancelUpdateReload?.();
-    win.__typebridgeFreezeForUpdateReload?.();
-    win.__typebridgeCommitUpdateReload?.();
     win.__typebridgeCommitWindowClose?.();
     win.__typebridgeCancelWindowClose?.();
     win.__typebridgeToggleTransliteration?.();
     win.__typebridgeOpenFind?.();
     win.__typebridgeSetFocusMode?.(true);
-    expect(calls).toEqual(['cancel', 'freezeReload', 'commitReload', 'commit', 'cancelClose', 'toggle', 'find', 'focus']);
-    for (const name of ['__typebridgePrepareUpdateReload', '__typebridgeAssertSafeUpdateReload', '__typebridgeFreezeForUpdateReload',
-      '__typebridgeCommitUpdateReload', '__typebridgePrepareWindowClose', '__typebridgeSetTitle', '__typebridgeTitleCommit',
+    expect(calls).toEqual(['cancel', 'commit', 'cancelClose', 'toggle', 'find', 'focus']);
+    for (const name of ['__typebridgePrepareUpdateReload', '__typebridgeAssertSafeUpdateReload',
+      '__typebridgePrepareWindowClose', '__typebridgeSetTitle', '__typebridgeTitleCommit',
       '__typebridgeTitleEdit', '__typebridgeCancelWindowClose'] as const) {
       expect(typeof win[name]).toBe('function');
     }
