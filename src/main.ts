@@ -39,7 +39,7 @@ import {
 import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, type StoredDraft } from './editor/indexeddb';
+import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, clearDocumentChanges, type StoredDraft } from './editor/indexeddb';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
@@ -1015,6 +1015,21 @@ const leaveGuards = createLeaveGuards(state, {
   viewMode, field, autosave, workspace, saver, reloadBackup, recovery,
   persist: () => persist(),
   snapshot: () => snapshot(),
+  // Explicit discard: drop the journal and change-log tail so salvage cannot bring them back (#37 R2c 2d-2).
+  discardUnsavedRecovery: async () => {
+    const discardedJournal = recovery.takeCurrentJournal();
+    if (discardedJournal) {
+      try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
+    }
+    changeWriter.abandon();
+    if (!state.db) return;
+    try {
+      await saver.drainChanges();
+      const ownership = state.ownership;
+      const owner = ownership && ownership.documentId === state.active.id ? await ownership.writeFence() : undefined;
+      await clearDocumentChanges(state.db, state.active.id, owner);
+    } catch { /* Closing anyway; a later owner may still see records if the clear failed. */ }
+  },
 });
 const { prepareUpdateReload, reloadAfterUpdate } = leaveGuards;
 updateStats();

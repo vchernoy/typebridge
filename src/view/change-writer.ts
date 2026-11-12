@@ -169,6 +169,15 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
     onUnprotected(listener: () => void): void {
       unprotectedListeners.push(listener);
     },
+    /**
+     * Drop the in-memory run after the user discards unsaved edits (storage clear is separate).
+     * Later edits wait for the next committed save to start a run again.
+     */
+    abandon(): void {
+      pending?.settle(false);
+      pending = undefined;
+      writer = undefined;
+    },
     /** The run this window has for `documentId`, if any. */
     runOf: (documentId: string): string | undefined => writer?.documentId === documentId ? writer.run : undefined,
     /** Resolves once every queued record was written, skipped or dropped. */

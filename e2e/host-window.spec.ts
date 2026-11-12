@@ -463,18 +463,31 @@ test('discarded close after save failure does not revive text under a reused id'
   const second = secondShell.frameLocator('iframe');
   await expect(second.locator('#editor')).toBeEnabled({ timeout: 30_000 });
 
-  // Save once successfully so the stub is known-live, then block further puts.
+  // Save once successfully so the stub is known-live, then block further document puts.
+  // The change log still works (#37 R2c 2d-2): the journal is not required while it protects.
   await fillHostEditor(second, 'Before block');
   await expect(second.locator('#save-indicator')).toHaveText('Saved');
   await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
   await fillHostEditor(second, 'Discarded after failed save');
   await expect(second.locator('#save-indicator')).toHaveText('Save failed');
-  await expect.poll(() => page.evaluate(() =>
-    Object.keys(localStorage).some(key =>
-      key.startsWith('typebridge.recovery.v1.')
-      && (localStorage.getItem(key) ?? '').includes('Discarded after failed save'),
-    ),
-  )).toBe(true);
+  // Unsaved text must be in the change log (documents puts fail; changes still land).
+  await expect.poll(() => page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as Array<{ change?: [number, string, string] }>).some(record =>
+          JSON.stringify(record.change ?? []).includes('Discarded after failed save')
+          || (typeof record === 'object' && JSON.stringify(record).includes('Discarded after failed save')),
+        ));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(true);
 
   await secondShell.locator('.host-window-close').click();
   const dialog = second.getByRole('dialog', { name: 'Close and discard unsaved changes?' });
@@ -482,12 +495,29 @@ test('discarded close after save failure does not revive text under a reused id'
   await dialog.getByRole('button', { name: 'Discard changes and close' }).click();
   await expect(page.locator('.host-window')).toHaveCount(1);
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
+  // Discard clears journal entries and change-log records for that document.
   expect(await page.evaluate(() =>
     Object.keys(localStorage).filter(key =>
       key.startsWith('typebridge.recovery.v1.')
       && (localStorage.getItem(key) ?? '').includes('Discarded after failed save'),
     ),
   )).toEqual([]);
+  await expect.poll(() => page.evaluate(() => new Promise<number>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).filter(record =>
+          JSON.stringify(record).includes('Discarded after failed save'),
+        ).length);
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(0);
 
   await page.getByRole('button', { name: 'New window' }).click();
   const revived = page.frameLocator('.host-window[data-window-id="w2"] iframe');
@@ -496,7 +526,9 @@ test('discarded close after save failure does not revive text under a reused id'
   await expect(revived.locator('#editor')).not.toHaveValue('Discarded after failed save');
   expect(await page.evaluate(() => sessionStorage.getItem('typebridge.pendingDraft.v1::w:w2'))).toBeNull();
   await expect(revived.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  await expect(revived.locator('#status')).not.toContainText('Recovered unsaved text');
 });
+
 
 test('resize keeps the dragged size instead of snapping to a half', async ({ page }) => {
   test.setTimeout(90_000);

@@ -225,6 +225,24 @@ export async function commitOrCreateConflictCopy(
 
 
 /**
+ * Remove every change-log record for `documentId` (#37 R2c 2d-2). Used when the user explicitly
+ * discards unsaved edits so a later owner does not salvage text they chose to throw away.
+ */
+export async function clearDocumentChanges(db: IDBDatabase, documentId: string, owner?: WriteFence): Promise<void> {
+  const tx = db.transaction(owner ? [CHANGES, OWNERSHIP] : CHANGES, 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, documentId, owner);
+    await request(tx.objectStore(CHANGES).delete(changesOf(documentId)));
+    await done;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
  * Delete only the exact revision selected by the user, with its change log. With `owner`, the fence is verified in the
  * same transaction. `dropOwnership` also removes the fence record (the document is gone for good);
  * keep it when this window goes on editing the same id privately.

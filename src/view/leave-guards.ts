@@ -27,6 +27,11 @@ export type LeaveGuardDeps = {
     setSuppressed: (next: boolean) => void;
   };
   recovery: { takeCurrentJournal: () => RecoverySnapshot | undefined };
+  /**
+   * After the user confirms discarding unsaved edits: clear the journal entry and the change-log
+   * records for this document so a later owner does not recover what was discarded (#37 R2c 2d-2).
+   */
+  discardUnsavedRecovery: () => Promise<void>;
 };
 
 export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
@@ -81,6 +86,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       });
       if (discard) {
         privateReloadChoice = { id: state.active.id, generation: deps.workspace.contentRevision() };
+        await deps.discardUnsavedRecovery();
       }
       return discard;
     }
@@ -93,13 +99,15 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     if (kind === 'reload') return primaryOk;
     // Close: a session backup is not enough — closing removes the iframe and must not
     // silently destroy the only copy after a failed save. Ask for explicit discard.
-    return askConfirmChoice({
+    const discard = await askConfirmChoice({
       title: 'Close and discard unsaved changes?',
       message: 'The latest save could not finish. Closing this window discards the unsaved text. Copy or export it first if you want to keep it.',
       confirmLabel: 'Discard changes and close',
       cancelLabel: 'Keep editing',
       returnFocus: updateReloadReturnFocus(),
     });
+    if (discard) await deps.discardUnsavedRecovery();
+    return discard;
   }
   async function prepareUpdateReload(): Promise<boolean> {
     return prepareLeaveWithUnsaved('reload');
