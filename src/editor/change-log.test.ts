@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyChange, changeBetween, replayText, type ChangeRecord, type TextChange } from './change-log';
+import { TITLE_ONLY_CHANGE, applyChange, changeBetween, replayText, type ChangeRecord, type TextChange } from './change-log';
 
 const DOC = 'doc-1';
 
@@ -9,6 +9,7 @@ function rng(seed: number) {
   return (n: number) => { state = (state * 48271) % 2147483647; return state % n; };
 }
 const PIECES = ['а', 'Ё', 'щ', 'b', ' ', '\n', '🙂', 'é', 'é', '👩‍💻', 'Привет'];
+const TITLES = ['Заметка', 'Письмо', 'Черновик', 'Untitled document', 'Имя 🙂'];
 
 /** A random edit of `text`: insert, delete or replace a random range (may split surrogate pairs). */
 function randomEdit(text: string, next: (n: number) => number): string {
@@ -24,19 +25,28 @@ type Session = { snapshots: { text: string; upTo: number }[]; records: ChangeRec
 /**
  * Simulate an editing run the way the app will: each edit appends a record; a snapshot is
  * sometimes taken (text + upTo). `texts[seq]` is the true text after change `seq`.
+ * When `withTitles` is true, some edits are title-only or also set a title (#37 R2c 2d-1).
  */
-function simulate(seed: number, edits: number, initial = 'Начало\n'): Session {
+function simulate(seed: number, edits: number, initial = 'Начало\n', withTitles = false): Session {
   const next = rng(seed);
   let text = initial;
   const texts = [initial];
   const records: ChangeRecord[] = [];
   const snapshots = [{ text, upTo: 0 }];
   for (let seq = 1; seq <= edits; seq++) {
-    let after = randomEdit(text, next);
-    if (after === text) after = text + 'x';
-    const change = changeBetween(text, after)!;
-    records.push({ documentId: DOC, seq, run: 'run-a', change, length: after.length });
-    text = after;
+    const kind = withTitles ? next(5) : 0; // 0–2 text, 3 title-only, 4 text+title
+    if (kind === 3) {
+      const title = TITLES[next(TITLES.length)]! + String(seq);
+      records.push({ documentId: DOC, seq, run: 'run-a', change: TITLE_ONLY_CHANGE, length: text.length, title });
+    } else {
+      let after = randomEdit(text, next);
+      if (after === text) after = text + 'x';
+      const change = changeBetween(text, after)!;
+      text = after;
+      const record: ChangeRecord = { documentId: DOC, seq, run: 'run-a', change, length: after.length };
+      if (kind === 4) record.title = TITLES[next(TITLES.length)]! + String(seq);
+      records.push(record);
+    }
     texts.push(text);
     if (next(5) === 0) snapshots.push({ text, upTo: seq });
   }
@@ -124,5 +134,63 @@ describe('replayText: a damaged log stops at the last consistent text', () => {
   it('backstop: replaying onto unrelated text stops at the first change that does not fit', () => {
     // Lineage is ensured by upTo and run; this check only catches what they would miss.
     expect(replayText(DOC, 'совсем другой текст', 0, records).stopped).toBe('mismatch');
+  });
+});
+
+describe('replayText: title changes (#37 R2c 2d-1)', () => {
+  it('returns the last title set by an applied record', () => {
+    // Fails on old code: ReplayResult has no title field.
+    const records: ChangeRecord[] = [
+      { documentId: DOC, seq: 1, run: 'run-a', change: [0, '', 'a'], length: 1 },
+      { documentId: DOC, seq: 2, run: 'run-a', change: TITLE_ONLY_CHANGE, length: 1, title: 'Первое' },
+      { documentId: DOC, seq: 3, run: 'run-a', change: [1, '', 'b'], length: 2, title: 'Второе' },
+      { documentId: DOC, seq: 4, run: 'run-a', change: TITLE_ONLY_CHANGE, length: 2, title: 'Третье' },
+    ];
+    expect(replayText(DOC, '', 0, records)).toEqual({
+      text: 'ab', lastSeq: 4, applied: 4, title: 'Третье',
+    });
+  });
+
+  it('old records without a title still replay', () => {
+    // Fails if validation rejects missing title, or if replay invents a title.
+    const records: ChangeRecord[] = [
+      { documentId: DOC, seq: 1, run: 'run-a', change: [0, '', 'Hi'], length: 2 },
+      { documentId: DOC, seq: 2, run: 'run-a', change: [2, '', '!'], length: 3 },
+    ];
+    expect(replayText(DOC, '', 0, records)).toEqual({ text: 'Hi!', lastSeq: 2, applied: 2 });
+    expect('title' in replayText(DOC, '', 0, records)).toBe(false);
+  });
+
+  it('a title record past a gap is not applied', () => {
+    // Fails if title is taken from a record after a stop, or if title-only skips the gap check.
+    const records: ChangeRecord[] = [
+      { documentId: DOC, seq: 1, run: 'run-a', change: [0, '', 'a'], length: 1, title: 'A' },
+      // seq 2 missing
+      { documentId: DOC, seq: 3, run: 'run-a', change: TITLE_ONLY_CHANGE, length: 1, title: 'Past gap' },
+    ];
+    expect(replayText(DOC, '', 0, records)).toEqual({
+      text: 'a', lastSeq: 1, applied: 1, title: 'A', stopped: 'gap',
+    });
+  });
+
+  it('property: interleaved random title edits replay text and the last title', () => {
+    // Fails on old code that ignores title fields or breaks when title-only records appear.
+    for (let seed = 1; seed <= 40; seed++) {
+      const { snapshots, records, texts } = simulate(seed, 60, 'Начало\n', true);
+      for (let cut = 0; cut <= records.length; cut++) {
+        const stored = records.slice(0, cut);
+        const snapshot = snapshots.filter(s => s.upTo <= cut).at(-1)!;
+        const result = replayText(DOC, snapshot.text, snapshot.upTo, stored);
+        // Title is only from records applied after the snapshot, never from earlier ones.
+        let expectedTitle: string | undefined;
+        for (const record of stored) {
+          if (record.seq > snapshot.upTo && record.title !== undefined) expectedTitle = record.title;
+        }
+        const expected = expectedTitle === undefined
+          ? { text: texts[cut], lastSeq: cut, applied: cut - snapshot.upTo }
+          : { text: texts[cut], lastSeq: cut, applied: cut - snapshot.upTo, title: expectedTitle };
+        expect(result, `seed ${seed}, cut ${cut}`).toEqual(expected);
+      }
+    }
   });
 });

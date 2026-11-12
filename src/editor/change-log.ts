@@ -1,8 +1,9 @@
 /**
- * Change log for crash recovery (#37 R2c). Each change that reaches a document's text is a small
- * record with an increasing change-id (`seq`); the full save (snapshot) records `upTo`, the last
- * change-id it already contains. After a crash, the text is the snapshot plus a gap-free run of the
- * later changes. See the design in #37 and docs/evidence/37/README.md.
+ * Change log for crash recovery (#37 R2c). Each change that reaches a document's text or title is a
+ * small record with an increasing change-id (`seq`); the full save (snapshot) records `upTo`, the
+ * last change-id it already contains. After a crash, the text (and title, when a record set one) is
+ * the snapshot plus a gap-free run of the later changes. See the design in #37 and
+ * docs/evidence/37/README.md.
  *
  * This module is pure: it never touches storage or the DOM. Replay trusts nothing it reads: it
  * stops at the first record that does not continue the chain, so the result is always the snapshot
@@ -11,6 +12,9 @@
 
 /** One text change: at `position`, `deleted` was replaced by `inserted` (UTF-16 offsets). */
 export type TextChange = [position: number, deleted: string, inserted: string];
+
+/** Title-only records use a no-op text change so length and fit checks still apply. */
+export const TITLE_ONLY_CHANGE: TextChange = [0, '', ''];
 
 export type ChangeRecord = {
   documentId: string;
@@ -25,6 +29,11 @@ export type ChangeRecord = {
   change: TextChange;
   /** Text length after the change: a cheap check that replay is on the right text. */
   length: number;
+  /**
+   * The document title after this record, when the title changed. Absent on older records and when
+   * only the text changed. Title-only records use `TITLE_ONLY_CHANGE` and keep `length` unchanged.
+   */
+  title?: string;
 };
 
 /** Why replay stopped before the end of the records, if it did. */
@@ -38,6 +47,8 @@ export type ReplayResult = {
   /** Change-id of the last applied change (`upTo` when none applied). */
   lastSeq: number;
   applied: number;
+  /** Last title set by an applied record; undefined when none of them set a title. */
+  title?: string;
   /** Set when replay stopped before the last record after `upTo`. */
   stopped?: ReplayStop;
 };
@@ -64,18 +75,21 @@ export function applyChange(text: string, change: TextChange): string | undefine
 function validRecord(value: unknown, documentId: string): value is ChangeRecord {
   if (!value || typeof value !== 'object') return false;
   const r = value as Partial<ChangeRecord>;
-  return r.documentId === documentId && Number.isSafeInteger(r.seq) && (r.seq ?? 0) > 0 &&
+  if (!(r.documentId === documentId && Number.isSafeInteger(r.seq) && (r.seq ?? 0) > 0 &&
     typeof r.run === 'string' && r.run.length > 0 && Number.isSafeInteger(r.length) && (r.length ?? -1) >= 0 &&
     Array.isArray(r.change) && r.change.length === 3 && Number.isSafeInteger(r.change[0]) && r.change[0] >= 0 &&
-    typeof r.change[1] === 'string' && typeof r.change[2] === 'string';
+    typeof r.change[1] === 'string' && typeof r.change[2] === 'string')) return false;
+  // Older records have no title; a present title must be a string.
+  if (r.title !== undefined && typeof r.title !== 'string') return false;
+  return true;
 }
 
 /**
- * Text-only replay: the snapshot `text` (which contains changes up to `upTo`) plus the records of
- * `documentId` after it, in change-id order. Applies records only while they continue the chain
- * from `upTo + 1` with no gap, all from the run of the first one, and each fits the text.
- * Records at or below `upTo` are already in the snapshot and are ignored. An invalid record is
- * skipped, so its change-id becomes a gap and replay stops just before it.
+ * Snapshot `text` (which contains changes up to `upTo`) plus the records of `documentId` after it,
+ * in change-id order. Applies records only while they continue the chain from `upTo + 1` with no
+ * gap, all from the run of the first one, and each fits the text. Records at or below `upTo` are
+ * already in the snapshot and are ignored. An invalid record is skipped, so its change-id becomes
+ * a gap and replay stops just before it. `title` is the last title set by an applied record.
  */
 export function replayText(documentId: string, text: string, upTo: number, records: readonly unknown[]): ReplayResult {
   const later = records
@@ -84,15 +98,21 @@ export function replayText(documentId: string, text: string, upTo: number, recor
   let current = text;
   let lastSeq = upTo;
   let applied = 0;
+  let title: string | undefined;
   const run = later[0]?.run;
   for (const record of later) {
-    if (record.seq !== lastSeq + 1) return { text: current, lastSeq, applied, stopped: 'gap' };
-    if (record.run !== run) return { text: current, lastSeq, applied, stopped: 'other-run' };
+    if (record.seq !== lastSeq + 1) return stop({ text: current, lastSeq, applied, title }, 'gap');
+    if (record.run !== run) return stop({ text: current, lastSeq, applied, title }, 'other-run');
     const next = applyChange(current, record.change);
-    if (next === undefined || next.length !== record.length) return { text: current, lastSeq, applied, stopped: 'mismatch' };
+    if (next === undefined || next.length !== record.length) return stop({ text: current, lastSeq, applied, title }, 'mismatch');
     current = next;
+    if (record.title !== undefined) title = record.title;
     lastSeq = record.seq;
     applied++;
   }
-  return { text: current, lastSeq, applied };
+  return title === undefined ? { text: current, lastSeq, applied } : { text: current, lastSeq, applied, title };
+}
+
+function stop(result: ReplayResult, stopped: ReplayStop): ReplayResult {
+  return { ...result, stopped };
 }

@@ -245,16 +245,18 @@ test('crash recovery from the change log keeps another run\'s text as a copy, on
     const owner = { instanceId: 'window-a', fence };
     await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет', updatedAt: 1 }, 0, 'c1', owner);
     // A window that crashed had typed ", мир 🙂" after the stored row.
-    const crashed = (seq: number, change: [number, string, string], length: number) => ({ documentId: 'crash', seq, run: 'crashed', change, length });
+    const crashed = (seq: number, change: [number, string, string], length: number, title?: string) => ({
+      documentId: 'crash', seq, run: 'crashed', change, length, ...(title !== undefined ? { title } : {}),
+    });
     await api.appendChange(db, crashed(1, [6, '', ', мир'], 11), owner);
     await api.appendChange(db, crashed(2, [11, '', ' 🙂'], 14), owner);
     const copy = await api.salvageChanges(db, 'crash', owner, 'rec-1', undefined, 5);
     const left = await api.listChanges(db, 'crash');
     const again = await api.salvageChanges(db, 'crash', owner, 'rec-2', undefined, 6);
     // Lost text that is only what this window shows (a reload backup, a handoff) is not stored
-    // yet: no copy, and the records stay (#252 review)...
+    // yet: no copy, and the records stay (#252 review). Title must match too (#37 R2c 2d-1).
     await api.appendChange(db, crashed(1, [6, '', '!'], 7), owner);
-    const shown = await api.salvageChanges(db, 'crash', owner, 'rec-3', undefined, 7, 'Привет!');
+    const shown = await api.salvageChanges(db, 'crash', owner, 'rec-3', undefined, 7, 'Привет!', 'Заметка');
     const keptForShown = (await api.listChanges(db, 'crash')).length;
     // ...so after another restart (nothing shown) the same text is still recovered.
     const afterRestart = await api.salvageChanges(db, 'crash', owner, 'rec-3', undefined, 8);
@@ -278,5 +280,54 @@ test('crash recovery from the change log keeps another run\'s text as a copy, on
     copy: { id: 'rec-1', title: 'Заметка (recovered)', text: 'Привет, мир 🙂' }, left: 0, again: undefined, shown: undefined, keptForShown: 1,
     afterRestart: 'Привет!', sameText: undefined, afterSameText: 0,
     saved: { id: 'rec-4', text: 'Привет#?' }, original: 'Привет, друг', ids: ['crash', 'rec-1', 'rec-3', 'rec-4'],
+  });
+});
+
+test('crash recovery restores a renamed title from the change log (#37 R2c 2d-1)', async ({ page }) => {
+  // Fails on old code: recovered copy uses the stored title; title-only loss makes no copy;
+  // shownText alone (wrong title) still keeps records incorrectly, or drops them without matching title.
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const fence = await api.claimEditOwnership(db, 'title-crash', 'window-a', 1);
+    const owner = { instanceId: 'window-a', fence };
+    await api.commitOrCreateConflictCopy(db, { id: 'title-crash', title: 'Старое', text: 'Текст', updatedAt: 1 }, 0, 'c1', owner);
+    // Crashed run renamed the document and typed more.
+    await api.appendChange(db, {
+      documentId: 'title-crash', seq: 1, run: 'crashed', change: [0, '', ''] as [number, string, string], length: 5, title: 'Новое имя',
+    }, owner);
+    await api.appendChange(db, {
+      documentId: 'title-crash', seq: 2, run: 'crashed', change: [5, '', '!'] as [number, string, string], length: 6,
+    }, owner);
+    const renamed = await api.salvageChanges(db, 'title-crash', owner, 'rec-title', undefined, 2);
+    // Title-only loss (text unchanged) still produces a copy with the new title.
+    await api.appendChange(db, {
+      documentId: 'title-crash', seq: 1, run: 'crashed', change: [0, '', ''] as [number, string, string], length: 5, title: 'Только заголовок',
+    }, owner);
+    const titleOnly = await api.salvageChanges(db, 'title-crash', owner, 'rec-title-only', undefined, 3);
+    // Shown text + shown title equal to the lost state keeps the records (rule 5).
+    await api.appendChange(db, {
+      documentId: 'title-crash', seq: 1, run: 'crashed', change: [0, '', ''] as [number, string, string], length: 5, title: 'Показанное',
+    }, owner);
+    const kept = await api.salvageChanges(db, 'title-crash', owner, 'rec-keep', undefined, 4, 'Текст', 'Показанное');
+    const keptCount = (await api.listChanges(db, 'title-crash')).length;
+    // Shown text alone with a different title still salvages (title is part of lost state).
+    const wrongTitle = await api.salvageChanges(db, 'title-crash', owner, 'rec-wrong', undefined, 5, 'Текст', 'Другое');
+    db.close();
+    return {
+      renamed: renamed && { title: renamed.title, text: renamed.text },
+      titleOnly: titleOnly && { title: titleOnly.title, text: titleOnly.text },
+      kept, keptCount,
+      wrongTitle: wrongTitle && { title: wrongTitle.title, text: wrongTitle.text },
+    };
+  });
+  expect(result).toEqual({
+    renamed: { title: 'Новое имя (recovered)', text: 'Текст!' },
+    titleOnly: { title: 'Только заголовок (recovered)', text: 'Текст' },
+    kept: undefined, keptCount: 1,
+    wrongTitle: { title: 'Показанное (recovered)', text: 'Текст' },
   });
 });
