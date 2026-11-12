@@ -119,3 +119,46 @@ test('a share link opens offline once the site has been visited', async ({ page,
     await context.setOffline(false);
   }
 });
+
+test('Edit a copy leaves a restored host Focus and opens the copy in a window (#246 review)', async ({ page }) => {
+  await page.goto('/');
+  const frame = page.frameLocator('.host-window iframe.host-editor').first();
+  await expect(frame.locator('#editor')).toBeEnabled();
+  await frame.locator('#focus-mode').click();
+  await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
+  const document = shared({ text: 'Копия из режима фокуса' });
+  await page.goto(await linkFor(document));
+  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await expect(page.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
+  await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
+  const copyId = (await readStoredDocs(page)).find(row => row.text === document.text)?.id;
+  await expect(page.frameLocator(`.host-window iframe[src*="doc=${copyId}"]`).locator('#editor')).toHaveValue(document.text);
+});
+
+test('a slow decode of an earlier link never replaces a newer one (#246 review)', async ({ page }) => {
+  // Hold the first decompression so the later link finishes first.
+  await page.addInitScript(() => {
+    const Native = DecompressionStream;
+    let first = true;
+    (window as unknown as { DecompressionStream: unknown }).DecompressionStream = class extends Native {
+      constructor(format: CompressionFormat) {
+        super(format);
+        if (!first) return;
+        first = false;
+        const readable = this.readable.pipeThrough(new TransformStream({
+          async transform(chunk, controller) { await new Promise(resolve => setTimeout(resolve, 800)); controller.enqueue(chunk); },
+          flush() { (window as unknown as { heldDecodeDone: boolean }).heldDecodeDone = true; },
+        }));
+        Object.defineProperty(this, 'readable', { value: readable });
+      }
+    };
+  });
+  await page.goto(await linkFor(shared({ title: 'Старая ссылка' })));
+  await page.evaluate(() => { location.hash = '#doc=9.abc'; });
+  await expect(page.locator('#read-text')).toContainText('newer version of TypeBridge');
+  // Once the held decode of the earlier link has finished, the newer result must still show.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { heldDecodeDone?: boolean }).heldDecodeDone)).toBe(true);
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+  await expect(page.locator('#read-title')).toHaveText('This shared document cannot be opened');
+  await expect(page.locator('#edit-copy')).toBeHidden();
+});

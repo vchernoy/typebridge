@@ -78,8 +78,16 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
   }
 }
 
+/** Bumped on every render: a slow decode of an earlier link must not replace a newer one. */
+let renderGeneration = 0;
 async function render(): Promise<void> {
-  const result = await decodeSharePayload(sharePayloadFromHash(location.hash));
+  const generation = ++renderGeneration;
+  const hash = location.hash;
+  // Never leave the previous document's Edit a copy armed while another link decodes.
+  editCopy.hidden = true;
+  editCopy.onclick = null;
+  const result = await decodeSharePayload(sharePayloadFromHash(hash));
+  if (generation !== renderGeneration || location.hash !== hash) return;
   if (result.ok) showDocument(result.document, result.knownFormat);
   else showFailure(result.reason);
 }

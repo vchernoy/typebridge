@@ -79,7 +79,7 @@ export type WindowManager = {
   addWindow: (documentId?: string) => string | undefined;
   /**
    * Show a saved document: activate the window that already shows it, else open a new window
-   * for it. `full` when no window can be added (the window cap or host Focus).
+   * for it. Leaves host Focus first, so `full` only means every window is open (the cap).
    */
   openDocument: (documentId: string) => 'shown' | 'opened' | 'full';
   closeWindow: (id: string) => Promise<boolean>;
@@ -817,6 +817,9 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
         const frame = frames.get(win.id);
         return (frame && deps.readDocumentId ? deps.readDocumentId(frame) : undefined) ?? win.documentId;
       };
+      // A restored Focus would refuse a new window although fewer than the cap are open, and
+      // its one maximized window cannot be closed (#246 review): show the copy outside Focus.
+      if (hostFocus) api.setHostFocusMode(false);
       const existing = layouts.find(win => shownIn(win) === documentId);
       if (existing) { setActive(existing.id); return 'shown'; }
       return api.addWindow(documentId) ? 'opened' : 'full';
