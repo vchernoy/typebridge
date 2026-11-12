@@ -30,6 +30,9 @@ function showFailure(reason: DecodeFailure): void {
   title.textContent = 'This shared document cannot be opened';
   body.textContent = FAILURE_MESSAGES[reason];
   body.classList.add('read-text--message');
+  // A notice from an earlier link (e.g. an unknown format) must not stay with this failure.
+  notice.hidden = true;
+  notice.textContent = '';
   editCopy.hidden = true;
 }
 

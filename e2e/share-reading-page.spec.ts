@@ -60,6 +60,12 @@ test('a damaged or cut link explains itself', async ({ page }) => {
   await expect(page.locator('#edit-copy')).toBeHidden();
   await page.goto('/read.html#doc=9.abc');
   await expect(page.locator('#read-text')).toContainText('newer version of TypeBridge');
+  // An unknown-format notice from an earlier link does not stay with a later failure.
+  await page.goto(await linkFor(shared({ format: 'markdown' })));
+  await expect(page.locator('#read-notice')).toBeVisible();
+  await page.evaluate(() => { location.hash = '#doc=9.abc'; });
+  await expect(page.locator('#read-text')).toContainText('newer version of TypeBridge');
+  await expect(page.locator('#read-notice')).toBeHidden();
 });
 
 test('Edit a copy saves a new document and opens it in an editor window', async ({ page }) => {
@@ -100,7 +106,7 @@ test('with every window open, Edit a copy still saves and says how to open it', 
   await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === document.text)).toBe(true);
 });
 
-test('a share link opens offline once the site has been visited', async ({ page, context }) => {
+test('a share link opens offline once TypeBridge itself was opened (it installs offline support)', async ({ page, context }) => {
   await page.goto('/editor.html');
   await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
