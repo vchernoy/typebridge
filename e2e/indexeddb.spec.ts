@@ -426,9 +426,17 @@ test('reload discard marker write/apply under the fence (#255)', async ({ page }
     const marker2 = await api.writeReloadDiscardMarker(db, 'reload-doc', owner);
     const applied = await api.applyReloadDiscardMarker(db, 'reload-doc', owner, true);
     const left = await api.listChanges(db, 'reload-doc');
-    // Cancel clear is idempotent.
+    // Cancel clear is idempotent for the owning instance.
     await api.clearReloadDiscardMarker(db, 'reload-doc', owner);
     await api.clearReloadDiscardMarker(db, 'reload-doc', owner);
+    // Foreign owner must not erase another instance's in-flight marker (#256 P2).
+    await api.appendChange(db, rec(5, 'run-d', 'v'), owner);
+    const marker3 = await api.writeReloadDiscardMarker(db, 'reload-doc', owner);
+    await api.releaseEditOwnership(db, 'reload-doc', owner, Date.now());
+    const foreignFence = await api.claimEditOwnership(db, 'reload-doc', 'window-b', Date.now());
+    const foreign = { instanceId: 'window-b', fence: foreignFence };
+    await api.clearReloadDiscardMarker(db, 'reload-doc', foreign);
+    const afterForeign = await api.getReloadDiscardMarker(db, 'reload-doc');
     db.close();
     return {
       stores,
@@ -442,6 +450,8 @@ test('reload discard marker write/apply under the fence (#255)', async ({ page }
       marker2UpTo: marker2.upToSeq,
       applied,
       leftSeqs: left.map(r => r.seq),
+      marker3Instance: marker3.instanceId,
+      afterForeignInstance: afterForeign?.instanceId ?? null,
     };
   });
   expect(result.stores).toEqual(['changes', 'discardMarkers', 'documents', 'editOwnership']);
@@ -455,6 +465,8 @@ test('reload discard marker write/apply under the fence (#255)', async ({ page }
   expect(result.marker2UpTo).toBe(4);
   expect(result.applied).toEqual({ applied: true, upToSeq: 4 });
   expect(result.leftSeqs).toEqual([]);
+  expect(result.marker3Instance).toBe('window-a');
+  expect(result.afterForeignInstance).toBe('window-a');
 });
 
 test('v3 database upgrades to v4 and keeps documents and changes (#255)', async ({ page }) => {

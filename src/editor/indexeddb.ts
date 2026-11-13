@@ -310,8 +310,9 @@ export async function writeReloadDiscardMarker(
 }
 
 /**
- * Cancel path (#255): drop the marker under the fence. Idempotent — missing marker or lost
- * ownership is a no-op so cancel never throws into the host's cancelReload loop.
+ * Cancel path (#255): drop the marker under the fence only when this owner wrote it
+ * (`marker.instanceId === owner.instanceId`). Idempotent — missing marker, foreign marker, or
+ * lost ownership is a no-op so a foreign cancel cannot erase an in-flight consent (#256 P2).
  */
 export async function clearReloadDiscardMarker(
   db: IDBDatabase, documentId: string, owner: WriteFence,
@@ -321,7 +322,11 @@ export async function clearReloadDiscardMarker(
   const done = finished(tx);
   try {
     await assertEditOwner(tx, documentId, owner);
-    await request(tx.objectStore(DISCARD_MARKERS).delete(documentId));
+    const markers = tx.objectStore(DISCARD_MARKERS);
+    const marker = await request(markers.get(documentId)) as ReloadDiscardMarker | undefined;
+    if (marker && marker.instanceId === owner.instanceId) {
+      await request(markers.delete(documentId));
+    }
     await done;
   } catch {
     try { tx.abort(); } catch { /* Already finished or aborted. */ }
