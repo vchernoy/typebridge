@@ -56,8 +56,13 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
    * Last pre-private commit after the document has already switched (#257).
    * Uses a frozen snapshot so later private typing cannot ride along. Ignores mayWrite
    * (already false) and may write even when clean so the `private` flag becomes durable.
+   * `frozenContentRevision` is the workspace content revision at the freeze moment — not
+   * after awaits — so private typing during drain cannot make dirty look false.
    */
-  async function persistLastBeforePrivate(frozen: StoredDraft): Promise<SaveResult> {
+  async function persistLastBeforePrivate(
+    frozen: StoredDraft,
+    frozenContentRevision: number,
+  ): Promise<SaveResult> {
     if (deps.viewMode) return { saved: true, conflict: false };
     clearTimeout(saveTimer);
     if (state.deleting || state.editBlock) return { saved: false, conflict: false };
@@ -72,7 +77,6 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
         if (state.deleting || state.editBlock) return { saved: false, conflict: false };
         await deps.changes.idle();
         if (state.deleting || state.editBlock) return { saved: false, conflict: false };
-        const version = deps.workspace.contentRevision();
         const saved: StoredDraft = { ...frozen, private: true, updatedAt: Date.now() };
         const log = deps.changes.upToForSave(saved.id, saved.text, saved.title);
         preparedRun = log.keepRun;
@@ -97,7 +101,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
         if (result.recovered) deps.onRecovered(result.recovered, result.draft.id);
         deps.writingPosition.save();
         state.saveFailed = false;
-        deps.workspace.setDirty(deps.workspace.contentRevision() !== version);
+        deps.workspace.setDirty(deps.workspace.contentRevision() !== frozenContentRevision);
         deps.updateSaveIndicator();
         if (result.conflict) {
           deps.workspace.setDocumentId(result.draft.id);

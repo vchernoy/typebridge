@@ -28,15 +28,15 @@ afterEach(() => {
   vi.mocked(updateDocumentPrivateFlag).mockReset();
 });
 
-function makeWorkspace(dirty = false): Workspace {
+function makeWorkspace(dirty = false, revision = { value: 1 }): Workspace {
   return {
     sessionId: 'session-1' as const,
     paneId: 'pane-a' as const,
     sessionGeneration: () => 1,
-    contentRevision: () => 1,
+    contentRevision: () => revision.value,
     paneGeneration: () => 0,
     bumpSessionGeneration: () => 1,
-    bumpContentRevision: () => 1,
+    bumpContentRevision: () => { revision.value += 1; return revision.value; },
     documentId: () => 'doc',
     setDocumentId: () => undefined,
     dirty: () => dirty,
@@ -95,13 +95,17 @@ function harness(options: {
     riskText: () => '',
   } as unknown as StatusLine;
 
+  const revision = { value: 1 };
   const persistLastBeforePrivate = vi.fn(async () => ({
     saved: options.persistSaved !== false,
     conflict: false,
   }));
   const persist = vi.fn(async () => ({ saved: true, conflict: false }));
   const cancel = vi.fn();
-  const drainChanges = vi.fn(async () => undefined);
+  const drainChanges = vi.fn(async () => {
+    // Private typing during drain bumps the content revision past the freeze.
+    revision.value += 1;
+  });
   const abandonChangeRun = vi.fn();
   const renderDrafts = vi.fn();
   const syncAutosaveControl = vi.fn();
@@ -115,7 +119,7 @@ function harness(options: {
   const toggle = createAutosaveToggle(state, status, {
     autosave,
     privateMarker,
-    workspace: makeWorkspace(options.dirty === true),
+    workspace: makeWorkspace(options.dirty === true, revision),
     viewMode: false,
     embedded: true,
     transferFrozen: () => false,
@@ -135,7 +139,7 @@ function harness(options: {
 
   return {
     toggle, state, autosave, privateMarker, persistLastBeforePrivate,
-    announceAction, setSaveStatus, abandonChangeRun,
+    announceAction, setSaveStatus, abandonChangeRun, revision,
   };
 }
 
@@ -145,6 +149,7 @@ describe('createAutosaveToggle going private (#257)', () => {
     await toggle.applyDocumentChange(false);
     expect(persistLastBeforePrivate).toHaveBeenCalledWith(
       expect.objectContaining({ private: true, text: 'saved', title: 'T' }),
+      1,
     );
     expect(state.active.private).toBe(true);
     expect(autosave.checked).toBe(false);
@@ -173,5 +178,12 @@ describe('createAutosaveToggle going private (#257)', () => {
     });
     await toggle.applyDocumentChange(false);
     expect(announceAction).toHaveBeenCalledWith(PRIVATE_SWITCH_FLAG_FAILED, { keepConflict: true });
+  });
+
+  it('passes the freeze-time content revision, not a post-drain bump (#257 P0)', async () => {
+    const { toggle, persistLastBeforePrivate, revision } = harness();
+    await toggle.applyDocumentChange(false);
+    expect(revision.value).toBe(2);
+    expect(persistLastBeforePrivate).toHaveBeenCalledWith(expect.anything(), 1);
   });
 });

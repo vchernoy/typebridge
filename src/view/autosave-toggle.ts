@@ -34,8 +34,11 @@ export type AutosaveToggleDeps = {
   controlBlocked: () => boolean;
   journalEdit: () => void;
   persist: () => Promise<SaveResult>;
-  /** One last full save of a frozen pre-private snapshot (includes `private: true`). */
-  persistLastBeforePrivate: (frozen: StoredDraft) => Promise<SaveResult>;
+  /**
+   * One last full save of a frozen pre-private snapshot (includes `private: true`).
+   * Pass the content revision from the freeze moment, not after awaits.
+   */
+  persistLastBeforePrivate: (frozen: StoredDraft, frozenContentRevision: number) => Promise<SaveResult>;
   snapshot: () => StoredDraft;
   changeLogProtects: () => boolean;
   saver: {
@@ -180,6 +183,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     const wasDirty = deps.workspace.dirty();
     const changeLogCovered = deps.changeLogProtects();
     const frozen = deps.snapshot();
+    // Capture with the freeze: awaits below can bump the revision via private typing (#257 P0).
+    const frozenContentRevision = deps.workspace.contentRevision();
     // 1. Switch immediately.
     state.active = { ...state.active, private: true };
     deps.autosave.checked = false;
@@ -206,7 +211,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       ...frozen,
       private: true,
       updatedAt: Date.now(),
-    });
+    }, frozenContentRevision);
     deps.abandonChangeRun();
 
     if (result.saved) {

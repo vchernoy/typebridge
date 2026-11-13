@@ -783,7 +783,8 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   controlBlocked: () => autosaveControlBlocked(),
   journalEdit: () => { journalEdit(); },
   persist: () => persist(),
-  persistLastBeforePrivate: frozen => saver.persistLastBeforePrivate(frozen),
+  persistLastBeforePrivate: (frozen, frozenContentRevision) =>
+    saver.persistLastBeforePrivate(frozen, frozenContentRevision),
   snapshot: () => snapshot(),
   changeLogProtects: () => changeLogProtects(),
   saver,

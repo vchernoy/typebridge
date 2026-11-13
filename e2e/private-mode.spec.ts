@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { setAutosave, setPrivateSession } from './settings-helpers';
+import { documentAction, setAutosave, setPrivateSession } from './settings-helpers';
 
 const status = (page: Page) => page.locator('#status-line');
 
@@ -91,6 +91,38 @@ test('typing while private leaves no post-switch storage trace after reload (#25
   const after = await storageSnapshot(page);
   expect(after.docs.every(doc => !doc.text.includes('SECRET'))).toBe(true);
   expect(after.docs.every(doc => !(doc.title ?? '').includes('Secret'))).toBe(true);
+});
+
+test('private typing during goPrivate keeps the document dirty (#257 P0)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Freeze base');
+  await expect(status(page)).toHaveText('Saved locally');
+
+  // Hold the last pre-private save so typing after the switch still happens before dirty is set.
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 1_500;
+  });
+  const toggling = setAutosave(page, false);
+  await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
+  await page.locator('#editor').press('End');
+  // Digits are not transliterated — a stable private-period marker.
+  await page.locator('#editor').pressSequentially(' 99');
+  await toggling;
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+  const snap = await storageSnapshot(page);
+  expect(snap.docs.every(doc => !doc.text.includes('99'))).toBe(true);
+  expect(snap.docs.some(doc => doc.private === true && doc.text === 'Freeze base')).toBe(true);
+
+  // Leaving must confirm: dirty was not cleared by comparing against a post-typing revision.
+  await documentAction(page, '#new-draft');
+  await expect(page.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(page.locator('#editor')).toHaveValue('Freeze base 99');
 });
 
 test('going private mid-save does not store text typed after the switch (#257)', async ({ page }) => {
