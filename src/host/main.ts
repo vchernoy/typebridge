@@ -71,6 +71,8 @@ const manager = installWindowManager({
     const id = shell?.dataset.windowId ?? frame.dataset.windowId;
     if (!id) return undefined;
     try {
+      const probe = (frame.contentWindow as import('../view/embed-api').EditorWindow | null)?.__typebridgeStoredDocumentId;
+      if (probe) return probe();
       return sessionStorage.getItem(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, id)) ?? undefined;
     } catch {
       return undefined;

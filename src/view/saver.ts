@@ -88,8 +88,20 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     },
   ): Promise<{ conflict: boolean }> {
     const clearPendingAfterCommit = deps.preparePendingClear(saved);
+    // Privacy can change while a first save waits for its fence. A never-saved private
+    // document must not be created by that already-started save (#257 step 3).
+    const cancelledNewSave = (): boolean => {
+      if (state.active.revision !== 0 || deps.mayWrite()) return false;
+      deps.changes.saved(keepRun, false);
+      return true;
+    };
+    if (cancelledNewSave()) return { conflict: false };
+    // New private documents never claimed ownership; the first real save must claim before writing.
+    if (!state.ownership && state.active.revision === 0) await deps.takeOwnership(saved.id);
+    if (cancelledNewSave()) return { conflict: false };
     if (state.ownership?.documentId !== saved.id) throw new EditOwnershipLostError();
     const owner = await state.ownership.writeFence();
+    if (cancelledNewSave()) return { conflict: false };
     const current = deps.currentJournal();
     const journal = current && current.documentId === saved.id && current.revision === state.active.revision
       && sameFields(current, saved) ? current : undefined;

@@ -25,4 +25,5 @@ export function newDraft(text = '', title = UNTITLED_TITLE): Draft {
 export function autosaveEnabled(): boolean { return localStorage.getItem(ENABLED) !== 'off'; }
 export function setAutosaveEnabled(enabled: boolean): void { localStorage.setItem(ENABLED, enabled ? 'on' : 'off'); }
 export function setActiveDraftId(id: string): void { sessionStorage.setItem(activeDraftKey, id); }
+export function clearActiveDraftId(): void { sessionStorage.removeItem(activeDraftKey); }
 export function readActiveDraftId(): string | null { return sessionStorage.getItem(activeDraftKey); }

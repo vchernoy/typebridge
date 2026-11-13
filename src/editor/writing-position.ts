@@ -47,7 +47,7 @@ export function setupWritingPosition(field: HTMLTextAreaElement, documentId: () 
     timer = undefined;
     const latest = pending;
     pending = undefined;
-    if (!latest) return;
+    if (!latest || !documentId()) return;
     const { id, value } = latest;
     if (removed.has(id)) return;
     const raw = JSON.stringify(value);

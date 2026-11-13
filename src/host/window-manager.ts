@@ -784,6 +784,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       const titles: string[] = [];
       for (const win of layouts) {
         if (exceptWindowId && win.id === exceptWindowId) continue;
+        const hooks = editorWindowApi(frames.get(win.id)?.contentWindow);
+        if (hooks?.__typebridgeStoredDocumentId?.() === '') continue;
         const shell = shells.get(win.id);
         const input = shell?.querySelector<HTMLInputElement>('.host-window-title');
         const fromChrome = input?.value.trim();
@@ -1060,7 +1062,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       title?: string;
     } | null;
     if (!data || data.type !== 'typebridge-active-draft') return;
-    if (typeof data.windowId !== 'string' || typeof data.documentId !== 'string' || !data.documentId) return;
+    if (typeof data.windowId !== 'string' || typeof data.documentId !== 'string') return;
     if (!layouts.some(win => win.id === data.windowId)) return;
     layouts = layouts.map(win => (
       win.id === data.windowId ? { ...win, documentId: data.documentId } : win

@@ -36,11 +36,13 @@ import {
   UNTITLED_TITLE,
   configureActiveDraftKey,
   newDraft,
+  clearActiveDraftId,
   setActiveDraftId,
 } from './editor/drafts';
 import {
   documentAutosaveChecked,
   privateNow,
+  newPrivateDocument,
   privateSessionOn,
   setPrivateSessionOn,
 } from './editor/privacy';
@@ -500,7 +502,7 @@ function updateSaveIndicator(): void {
 // Window id scopes positions when multiple instances share one tab's sessionStorage (#175).
 const writingPosition = setupWritingPosition(
   field,
-  () => state.loadingDraft || field.disabled || state.viewMissing ? undefined : state.active.id,
+  () => state.loadingDraft || field.disabled || state.viewMissing || newPrivateDocument(state.active) ? undefined : state.active.id,
   writingPositionNamespace(windowId, viewMode),
 );
 /** Filled once the change-log writer exists; until then the journal treats the log as unprotected. */
@@ -545,7 +547,23 @@ const readPending = reloadBackup.read;
 const clearPending = reloadBackup.clear;
 function rememberActive(): void {
   if (viewMode) return;
-  try { setActiveDraftId(state.active.id); } catch { /* Selection is only a hint. */ }
+  const hidden = newPrivateDocument(state.active);
+  if (hidden) {
+    // A private revision-zero document is edited only here; no shared ownership is needed.
+    if (state.ownership?.documentId === state.active.id) {
+      const held = state.ownership; state.ownership = undefined;
+      void held.release();
+    }
+    writingPosition.remove(state.active.id, false);
+    if (reloadBackup.read()?.id === state.active.id) reloadBackup.remove();
+    try {
+      for (const item of listRecovery(localStorage)) {
+        if (item.documentId === state.active.id) clearRecovery(localStorage, item);
+      }
+    } catch { /* Optional storage. */ }
+    if (recovery.currentJournal()?.documentId === state.active.id) recovery.takeCurrentJournal();
+  }
+  try { if (hidden) clearActiveDraftId(); else setActiveDraftId(state.active.id); } catch { /* Selection is only a hint. */ }
   // Tell the #175 host so layout persistence can record this window's document id / title.
   if (embedded && window.parent !== window) {
     try {
@@ -554,7 +572,7 @@ function rememberActive(): void {
       window.parent.postMessage({
         type: 'typebridge-active-draft',
         windowId,
-        documentId: state.active.id,
+        documentId: hidden ? '' : state.active.id,
         title: draftTitle.value,
       }, window.location.origin);
     } catch { /* Cross-origin parent — host will probe on unload. */ }
@@ -610,6 +628,7 @@ function renderDrafts(): void {
         updatedAt: isCurrent ? (workspace.dirty() ? Date.now() : draft.updatedAt) : draft.updatedAt,
         openElsewhere: elsewhere.has(draft.id),
       });
+      if (isCurrent && newPrivateDocument(state.active)) option.textContent += ' · Private · Not saved';
       picker.append(option);
     }
     picker.value = state.viewMissing ? '' : state.active.id;
@@ -744,6 +763,7 @@ async function salvageOnOwn(documentId: string): Promise<void> {
   if (viewMode || !state.db) return;
   const ownership = state.ownership;
   if (!ownership || ownership.documentId !== documentId) return;
+  if (!await getStoredDraft(state.db, documentId)) return;
   try {
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
     const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), { text: field.value, title: shownTitle, ...documentSearch.values() });
@@ -800,6 +820,7 @@ for (const event of ['historychange', 'compositionend']) draftTitle.addEventList
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, privateMarker, workspace, viewMode, embedded,
+  syncIdentity: () => rememberActive(),
   transferFrozen: () => state.transferFrozen,
   controlBlocked: () => autosaveControlBlocked(),
   journalEdit: () => { journalEdit(); },
@@ -1050,6 +1071,7 @@ if (!viewMode) {
   // Host title bar (#175 step 8) edits this window's title: let it start a takeover too,
   // and hold what was typed there the same way.
   exposeEditorWindowApi({
+    __typebridgeStoredDocumentId: () => newPrivateDocument(state.active) ? '' : state.active.id,
     __typebridgeRequestEdit: requestEditHere,
     __typebridgeBufferTitleEdit: (op, start, end) => {
       // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.

@@ -28,6 +28,7 @@ import type { DocumentSignal } from './signals';
 import type { Workspace } from './workspace';
 
 export type AutosaveToggleDeps = {
+  syncIdentity?: () => void;
   autosave: HTMLInputElement;
   privateMarker: HTMLElement;
   workspace: Workspace;
@@ -97,6 +98,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
 
   function syncPrivateMarker(): void {
     deps.privateMarker.hidden = deps.autosave.checked;
+    deps.syncIdentity?.();
   }
 
   function mirrorFromDocument(): void {
@@ -175,7 +177,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
    * Autosave-off (#260 Codex P1).
    */
   async function lastSaveBeforeSession(): Promise<{ saveFailed: boolean }> {
-    if (state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
+    if (state.active.revision === 0 || state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
     const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
     if (!canSave) return { saveFailed: false };
     // Prefer the last may-write boundary: delayed `storage` can run after post-private typing
@@ -275,6 +277,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         announce('Autosave on');
       }
     } finally {
+      deps.syncIdentity?.();
       appliedSessionOn = sessionOn;
       finish(false);
     }
@@ -345,8 +348,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     // Drop stale conflict/action chrome; an in-flight save may re-announce after await.
     status.clearNotices();
 
-    // Never-saved clean docs: nothing pre-private to keep (step 3 covers creation-time no-trace).
-    if (frozen.revision < 1 && !wasDirty) {
+    // A private document that has never saved must leave no row or recovery copy (#257 step 3).
+    if (frozen.revision < 1) {
       announce(AUTOSAVE_OFF);
       return;
     }

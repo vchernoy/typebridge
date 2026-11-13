@@ -573,3 +573,15 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     );
   });
 });
+
+it('going private before the first save never makes a last save, even when dirty', async () => {
+  const { toggle, persistLastBeforePrivate } = harness({ revision: 0, dirty: true });
+  await toggle.applyDocumentChange(false);
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+  expect(updateDocumentPrivateFlag).not.toHaveBeenCalled();
+});
+it('session privacy never last-saves a new document', async () => {
+  const { toggle, persistLastBeforePrivate } = harness({ revision: 0, sessionDirty: true });
+  await toggle.applySessionChange(true);
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+});

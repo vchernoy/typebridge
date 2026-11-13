@@ -4,6 +4,7 @@
  * ownership transfer, and parks/resumes ownership during a focus handoff. The rules for what a
  * block means are pure functions in view/ownership.ts.
  */
+import { privateNow } from '../editor/privacy';
 import type { Editor } from '../editor/editor';
 import { acquireEditOwnership, type EditOwnership } from '../editor/edit-ownership';
 import { getStoredDraft } from '../editor/indexeddb';
@@ -86,7 +87,10 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
     if (generation !== state.storageGeneration || !state.db) return { block: 'error', generation: state.storageGeneration };
     let held: EditOwnership | undefined;
     try {
+      const stored = await getStoredDraft(state.db, documentId);
+      if (!stored && privateNow(state.active.id === documentId ? state.active : undefined)) return { block: '', generation };
       const result = await acquireEditOwnership({
+        deferClaim: !stored,
         db: state.db, locks: webLocks, documentId, instanceId,
         onLost: () => { if (held && state.ownership === held) loseOwnership(); },
         steal: options.steal,
