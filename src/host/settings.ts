@@ -8,6 +8,7 @@ import { setupRules } from '../ui/rules';
 import { setupSettings, openSettingsTo, ensureSettingsOpen } from '../ui/settings';
 import { setupWindowLayoutSetting } from '../ui/window-layout-setting';
 import { exposeHostPageApi } from '../view/embed-api';
+import { AUTOSAVE_PREF_KEY } from '../editor/drafts';
 import { privateSessionOn, setPrivateSessionOn } from '../editor/privacy';
 import {
   TRANSLITERATION_SHORTCUTS,
@@ -195,6 +196,13 @@ export function installHostSettings(deps: {
         }
       } catch { /* keep */ }
     }
+  });
+
+  // Other top-level tabs change Private session via localStorage only — mirror the checkbox
+  // here. Editor iframes listen themselves and run the session last-save path (#260 P1).
+  window.addEventListener('storage', event => {
+    if (event.key !== null && event.key !== AUTOSAVE_PREF_KEY) return;
+    try { privateSession.checked = privateSessionOn(); } catch { /* keep */ }
   });
 
   function resetShortcut(): boolean {

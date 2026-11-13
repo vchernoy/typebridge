@@ -30,6 +30,7 @@ import { installEmbedHooks } from './view/embed-hooks';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
+  AUTOSAVE_PREF_KEY,
   UNTITLED_TITLE,
   configureActiveDraftKey,
   newDraft,
@@ -666,7 +667,7 @@ const heldEdits = createHeldEdits(state, statusLine, {
 const { onEditableHere } = heldEdits;
 const editAccess = createEditAccess(state, statusLine, {
   viewMode, instanceId, webLocks, workspace, editor, titleEditor, ownershipNotice, undo, redo, autosave,
-  writingPosition, quietReader,
+  mayWrite, writingPosition, quietReader,
   syncHistory: () => { syncHistory(); },
   syncMutationControls: () => { syncMutationControls(); },
   updateSaveIndicator: () => { updateSaveIndicator(); },
@@ -683,7 +684,7 @@ const {
   recoverParkedHandoffOwnership,
 } = editAccess;
 const takeover = createTakeover(state, {
-  viewMode, field, draftTitle, editor, workspace, autosave, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
+  viewMode, field, draftTitle, editor, workspace, autosave, mayWrite, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
   focusHandoff: () => focusHandoff,
   showDraft: () => { showDraft(); },
   syncTitleTooltip: () => { syncTitleTooltip(); },
@@ -759,10 +760,14 @@ const saver = createSaver(state, statusLine, {
 });
 const { persist, scheduleSave } = saver;
 field.addEventListener('input', () => {
+  // scheduleSave bumps contentRevision first; cache after so the session last-save freeze
+  // matches the post-edit revision (#260 / #262).
   scheduleSave();
+  autosaveToggle?.noteWritableSnapshot();
 });
 field.addEventListener('historychange', () => {
   scheduleSave();
+  autosaveToggle?.noteWritableSnapshot();
 });
 draftTitle.addEventListener('focus', () => {
   activatePane(PRIMARY_PANE_ID);
@@ -776,6 +781,7 @@ draftTitle.addEventListener('input', () => {
   syncTitleTooltip();
   rememberActive();
   scheduleSave(true);
+  autosaveToggle?.noteWritableSnapshot();
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, privateMarker, workspace, viewMode, embedded,
@@ -783,8 +789,8 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   controlBlocked: () => autosaveControlBlocked(),
   journalEdit: () => { journalEdit(); },
   persist: () => persist(),
-  persistLastBeforePrivate: (frozen, frozenContentRevision) =>
-    saver.persistLastBeforePrivate(frozen, frozenContentRevision),
+  persistLastBeforePrivate: (frozen, frozenContentRevision, options) =>
+    saver.persistLastBeforePrivate(frozen, frozenContentRevision, options),
   snapshot: () => snapshot(),
   changeLogProtects: () => changeLogProtects(),
   saver,
@@ -792,6 +798,24 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   refreshDrafts: () => refreshDrafts(),
   renderDrafts: () => { renderDrafts(); },
   loseOwnership: () => { loseOwnership(); },
+  postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
+  clearDocumentBackups: documentId => {
+    try {
+      const pending = reloadBackup.read();
+      if (pending?.id === documentId) reloadBackup.remove();
+    } catch { /* Optional backup. */ }
+    try {
+      for (const item of listRecovery(localStorage)) {
+        if (item.documentId === documentId) clearRecovery(localStorage, item);
+      }
+      void renderRecovery();
+    } catch { /* Storage blocked. */ }
+    const current = recovery.currentJournal();
+    if (current?.documentId === documentId) {
+      try { clearRecovery(localStorage, current); } catch { /* Optional. */ }
+      recovery.takeCurrentJournal();
+    }
+  },
   syncAutosaveControl: () => { syncAutosaveControl(); },
 });
 const applyDocumentAutosave = autosaveToggle.applyDocumentChange;
@@ -925,7 +949,7 @@ const viewer = createViewerMode(state, {
   onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
 });
 const sync = createDocumentSync(state, statusLine, {
-  viewMode, field, draftTitle, editor, workspace, autosave, writingPosition, saver, viewer,
+  viewMode, field, draftTitle, editor, workspace, mayWrite, writingPosition, saver, viewer,
   focusHandoff: () => focusHandoff,
   hideEditHereBar: () => { hideEditHereBar(); },
   applyEditAccess: () => { applyEditAccess(); },
@@ -1037,7 +1061,7 @@ if (viewMode && !sync.hasChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTE
 void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
   embedded,
   windowId: windowId ?? undefined,
-  autosave, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,
+  mayWrite, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,
   onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
   readPending: () => readPending(),
   clearPending: saved => { clearPending(saved); },
@@ -1130,6 +1154,13 @@ onPrefsChanged(detail => {
     layout: () => { resetLayout(); },
   });
 }, { skipOrigin: prefsOrigin });
+
+// Cross-tab: CustomEvent prefs sync stays same-document; other top-level tabs only get
+// `storage`. Run the session last-save / mirror path when Private session changes (#260 P1).
+window.addEventListener('storage', event => {
+  if (event.key !== null && event.key !== AUTOSAVE_PREF_KEY) return;
+  applyPrivateSessionFromStorage();
+});
 
 // Host page registers the service worker and shows the update notice once (#175 step 3).
 if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {

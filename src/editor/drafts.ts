@@ -1,7 +1,9 @@
 import type { EditorHistory } from './editor';
 export type Draft = { id: string; title: string; text: string; updatedAt: number; history?: EditorHistory };
 export const ACTIVE_DRAFT_KEY_BASE = 'typebridge.activeDraft.v1';
-const ENABLED = 'typebridge.autosave.v1';
+/** Shared Private session / legacy Autosave preference (`off` = private session on). */
+export const AUTOSAVE_PREF_KEY = 'typebridge.autosave.v1';
+const ENABLED = AUTOSAVE_PREF_KEY;
 
 /** Default name for new documents (#108). Existing ones keep their saved title. */
 export const UNTITLED_TITLE = 'Untitled document';

@@ -28,6 +28,8 @@ export type EditAccessDeps = {
   undo: HTMLButtonElement;
   redo: HTMLButtonElement;
   autosave: HTMLInputElement;
+  /** False while privateNow() — prefer over reading the checkbox (#257). */
+  mayWrite: () => boolean;
   writingPosition: { save: () => void };
   quietReader: () => boolean;
   syncHistory: () => void;
@@ -195,7 +197,7 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
     if (access.ownership) {
       installOwnership(access);
       announceAction('Editing stayed in this window — the other window could not take over.', { keepConflict: true });
-      if (workspace.dirty() && autosave.checked && !state.active.private) {
+      if (workspace.dirty() && deps.mayWrite()) {
         saveSoon();
       }
       return;

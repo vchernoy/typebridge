@@ -85,6 +85,7 @@ function harness(options: { documentPrivate?: boolean; sessionOn?: boolean; dirt
     editor: editor as never,
     workspace,
     autosave,
+    mayWrite: () => autosave.checked && !state.active.private,
     privateMarker,
     writingPosition: { save: () => undefined },
     editHereBar: { hidden: true } as HTMLElement,

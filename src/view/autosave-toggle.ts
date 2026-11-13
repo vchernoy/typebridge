@@ -4,7 +4,7 @@
  * Unchecked means this document is private. The global private session is a separate Settings
  * control (`typebridge.autosave.v1`); while it is on, this checkbox is forced off and disabled.
  * Prefs sync shares only the global value; document switches update the checkbox from the
- * target document's flag.
+ * target document's flag. Going private offers Keep/Delete of the saved copy (#257 follow-up).
  */
 import {
   documentAutosaveChecked,
@@ -14,14 +14,17 @@ import {
   privateSessionOn,
 } from '../editor/privacy';
 import {
+  deleteStoredDraft,
   EditOwnershipLostError,
   updateDocumentPrivateFlag,
   type StoredDraft,
 } from '../editor/indexeddb';
 import { AUTOSAVE_OFF } from '../editor/status';
+import { askConfirmChoice } from '../ui/confirm-dialog';
 import type { StatusLine } from '../ui/status-line';
 import type { EditorState } from './editor-state';
-import type { SaveResult } from './saver';
+import type { LastBeforePrivacyOptions, SaveResult } from './saver';
+import type { DocumentSignal } from './signals';
 import type { Workspace } from './workspace';
 
 export type AutosaveToggleDeps = {
@@ -35,10 +38,15 @@ export type AutosaveToggleDeps = {
   journalEdit: () => void;
   persist: () => Promise<SaveResult>;
   /**
-   * One last full save of a frozen pre-private snapshot (includes `private: true`).
-   * Pass the content revision from the freeze moment, not after awaits.
+   * One last full save of a frozen pre-privacy snapshot. Pass the content revision from the
+   * freeze moment, not after awaits. `markPrivate` true for the per-document toggle; false for
+   * the global private session (#257 follow-up).
    */
-  persistLastBeforePrivate: (frozen: StoredDraft, frozenContentRevision: number) => Promise<SaveResult>;
+  persistLastBeforePrivate: (
+    frozen: StoredDraft,
+    frozenContentRevision: number,
+    options?: LastBeforePrivacyOptions,
+  ) => Promise<SaveResult>;
   snapshot: () => StoredDraft;
   changeLogProtects: () => boolean;
   saver: {
@@ -50,6 +58,9 @@ export type AutosaveToggleDeps = {
   refreshDrafts: () => Promise<void>;
   renderDrafts: () => void;
   loseOwnership: () => void;
+  postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
+  /** Drop journal and reload-backup entries for this document after Delete saved copy. */
+  clearDocumentBackups: (documentId: string) => void;
   /** Re-evaluate disabled state after a toggle (session / ownership / transitioning). */
   syncAutosaveControl: () => void;
 };
@@ -59,6 +70,16 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   let autosaveToggleGate: Promise<void> | undefined;
   let releaseAutosaveToggleGate: (() => void) | undefined;
   let pendingSession: boolean | undefined;
+  /** Session value currently being applied via `applySessionChange` (not document go-private). */
+  let sessionApplyTarget: boolean | undefined;
+  /** Last session preference that finished applying (for CustomEvent + storage dedupe). */
+  let appliedSessionOn: boolean | undefined;
+  /**
+   * Last text/title/history (+ content revision) taken while `mayWrite` / !privateNow.
+   * Cross-tab `storage` can arrive after localStorage already flipped; live snapshot() then
+   * can include post-private typing. Prefer this boundary for the session last-save (#260 P1).
+   */
+  let lastWritable: { draft: StoredDraft; contentRevision: number } | undefined;
 
   function beginGate(): void {
     if (autosaveToggleGate) return;
@@ -92,6 +113,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   function finish(refocus: boolean): void {
     endGate();
     active = false;
+    sessionApplyTarget = undefined;
     deps.syncAutosaveControl();
     if (refocus && !deps.embedded) {
       try { deps.autosave.focus({ preventScroll: true }); } catch { /* ignore */ }
@@ -131,36 +153,114 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     }
   }
 
+  /**
+   * Record the current editor surface while writes are still allowed. Call from input /
+   * title / history paths **after** `scheduleSave()` bumps `contentRevision` (and after
+   * showing a writable document) so a delayed cross-tab Private session notification can
+   * last-save this boundary instead of post-private text, and so the freeze matches the
+   * post-edit revision (#260 / #262).
+   */
+  function noteWritableSnapshot(): void {
+    if (privateNow(state.active)) return;
+    lastWritable = {
+      draft: deps.snapshot(),
+      contentRevision: deps.workspace.contentRevision(),
+    };
+  }
+
+  /**
+   * Last save of dirty text typed while writes were still allowed, without setting the
+   * document `private` flag (#257 switching steps / follow-up item 1).
+   * Returns whether that last save failed so callers can warn instead of announcing a clean
+   * Autosave-off (#260 Codex P1).
+   */
+  async function lastSaveBeforeSession(): Promise<{ saveFailed: boolean }> {
+    if (state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
+    const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
+    if (!canSave) return { saveFailed: false };
+    // Prefer the last may-write boundary: delayed `storage` can run after post-private typing
+    // already landed in the field while mayWrite() already returned false (#260 P1).
+    const boundary = lastWritable;
+    const frozen = boundary?.draft ?? deps.snapshot();
+    const frozenContentRevision = boundary?.contentRevision ?? deps.workspace.contentRevision();
+    lastWritable = undefined;
+    const pending = deps.saver.inFlight();
+    if (pending) await pending;
+    let freezeTarget = frozen;
+    if (state.active.id !== frozen.id) {
+      freezeTarget = {
+        ...frozen,
+        id: state.active.id,
+        revision: state.active.revision,
+      };
+    }
+    try { await deps.saver.drainChanges(); } catch { /* may already be failing */ }
+    const result = await deps.persistLastBeforePrivate({
+      ...freezeTarget,
+      updatedAt: Date.now(),
+    }, frozenContentRevision, { markPrivate: false });
+    deps.abandonChangeRun();
+    return { saveFailed: !result.saved };
+  }
+
   /** Global private-session preference changed (Settings / host prefs sync). */
   async function applySessionChange(sessionOn: boolean): Promise<void> {
     if (active) {
-      pendingSession = sessionOn;
       if (sessionOn) {
         deps.autosave.checked = false;
         deps.saver.cancel();
         syncPrivateMarker();
       }
+      // Same-tab host fan-out + storage can both arrive while the first last-save awaits.
+      // Do not queue a replay of the same target — that would re-snapshot post-session typing (#260 P1).
+      // A same-target reassertion after an opposite queue must cancel that stale pending first
+      // (on → off → on while in flight), or finish() would apply the stale value (#260 P1).
+      if (sessionApplyTarget === sessionOn) {
+        if (pendingSession !== undefined && pendingSession !== sessionOn) {
+          pendingSession = undefined;
+        }
+        return;
+      }
+      if (pendingSession === sessionOn) return;
+      pendingSession = sessionOn;
+      return;
+    }
+    // Echo after the transition already finished (second of CustomEvent / storage).
+    if (appliedSessionOn === sessionOn) {
+      mirrorFromDocument();
+      deps.syncAutosaveControl();
       return;
     }
     active = true;
+    sessionApplyTarget = sessionOn;
     beginGate();
     try {
       mirrorFromDocument();
       if (sessionOn) {
         deps.saver.cancel();
+        // Lock the per-document control while the last pre-session save runs (same as goPrivate).
+        if (!deps.controlBlocked()) deps.autosave.disabled = true;
         if (!deps.controlBlocked()) {
           status.clearNotices();
-          announce(AUTOSAVE_OFF);
+          const { saveFailed } = await lastSaveBeforeSession();
+          // Match goPrivate: do not paper over a failed last-save with AUTOSAVE_OFF (#260 P1).
+          if (saveFailed) {
+            status.announceAction(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
+          } else {
+            announce(AUTOSAVE_OFF);
+          }
         } else {
           status.showSaveState();
         }
         return;
       }
       // Session turned off: per-document flag decides.
+      lastWritable = undefined;
       if (!deps.autosave.checked) {
         status.showSaveState();
         return;
       }
+      noteWritableSnapshot();
       const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
       if (!canSave) {
         status.showSaveState();
@@ -175,7 +275,58 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         announce('Autosave on');
       }
     } finally {
+      appliedSessionOn = sessionOn;
       finish(false);
+    }
+  }
+
+  /**
+   * Offer Keep/Delete after going private. When true, `skipAutosaveOff` means a status message
+   * was already announced that must not be replaced by AUTOSAVE_OFF (#260 Codex P1 / P2).
+   */
+  async function offerDeleteSavedCopy(): Promise<{ skipAutosaveOff: boolean }> {
+    if (state.active.revision < 1) return { skipAutosaveOff: false };
+    // Bind deletion to this document before any await — defense if a switch somehow races the gate.
+    const targetId = state.active.id;
+    const targetRevision = state.active.revision;
+    const targetOwnership = state.ownership;
+    if (!targetOwnership || targetOwnership.documentId !== targetId) return { skipAutosaveOff: false };
+    const deleteSaved = await askConfirmChoice({
+      title: 'Delete the saved copy?',
+      message: 'Delete the saved copy of this document? Keep saved copy leaves it in your Documents list.',
+      confirmLabel: 'Delete saved copy',
+      cancelLabel: 'Keep saved copy',
+      returnFocus: deps.autosave,
+    });
+    if (!deleteSaved) return { skipAutosaveOff: false };
+    try {
+      if (!state.db || targetOwnership.documentId !== targetId) throw new Error('Storage unavailable');
+      if (state.active.id !== targetId || state.ownership !== targetOwnership || state.editBlock || deps.transferFrozen() || state.transitioning) {
+        throw new Error('Document changed');
+      }
+      // Keep the fence: this window goes on editing the same id privately.
+      if (!await deleteStoredDraft(state.db, targetId, targetRevision, await targetOwnership.writeFence())) {
+        throw new Error('Draft changed');
+      }
+      deps.clearDocumentBackups(targetId);
+      if (targetRevision >= 1) deps.postSignal('deleted', targetId, targetRevision);
+      if (state.active.id === targetId) {
+        state.active = { ...state.active, revision: 0, private: true };
+        deps.workspace.setDirty(true);
+      }
+      status.clearNotices();
+      // Deletion is durable; list refresh failure must not look like a failed delete (#260 Codex P2).
+      try {
+        await deps.refreshDrafts();
+      } catch {
+        status.announceAction('Saved copy deleted, but the document list could not be refreshed', { keepConflict: true });
+        return { skipAutosaveOff: true };
+      }
+      return { skipAutosaveOff: false };
+    } catch (error) {
+      if (error instanceof EditOwnershipLostError) deps.loseOwnership();
+      status.announceAction('Could not delete saved document; current text is kept', { keepConflict: true });
+      return { skipAutosaveOff: true };
     }
   }
 
@@ -222,41 +373,51 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       ...freezeTarget,
       private: true,
       updatedAt: Date.now(),
-    }, frozenContentRevision);
+    }, frozenContentRevision, { markPrivate: true });
     deps.abandonChangeRun();
 
-    if (result.saved) {
-      announce(AUTOSAVE_OFF);
-      return;
-    }
+    let warnSave = false;
+    let warnFlag = false;
 
-    // Flag-only update under the ownership fence when the full save failed.
-    let flagOk = false;
-    try {
-      if (state.db && state.ownership && state.ownership.documentId === state.active.id
-        && state.active.revision >= 1) {
-        const fence = await state.ownership.writeFence();
-        const flag = await updateDocumentPrivateFlag(
-          state.db, state.active.id, true, state.active.revision, fence,
-        );
-        if (flag.ok) {
-          state.active = flag.draft;
-          flagOk = true;
+    if (!result.saved) {
+      // Flag-only update under the ownership fence when the full save failed.
+      let flagOk = false;
+      try {
+        if (state.db && state.ownership && state.ownership.documentId === state.active.id
+          && state.active.revision >= 1) {
+          const fence = await state.ownership.writeFence();
+          const flag = await updateDocumentPrivateFlag(
+            state.db, state.active.id, true, state.active.revision, fence,
+          );
+          if (flag.ok) {
+            state.active = flag.draft;
+            flagOk = true;
+          }
         }
+      } catch (error) {
+        if (error instanceof EditOwnershipLostError) deps.loseOwnership();
       }
-    } catch (error) {
-      if (error instanceof EditOwnershipLostError) deps.loseOwnership();
+
+      if (!flagOk) {
+        warnFlag = true;
+      } else if (wasDirty && (!changeLogCovered || !deps.changeLogProtects()) && !state.storageProblem) {
+        // Re-check after awaits: a conflict copy drops held change records (#257 P1).
+        warnSave = true;
+      }
     }
 
-    if (!flagOk) {
+    const { skipAutosaveOff } = await offerDeleteSavedCopy();
+
+    if (warnFlag) {
       status.announceAction(PRIVATE_SWITCH_FLAG_FAILED, { keepConflict: true });
       return;
     }
-    // Re-check after awaits: a conflict copy drops held change records (#257 P1).
-    if (wasDirty && (!changeLogCovered || !deps.changeLogProtects()) && !state.storageProblem) {
+    if (warnSave) {
       status.announceAction(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
       return;
     }
+    // Keep delete-failure / list-refresh feedback visible (#260 Codex P1).
+    if (skipAutosaveOff) return;
     announce(AUTOSAVE_OFF);
   }
 
@@ -289,8 +450,10 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   /** After showDraft / document switch: mirror the shown document (and session). */
   function syncFromDocument(): void {
     if (active) return;
+    lastWritable = undefined;
     mirrorFromDocument();
     if (!deps.autosave.checked) deps.saver.cancel();
+    else noteWritableSnapshot();
   }
 
   /** Re-read global session after host/prefs sync, then mirror the shown document. */
@@ -305,6 +468,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   return {
     applyDocumentChange,
     applySessionChange,
+    noteWritableSnapshot,
     syncFromDocument,
     syncFromStorage,
     syncPrivateMarker,
