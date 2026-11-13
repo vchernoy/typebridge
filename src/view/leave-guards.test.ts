@@ -82,7 +82,10 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
       field,
       autosave,
       workspace,
-      saver: { cancel: vi.fn(() => undefined) },
+      saver: {
+        cancel: vi.fn(() => undefined),
+        inFlight: vi.fn(() => undefined),
+      },
       persist: async () => ({ saved: false, conflict: false }),
       snapshot: () => ({ ...state.active, text: field.value, title: 'T', updatedAt: 1 }),
       reloadBackup: {
@@ -191,6 +194,17 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(deps.saver.cancel).toHaveBeenCalled();
     expect(deps.markReloadDiscard).not.toHaveBeenCalled();
     expect(freezeForDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload refuses when a persist is already in flight (#256 residual P2)', async () => {
+    const { guards, deps, freezeForDiscard, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+    const inflight = Promise.resolve({ saved: true, conflict: false });
+    vi.mocked(deps.saver.inFlight).mockReturnValue(inflight);
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.saver.cancel).toHaveBeenCalled();
+    expect(freezeForDiscard).toHaveBeenCalledOnce();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
   });
 
   it('assert after discard consent ignores Autosave-on backup recreate (#256 review P0)', async () => {

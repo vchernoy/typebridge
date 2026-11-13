@@ -58,7 +58,9 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
   async function persist(): Promise<SaveResult> {
     if (deps.viewMode) return { saved: true, conflict: false };
     clearTimeout(saveTimer);
-    if (state.deleting || !deps.autosave.checked || !deps.workspace.dirty()) return { saved: !deps.workspace.dirty(), conflict: false };
+    if (state.deleting || state.transferFrozen || !deps.autosave.checked || !deps.workspace.dirty()) {
+      return { saved: !deps.workspace.dirty(), conflict: false };
+    }
     if (state.editBlock) return { saved: false, conflict: false };
     if (saving) return saving;
     saving = (async () => {
@@ -70,12 +72,12 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       let preparedRun: string | undefined;
       try {
         if (!state.db) throw new Error('Storage unavailable');
-        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
+        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock && !state.transferFrozen) {
           // Queued change records land first, so this save's cleanup covers every one of them.
           await deps.changes.idle();
           // Waiting yielded: Autosave may be off now, with private text typed since (#251 review).
-          // Never capture text unless every saving guard still holds.
-          if (state.deleting || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock) break;
+          // Never capture text unless every saving guard still holds — including discard/takeover freeze.
+          if (state.deleting || state.transferFrozen || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock) break;
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
           // Taken with the text and title: the row says which change records it already contains (#37 R2c).
@@ -170,7 +172,10 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     try { return await saving; } finally {
       saving = undefined;
       // An edit can arrive while the post-commit draft list is loading.
-      if (!state.deleting && deps.workspace.dirty() && deps.autosave.checked && !state.saveFailed && !state.editBlock) {
+      if (
+        !state.deleting && !state.transferFrozen && deps.workspace.dirty()
+        && deps.autosave.checked && !state.saveFailed && !state.editBlock
+      ) {
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => { void persist(); }, 300);
       }

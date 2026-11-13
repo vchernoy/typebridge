@@ -20,7 +20,11 @@ export type LeaveGuardDeps = {
   field: HTMLTextAreaElement;
   autosave: HTMLInputElement;
   workspace: Workspace;
-  saver: { cancel: () => void };
+  saver: {
+    cancel: () => void;
+    /** In-flight persist, if any — cancel() only clears the debounce timer. */
+    inFlight: () => Promise<SaveResult> | undefined;
+  };
   persist: () => Promise<SaveResult>;
   snapshot: () => StoredDraft;
   reloadBackup: {
@@ -176,13 +180,20 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       if (!discard) return false;
       if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
       // Dialog await: Autosave may have flipped on and started persist — refuse privacy discard
-      // and cancel any in-flight save so it cannot commit after we freeze (#256 Codex P1).
+      // so an in-flight commit cannot land the discarded text (#256 Codex P1 / residual P2).
       deps.saver.cancel();
       if (deps.autosave.checked || state.transferFrozen) return false;
-      // Freeze + suppress before the next await so Autosave prefs sync cannot persist discarded
-      // text while markReloadDiscard runs. Only this arm is thawed on cancel.
+      // Freeze before the inFlight check so a prefs-sync cannot start a new persist under us;
+      // cancel() does not abort a save already past its guards.
       deps.freezeForDiscard();
       reloadFreezeArmed = true;
+      if (deps.saver.inFlight() || deps.autosave.checked) {
+        reloadFreezeArmed = false;
+        deps.unfreezeAfterDiscard();
+        return false;
+      }
+      // Suppress before the next await so unload cannot recreate pendingDraft mid-marker write.
+      // Only this arm is thawed on cancel.
       stashedReloadBackup = deps.reloadBackup.take();
       deps.reloadBackup.setSuppressed(true);
       try {
