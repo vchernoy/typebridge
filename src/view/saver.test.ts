@@ -138,7 +138,7 @@ describe('persistLastBeforePrivate (#257)', () => {
       revision: 1,
     };
     const result = await saver.persistLastBeforePrivate(frozen, 1);
-    expect(result.conflict).toBe(true);
+    expect(result).toEqual({ saved: true, conflict: true });
     expect(state.active.id).toBe('copy');
     expect(rememberActive).toHaveBeenCalled();
     expect(takeOwnership).toHaveBeenCalledWith('copy');

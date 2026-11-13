@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   documentAutosaveChecked,
   PRIVATE_SWITCH_FLAG_FAILED,
@@ -73,6 +73,22 @@ describe('privateNow (#257 step 1)', () => {
     expect(privateSessionOn()).toBe(true);
     expect(privateNow({})).toBe(true);
     expect(documentAutosaveChecked({})).toBe(false);
+  });
+
+  it('fails closed before the first preference read when localStorage throws (#257 P0)', async () => {
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      get length() { return 0; },
+      key: () => null,
+      getItem: () => { throw new DOMException('Blocked', 'SecurityError'); },
+      setItem: () => { throw new DOMException('Blocked', 'SecurityError'); },
+      removeItem: () => undefined,
+      clear: () => undefined,
+    };
+    vi.resetModules();
+    const fresh = await import('./privacy');
+    expect(fresh.privateSessionOn()).toBe(true);
+    expect(fresh.privateNow({})).toBe(true);
+    expect(fresh.documentAutosaveChecked({})).toBe(false);
   });
 
   it('exposes the switch-time warning strings from the issue notes', () => {

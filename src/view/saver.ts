@@ -119,7 +119,8 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
         catch {
           if (status.shouldAttachDraftListRefreshFailure()) status.markDraftListRefreshFailed();
         }
-        return { saved: !result.conflict, conflict: createdConflict };
+        // A conflict copy still stored the frozen private snapshot — treat as saved (#257 P2).
+        return { saved: true, conflict: createdConflict };
       } catch (error) {
         if (preparedRun) deps.changes.saved(preparedRun, false);
         if (error instanceof EditOwnershipLostError) {
