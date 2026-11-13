@@ -1,196 +1,142 @@
 import { describe, expect, it } from 'vitest';
-import { TITLE_ONLY_CHANGE, applyChange, changeBetween, replayText, type ChangeRecord, type TextChange } from './change-log';
+import { applyChange, changeBetween, fieldRecord, replayDocument, type ChangeRecord } from './change-log';
+import { DOCUMENT_FIELDS, documentFields, type DocumentFields } from './document-fields';
 
 const DOC = 'doc-1';
-
-/** Deterministic pseudo-random numbers, so a failing case can be reproduced from its seed. */
+const initial = { text: 'Начало\n', title: 'Заметка', find: '', replace: '' };
 function rng(seed: number) {
   let state = seed;
   return (n: number) => { state = (state * 48271) % 2147483647; return state % n; };
 }
-const PIECES = ['а', 'Ё', 'щ', 'b', ' ', '\n', '🙂', 'é', 'é', '👩‍💻', 'Привет'];
-const TITLES = ['Заметка', 'Письмо', 'Черновик', 'Untitled document', 'Имя 🙂'];
-
-/** A random edit of `text`: insert, delete or replace a random range (may split surrogate pairs). */
+const PIECES = ['а', 'Ё', 'щ', 'b', ' ', '\n', '🙂', 'é', '👩‍💻', 'Привет', 'z'.repeat(300)];
 function randomEdit(text: string, next: (n: number) => number): string {
   const start = next(text.length + 1);
   const end = Math.min(text.length, start + next(6));
-  let inserted = '';
-  for (let i = next(4); i > 0; i--) inserted += PIECES[next(PIECES.length)];
-  return text.slice(0, start) + inserted + text.slice(next(3) === 0 ? start : end);
+  return text.slice(0, start) + PIECES[next(PIECES.length)] + text.slice(end);
 }
-
-type Session = { snapshots: { text: string; upTo: number }[]; records: ChangeRecord[]; texts: string[] };
-
-/**
- * Simulate an editing run the way the app will: each edit appends a record; a snapshot is
- * sometimes taken (text + upTo). `texts[seq]` is the true text after change `seq`.
- * When `withTitles` is true, some edits are title-only or also set a title (#37 R2c 2d-1).
- */
-function simulate(seed: number, edits: number, initial = 'Начало\n', withTitles = false): Session {
+function simulate(seed: number) {
   const next = rng(seed);
-  let text = initial;
-  const texts = [initial];
+  const fields = { ...initial };
+  const states = [{ ...fields }];
   const records: ChangeRecord[] = [];
-  const snapshots = [{ text, upTo: 0 }];
-  for (let seq = 1; seq <= edits; seq++) {
-    const kind = withTitles ? next(5) : 0; // 0–2 text, 3 title-only, 4 text+title
-    if (kind === 3) {
-      const title = TITLES[next(TITLES.length)]! + String(seq);
-      records.push({ documentId: DOC, seq, run: 'run-a', change: TITLE_ONLY_CHANGE, length: text.length, title });
-    } else {
-      let after = randomEdit(text, next);
-      if (after === text) after = text + 'x';
-      const change = changeBetween(text, after)!;
-      text = after;
-      const record: ChangeRecord = { documentId: DOC, seq, run: 'run-a', change, length: after.length };
-      if (kind === 4) record.title = TITLES[next(TITLES.length)]! + String(seq);
-      records.push(record);
-    }
-    texts.push(text);
-    if (next(5) === 0) snapshots.push({ text, upTo: seq });
+  for (let seq = 1; seq <= 80; seq++) {
+    const field = DOCUMENT_FIELDS[next(4)];
+    const after = randomEdit(fields[field], next);
+    records.push(fieldRecord({ documentId: DOC, seq, run: 'run-a', field }, fields[field], after));
+    fields[field] = after;
+    states.push({ ...fields });
   }
-  return { snapshots, records, texts };
+  return { states, records };
 }
 
 describe('changeBetween / applyChange', () => {
-  it('round-trips random edits exactly, including emoji and combining marks', () => {
+  it('round-trips random UTF-16 edits, including emoji and combining marks', () => {
     const next = rng(11);
-    let text = 'Ёлка 🙂 é';
+    let text = 'Ёлка 🙂 é';
     for (let i = 0; i < 2_000; i++) {
       const after = randomEdit(text, next);
       const change = changeBetween(text, after);
-      if (after === text) { expect(change).toBeUndefined(); continue; }
-      expect(applyChange(text, change!)).toBe(after);
+      if (after === text) expect(change).toBeUndefined();
+      else expect(applyChange(text, change!)).toBe(after);
       text = after;
     }
   });
-
-  it('refuses a change whose deleted text is not at its position', () => {
+  it('refuses wrong deleted text or an out-of-bounds offset', () => {
     expect(applyChange('abc', [1, 'x', 'y'])).toBeUndefined();
     expect(applyChange('abc', [4, '', 'y'])).toBeUndefined();
     expect(applyChange('abc', [1, 'b', 'Б'])).toBe('aБc');
   });
 });
 
-describe('replayText: snapshot plus a cut log equals the text at the cut', () => {
-  it('for random sessions, every snapshot and every crash point', () => {
-    for (let seed = 1; seed <= 60; seed++) {
-      const { snapshots, records, texts } = simulate(seed, 80);
-      for (let cut = 0; cut <= records.length; cut++) {
-        // A crash after `cut` changes reached storage: the log holds 1..cut, the latest snapshot ≤ cut.
-        const stored = records.slice(0, cut);
-        const snapshot = snapshots.filter(s => s.upTo <= cut).at(-1)!;
-        const result = replayText(DOC, snapshot.text, snapshot.upTo, stored);
-        expect(result, `seed ${seed}, cut ${cut}`).toEqual({ text: texts[cut], lastSeq: cut, applied: cut - snapshot.upTo });
-      }
-    }
+describe('four-field records and consistent replay (#257 2a)', () => {
+  it.each(DOCUMENT_FIELDS)('%s uses values below 256 UTF-16 units and deltas at/above 256', field => {
+    const id = { documentId: DOC, seq: 1, run: 'r', field };
+    expect(fieldRecord(id, 'old', '')).toEqual({ ...id, value: '', previous: 'old' });
+    expect(fieldRecord(id, '', 'x'.repeat(255))).toEqual({ ...id, value: 'x'.repeat(255), previous: '' });
+    const long = fieldRecord(id, '', 'x'.repeat(256));
+    expect(long).toEqual({ ...id, change: [0, '', 'x'.repeat(256)], length: 256 });
+    expect(replayDocument(DOC, { ...initial, [field]: '' }, 0, [long])[field]).toBe('x'.repeat(256));
+    expect(fieldRecord(id, 'x'.repeat(300), 'short')).toEqual({ ...id, change: [0, 'x'.repeat(300), 'short'], length: 5 });
   });
 
-  it('ignores records already in the snapshot and works on records in any order', () => {
-    const { records, texts } = simulate(3, 30);
-    const shuffled = [...records].reverse();
-    expect(replayText(DOC, texts[10]!, 10, shuffled)).toEqual({ text: texts[30], lastSeq: 30, applied: 20 });
-  });
-
-  it('a snapshot newer than the log (its records already cleaned up) replays nothing', () => {
-    const { records, texts } = simulate(4, 20);
-    expect(replayText(DOC, texts[20]!, 20, records.slice(0, 15))).toEqual({ text: texts[20], lastSeq: 20, applied: 0 });
-  });
-});
-
-describe('replayText: a damaged log stops at the last consistent text', () => {
-  const { records, texts } = simulate(7, 40);
-
-  it('stops before a missing change-id', () => {
-    const withGap = records.filter(r => r.seq !== 25);
-    expect(replayText(DOC, texts[0]!, 0, withGap)).toEqual({ text: texts[24], lastSeq: 24, applied: 24, stopped: 'gap' });
-  });
-
-  it('stops when the first later change is not the next one', () => {
-    expect(replayText(DOC, texts[10]!, 10, records.slice(12))).toEqual({ text: texts[10], lastSeq: 10, applied: 0, stopped: 'gap' });
-  });
-
-  it('never continues a crashed run with another run that started from the same snapshot', () => {
-    // Run A crashed after 1..20; run B started from the original snapshot and wrote 21.. on other text.
-    const runB = simulate(99, 10, texts[0]).records.map(r => ({ ...r, seq: r.seq + 20, run: 'run-b' }));
-    const result = replayText(DOC, texts[0]!, 0, [...records.slice(0, 20), ...runB]);
-    expect(result).toEqual({ text: texts[20], lastSeq: 20, applied: 20, stopped: 'other-run' });
-  });
-
-  it('stops at a change that does not fit the text (wrong deleted text or length)', () => {
-    const wrongDeleted = records.map(r => r.seq === 15 ? { ...r, change: [r.change[0], r.change[1] + 'Ж', r.change[2]] as TextChange } : r);
-    expect(replayText(DOC, texts[0]!, 0, wrongDeleted)).toEqual({ text: texts[14], lastSeq: 14, applied: 14, stopped: 'mismatch' });
-    const wrongLength = records.map(r => r.seq === 15 ? { ...r, length: r.length + 1 } : r);
-    expect(replayText(DOC, texts[0]!, 0, wrongLength)).toEqual({ text: texts[14], lastSeq: 14, applied: 14, stopped: 'mismatch' });
-  });
-
-  it('treats an invalid record as a gap and ignores other documents', () => {
-    const damaged: unknown[] = records.map(r => r.seq === 30 ? { ...r, change: 'not a change' } : r);
-    damaged.push({ ...records[0], documentId: 'other', seq: 1 }, null, 'junk', { documentId: DOC });
-    expect(replayText(DOC, texts[0]!, 0, damaged)).toEqual({ text: texts[29], lastSeq: 29, applied: 29, stopped: 'gap' });
-  });
-
-  it('backstop: replaying onto unrelated text stops at the first change that does not fit', () => {
-    // Lineage is ensured by upTo and run; this check only catches what they would miss.
-    expect(replayText(DOC, 'совсем другой текст', 0, records).stopped).toBe('mismatch');
-  });
-});
-
-describe('replayText: title changes (#37 R2c 2d-1)', () => {
-  it('returns the last title set by an applied record', () => {
-    // Fails on old code: ReplayResult has no title field.
-    const records: ChangeRecord[] = [
-      { documentId: DOC, seq: 1, run: 'run-a', change: [0, '', 'a'], length: 1 },
-      { documentId: DOC, seq: 2, run: 'run-a', change: TITLE_ONLY_CHANGE, length: 1, title: 'Первое' },
-      { documentId: DOC, seq: 3, run: 'run-a', change: [1, '', 'b'], length: 2, title: 'Второе' },
-      { documentId: DOC, seq: 4, run: 'run-a', change: TITLE_ONLY_CHANGE, length: 2, title: 'Третье' },
-    ];
-    expect(replayText(DOC, '', 0, records)).toEqual({
-      text: 'ab', lastSeq: 4, applied: 4, title: 'Третье',
-    });
-  });
-
-  it('old records without a title still replay', () => {
-    // Fails if validation rejects missing title, or if replay invents a title.
-    const records: ChangeRecord[] = [
-      { documentId: DOC, seq: 1, run: 'run-a', change: [0, '', 'Hi'], length: 2 },
-      { documentId: DOC, seq: 2, run: 'run-a', change: [2, '', '!'], length: 3 },
-    ];
-    expect(replayText(DOC, '', 0, records)).toEqual({ text: 'Hi!', lastSeq: 2, applied: 2 });
-    expect('title' in replayText(DOC, '', 0, records)).toBe(false);
-  });
-
-  it('a title record past a gap is not applied', () => {
-    // Fails if title is taken from a record after a stop, or if title-only skips the gap check.
-    const records: ChangeRecord[] = [
-      { documentId: DOC, seq: 1, run: 'run-a', change: [0, '', 'a'], length: 1, title: 'A' },
-      // seq 2 missing
-      { documentId: DOC, seq: 3, run: 'run-a', change: TITLE_ONLY_CHANGE, length: 1, title: 'Past gap' },
-    ];
-    expect(replayText(DOC, '', 0, records)).toEqual({
-      text: 'a', lastSeq: 1, applied: 1, title: 'A', stopped: 'gap',
-    });
-  });
-
-  it('property: interleaved random title edits replay text and the last title', () => {
-    // Fails on old code that ignores title fields or breaks when title-only records appear.
+  it('property: every crash cut and snapshot recovers one real four-field instant', () => {
     for (let seed = 1; seed <= 40; seed++) {
-      const { snapshots, records, texts } = simulate(seed, 60, 'Начало\n', true);
+      const { records, states } = simulate(seed);
+      expect(records.some(r => r.change)).toBe(true);
+      expect(records.some(r => r.value !== undefined)).toBe(true);
       for (let cut = 0; cut <= records.length; cut++) {
-        const stored = records.slice(0, cut);
-        const snapshot = snapshots.filter(s => s.upTo <= cut).at(-1)!;
-        const result = replayText(DOC, snapshot.text, snapshot.upTo, stored);
-        // Title is only from records applied after the snapshot, never from earlier ones.
-        let expectedTitle: string | undefined;
-        for (const record of stored) {
-          if (record.seq > snapshot.upTo && record.title !== undefined) expectedTitle = record.title;
-        }
-        const expected = expectedTitle === undefined
-          ? { text: texts[cut], lastSeq: cut, applied: cut - snapshot.upTo }
-          : { text: texts[cut], lastSeq: cut, applied: cut - snapshot.upTo, title: expectedTitle };
-        expect(result, `seed ${seed}, cut ${cut}`).toEqual(expected);
+        const upTo = Math.max(0, cut - (cut % 11));
+        const result = replayDocument(DOC, states[upTo], upTo, records.slice(0, cut).reverse());
+        expect(result, `seed ${seed}, cut ${cut}`).toEqual({ ...states[cut], lastSeq: cut, applied: cut - upTo });
       }
     }
   });
+
+  it('missing find/replace mean empty; a snapshot newer than the log replays nothing', () => {
+    expect(documentFields({ text: 'a', title: 'T' })).toEqual({ text: 'a', title: 'T', find: '', replace: '' });
+    const { records, states } = simulate(4);
+    expect(replayDocument(DOC, states[80], 80, records.slice(0, 70))).toEqual({ ...states[80], lastSeq: 80, applied: 0 });
+  });
+
+  const interleaved: ChangeRecord[] = [
+    { documentId: DOC, seq: 1, run: 'r', field: 'text', value: 'a', previous: initial.text },
+    { documentId: DOC, seq: 2, run: 'r', field: 'find', value: 'query', previous: '' },
+    { documentId: DOC, seq: 3, run: 'r', field: 'title', value: 'New', previous: initial.title },
+    { documentId: DOC, seq: 4, run: 'r', field: 'replace', value: 'replacement', previous: '' },
+  ];
+  const prefix: DocumentFields = { ...initial, text: 'a', find: 'query' };
+  it('stops all fields at a gap instead of applying a later title/replace', () => {
+    expect(replayDocument(DOC, initial, 0, interleaved.filter(r => r.seq !== 3))).toEqual({ ...prefix, lastSeq: 2, applied: 2, stopped: 'gap' });
+    expect(replayDocument(DOC, initial, 0, interleaved.slice(1))).toMatchObject({ ...initial, applied: 0, stopped: 'gap' });
+  });
+  it('never crosses editing runs, even for a full value record', () => {
+    expect(replayDocument(DOC, initial, 0, interleaved.map(r => r.seq === 3 ? { ...r, run: 'other' } : r))).toEqual({ ...prefix, lastSeq: 2, applied: 2, stopped: 'other-run' });
+  });
+  it.each([
+    { change: [0, 'wrong', 'x'.repeat(300)], length: 300 },
+    { change: [1, '', 'x'.repeat(300)], length: 300 },
+  ])('stops every field at a mismatching long change %j', delta => {
+    const records = interleaved.map(r => r.seq === 3 ? { documentId: DOC, seq: 3, run: 'r', field: 'title', ...delta } : r);
+    expect(replayDocument(DOC, initial, 0, records)).toEqual({ ...prefix, lastSeq: 2, applied: 2, stopped: 'mismatch' });
+  });
+  it.each([
+    { field: 'unknown', value: 'x' },
+    { field: 'find', value: 42 },
+    { field: 'find', value: 'x'.repeat(256) },
+    { field: 'find', value: '', change: [0, '', ''] },
+    { field: 'find', change: [-1, '', 'x'.repeat(300)], length: 300 },
+    { field: 'find', change: [0, '', 'short'], length: -1 },
+    { field: 'find', value: 'x', previous: 42 },
+    { field: 'find', value: 'x', previous: 'x'.repeat(256) },
+    { change: [0, '', ''], length: 0, title: 'old schema' },
+  ])('invalid record stops the document, including an invalid tail %j', invalid => {
+    const bad = { documentId: DOC, seq: 3, run: 'r', ...invalid };
+    for (const records of [[...interleaved.slice(0, 2), bad], [...interleaved.slice(0, 2), bad, interleaved[3]]]) {
+      expect(replayDocument(DOC, initial, 0, records)).toEqual({ ...prefix, lastSeq: 2, applied: 2, stopped: 'gap' });
+    }
+  });
+  it('ignores other documents and unrelated malformed data', () => {
+    expect(replayDocument(DOC, initial, 0, [null, 'junk', ...interleaved, { ...interleaved[0], documentId: 'other' }])).toEqual({ text: 'a', title: 'New', find: 'query', replace: 'replacement', lastSeq: 4, applied: 4 });
+  });
+});
+
+it.each(DOCUMENT_FIELDS)('a mismatching %s predecessor stops every later field', field => {
+  const record = fieldRecord({ documentId: DOC, seq: 1, run: 'r', field }, 'prior', 'next');
+  const later = fieldRecord({ documentId: DOC, seq: 2, run: 'r', field: 'title' }, initial.title, 'later');
+  expect(replayDocument(DOC, { ...initial, [field]: 'foreign' }, 0, [record, later])).toEqual({
+    ...initial, [field]: 'foreign', lastSeq: 0, applied: 0, stopped: 'mismatch',
+  });
+});
+
+it.each(DOCUMENT_FIELDS)('%s long-to-short and long-to-empty deltas still fit-check and replay', field => {
+  const before = 'x'.repeat(256);
+  for (const after of ['x'.repeat(255), '']) {
+    const record = fieldRecord({ documentId: DOC, seq: 1, run: 'r', field }, before, after);
+    expect(record.change).toBeDefined();
+    expect(record).not.toHaveProperty('previous');
+    expect(replayDocument(DOC, { ...initial, [field]: before }, 0, [record])).toEqual({
+      ...initial, [field]: after, lastSeq: 1, applied: 1,
+    });
+    expect(replayDocument(DOC, { ...initial, [field]: 'foreign' }, 0, [record])).toMatchObject({ applied: 0, stopped: 'mismatch' });
+  }
 });

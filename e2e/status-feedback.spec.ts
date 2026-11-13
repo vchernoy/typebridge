@@ -1,3 +1,4 @@
+import { DATABASE_VERSION } from '../src/editor/indexeddb';
 import { answerNextConfirmation } from './settings-helpers';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { documentAction, openSettings, selectDocument, setAutosave, setPrivateSession } from './settings-helpers';
@@ -464,11 +465,11 @@ test('a database upgrade in another tab stays visible after action feedback and 
   await expect(status(page)).toHaveText('Saved locally');
   const other = await context.newPage();
   await other.goto('/404');
-  await other.evaluate(() => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 6);
+  await other.evaluate(version => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', version + 1);
     open.onsuccess = () => { open.result.close(); resolve(); };
     open.onerror = () => reject(open.error);
-  }));
+  }), DATABASE_VERSION);
   const upgraded = 'Storage was upgraded in another tab. Copy or export unsaved text, then reload.';
   await expect(status(page)).toHaveText(upgraded);
   await documentAction(page, '#export-txt');

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { TITLE_ONLY_CHANGE, replayText, type ChangeRecord } from '../editor/change-log';
+import { replayDocument, type ChangeRecord } from '../editor/change-log';
 import { createChangeWriter } from './change-writer';
 
 /** A fake shown document and store: what the saver and storage would see. */
 function harness(stored = { text: 'Сохранено', title: 'Заметка', upTo: 0 }) {
   const env = {
-    id: 'doc', generation: 1, text: stored.text, title: stored.title, autosave: true,
-    row: { text: stored.text, title: stored.title, upTo: stored.upTo },
+    id: 'doc', generation: 1, text: stored.text, title: stored.title, find: '', replace: '', autosave: true,
+    row: { text: stored.text, title: stored.title, find: '', replace: '', upTo: stored.upTo },
     records: [] as ChangeRecord[],
     failNext: 0,
     runs: 0,
@@ -14,8 +14,7 @@ function harness(stored = { text: 'Сохранено', title: 'Заметка',
   const writer = createChangeWriter({
     mayRecord: () => env.autosave,
     shown: () => ({ id: env.id, generation: env.generation }),
-    text: () => env.text,
-    title: () => env.title,
+    fields: () => env,
     append: async record => {
       await Promise.resolve();
       if (env.failNext > 0) { env.failNext--; throw new Error('quota'); }
@@ -28,12 +27,12 @@ function harness(stored = { text: 'Сохранено', title: 'Заметка',
   /** The commit transaction: the row, then the cleanup it does. */
   const commit = (log: ReturnType<typeof writer.upToForSave>, text: string, title = env.title) => {
     env.records = env.records.filter(r => r.run === log.keepRun && r.seq > log.upTo);
-    env.row = { text, title, upTo: log.upTo };
+    env.row = { text, title, find: env.find, replace: env.replace, upTo: log.upTo };
   };
   /** A full save the way the saver does it: wait for queued records, take text + title + upTo, commit, report. */
   const save = async (ok = true) => {
     await writer.idle();
-    const log = writer.upToForSave(env.id, env.text, env.title);
+    const log = writer.upToForSave(env.id, env);
     if (ok) commit(log, env.text, env.title);
     writer.saved(log.keepRun, ok);
     return log;
@@ -41,7 +40,7 @@ function harness(stored = { text: 'Сохранено', title: 'Заметка',
   /** What crash recovery would rebuild now: the stored row plus the log. */
   const recovered = async () => {
     await writer.idle();
-    return replayText(env.id, env.row.text, env.row.upTo, env.records);
+    return replayDocument(env.id, env.row, env.row.upTo, env.records);
   };
   return { env, writer, type, rename, save, commit, recovered };
 }
@@ -127,7 +126,7 @@ describe('change writer', () => {
   it('edits made while a run-starting save is in flight continue the saved text once it commits', async () => {
     const { env, writer, type, commit, recovered } = harness({ text: 'Старое', title: 'T', upTo: 5 });
     env.text = 'Личное';
-    const log = writer.upToForSave(env.id, env.text, env.title); // the save of 'Личное' is in flight
+    const log = writer.upToForSave(env.id, env); // the save of 'Личное' is in flight
     expect(log).toMatchObject({ upTo: 0 });
     type('Личное!'); type('Личное!!');
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -142,7 +141,7 @@ describe('change writer', () => {
   it('records held for a save that fails are dropped (#251 review)', async () => {
     const { env, writer, type, recovered } = harness({ text: 'a', title: 'T', upTo: 0 });
     env.text = 'b';
-    const log = writer.upToForSave(env.id, env.text, env.title);
+    const log = writer.upToForSave(env.id, env);
     type('bc');
     writer.saved(log.keepRun, false); // the row is still 'a'
     await writer.idle();
@@ -155,7 +154,7 @@ describe('change writer', () => {
     await save();
     type('X');
     await writer.idle();
-    writer.upToForSave(env.id, env.text, env.title); // in flight, not reported yet
+    writer.upToForSave(env.id, env); // in flight, not reported yet
     type('XY');
     await writer.idle();
     expect(env.records.map(r => r.seq)).toEqual([1, 2]);
@@ -164,8 +163,8 @@ describe('change writer', () => {
   it('a run-starting save removes a crashed run\'s longer tail (#251 review)', async () => {
     const { env, type, save, recovered } = harness({ text: 'a', title: 'T', upTo: 0 });
     env.records = [
-      { documentId: 'doc', seq: 1, run: 'crashed', change: [1, '', 'b'], length: 2 },
-      { documentId: 'doc', seq: 2, run: 'crashed', change: [2, '', 'c'], length: 3 },
+      { documentId: 'doc', seq: 1, run: 'crashed', field: 'text', value: 'ab', previous: 'a' },
+      { documentId: 'doc', seq: 2, run: 'crashed', field: 'text', value: 'abc', previous: 'ab' },
     ];
     env.text = 'ax';
     await save();
@@ -212,7 +211,7 @@ describe('change writer', () => {
     rename('Новое имя');
     await writer.idle();
     expect(env.records).toEqual([{
-      documentId: 'doc', seq: 1, run: 'run-1', change: TITLE_ONLY_CHANGE, length: 'Сохранено'.length, title: 'Новое имя',
+      documentId: 'doc', seq: 1, run: 'run-1', field: 'title', value: 'Новое имя', previous: 'Заметка',
     }]);
     expect(await recovered()).toMatchObject({ text: 'Сохранено', lastSeq: 1, title: 'Новое имя', applied: 1 });
   });
@@ -223,7 +222,7 @@ describe('change writer', () => {
     const { env, writer, type, commit, save, recovered } = harness();
     await save();
     env.title = 'Переименовано'; // title changed without a log record (e.g. unrecorded edit)
-    const log = writer.upToForSave(env.id, env.text, env.title);
+    const log = writer.upToForSave(env.id, env);
     expect(log.upTo).toBe(0);
     type('Сохранено!');
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -266,7 +265,7 @@ describe('change writer', () => {
     await save(); // covers the failed run and starts a new one
     expect(writer.protects()).toBe(true);
     env.text = 'held'; // unrecorded: save must anchor
-    const log = writer.upToForSave(env.id, env.text, env.title);
+    const log = writer.upToForSave(env.id, env);
     expect(writer.protects()).toBe(false); // anchor pending
     writer.saved(log.keepRun, true);
     expect(writer.protects()).toBe(true);
@@ -289,7 +288,7 @@ describe('change writer', () => {
 
     events.length = 0;
     env.text = 'new';
-    const log = writer.upToForSave(env.id, env.text, env.title);
+    const log = writer.upToForSave(env.id, env);
     type('new!');
     writer.saved(log.keepRun, false);
     await writer.idle();
@@ -308,7 +307,7 @@ describe('change writer', () => {
     type('Сохранено!!');
     await writer.idle();
     env.text = 'held-after-fail';
-    const log = writer.upToForSave(env.id, env.text, env.title);
+    const log = writer.upToForSave(env.id, env);
     writer.saved(log.keepRun, false);
     expect(writer.protects()).toBe(false);
     expect(writer.runOf(env.id)).toBe(log.keepRun);
@@ -328,4 +327,63 @@ describe('change writer', () => {
     await writer.idle();
     expect(events).toEqual([]);
   });
+});
+
+it('interleaves all four fields in one sequence, with short values and long changes', async () => {
+  const { env, writer, save, recovered } = harness();
+  await save();
+  env.find = 'needle'; writer.edit();
+  env.text = 'x'.repeat(256); writer.edit();
+  env.replace = 'replacement'; writer.edit();
+  env.title = 'Rename'; writer.edit();
+  env.find = 'n'.repeat(300); writer.edit();
+  await writer.idle();
+  expect(env.records.map(r => [r.seq, r.field, r.value !== undefined ? 'value' : 'change'])).toEqual([
+    [1, 'find', 'value'], [2, 'text', 'change'], [3, 'replace', 'value'], [4, 'title', 'value'], [5, 'find', 'change'],
+  ]);
+  expect(await recovered()).toMatchObject({ text: env.text, title: env.title, find: env.find, replace: env.replace, lastSeq: 5 });
+  await save();
+  expect(env.row).toMatchObject({ find: env.find, replace: env.replace, upTo: 5 });
+  expect(env.records).toEqual([]);
+});
+
+it.each(['find', 'replace'] as const)('unrecorded %s edits hold later records until their anchor save succeeds', async field => {
+  const { env, writer, save } = harness();
+  await save();
+  env[field] = 'unrecorded';
+  const log = writer.upToForSave(env.id, env);
+  env.title = 'later'; writer.edit();
+  await Promise.resolve();
+  expect(writer.protects()).toBe(false);
+  expect(env.records).toEqual([]);
+  writer.saved(log.keepRun, false);
+  await writer.idle();
+  expect(env.records).toEqual([]);
+});
+
+it('one failed field append stops the whole document, including later fields', async () => {
+  const { env, writer, save, recovered } = harness();
+  await save();
+  env.find = 'durable'; writer.edit();
+  await writer.idle();
+  env.failNext = 1;
+  env.replace = 'lost'; writer.edit();
+  env.text = 'must not land'; writer.edit();
+  env.title = 'must not land either'; writer.edit();
+  expect(await recovered()).toMatchObject({ text: 'Сохранено', title: 'Заметка', find: 'durable', replace: '', lastSeq: 1 });
+  expect(writer.protects()).toBe(false);
+});
+
+it('the privacy gate blocks every field, while captured pre-private records can still land', async () => {
+  const { env, writer, save, recovered } = harness();
+  await save();
+  env.find = 'public find'; writer.edit();
+  env.replace = 'public replace'; writer.edit();
+  env.autosave = false;
+  env.text = 'SECRET body'; env.title = 'SECRET title'; env.find = 'SECRET find'; env.replace = 'SECRET replace';
+  writer.edit();
+  await writer.idle();
+  expect(JSON.stringify(env.records)).not.toContain('SECRET');
+  expect(await recovered()).toMatchObject({ text: 'Сохранено', title: 'Заметка', find: 'public find', replace: 'public replace', lastSeq: 2 });
+  expect(writer.protects()).toBe(false);
 });

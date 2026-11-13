@@ -19,3 +19,7 @@ Implemented portions of the original backlog include the shell/live input, both 
 
 Current follow-ups and priorities are listed once, in [ROADMAP.md](ROADMAP.md); see also [audit #71](https://github.com/vchernoy/typebridge/issues/71).
 
+
+## #257 private mode: step 2a model/log
+
+Four-field document storage and a shared value-or-change recovery log are implemented in this change, pending independent review/CI. Refs #257, #255, #37. Undo/Redo behavior stays unchanged. Document-bound Find/Replace UI (2b), residuals (2c), new-private-document traces (3), and clear local data (4) are later PRs. See the architecture for the boundary; the search-UI privacy checklist is not complete in 2a.

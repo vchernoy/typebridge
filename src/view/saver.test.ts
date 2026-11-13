@@ -164,6 +164,7 @@ describe('persistLastBeforePrivate (#257)', () => {
       id: 'doc',
       title: 'T',
       text: 'pre-session',
+      find: 'pre-session find', replace: 'pre-session replace',
       updatedAt: 2,
       revision: 2,
     };
@@ -210,13 +211,17 @@ describe('persistLastBeforePrivate (#257)', () => {
       id: 'doc',
       title: 'T',
       text: 'pre-session',
+      find: 'pre-session find', replace: 'pre-session replace',
       updatedAt: 1,
       revision: 1,
     };
+    state.active.find = 'SECRET find'; state.active.replace = 'SECRET replace';
     const result = await saver.persistLastBeforePrivate(frozen, 1, { markPrivate: false });
     expect(result).toEqual({ saved: true, conflict: false });
     const committedArg = vi.mocked(commitOrCreateConflictCopy).mock.calls[0]![1] as StoredDraft;
     expect(committedArg.text).toBe('pre-session');
+    expect(committedArg.find).toBe('pre-session find');
+    expect(committedArg.replace).toBe('pre-session replace');
     expect(committedArg.private).toBeUndefined();
     expect(state.active.private).toBeUndefined();
     expect(state.active.text).toBe('pre-session');

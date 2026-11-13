@@ -1,3 +1,4 @@
+import { DATABASE_VERSION } from '../src/editor/indexeddb';
 import { answerNextConfirmation } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 import { documentAction } from './settings-helpers';
@@ -29,11 +30,11 @@ test('database version change closes the old connection and warns the editor', a
   const second = await context.newPage();
   await second.goto('/editor.html');
   await expect(second.locator('#editor')).toBeEnabled();
-  const upgraded = await second.evaluate(() => new Promise<boolean>((resolve, reject) => {
-    const request = indexedDB.open('typebridge', 6);
+  const upgraded = await second.evaluate(version => new Promise<boolean>((resolve, reject) => {
+    const request = indexedDB.open('typebridge', version + 1);
     request.onsuccess = () => { request.result.close(); resolve(true); };
     request.onerror = () => reject(request.error);
-  }));
+  }), DATABASE_VERSION);
   expect(upgraded).toBe(true);
   await expect(page.getByRole('alert')).toContainText('upgraded in another tab');
 });
