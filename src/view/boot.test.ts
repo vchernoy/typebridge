@@ -8,7 +8,7 @@ const ID_NEW = '33333333-3333-4333-8333-333333333333';
 const doc = (id: string, over: Partial<StoredDraft> = {}): StoredDraft => ({ id, title: 'T', text: 'x', updatedAt: 1, revision: 1, ...over } as StoredDraft);
 const placeholder = doc('placeholder', { revision: 0 });
 const fresh = (): StoredDraft => doc('fresh', { revision: 0, text: '', title: 'Untitled document 2' });
-const base = { drafts: [doc(ID_A), doc(ID_B)], selected: null, pending: undefined, secondaryHostWindow: false, allocateNew: fresh, fallback: placeholder };
+const base = { drafts: [doc(ID_A), doc(ID_B)], selected: null, pending: undefined, hostWindow: false, allocateNew: fresh, fallback: placeholder };
 
 describe('chooseBootDocument', () => {
   it('opens the remembered document, else the newest saved one, else the placeholder', () => {
@@ -30,11 +30,11 @@ describe('chooseBootDocument', () => {
     expect(choice).toEqual({ chosen: base.drafts[1], restorePending: false, clearPendingCopy: true });
   });
 
-  it('starts a secondary host window on a fresh document instead of the newest one', () => {
-    expect(chooseBootDocument({ ...base, secondaryHostWindow: true }).chosen.id).toBe('fresh');
+  it('starts a host window without a saved identity on a fresh document instead of the newest one', () => {
+    expect(chooseBootDocument({ ...base, hostWindow: true }).chosen.id).toBe('fresh');
     // A remembered never-saved id keeps that id for the fresh document.
-    expect(chooseBootDocument({ ...base, secondaryHostWindow: true, selected: ID_NEW }).chosen.id).toBe(ID_NEW);
+    expect(chooseBootDocument({ ...base, hostWindow: true, selected: ID_NEW }).chosen.id).toBe(ID_NEW);
     // A remembered saved document still wins.
-    expect(chooseBootDocument({ ...base, secondaryHostWindow: true, selected: ID_B }).chosen.id).toBe(ID_B);
+    expect(chooseBootDocument({ ...base, hostWindow: true, selected: ID_B }).chosen.id).toBe(ID_B);
   });
 });

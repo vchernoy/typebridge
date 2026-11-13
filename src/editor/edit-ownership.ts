@@ -5,8 +5,8 @@ import { editOwnerLockName, mayAcquireEditOwnership } from '../view/ownership';
 export type EditOwnership = {
   readonly documentId: string;
   /**
-   * Credentials for the IndexedDB write gate. The fence is claimed on acquire; if that claim
-   * failed (a storage error), it is claimed again here, still under the lock. Rejects with
+   * Credentials for the IndexedDB write gate. Saved documents claim on acquire; new documents
+   * defer the claim until this first write. Failed claims retry here, still under the lock. Rejects with
    * EditOwnershipLostError after release or loss.
    */
   writeFence(): Promise<WriteFence>;

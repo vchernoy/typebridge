@@ -763,8 +763,8 @@ async function salvageOnOwn(documentId: string): Promise<void> {
   if (viewMode || !state.db) return;
   const ownership = state.ownership;
   if (!ownership || ownership.documentId !== documentId) return;
-  if (!await getStoredDraft(state.db, documentId)) return;
   try {
+    if (!await getStoredDraft(state.db, documentId)) return;
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
     const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), { text: field.value, title: shownTitle, ...documentSearch.values() });
     if (copy) await announceRecovered(copy, documentId);
@@ -820,7 +820,8 @@ for (const event of ['historychange', 'compositionend']) draftTitle.addEventList
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, privateMarker, workspace, viewMode, embedded,
-  syncIdentity: () => rememberActive(),
+  // Boot still needs its prior hint; its explicit rememberActive runs after selection.
+  syncIdentity: () => { if (!field.disabled) rememberActive(); },
   transferFrozen: () => state.transferFrozen,
   controlBlocked: () => autosaveControlBlocked(),
   journalEdit: () => { journalEdit(); },
@@ -1071,7 +1072,7 @@ if (!viewMode) {
   // Host title bar (#175 step 8) edits this window's title: let it start a takeover too,
   // and hold what was typed there the same way.
   exposeEditorWindowApi({
-    __typebridgeStoredDocumentId: () => newPrivateDocument(state.active) ? '' : state.active.id,
+    __typebridgeStoredDocumentId: () => field.disabled ? undefined : newPrivateDocument(state.active) ? '' : state.active.id,
     __typebridgeRequestEdit: requestEditHere,
     __typebridgeBufferTitleEdit: (op, start, end) => {
       // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.

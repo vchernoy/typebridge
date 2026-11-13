@@ -16,7 +16,7 @@ vi.mock('../editor/recovery', () => ({
   clearRecovery: vi.fn(),
 }));
 
-import { commitOrCreateConflictCopy } from '../editor/indexeddb';
+import { commitOrCreateConflictCopy, EditOwnershipLostError } from '../editor/indexeddb';
 import { createSaver } from './saver';
 
 beforeEach(() => {
@@ -228,7 +228,7 @@ describe('persistLastBeforePrivate (#257)', () => {
   });
 });
 
-it.each([false, true])('claims a new document before its first save, respecting privacy during acquisition: %s', async cancel => {
+it.each([false, true, 'released'])('claims a new document before its first save, respecting privacy during acquisition: %s', async cancel => {
   const state = createEditorState(); state.db = {} as IDBDatabase;
   state.active = { id: 'new', title: 'T', text: 'body', revision: 0, updatedAt: 1 };
   let dirty = true, writable = true;
@@ -236,6 +236,7 @@ it.each([false, true])('claims a new document before its first save, respecting 
   const takeOwnership = vi.fn(async () => {
     order.push('claim');
     if (cancel) writable = false;
+    if (cancel === 'released') throw new EditOwnershipLostError();
     state.ownership = { documentId: 'new', writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
   });
   vi.mocked(commitOrCreateConflictCopy).mockImplementation(async () => {

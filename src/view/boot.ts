@@ -21,8 +21,8 @@ export type BootChoiceInput = {
   selected: string | null;
   /** The reload backup, if any. */
   pending: StoredDraft | undefined;
-  /** A host window other than the first one. */
-  secondaryHostWindow: boolean;
+  /** Any host window: no saved identity means open a fresh document. */
+  hostWindow: boolean;
   /** A new, unsaved document with a distinct Untitled name. */
   allocateNew: () => StoredDraft;
   /** The placeholder shown before boot (used when there are no documents). */
@@ -45,7 +45,7 @@ export function chooseBootDocument(input: BootChoiceInput): BootChoice {
   const clearPendingCopy = !!(pending && committed && sameContent(pending, committed));
   const restorePending = !!pending && (!committed || !sameContent(pending, committed));
   const listed = selected ? drafts.find(d => d.id === selected) : undefined;
-  const openFresh = input.secondaryHostWindow && !listed && !restorePending;
+  const openFresh = input.hostWindow && !listed && !restorePending;
   const chosen = restorePending
     ? pending!
     : listed
@@ -114,7 +114,7 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
       drafts: state.drafts,
       selected,
       pending,
-      secondaryHostWindow: deps.embedded && !!deps.windowId && deps.windowId !== 'main',
+      hostWindow: deps.embedded && !!deps.windowId,
       allocateNew: deps.allocateNewDraft,
       fallback: state.active,
     });

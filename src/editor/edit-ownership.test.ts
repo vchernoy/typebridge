@@ -73,6 +73,16 @@ describe('acquireEditOwnership', () => {
     expect(storage.fences.get(DOC)).toBe(1);
     await result.ownership.release();
   });
+  it('releases a deferred claim that was still in flight when privacy released ownership', async () => {
+    const result = await acquireEditOwnership({ db, locks: locks as unknown as LockManager,
+      documentId: DOC, instanceId: 'new', onLost: () => undefined, deferClaim: true });
+    if (result.status !== 'acquired') throw new Error('not acquired');
+    const writing = result.ownership.writeFence();
+    const releasing = result.ownership.release();
+    const [write] = await Promise.allSettled([writing, releasing]);
+    expect(write.status).toBe('rejected');
+    expect(storage.released).toEqual([{ documentId: DOC, instanceId: 'new', fence: 1 }]);
+  });
   it('closing an unwritten new document leaves no ownership record', async () => {
     const result = await acquireEditOwnership({ db, locks: locks as unknown as LockManager,
       documentId: DOC, instanceId: 'new', onLost: () => undefined, deferClaim: true });

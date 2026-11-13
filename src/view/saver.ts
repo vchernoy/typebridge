@@ -204,6 +204,8 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       } catch (error) {
         if (preparedRun) deps.changes.saved(preparedRun, false);
         if (error instanceof EditOwnershipLostError) {
+          // Going private deliberately releases an unsaved identity; this is not a competing editor.
+          if (state.active.revision === 0 && !deps.mayWrite()) return { saved: false, conflict: createdConflict };
           deps.loseOwnership();
           return { saved: false, conflict: createdConflict };
         }
@@ -283,6 +285,8 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       } catch (error) {
         if (preparedRun) deps.changes.saved(preparedRun, false);
         if (error instanceof EditOwnershipLostError) {
+          // Going private deliberately releases an unsaved identity; this is not a competing editor.
+          if (state.active.revision === 0 && !deps.mayWrite()) return { saved: false, conflict: createdConflict };
           deps.loseOwnership();
           return { saved: false, conflict: createdConflict };
         }
