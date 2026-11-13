@@ -56,9 +56,9 @@ export function onStorageClear(callback: (detail: StorageClear & { local: boolea
 }
 export function notifyStorageClear(documentId?: string, failed = false): void {
   start(); const detail = { nonce: crypto.randomUUID(), ...(documentId ? { documentId } : {}), ...(failed ? { failed: true as const } : {}) };
-  receive(detail, true);
   try { channel?.postMessage(detail); } catch { /* Optional channel. */ }
-  try { localStorage.setItem(STORAGE_CLEAR_KEY, JSON.stringify(detail)); localStorage.removeItem(STORAGE_CLEAR_KEY); } catch { /* IndexedDB deletion still notifies connected editors. */ }
+  try { localStorage.setItem(STORAGE_CLEAR_KEY, JSON.stringify(detail)); localStorage.removeItem(STORAGE_CLEAR_KEY); } catch { /* Optional transport. */ }
+  receive(detail, true);
 }
 /** Deletion invalidates old connections/fences; it waits for transactions that already started. */
 export function deleteContentDatabase(blocked: () => void): Promise<void> {
