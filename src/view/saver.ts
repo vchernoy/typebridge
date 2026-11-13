@@ -11,6 +11,7 @@ import { CONFLICT_COPY, SAVE_FAILED } from '../editor/status';
 import type { StatusLine } from '../ui/status-line';
 import type { EditorState } from './editor-state';
 import { testKnob } from './embed-api';
+import { isReloadDiscardPendingActive } from './reload-discard';
 import type { Workspace } from './workspace';
 
 export type SaveResult = { saved: boolean; conflict: boolean };
@@ -51,13 +52,23 @@ export type SaverDeps = {
   renderDrafts: () => void;
 };
 
+/**
+ * Discard-reload freezes without `transitioning`; delete/switch set `transitioning` then flush
+ * under that freeze. Only the former must block persist (#256 Codex P1).
+ */
+export function persistBlockedByFreeze(state: Pick<EditorState, 'transferFrozen' | 'transitioning'>): boolean {
+  return state.transferFrozen && !state.transitioning;
+}
+
 export function createSaver(state: EditorState, status: StatusLine, deps: SaverDeps) {
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let saving: Promise<SaveResult> | undefined;
   async function persist(): Promise<SaveResult> {
     if (deps.viewMode) return { saved: true, conflict: false };
     clearTimeout(saveTimer);
-    if (state.deleting || !deps.autosave.checked || !deps.workspace.dirty()) return { saved: !deps.workspace.dirty(), conflict: false };
+    if (state.deleting || persistBlockedByFreeze(state) || !deps.autosave.checked || !deps.workspace.dirty()) {
+      return { saved: !deps.workspace.dirty(), conflict: false };
+    }
     if (state.editBlock) return { saved: false, conflict: false };
     if (saving) return saving;
     saving = (async () => {
@@ -69,12 +80,16 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       let preparedRun: string | undefined;
       try {
         if (!state.db) throw new Error('Storage unavailable');
-        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
+        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock && !persistBlockedByFreeze(state)) {
           // Queued change records land first, so this save's cleanup covers every one of them.
           await deps.changes.idle();
           // Waiting yielded: Autosave may be off now, with private text typed since (#251 review).
-          // Never capture text unless every saving guard still holds.
-          if (state.deleting || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock) break;
+          // Never capture text unless every saving guard still holds — including discard freeze
+          // (not delete/switch, which flush under transitioning + transferFrozen).
+          if (
+            state.deleting || persistBlockedByFreeze(state)
+            || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock
+          ) break;
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
           // Taken with the text and title: the row says which change records it already contains (#37 R2c).
@@ -91,7 +106,12 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           const owner = await state.ownership.writeFence();
           const current = deps.currentJournal();
           const journal = current && current.documentId === saved.id && current.revision === state.active.revision && current.text === saved.text && current.title === saved.title ? current : undefined;
-          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, { keepRun: log.keepRun, recoveryId: crypto.randomUUID() });
+          // While a cross-tab reload-discard is in flight, do not replay discarded records into a
+          // "(recovered)" copy on save (#256 Codex P0). The consenting tab applies the marker.
+          const changeRecovery = isReloadDiscardPendingActive(saved.id)
+            ? undefined
+            : { keepRun: log.keepRun, recoveryId: crypto.randomUUID() };
+          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, changeRecovery);
           // A conflict copy is a new document: this document's row did not take the text.
           deps.changes.saved(log.keepRun, !result.conflict);
           preparedRun = undefined;
@@ -164,7 +184,10 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     try { return await saving; } finally {
       saving = undefined;
       // An edit can arrive while the post-commit draft list is loading.
-      if (!state.deleting && deps.workspace.dirty() && deps.autosave.checked && !state.saveFailed && !state.editBlock) {
+      if (
+        !state.deleting && !persistBlockedByFreeze(state) && deps.workspace.dirty()
+        && deps.autosave.checked && !state.saveFailed && !state.editBlock
+      ) {
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => { void persist(); }, 300);
       }

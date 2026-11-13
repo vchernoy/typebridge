@@ -4,7 +4,8 @@
  * user confirms discarding it, and that choice is bound to the exact text it was made for.
  *
  * Window-close discard clears the journal and change log on commit (deferred so cancel can thaw
- * without wiping recovery). Update-reload does not clear change records yet — see #255.
+ * without wiping recovery). Update-reload writes a durable discard marker at consent (#255);
+ * assert → location.reload() stays synchronous; records are cleared on the next load.
  */
 import type { StoredDraft } from '../editor/indexeddb';
 import { clearRecovery, type RecoverySnapshot } from '../editor/recovery';
@@ -19,13 +20,19 @@ export type LeaveGuardDeps = {
   field: HTMLTextAreaElement;
   autosave: HTMLInputElement;
   workspace: Workspace;
-  saver: { cancel: () => void };
+  saver: {
+    cancel: () => void;
+    /** In-flight persist, if any — cancel() only clears the debounce timer. */
+    inFlight: () => Promise<SaveResult> | undefined;
+  };
   persist: () => Promise<SaveResult>;
   snapshot: () => StoredDraft;
   reloadBackup: {
     save: () => void;
     read: () => StoredDraft | undefined;
     remove: () => void;
+    take: () => StoredDraft | undefined;
+    put: (draft: StoredDraft) => void;
     suppressed: () => boolean;
     setSuppressed: (next: boolean) => void;
   };
@@ -35,6 +42,13 @@ export type LeaveGuardDeps = {
    * records for this document so a later owner does not recover what was discarded (#37 R2c 2d-2).
    */
   discardUnsavedRecovery: () => Promise<void>;
+  /**
+   * Update-reload discard consent (#255): write the IndexedDB marker + sessionStorage intent.
+   * Throws (or rejects) when the marker cannot be written — prepare must then return false.
+   */
+  markReloadDiscard: () => Promise<void>;
+  /** Cancel update-reload: drop session intent and best-effort remove the IDB marker. */
+  clearReloadDiscard: () => void;
   /** Freeze body + title editors (and mutation controls) for the discard-cleanup window. */
   freezeForDiscard: () => void;
   /** Undo freezeForDiscard when the leave aborts after cleanup. */
@@ -49,7 +63,12 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     void deps.persist();
   });
   let allowUpdateReload = false;
-  let privateReloadChoice: { id: string; generation: number } | undefined;
+  /**
+   * Discard consent for update-reload: document id + content revision + exact text/title.
+   * Freeze sets transferFrozen so scheduleSave will not bump contentRevision; assert must
+   * still reject a mutated field value before navigation (#256 CI host-window).
+   */
+  let privateReloadChoice: { id: string; generation: number; text: string; title: string } | undefined;
   /** True after a successful close prepare that left editors frozen pending host commit/cancel. */
   let closeFreezeArmed = false;
   /**
@@ -57,6 +76,16 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
    * cancel can thaw without wiping journal/change-log recovery (#254 Codex P1).
    */
   let pendingCloseDiscard = false;
+  /**
+   * Reload-discard prepare removed this window's pendingDraft so boot cannot restore discarded
+   * text (#256 Codex P0). Restored on cancelUpdateReload if the reload does not proceed.
+   */
+  let stashedReloadBackup: StoredDraft | undefined;
+  /**
+   * True only when this prepare armed transferFrozen for reload-discard. Cancel must not thaw an
+   * unrelated switch/delete/takeover freeze (#256 Codex P1).
+   */
+  let reloadFreezeArmed = false;
 
   function updateReloadReturnFocus(): HTMLElement {
     const local = document.querySelector<HTMLButtonElement>('#update-reload');
@@ -108,7 +137,6 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   /**
    * Confirm close discard. Consent is bound to the content revision shown in the dialog.
    * Destructive journal/change-log clear is deferred until host commit so cancel keeps recovery.
-   * Update-reload does not clear change records yet (#255).
    */
   async function confirmCloseDiscard(prompt: {
     title: string; message: string; confirmLabel: string;
@@ -129,7 +157,8 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   }
 
   async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
-    if (state.transitioning || state.deleting || deps.field.disabled) return false;
+    // transferFrozen (not only field.disabled): takeover freeze uses readOnly, not disabled.
+    if (state.transitioning || state.deleting || deps.field.disabled || state.transferFrozen) return false;
     privateReloadChoice = undefined;
     if (deps.workspace.dirty() && !deps.autosave.checked) {
       if (kind === 'close') {
@@ -140,11 +169,18 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
           confirmLabel: 'Discard changes and close',
         });
         if (discarded) {
-          privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
+          const snap = deps.snapshot();
+          privateReloadChoice = {
+            id: state.active.id,
+            generation: contentAtPrompt,
+            text: snap.text,
+            title: snap.title,
+          };
         }
         return discarded;
       }
-      // Update-reload: consent only — change-log/journal clear is #255.
+      // Update-reload: consent + durable marker; assert → reload stays sync (#255).
+      const contentAtPrompt = deps.workspace.contentRevision();
       const discard = await askConfirmChoice({
         title: 'Reload without saving?',
         message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
@@ -152,10 +188,61 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         cancelLabel: 'Keep editing',
         returnFocus: updateReloadReturnFocus(),
       });
-      if (discard) {
-        privateReloadChoice = { id: state.active.id, generation: deps.workspace.contentRevision() };
+      if (!discard) return false;
+      if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
+      // Bind the consented text/title now — before any further await. Freeze blocks scheduleSave,
+      // so a mutation during markReloadDiscard must not become the consented snapshot (#256 Codex P1).
+      const consented = deps.snapshot();
+      // Dialog await: Autosave may have flipped on and started persist — refuse privacy discard
+      // so an in-flight commit cannot land the discarded text (#256 Codex P1 / residual P2).
+      deps.saver.cancel();
+      if (deps.autosave.checked || state.transferFrozen) return false;
+      // Freeze before the inFlight check so a prefs-sync cannot start a new persist under us;
+      // cancel() does not abort a save already past its guards.
+      deps.freezeForDiscard();
+      reloadFreezeArmed = true;
+      if (deps.saver.inFlight() || deps.autosave.checked) {
+        reloadFreezeArmed = false;
+        deps.unfreezeAfterDiscard();
+        return false;
       }
-      return discard;
+      // Suppress before the next await so unload cannot recreate pendingDraft mid-marker write.
+      // Only this arm is thawed on cancel.
+      stashedReloadBackup = deps.reloadBackup.take();
+      deps.reloadBackup.setSuppressed(true);
+      const abortReloadDiscardPrepare = (): void => {
+        deps.clearReloadDiscard();
+        deps.reloadBackup.setSuppressed(false);
+        if (stashedReloadBackup) {
+          deps.reloadBackup.put(stashedReloadBackup);
+          stashedReloadBackup = undefined;
+        }
+        reloadFreezeArmed = false;
+        deps.unfreezeAfterDiscard();
+      };
+      try {
+        await deps.markReloadDiscard();
+      } catch {
+        // Marker write failed: refuse prepare so the host cancels every window.
+        abortReloadDiscardPrepare();
+        return false;
+      }
+      const afterMark = deps.snapshot();
+      if (
+        deps.workspace.contentRevision() !== contentAtPrompt
+        || consented.text !== afterMark.text
+        || consented.title !== afterMark.title
+      ) {
+        abortReloadDiscardPrepare();
+        return false;
+      }
+      privateReloadChoice = {
+        id: state.active.id,
+        generation: contentAtPrompt,
+        text: consented.text,
+        title: consented.title,
+      };
+      return true;
     }
     deps.reloadBackup.save();
     if (deps.workspace.dirty()) await deps.persist();
@@ -180,10 +267,23 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   }
   /** Validate and arm reload; throws to abort. Does not navigate (host reloads the top page). */
   function assertSafeToReloadAfterUpdate(): void {
-    if (state.transitioning || state.deleting || deps.field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
+    // Discard-reload freeze disables the field on purpose; do not treat that as "busy".
+    if (state.transitioning || state.deleting || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
+    if (deps.field.disabled && !state.transferFrozen) throw new Error('Finish the current action first');
     if (deps.workspace.dirty()) {
-      if (!deps.autosave.checked) {
-        if (privateReloadChoice?.id !== state.active.id || privateReloadChoice.generation !== deps.workspace.contentRevision()) {
+      // Consented discard stays on the private-revision path even if Autosave flips on mid-prepare
+      // (#256 review P0): never recreate pendingDraft or ignore the content binding.
+      if (!deps.autosave.checked || privateReloadChoice) {
+        const now = deps.snapshot();
+        // Generation alone is not enough after discard freeze: readOnly/transferFrozen
+        // skips scheduleSave, so value can change without a revision bump.
+        if (
+          !privateReloadChoice
+          || privateReloadChoice.id !== state.active.id
+          || privateReloadChoice.generation !== deps.workspace.contentRevision()
+          || privateReloadChoice.text !== now.text
+          || privateReloadChoice.title !== now.title
+        ) {
           throw new Error('Private edits changed');
         }
       } else {
@@ -221,10 +321,21 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     reloadAfterUpdate,
     commitWindowClose,
     cancelWindowClose,
-    /** The update reload was cancelled: re-enable the unload warning and backups. */
+    /** The update reload was cancelled: drop discard intent/marker and re-enable unload backups. */
     cancelUpdateReload(): void {
       allowUpdateReload = false;
       deps.reloadBackup.setSuppressed(false);
+      // Session intent first so a leftover IDB marker cannot delete records on a later load (#255).
+      deps.clearReloadDiscard();
+      if (stashedReloadBackup) {
+        deps.reloadBackup.put(stashedReloadBackup);
+        stashedReloadBackup = undefined;
+      }
+      // Only thaw a freeze this prepare armed — never a switch/delete/takeover freeze (#256 P1).
+      if (reloadFreezeArmed) {
+        reloadFreezeArmed = false;
+        deps.unfreezeAfterDiscard();
+      }
     },
   };
 }

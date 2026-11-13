@@ -82,24 +82,31 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
       field,
       autosave,
       workspace,
-      saver: { cancel: () => undefined },
+      saver: {
+        cancel: vi.fn(() => undefined),
+        inFlight: vi.fn(() => undefined),
+      },
       persist: async () => ({ saved: false, conflict: false }),
       snapshot: () => ({ ...state.active, text: field.value, title: 'T', updatedAt: 1 }),
       reloadBackup: {
-        save: () => undefined,
+        save: vi.fn(() => undefined),
         read: () => undefined,
         remove: () => undefined,
+        take: vi.fn(() => undefined),
+        put: vi.fn(() => undefined),
         suppressed: () => false,
-        setSuppressed: () => undefined,
+        setSuppressed: vi.fn(() => undefined),
       },
       recovery: { takeCurrentJournal: () => undefined },
       discardUnsavedRecovery,
+      markReloadDiscard: vi.fn(async () => undefined),
+      clearReloadDiscard: vi.fn(() => undefined),
       freezeForDiscard,
       unfreezeAfterDiscard,
     };
     const guards = createLeaveGuards(state, deps);
     return {
-      guards, workspace, field, discardUnsavedRecovery,
+      guards, state, workspace, field, discardUnsavedRecovery, deps,
       freezeForDiscard, unfreezeAfterDiscard, isFrozen: () => frozen,
     };
   }
@@ -137,13 +144,128 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(discardUnsavedRecovery).toHaveBeenCalledOnce();
   });
 
-  it('update-reload consent does not clear recovery (deferred to #255)', async () => {
-    // Maintainer split: Discard changes and reload matches main — no change-log clear yet.
-    const { guards, discardUnsavedRecovery, freezeForDiscard } = harness({ autosaveOn: false });
+  it('update-reload confirm writes the discard marker (#255)', async () => {
+    const { guards, discardUnsavedRecovery, freezeForDiscard, deps } = harness({ autosaveOn: false });
     await expect(guards.prepareUpdateReload()).resolves.toBe(true);
-    expect(freezeForDiscard).not.toHaveBeenCalled();
+    expect(deps.markReloadDiscard).toHaveBeenCalledOnce();
+    expect(deps.reloadBackup.take).toHaveBeenCalledOnce();
+    expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(true);
+    expect(freezeForDiscard).toHaveBeenCalledOnce();
+    // Freeze must arm before the marker await so Autosave cannot persist mid-prepare (#256 P1).
+    expect(freezeForDiscard.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(deps.markReloadDiscard).mock.invocationCallOrder[0]);
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+  });
+
+  it('update-reload cancel restores a taken pendingDraft backup (#256 Codex P0)', async () => {
+    const { guards, deps, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+    const stashed = { id: 'doc', title: 'T', text: 'backed', updatedAt: 1, revision: 1 };
+    vi.mocked(deps.reloadBackup.take).mockReturnValue(stashed);
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
     guards.cancelUpdateReload();
-    expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+    expect(deps.reloadBackup.put).toHaveBeenCalledWith(stashed);
+    expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(false);
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+  });
+
+  it('update-reload cancel does not thaw a freeze this prepare did not arm (#256 Codex P1)', async () => {
+    const { guards, unfreezeAfterDiscard, field } = harness({ autosaveOn: false });
+    Object.defineProperty(field, 'disabled', { value: true, configurable: true });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    guards.cancelUpdateReload();
+    expect(unfreezeAfterDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload refuses when already transferFrozen (#256 Codex P1)', async () => {
+    const { guards, state, freezeForDiscard, deps } = harness({ autosaveOn: false });
+    state.transferFrozen = true;
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
+    expect(freezeForDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload refuses when Autosave turns on during the dialog (#256 Codex P1)', async () => {
+    const { guards, deps, freezeForDiscard } = harness({ autosaveOn: false });
+    vi.mocked(askConfirmChoice).mockImplementation(async () => {
+      (deps.autosave as { checked: boolean }).checked = true;
+      return true;
+    });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.saver.cancel).toHaveBeenCalled();
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
+    expect(freezeForDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload refuses when a persist is already in flight (#256 residual P2)', async () => {
+    const { guards, deps, freezeForDiscard, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+    const inflight = Promise.resolve({ saved: true, conflict: false });
+    vi.mocked(deps.saver.inFlight).mockReturnValue(inflight);
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.saver.cancel).toHaveBeenCalled();
+    expect(freezeForDiscard).toHaveBeenCalledOnce();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
+  });
+
+  it('assert after discard consent ignores Autosave-on backup recreate (#256 review P0)', async () => {
+    const { guards, deps, workspace } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    // Prefs sync flipped Autosave on after consent — must stay on private-revision path.
+    (deps.autosave as { checked: boolean }).checked = true;
+    expect(() => guards.assertSafeToReloadAfterUpdate()).not.toThrow();
+    expect(deps.reloadBackup.save).not.toHaveBeenCalled();
+    workspace.bumpContentRevision();
+    expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow(/Private edits changed/);
+  });
+
+  it('assert rejects field mutation after discard freeze without a revision bump (#256 CI)', async () => {
+    const { guards, field } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    // Mimic post-consent edit while transferFrozen blocks scheduleSave / contentRevision.
+    field.value = `${field.value}!`;
+    expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow(/Private edits changed/);
+  });
+
+  it('update-reload refuses when text mutates during the marker await (#256 Codex P1)', async () => {
+    const { guards, deps, field, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+    vi.mocked(deps.markReloadDiscard).mockImplementation(async () => {
+      field.value = `${field.value}!`;
+    });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.clearReloadDiscard).toHaveBeenCalled();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+    expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow();
+  });
+
+  it('update-reload Keep editing writes no marker (#255)', async () => {
+    const { guards, deps } = harness({ autosaveOn: false });
+    vi.mocked(askConfirmChoice).mockResolvedValue(false);
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload aborts when content changes during the dialog (#255)', async () => {
+    const { guards, workspace, deps } = harness({ autosaveOn: false });
+    vi.mocked(askConfirmChoice).mockImplementation(async () => {
+      workspace.bumpContentRevision();
+      return true;
+    });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload cancel clears the discard marker (#255)', async () => {
+    const { guards, deps } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    guards.cancelUpdateReload();
+    expect(deps.clearReloadDiscard).toHaveBeenCalled();
+  });
+
+  it('update-reload prepare returns false when the marker write fails (#255)', async () => {
+    const { guards, deps, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+    vi.mocked(deps.markReloadDiscard).mockRejectedValue(new Error('quota'));
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.clearReloadDiscard).toHaveBeenCalled();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
   });
 });

@@ -130,6 +130,428 @@ test('activation failure restores editing (#137 U9)', async ({ page }) => {
   await page.locator('#editor').fill('Editing works');
 });
 
+test('Discard changes and reload clears change-log so salvage cannot revive (#255)', async ({ page }) => {
+  // Fails on main: leftover change records after Autosave-off discard+reload become a "(recovered)" copy.
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await waitingUpdate(page);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Before block');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await editor.fill('Discarded after failed save');
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  await expect.poll(() => page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).some(record =>
+          JSON.stringify(record).includes('Discarded after failed save'),
+        ));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(true);
+
+  await setAutosave(page, false, 'keep');
+  // Prior save failure can leave the indicator on "Save failed"; privacy mode is what matters.
+  await expect(page.locator('#autosave')).not.toBeChecked();
+  await page.locator('#update-reload').click();
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await Promise.all([
+    page.waitForEvent('framenavigated'),
+    dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click(),
+  ]);
+  await expect(editor).toBeEnabled();
+  await expect(editor).toHaveValue('Before block');
+  await expect(page.locator('#status')).not.toContainText('Recovered unsaved text');
+  await expect(page.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  const titles = await page.evaluate(() => new Promise<string[]>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readonly');
+      const req = tx.objectStore('documents').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as Array<{ title?: string }>).map(doc => doc.title ?? ''));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  expect(titles.some(title => title.includes('(recovered)'))).toBe(false);
+  await expect.poll(() => page.evaluate(() => new Promise<number>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).filter(record =>
+          JSON.stringify(record).includes('Discarded after failed save'),
+        ).length);
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(0);
+});
+
+test('Discard changes and reload clears pendingDraft so boot cannot restore it (#256 Codex P0)', async ({ page }) => {
+  // Autosave-on backup from a failed save survives turning Autosave off; discard must remove it.
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await waitingUpdate(page);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Saved base');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await editor.fill('PENDING-DRAFT-MUST-NOT-RETURN');
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  // Plant a differing pendingDraft as if visibilitychange backed up the failed edit.
+  await page.evaluate(() => {
+    const id = document.querySelector<HTMLSelectElement>('#drafts')?.value ?? '';
+    const key = [...Object.keys(sessionStorage)].find(k => k.startsWith('typebridge.pendingDraft.v1'))
+      ?? 'typebridge.pendingDraft.v1';
+    sessionStorage.setItem(key, JSON.stringify({
+      id, title: 'Untitled document', text: 'PENDING-DRAFT-MUST-NOT-RETURN',
+      updatedAt: Date.now(), revision: 0, reloadBackupToken: 'e2e',
+    }));
+  });
+  await setAutosave(page, false, 'keep');
+  await expect(page.locator('#autosave')).not.toBeChecked();
+  await page.locator('#update-reload').click();
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await Promise.all([
+    page.waitForEvent('framenavigated'),
+    dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click(),
+  ]);
+  await expect(editor).toBeEnabled();
+  await expect(editor).not.toHaveValue('PENDING-DRAFT-MUST-NOT-RETURN');
+  await expect(editor).toHaveValue('Saved base');
+  expect(await page.evaluate(() =>
+    Object.keys(sessionStorage).some(key => key.startsWith('typebridge.pendingDraft.v1')),
+  )).toBe(false);
+});
+
+test('Discard changes and reload keeps an unrelated same-document journal (#256 P0)', async ({ page }) => {
+  // Fails if apply clears every journal for documentId instead of the exact consented snapshot.
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await waitingUpdate(page);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Before block');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const documentId = await page.evaluate(() => {
+    const select = document.querySelector<HTMLSelectElement>('#drafts');
+    return select?.value ?? '';
+  });
+  expect(documentId).not.toBe('');
+  // Orphan journal from another tab/crash: different text, same document id.
+  const orphan = {
+    token: 'orphan-token',
+    tab: 'orphan-tab',
+    documentId,
+    revision: 1,
+    timestamp: Date.now() - 60_000,
+    title: 'Untitled document',
+    text: 'UNRELATED-ORPHAN-JOURNAL-TEXT',
+  };
+  await page.evaluate(entry => {
+    localStorage.setItem(
+      `typebridge.recovery.v1.${entry.tab}.${entry.documentId}`,
+      JSON.stringify(entry),
+    );
+  }, orphan);
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await editor.fill('Discarded after failed save');
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  await setAutosave(page, false, 'keep');
+  await page.locator('#update-reload').click();
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await Promise.all([
+    page.waitForEvent('framenavigated'),
+    dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click(),
+  ]);
+  await expect(editor).toBeEnabled();
+  await expect(page.locator('#status')).not.toContainText('Recovered unsaved text');
+  const orphanLeft = await page.evaluate(entry => {
+    const raw = localStorage.getItem(`typebridge.recovery.v1.${entry.tab}.${entry.documentId}`);
+    return raw === JSON.stringify(entry);
+  }, orphan);
+  expect(orphanLeft).toBe(true);
+});
+
+test('pending reload-discard without session intent does not salvage (#256 foreign-tab)', async ({ page }) => {
+  // Simulates a foreign tab: marker + shared pending, no sessionStorage intent → must defer salvage.
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Keep base');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const documentId = await page.evaluate(() =>
+    document.querySelector<HTMLSelectElement>('#drafts')?.value ?? '',
+  );
+  expect(documentId).not.toBe('');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await editor.fill('FOREIGN-TAB-MUST-NOT-RECOVER');
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  await expect.poll(() => page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).some(record =>
+          JSON.stringify(record).includes('FOREIGN-TAB-MUST-NOT-RECOVER'),
+        ));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }))).toBe(true);
+
+  // Plant marker + pending as if consenting tab started reload; strip session intent (foreign context).
+  const planted = await page.evaluate(async docId => {
+    const instanceId = document.documentElement.dataset.instanceId ?? 'foreign-consent';
+    localStorage.setItem(
+      `typebridge.reloadDiscardPending.v1.${docId}`,
+      JSON.stringify({ instanceId, at: Date.now() }),
+    );
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open('typebridge');
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction(['discardMarkers', 'changes', 'editOwnership'], 'readwrite');
+        const changesReq = tx.objectStore('changes').getAll(IDBKeyRange.bound([docId, 0], [docId, Number.MAX_SAFE_INTEGER]));
+        changesReq.onsuccess = () => {
+          let upToSeq = 0;
+          for (const record of changesReq.result as Array<{ seq?: number }>) {
+            if (typeof record.seq === 'number' && record.seq > upToSeq) upToSeq = record.seq;
+          }
+          tx.objectStore('discardMarkers').put({
+            documentId: docId, upToSeq, instanceId, fence: 1,
+          });
+        };
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+    for (const key of Object.keys(sessionStorage)) {
+      if (key.startsWith('typebridge.reloadDiscard.v1.')) sessionStorage.removeItem(key);
+    }
+    const marker = await new Promise<unknown>((resolve, reject) => {
+      const open = indexedDB.open('typebridge');
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction('discardMarkers', 'readonly');
+        const req = tx.objectStore('discardMarkers').get(docId);
+        tx.oncomplete = () => { db.close(); resolve(req.result ?? null); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+    return {
+      marker: !!marker,
+      pending: localStorage.getItem(`typebridge.reloadDiscardPending.v1.${docId}`),
+      intentKeys: Object.keys(sessionStorage).filter(key => key.startsWith('typebridge.reloadDiscard.v1.')),
+    };
+  }, documentId);
+  expect(planted.marker).toBe(true);
+  expect(planted.pending).toBeTruthy();
+  expect(planted.intentKeys).toEqual([]);
+
+  await page.reload();
+  // Defer yields ownership so the consenting reload can finish; this context stays read-only.
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'reader', { timeout: 10_000 });
+  await expect(page.locator('#status')).not.toContainText('Recovered unsaved text');
+  await expect(page.getByRole('button', { name: /Recover / })).toHaveCount(0);
+  const titles = await page.evaluate(() => new Promise<string[]>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readonly');
+      const req = tx.objectStore('documents').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as Array<{ title?: string }>).map(doc => doc.title ?? ''));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  expect(titles.some(title => title.includes('(recovered)'))).toBe(false);
+  // Marker must still be present (foreign context must not consume it).
+  const after = await page.evaluate(docId => new Promise<{ marker: boolean; pending: string | null }>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('discardMarkers', 'readonly');
+      const req = tx.objectStore('discardMarkers').get(docId);
+      tx.oncomplete = () => {
+        db.close();
+        resolve({
+          marker: !!req.result,
+          pending: localStorage.getItem(`typebridge.reloadDiscardPending.v1.${docId}`),
+        });
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), documentId);
+  expect(after.pending).toBeTruthy();
+  expect(after.marker).toBe(true);
+});
+
+test('foreign cancel does not clear another tab pending (#256 Codex P0)', async ({ page }) => {
+  // Embed exposes __typebridgeCancelUpdateReload; standalone does not. Use the host iframe.
+  test.setTimeout(60_000);
+  await page.goto('/');
+  const frame = page.frameLocator('.host-window iframe.host-editor').first();
+  await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(frame.locator('html')).toHaveAttribute('data-embed', '1');
+  await frame.locator('#editor').fill('Keep base');
+  await expect(frame.locator('#save-indicator')).toHaveText('Saved');
+
+  const documentId = await frame.locator('#drafts').inputValue();
+  expect(documentId).not.toBe('');
+  const pendingKey = `typebridge.reloadDiscardPending.v1.${documentId}`;
+  // Plant pending owned by a different instance (consenting tab), then cancel from this embed.
+  const result = await page.evaluate(async ({ key, docId }) => {
+    const frameEl = document.querySelector<HTMLIFrameElement>('.host-window iframe.host-editor');
+    const win = frameEl?.contentWindow as (Window & {
+      __typebridgeCancelUpdateReload?: () => void;
+    }) | null | undefined;
+    if (!win?.__typebridgeCancelUpdateReload) {
+      return { cancelled: false, reason: 'missing-hook', after: null as string | null };
+    }
+    localStorage.setItem(key, JSON.stringify({ instanceId: 'consenting-other-tab', at: Date.now(), documentId: docId }));
+    win.__typebridgeCancelUpdateReload();
+    return { cancelled: true, reason: 'ok', after: localStorage.getItem(key) };
+  }, { key: pendingKey, docId: documentId });
+  expect(result.cancelled).toBe(true);
+  expect(result.reason).toBe('ok');
+  expect(result.after).toBeTruthy();
+  expect(JSON.parse(result.after!).instanceId).toBe('consenting-other-tab');
+});
+
+test('cancelled update-reload keeps change records for later salvage (#255)', async ({ page }) => {
+  // Fails if cancel leaves session intent so a later ownership salvage deletes the records.
+  test.setTimeout(60_000);
+  // Unique fragment that survives changeBetween's common-prefix/suffix compression.
+  const recoverable = 'ZZZ-must-stay-recoverable-999';
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await waitingUpdate(page, { late: false, failActivation: true });
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Keep base');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await editor.fill(recoverable);
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  await expect.poll(() => page.evaluate(needle => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).some(record => JSON.stringify(record).includes(needle)));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), recoverable)).toBe(true);
+  await setAutosave(page, false, 'keep');
+  await page.locator('#update-reload').click();
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click();
+  await expect(page.locator('#update-notice')).toContainText('Could not reload safely');
+  // Cross-tab pending flag must be cleared so another tab can salvage.
+  expect(await page.evaluate(() =>
+    Object.keys(localStorage).some(key => key.startsWith('typebridge.reloadDiscardPending.v1.')),
+  )).toBe(false);
+  // Intent cleared; change records must still be present.
+  await expect.poll(() => page.evaluate(needle => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('changes', 'readonly');
+      const req = tx.objectStore('changes').getAll();
+      tx.oncomplete = () => {
+        db.close();
+        resolve((req.result as unknown[]).some(record => JSON.stringify(record).includes(needle)));
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), recoverable)).toBe(true);
+  // No session intent left for a stale apply.
+  expect(await page.evaluate(() =>
+    Object.keys(sessionStorage).some(key => key.startsWith('typebridge.reloadDiscard.v1.')),
+  )).toBe(false);
+});
+
 for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 1400]) {
   test(`update notice evidence ${colorScheme} ${width}px (#137 U9)`, async ({ page, browserName }, testInfo) => {
     test.skip(browserName !== 'chromium', 'Chromium artifact evidence; behavior runs in all engines.');
