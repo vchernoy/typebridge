@@ -170,7 +170,12 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           clearPendingAfterCommit();
           const titleOnly = !result.conflict && saved.title !== state.active.title && saved.text === state.active.text;
           if (journal) { try { clearRecovery(localStorage, journal); } catch { /* keep */ } }
-          state.active = result.draft;
+          // Keep an in-memory private flag across an in-flight pre-private commit (#257):
+          // result.draft may still say private:false, and re-assigning that would reopen mayWrite
+          // and let the loop snapshot text typed after the switch.
+          state.active = state.active.private
+            ? { ...result.draft, private: true }
+            : result.draft;
           deps.clearVersionNotice();
           deps.postSignal(titleOnly ? 'renamed' : 'saved', result.draft.id, result.draft.revision);
           if (result.recovered) deps.onRecovered(result.recovered, result.draft.id);

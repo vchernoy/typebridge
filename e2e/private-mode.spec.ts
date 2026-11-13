@@ -93,6 +93,34 @@ test('typing while private leaves no post-switch storage trace after reload (#25
   expect(after.docs.every(doc => !(doc.title ?? '').includes('Secret'))).toBe(true);
 });
 
+test('going private mid-save does not store text typed after the switch (#257)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Pre switch base');
+  await expect(status(page)).toHaveText('Saved locally');
+
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 2_000;
+  });
+  await page.locator('#editor').press('End');
+  await page.locator('#editor').pressSequentially('!');
+  // Debounce starts the held save; then switch private and type secrets while it is still in flight.
+  await page.waitForTimeout(400);
+  await setAutosave(page, false);
+  await page.locator('#editor').press('End');
+  await page.locator('#editor').pressSequentially(' SECRET');
+  await page.waitForTimeout(2_500);
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+
+  const snap = await storageSnapshot(page);
+  expect(snap.docs.every(doc => !doc.text.includes('SECRET'))).toBe(true);
+  expect(snap.changeTexts.every(text => !text.includes('SECRET'))).toBe(true);
+  expect(snap.docs.some(doc => doc.private === true)).toBe(true);
+  await expect(page.locator('#autosave')).not.toBeChecked();
+});
+
 test('global private session blocks writes for a normal document (#257)', async ({ page }) => {
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
