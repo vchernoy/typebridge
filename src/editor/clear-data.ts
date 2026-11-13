@@ -1,7 +1,7 @@
 /** Content-only erasure (#257 step 4). Preferences and offline app assets are retained. */
 export const STORAGE_CLEAR_KEY = 'typebridge.storageClear.v1';
 export const STORAGE_CLEAR_EVENT = 'typebridge-storage-cleared';
-export type StorageClear = { nonce: string; documentId?: string };
+export type StorageClear = { nonce: string; documentId?: string; failed?: true };
 const prefixes = ['typebridge.recovery.v1.', 'typebridge.pendingDraft.', 'typebridge.activeDraft.',
   'typebridge.writingPosition.v1.', 'typebridge.find.query.v1', 'typebridge.find.replace.v1', 'typebridge.drafts.v1', 'typebridge.reloadDiscard.', 'typebridge.reloadDiscardPending.'];
 export function clearContentMetadata(storage: Storage): void {
@@ -29,16 +29,17 @@ export function parseStorageClear(value: unknown): StorageClear | undefined {
   if (!value || typeof value !== 'object') return;
   const v = value as Record<string, unknown>;
   if (typeof v.nonce !== 'string' || !v.nonce || (v.documentId !== undefined && (typeof v.documentId !== 'string' || !v.documentId))) return;
-  return { nonce: v.nonce, ...(typeof v.documentId === 'string' ? { documentId: v.documentId } : {}) };
+  if (v.failed !== undefined && v.failed !== true) return;
+  return { nonce: v.nonce, ...(typeof v.documentId === 'string' ? { documentId: v.documentId } : {}), ...(v.failed ? { failed: true as const } : {}) };
 }
 let channel: BroadcastChannel | undefined;
 let started = false;
 const seen = new Set<string>();
-function receive(value: unknown): void {
+function receive(value: unknown, local = false): void {
   const detail = parseStorageClear(value);
   if (!detail || seen.has(detail.nonce)) return;
   seen.add(detail.nonce);
-  window.dispatchEvent(new CustomEvent(STORAGE_CLEAR_EVENT, { detail }));
+  window.dispatchEvent(new CustomEvent(STORAGE_CLEAR_EVENT, { detail: { ...detail, local } }));
 }
 function start(): void {
   if (started) return; started = true;
@@ -48,12 +49,12 @@ function start(): void {
     try { receive(JSON.parse(event.newValue ?? 'null')); } catch { /* Invalid notification. */ }
   });
 }
-export function onStorageClear(callback: (detail: StorageClear) => void): void {
-  start(); window.addEventListener(STORAGE_CLEAR_EVENT, event => callback((event as CustomEvent<StorageClear>).detail));
+export function onStorageClear(callback: (detail: StorageClear & { local: boolean }) => void): void {
+  start(); window.addEventListener(STORAGE_CLEAR_EVENT, event => callback((event as CustomEvent<StorageClear & { local: boolean }>).detail));
 }
-export function notifyStorageClear(documentId?: string): void {
-  start(); const detail = { nonce: crypto.randomUUID(), ...(documentId ? { documentId } : {}) };
-  receive(detail);
+export function notifyStorageClear(documentId?: string, failed = false): void {
+  start(); const detail = { nonce: crypto.randomUUID(), ...(documentId ? { documentId } : {}), ...(failed ? { failed: true as const } : {}) };
+  receive(detail, true);
   try { channel?.postMessage(detail); } catch { /* Optional channel. */ }
   try { localStorage.setItem(STORAGE_CLEAR_KEY, JSON.stringify(detail)); localStorage.removeItem(STORAGE_CLEAR_KEY); } catch { /* IndexedDB deletion still notifies connected editors. */ }
 }

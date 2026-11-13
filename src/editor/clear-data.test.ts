@@ -36,6 +36,8 @@ describe('content erasure', () => {
   it('accepts metadata-only notifications and rejects malformed ones', () => {
     expect(parseStorageClear({ nonce: 'n', documentId: 'a', text: 'discard' })).toEqual({ nonce: 'n', documentId: 'a' });
     expect(parseStorageClear({ nonce: 'n' })).toEqual({ nonce: 'n' });
+    expect(parseStorageClear({ nonce: 'n', failed: true })).toEqual({ nonce: 'n', failed: true });
+    expect(parseStorageClear({ nonce: 'n', failed: 'yes' })).toBeUndefined();
     expect(parseStorageClear({ nonce: '' })).toBeUndefined(); expect(parseStorageClear({ nonce: 'n', documentId: 4 })).toBeUndefined();
   });
 });

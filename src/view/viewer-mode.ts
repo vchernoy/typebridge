@@ -148,12 +148,6 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     }
   }
   return {
-    showCleared: (message: string): void => {
-      requestedId = undefined; state.viewMissing = true;
-      viewerNotice.textContent = message; viewerNotice.hidden = false;
-      viewerBadge.textContent = 'Cleared saved copy · Read-only';
-      deps.renderDrafts();
-    },
     documentId: (): string | undefined => requestedId,
     /** Show another saved document (Documents picker). */
     open: viewerOpen,

@@ -1,4 +1,5 @@
-import { clearContentMetadata, clearDocumentMetadata, notifyStorageClear, onStorageClear } from './editor/clear-data';
+import { openDraftDatabase } from './editor/indexeddb';
+import { clearContentMetadata, clearDocumentMetadata, notifyStorageClear, onStorageClear, type StorageClear } from './editor/clear-data';
 import { setupClearLocalData } from './ui/clear-local-data';
 import { createDocumentSearch, restoreDocumentTitle } from './view/document-search';
 import { sameFields } from './editor/document-fields';
@@ -830,7 +831,10 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   syncIdentity: () => { if (!field.disabled) rememberActive(); },
   documentCleared: id => {
     try { clearDocumentMetadata(localStorage, id); clearDocumentMetadata(sessionStorage, id); }
-    catch { announceAction('Saved data was deleted, but some view metadata could not be cleared.', { kind: 'failure' }); }
+    catch {
+      announceAction('Saved data was deleted, but some view metadata could not be cleared.', { kind: 'failure' });
+      notifyStorageClear(id, true); return;
+    }
     notifyStorageClear(id);
   },
   transferFrozen: () => state.transferFrozen,
@@ -959,7 +963,7 @@ recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
 function handleDatabaseUpgrade(cleared = false): void {
-  if (cleared) { handleStorageClear(undefined, true); return; }
+  if (cleared) { handleStorageClear(); return; }
   // Invalidate in-flight acquires, then free any installed Web Lock so an upgraded tab can own.
   state.storageGeneration++;
   const previous = state.ownership;
@@ -1252,34 +1256,63 @@ if (embedded) {
 }
 
 
-function handleStorageClear(documentId?: string, pending = false): void {
-  try { if (documentId) clearDocumentMetadata(sessionStorage, documentId); else clearContentMetadata(sessionStorage); } catch { /* Reported by the clearing UI. */ }
-  const current = recovery.currentJournal();
-  if (current && (!documentId || current.documentId === documentId)) {
-    try { clearRecovery(localStorage, current); } catch { /* Optional storage. */ }
-    recovery.takeCurrentJournal();
-  }
-  if (documentId && state.active.id !== documentId) { void refreshDrafts().catch(() => {}); return; }
+/** Invalidate old writers immediately; success is separate from deletion/versionchange. */
+function handleStorageClear(): void {
   workspace.bumpSessionGeneration();
-  saver.cancel(); changeWriter.abandon();
-  state.active = { ...state.active, private: true, revision: 0 };
-  autosave.checked = false; privateMarker.hidden = false;
-  workspace.setDirty(true);
-  if (!documentId) {
-    state.storageCleared = true; state.storageGeneration++;
-    state.db?.close(); state.db = undefined;
-    const held = state.ownership; state.ownership = undefined; void held?.release();
-    state.drafts = [];
-    state.storageProblem = pending
-      ? 'Storage is being cleared. Open text is kept privately. Copy or export it before leaving.'
-      : 'Storage was cleared. Open text is kept privately. Copy or export it before leaving; reload before saving new documents.';
-  }
-  recoveryNotice.hidden = false;
-  recoveryNotice.textContent = documentId ? 'Storage was cleared for this document. Open text is kept privately.' : state.storageProblem;
-  if (viewMode) viewer.showCleared(recoveryNotice.textContent ?? 'Storage was cleared.');
-  else { rememberActive(); syncAutosaveControl(); renderDrafts(); }
-  if (documentId) void refreshDrafts().catch(() => {});
+  focusHandoff?.cancel(); saver.cancel(); changeWriter.abandon();
+  state.storageCleared = true; state.storageGeneration++;
+  state.db?.close(); state.db = undefined;
+  const held = state.ownership; state.ownership = undefined; void held?.release();
+  state.storageProblem = 'Storage is being cleared.';
+  recoveryNotice.hidden = false; recoveryNotice.textContent = state.storageProblem;
+  syncAutosaveControl();
 }
-onStorageClear(detail => handleStorageClear(detail.documentId));
+async function finishStorageClear(detail: StorageClear & { local: boolean }): Promise<void> {
+  if (detail.documentId) {
+    // Ordinary copies retain their revision/identity and use the normal deleted signal.
+    try { clearDocumentMetadata(sessionStorage, detail.documentId); }
+    catch { if (!detail.failed) notifyStorageClear(detail.documentId, true); }
+    if (detail.failed) { recoveryNotice.hidden = false; recoveryNotice.textContent = 'Some local data could not be cleared.'; }
+    void refreshDrafts().catch(() => {});
+    return;
+  }
+  if (!state.storageCleared) handleStorageClear();
+  if (detail.failed) {
+    state.storageGeneration++; // Cancel any successful completion still awaiting old writers.
+    state.storageProblem = 'Some local data could not be cleared. Retry before leaving this device.';
+    recoveryNotice.hidden = false; recoveryNotice.textContent = state.storageProblem;
+    return;
+  }
+  try { clearContentMetadata(sessionStorage); }
+  catch { notifyStorageClear(undefined, true); return; }
+  const generation = state.storageGeneration;
+  // Late save callbacks/queued appends must settle against the invalidated connection before
+  // a fresh database is opened. They must never write or install old text into the new session.
+  await saver.inFlight()?.catch(() => undefined);
+  await saver.drainChanges();
+  if (generation !== state.storageGeneration) return;
+  recovery.takeCurrentJournal();
+  state.drafts = []; state.active = { ...newDraft(), revision: 0 };
+  state.editBlock = ''; state.transferFrozen = false; state.transitioning = false;
+  state.saveFailed = false;
+  if (viewMode) viewer.showMissing('Storage was cleared in another tab');
+  else showDraft({ restorePosition: false });
+  const message = detail.local ? 'All local data was cleared' : 'Storage was cleared in another tab';
+  recoveryNotice.hidden = false; recoveryNotice.textContent = message;
+  await renderRecovery();
+  if (generation !== state.storageGeneration) return;
+  try {
+    const db = await openDraftDatabase(cleared => handleDatabaseUpgrade(cleared));
+    if (generation !== state.storageGeneration) { db.close(); return; }
+    state.db = db; state.storageCleared = false; state.storageProblem = '';
+    if (!viewMode) { installOwnership(await acquireFor(state.active.id)); rememberActive(); }
+    syncAutosaveControl(); updateSaveIndicator();
+  } catch {
+    if (generation !== state.storageGeneration) return;
+    state.storageProblem = 'Local data was cleared, but storage could not be reopened. Reload to save new documents.';
+    recoveryNotice.textContent = state.storageProblem;
+  }
+}
+onStorageClear(detail => { void finishStorageClear(detail); });
 setupClearLocalData();
 document.querySelector<HTMLButtonElement>('#clear-document-data')?.addEventListener('click', () => { void autosaveToggle?.clearSavedData(); });
