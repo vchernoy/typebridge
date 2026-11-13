@@ -21,6 +21,8 @@ export type TakeoverDeps = {
   editor: Editor;
   workspace: ReturnType<typeof createSinglePaneWorkspace>;
   autosave: HTMLInputElement;
+  /** False while privateNow() — prefer over reading the checkbox (#257). */
+  mayWrite: () => boolean;
   privateMarker: HTMLElement;
   writingPosition: { save: () => void };
   editHereBar: HTMLElement;
@@ -160,7 +162,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
       field.setSelectionRange(mapped.start, mapped.end);
       unfreezeEditorsAfterTransition();
       // Only schedule save for non-private takeovers (saved reread / clean yield).
-      if (workspace.dirty() && autosave.checked && !state.active.private && !input.snapshot?.dirty) {
+      if (workspace.dirty() && deps.mayWrite() && !input.snapshot?.dirty) {
         saveSoon();
       }
       return true;
@@ -212,7 +214,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
       }
       installOwnership(access);
       onEditableHere();
-      if (workspace.dirty() && autosave.checked && !state.active.private) { saveSoon(); }
+      if (workspace.dirty() && deps.mayWrite()) { saveSoon(); }
     })().finally(() => {
       ownershipRetry = undefined;
       if (!rereadAfterOwnershipRetry) return;

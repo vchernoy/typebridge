@@ -666,7 +666,7 @@ const heldEdits = createHeldEdits(state, statusLine, {
 const { onEditableHere } = heldEdits;
 const editAccess = createEditAccess(state, statusLine, {
   viewMode, instanceId, webLocks, workspace, editor, titleEditor, ownershipNotice, undo, redo, autosave,
-  writingPosition, quietReader,
+  mayWrite, writingPosition, quietReader,
   syncHistory: () => { syncHistory(); },
   syncMutationControls: () => { syncMutationControls(); },
   updateSaveIndicator: () => { updateSaveIndicator(); },
@@ -683,7 +683,7 @@ const {
   recoverParkedHandoffOwnership,
 } = editAccess;
 const takeover = createTakeover(state, {
-  viewMode, field, draftTitle, editor, workspace, autosave, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
+  viewMode, field, draftTitle, editor, workspace, autosave, mayWrite, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
   focusHandoff: () => focusHandoff,
   showDraft: () => { showDraft(); },
   syncTitleTooltip: () => { syncTitleTooltip(); },
@@ -783,8 +783,8 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   controlBlocked: () => autosaveControlBlocked(),
   journalEdit: () => { journalEdit(); },
   persist: () => persist(),
-  persistLastBeforePrivate: (frozen, frozenContentRevision) =>
-    saver.persistLastBeforePrivate(frozen, frozenContentRevision),
+  persistLastBeforePrivate: (frozen, frozenContentRevision, options) =>
+    saver.persistLastBeforePrivate(frozen, frozenContentRevision, options),
   snapshot: () => snapshot(),
   changeLogProtects: () => changeLogProtects(),
   saver,
@@ -792,6 +792,24 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   refreshDrafts: () => refreshDrafts(),
   renderDrafts: () => { renderDrafts(); },
   loseOwnership: () => { loseOwnership(); },
+  postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
+  clearDocumentBackups: documentId => {
+    try {
+      const pending = reloadBackup.read();
+      if (pending?.id === documentId) reloadBackup.remove();
+    } catch { /* Optional backup. */ }
+    try {
+      for (const item of listRecovery(localStorage)) {
+        if (item.documentId === documentId) clearRecovery(localStorage, item);
+      }
+      void renderRecovery();
+    } catch { /* Storage blocked. */ }
+    const current = recovery.currentJournal();
+    if (current?.documentId === documentId) {
+      try { clearRecovery(localStorage, current); } catch { /* Optional. */ }
+      recovery.takeCurrentJournal();
+    }
+  },
   syncAutosaveControl: () => { syncAutosaveControl(); },
 });
 const applyDocumentAutosave = autosaveToggle.applyDocumentChange;
@@ -925,7 +943,7 @@ const viewer = createViewerMode(state, {
   onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
 });
 const sync = createDocumentSync(state, statusLine, {
-  viewMode, field, draftTitle, editor, workspace, autosave, writingPosition, saver, viewer,
+  viewMode, field, draftTitle, editor, workspace, mayWrite, writingPosition, saver, viewer,
   focusHandoff: () => focusHandoff,
   hideEditHereBar: () => { hideEditHereBar(); },
   applyEditAccess: () => { applyEditAccess(); },
@@ -1037,7 +1055,7 @@ if (viewMode && !sync.hasChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTE
 void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
   embedded,
   windowId: windowId ?? undefined,
-  autosave, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,
+  mayWrite, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,
   onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
   readPending: () => readPending(),
   clearPending: saved => { clearPending(saved); },

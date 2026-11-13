@@ -11,10 +11,16 @@ vi.mock('../editor/indexeddb', async importOriginal => {
   return {
     ...actual,
     updateDocumentPrivateFlag: vi.fn(),
+    deleteStoredDraft: vi.fn(),
   };
 });
 
-import { updateDocumentPrivateFlag } from '../editor/indexeddb';
+vi.mock('../ui/confirm-dialog', () => ({
+  askConfirmChoice: vi.fn(async () => false),
+}));
+
+import { deleteStoredDraft, updateDocumentPrivateFlag } from '../editor/indexeddb';
+import { askConfirmChoice } from '../ui/confirm-dialog';
 
 beforeEach(() => {
   vi.stubGlobal('localStorage', {
@@ -26,6 +32,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.mocked(updateDocumentPrivateFlag).mockReset();
+  vi.mocked(deleteStoredDraft).mockReset();
+  vi.mocked(askConfirmChoice).mockReset();
+  vi.mocked(askConfirmChoice).mockResolvedValue(false);
 });
 
 function makeWorkspace(dirty = false, revision = { value: 1 }): Workspace {
@@ -40,7 +49,7 @@ function makeWorkspace(dirty = false, revision = { value: 1 }): Workspace {
     documentId: () => 'doc',
     setDocumentId: () => undefined,
     dirty: () => dirty,
-    setDirty: () => undefined,
+    setDirty: vi.fn(),
     setPaneRole: () => undefined,
     activePaneId: () => 'pane-a' as const,
     setActivePane: () => undefined,
@@ -67,6 +76,8 @@ function harness(options: {
   changeLogProtectsAfterAwait?: boolean;
   /** In-flight save moves active/ownership to this conflict copy before resolving. */
   inFlightConflict?: StoredDraft;
+  deleteSaved?: boolean;
+  sessionDirty?: boolean;
 } = {}) {
   const state = createEditorState();
   state.active = {
@@ -101,9 +112,10 @@ function harness(options: {
 
   const revision = { value: 1 };
   let protects = options.changeLogProtects === true;
-  const persistLastBeforePrivate = vi.fn(async () => ({
+  const persistLastBeforePrivate = vi.fn(async (_frozen, _rev, opts?: { markPrivate?: boolean }) => ({
     saved: options.persistSaved !== false,
     conflict: false,
+    markPrivate: opts?.markPrivate,
   }));
   const persist = vi.fn(async () => ({ saved: true, conflict: false }));
   const cancel = vi.fn();
@@ -114,6 +126,11 @@ function harness(options: {
   const abandonChangeRun = vi.fn();
   const renderDrafts = vi.fn();
   const syncAutosaveControl = vi.fn();
+  const postSignal = vi.fn();
+  const clearDocumentBackups = vi.fn();
+  const setDirty = vi.fn();
+  const workspace = makeWorkspace(options.dirty === true || options.sessionDirty === true, revision);
+  workspace.setDirty = setDirty;
   const frozenSnapshot: StoredDraft = {
     id: 'doc',
     title: 'T',
@@ -129,6 +146,8 @@ function harness(options: {
       draft: { ...state.active, id, revision: rev, private: privateFlag },
     };
   });
+  vi.mocked(deleteStoredDraft).mockResolvedValue(true);
+  vi.mocked(askConfirmChoice).mockResolvedValue(options.deleteSaved === true);
 
   const inFlight = options.inFlightConflict
     ? () => Promise.resolve().then(() => {
@@ -149,7 +168,7 @@ function harness(options: {
   const toggle = createAutosaveToggle(state, status, {
     autosave,
     privateMarker,
-    workspace: makeWorkspace(options.dirty === true, revision),
+    workspace,
     viewMode: false,
     embedded: true,
     transferFrozen: () => false,
@@ -164,12 +183,15 @@ function harness(options: {
     refreshDrafts: async () => undefined,
     renderDrafts,
     loseOwnership: () => undefined,
+    postSignal,
+    clearDocumentBackups,
     syncAutosaveControl,
   });
 
   return {
     toggle, state, autosave, privateMarker, persistLastBeforePrivate,
     announceAction, setSaveStatus, abandonChangeRun, revision,
+    postSignal, clearDocumentBackups, setDirty, cancel,
   };
 }
 
@@ -180,10 +202,12 @@ describe('createAutosaveToggle going private (#257)', () => {
     expect(persistLastBeforePrivate).toHaveBeenCalledWith(
       expect.objectContaining({ private: true, text: 'saved', title: 'T' }),
       1,
+      { markPrivate: true },
     );
     expect(state.active.private).toBe(true);
     expect(autosave.checked).toBe(false);
     expect(privateMarker.hidden).toBe(false);
+    expect(askConfirmChoice).toHaveBeenCalled();
     expect(setSaveStatus).toHaveBeenCalled();
   });
 
@@ -214,7 +238,7 @@ describe('createAutosaveToggle going private (#257)', () => {
     const { toggle, persistLastBeforePrivate, revision } = harness();
     await toggle.applyDocumentChange(false);
     expect(revision.value).toBe(2);
-    expect(persistLastBeforePrivate).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(persistLastBeforePrivate).toHaveBeenCalledWith(expect.anything(), 1, { markPrivate: true });
   });
 
   it('rebases the freeze onto an in-flight conflict copy (#257 P1)', async () => {
@@ -241,6 +265,7 @@ describe('createAutosaveToggle going private (#257)', () => {
         private: true,
       }),
       1,
+      { markPrivate: true },
     );
     expect(state.active.id).toBe('copy');
     expect(state.active.private).toBe(true);
@@ -264,5 +289,53 @@ describe('createAutosaveToggle going private (#257)', () => {
     });
     await toggle.applyDocumentChange(false);
     expect(announceAction).toHaveBeenCalledWith(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
+  });
+
+  it('deletes the saved copy, change records and backups when chosen (#257 follow-up)', async () => {
+    const { toggle, state, postSignal, clearDocumentBackups, setDirty } = harness({
+      deleteSaved: true,
+    });
+    await toggle.applyDocumentChange(false);
+    expect(deleteStoredDraft).toHaveBeenCalled();
+    expect(clearDocumentBackups).toHaveBeenCalledWith('doc');
+    expect(postSignal).toHaveBeenCalledWith('deleted', 'doc', 1);
+    expect(state.active.revision).toBe(0);
+    expect(state.active.private).toBe(true);
+    expect(setDirty).toHaveBeenCalledWith(true);
+  });
+});
+
+describe('createAutosaveToggle private session (#257 follow-up)', () => {
+  it('saves dirty text without private:true when the session turns on', async () => {
+    const { toggle, persistLastBeforePrivate, state, abandonChangeRun } = harness({
+      sessionDirty: true,
+    });
+    // Preference already flipped by Settings before applySessionChange.
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'saved', title: 'T' }),
+      1,
+      { markPrivate: false },
+    );
+    expect(state.active.private).toBeUndefined();
+    expect(abandonChangeRun).toHaveBeenCalled();
+    expect(askConfirmChoice).not.toHaveBeenCalled();
+  });
+
+  it('does not last-save private-period text when the document was already private', async () => {
+    const { toggle, persistLastBeforePrivate, state } = harness({ sessionDirty: true });
+    state.active = { ...state.active, private: true };
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).not.toHaveBeenCalled();
   });
 });

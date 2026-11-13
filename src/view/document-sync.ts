@@ -19,7 +19,8 @@ export type DocumentSyncDeps = {
   draftTitle: HTMLInputElement;
   editor: Editor;
   workspace: Workspace;
-  autosave: HTMLInputElement;
+  /** False while privateNow() — prefer over reading the checkbox (#257). */
+  mayWrite: () => boolean;
   writingPosition: { save: () => void };
   saver: { inFlight: () => Promise<SaveResult> | undefined };
   viewer: { showDocument: (draft: StoredDraft) => void; showMissing: (message: string) => void; MISSING: string };
@@ -118,7 +119,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
       // Apply keys held while the copy was made before anything else can edit (keeps order).
       deps.drainDeletedInput();
       void deps.refreshDrafts().catch(() => { /* The list refreshes on next open. */ });
-      if (deps.autosave.checked && !state.active.private) {
+      if (deps.mayWrite()) {
         const result = await deps.persist();
         status.announceAction(result.saved ? 'Kept as a new document.' : 'Kept as a new document; it is not saved yet.');
       } else {

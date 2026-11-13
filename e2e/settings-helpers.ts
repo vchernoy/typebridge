@@ -40,20 +40,32 @@ export async function setSetting(page: Page, selector: string, on: boolean): Pro
 
 /**
  * Per-document Autosave checkbox in the editor chrome (#257).
- * Unchecked marks the shown document private. No delete-saved-copy prompt in step 1
- * (clear local data is a later step). The optional third argument is ignored for
- * call-site compatibility with older Keep/Delete flows.
+ * Unchecked marks the shown document private and offers Keep/Delete of the saved copy.
  */
 export async function setAutosave(
   page: Page,
   on: boolean,
-  _offChoice: 'keep' | 'delete' = 'keep',
+  offChoice: 'keep' | 'delete' = 'keep',
 ): Promise<void> {
-  void _offChoice;
   const box = page.locator('#autosave');
   await expect(box).toBeEnabled();
   if (on) await box.check();
-  else await box.uncheck();
+  else {
+    await box.uncheck();
+    const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
+    // Saved docs get Keep/Delete after the last pre-private save; never-saved clean docs skip it.
+    await expect.poll(async () => {
+      if (await dialog.isVisible()) return 'dialog';
+      if (await box.isEnabled()) return 'done';
+      return 'wait';
+    }, { timeout: 15_000 }).not.toBe('wait');
+    if (await dialog.isVisible()) {
+      await dialog.getByRole('button', {
+        name: offChoice === 'delete' ? 'Delete saved copy' : 'Keep saved copy',
+      }).click();
+      await expect(dialog).toBeHidden();
+    }
+  }
   await expect(box).toBeChecked({ checked: on });
   // Going private may briefly keep the control disabled while an in-flight save finishes.
   await expect(box).toBeEnabled({ timeout: 15_000 });
