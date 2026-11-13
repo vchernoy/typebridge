@@ -92,7 +92,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
         take: vi.fn(() => undefined),
         put: vi.fn(() => undefined),
         suppressed: () => false,
-        setSuppressed: () => undefined,
+        setSuppressed: vi.fn(() => undefined),
       },
       recovery: { takeCurrentJournal: () => undefined },
       discardUnsavedRecovery,
@@ -146,6 +146,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     await expect(guards.prepareUpdateReload()).resolves.toBe(true);
     expect(deps.markReloadDiscard).toHaveBeenCalledOnce();
     expect(deps.reloadBackup.take).toHaveBeenCalledOnce();
+    expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(true);
     expect(freezeForDiscard).not.toHaveBeenCalled();
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
   });
@@ -157,6 +158,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     await expect(guards.prepareUpdateReload()).resolves.toBe(true);
     guards.cancelUpdateReload();
     expect(deps.reloadBackup.put).toHaveBeenCalledWith(stashed);
+    expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(false);
   });
 
   it('update-reload Keep editing writes no marker (#255)', async () => {

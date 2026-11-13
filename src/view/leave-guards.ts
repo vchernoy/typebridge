@@ -177,8 +177,10 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         return false;
       }
       // Drop any earlier Autosave-on pendingDraft so the next load cannot restore discarded text
-      // (#256 Codex P0). Stash for cancelRestore; mayBackUp is false while Autosave is off.
+      // (#256 Codex P0). Stash for cancel restore; suppress so prefs sync turning Autosave back
+      // on cannot recreate a backup before navigation.
       stashedReloadBackup = deps.reloadBackup.take();
+      deps.reloadBackup.setSuppressed(true);
       privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
       return true;
     }
