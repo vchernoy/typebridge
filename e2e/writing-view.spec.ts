@@ -330,10 +330,16 @@ for (const storageFails of [false, true]) {
   });
 }
 
-test('startup pruning retains the recovered unsaved document position (#107)', async ({ page }) => {
+test('startup pruning retains the recovered unsaved public document position (#107)', async ({ page }) => {
   const id = '22222222-2222-4222-8222-222222222222';
   await page.addInitScript(({ id, text, key }) => {
-    localStorage.setItem('typebridge.autosave.v1', 'off');
+    localStorage.setItem('typebridge.autosave.v1', 'on');
+    // Keep this public recovery unsaved via storage failure; new private documents retain no positions (#257).
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (this.name === 'documents') throw new DOMException('save blocked', 'QuotaExceededError');
+      return put.apply(this, args);
+    };
     sessionStorage.setItem('typebridge.pendingDraft.v1', JSON.stringify({
       id, title: 'Recovered position', text, updatedAt: Date.now(), revision: 0,
     }));

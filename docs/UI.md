@@ -45,3 +45,6 @@ When a newer offline worker is waiting, a non-blocking New version available not
 ## Reset settings
 
 Settings → Reset settings to defaults asks explicitly before resetting appearance (System), window layout (Auto), typing mode/shortcut, custom rules, Tab indents, Find options, Normal/Focus editor sizes and Focus preference. It does not reload the page, delete documents, change current text/history or clear Private session / per-document private flags. Partial storage failures are reported; they do not prevent other preferences from being reset.
+
+
+A new private document that has never saved appears only in its window’s Documents list, marked **Private · Not saved**. It disappears on reload/close; its ID is omitted from restored host layout. Checking Autosave with Private session off saves it and starts normal metadata recording. Explicit Import remains an explicit save. Previously saved private documents continue reopening their last stored version.

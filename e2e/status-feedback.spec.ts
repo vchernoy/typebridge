@@ -26,8 +26,6 @@ const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, th
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
 const AUTOSAVE_OFF = 'Autosave off — text and title are not saved and will be lost on reload';
-const PRIVATE_SWITCH_FLAG_FAILED =
-  "Your last changes before going private couldn't be saved, and this document may not reopen as private.";
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 // Copy may be refused by the headless clipboard; either message must keep the warning.
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -365,10 +363,8 @@ test('without browser storage, toggling private keeps the storage warning (#257)
   await expect(status(page)).toContainText('browser storage is unavailable');
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  // Going private without storage may also announce the private-flag failure (#257).
-  await expect(status(page)).toHaveText(
-    PRIVATE_SWITCH_FLAG_FAILED + ' ' + SAVE_FAILED_NO_STORAGE,
-  );
+  // Revision-zero private documents never persist a flag (#257 step 3); keep the actual storage risk.
+  await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
 });
 
