@@ -701,13 +701,18 @@ async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<v
   statusLine.announceAction(`Recovered unsaved text from an earlier session as “${copy.title}” in Documents. Your current document was kept.`);
 }
 /**
- * Update-reload discard (#255): write marker + session intent at consent. No-op without a live
- * fence (same gate as discardUnsavedRecovery). Throws when the marker cannot be stored.
+ * Update-reload discard (#255): write marker + session intent at consent. Throws when a marker
+ * cannot be stored (no db/fence/ownership) so prepare refuses rather than reloading with a
+ * discard that will not clear journals or change records (#256 Codex P0).
  */
 async function markReloadDiscard(): Promise<void> {
-  if (viewMode || !state.db || state.editBlock) return;
+  if (viewMode || !state.db || state.editBlock) {
+    throw new Error('Reload discard marker unavailable');
+  }
   const ownership = state.ownership;
-  if (!ownership || ownership.documentId !== state.active.id) return;
+  if (!ownership || ownership.documentId !== state.active.id) {
+    throw new Error('Reload discard marker unavailable');
+  }
   const documentId = state.active.id;
   const fence = await ownership.writeFence();
   // Pending first so a foreign tab never sees a marker without pending (#256 P1).
