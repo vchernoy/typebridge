@@ -38,6 +38,29 @@ export async function setSetting(page: Page, selector: string, on: boolean): Pro
   await closeSettings(page);
 }
 
+type AutosaveRoot = Page | FrameLocator;
+
+/** Keep/Delete dialog after going private on a saved document (#257 follow-up / #260). */
+export function privateSavedCopyDialog(root: AutosaveRoot) {
+  return root.getByRole('dialog', { name: 'Delete the saved copy?' });
+}
+
+/**
+ * Dismiss Keep/Delete once visible. Call after starting go-private on a saved document;
+ * the last pre-private save (and any persist delay) must finish before the dialog appears.
+ */
+export async function confirmPrivateSavedCopy(
+  root: AutosaveRoot,
+  choice: 'keep' | 'delete' = 'keep',
+): Promise<void> {
+  const dialog = privateSavedCopyDialog(root);
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await dialog.getByRole('button', {
+    name: choice === 'delete' ? 'Delete saved copy' : 'Keep saved copy',
+  }).click();
+  await expect(dialog).toBeHidden();
+}
+
 /**
  * Per-document Autosave checkbox in the editor chrome (#257).
  * Unchecked marks the shown document private and offers Keep/Delete of the saved copy.
@@ -52,19 +75,14 @@ export async function setAutosave(
   if (on) await box.check();
   else {
     await box.uncheck();
-    const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
+    const dialog = privateSavedCopyDialog(page);
     // Saved docs get Keep/Delete after the last pre-private save; never-saved clean docs skip it.
     await expect.poll(async () => {
       if (await dialog.isVisible()) return 'dialog';
       if (await box.isEnabled()) return 'done';
       return 'wait';
     }, { timeout: 15_000 }).not.toBe('wait');
-    if (await dialog.isVisible()) {
-      await dialog.getByRole('button', {
-        name: offChoice === 'delete' ? 'Delete saved copy' : 'Keep saved copy',
-      }).click();
-      await expect(dialog).toBeHidden();
-    }
+    if (await dialog.isVisible()) await confirmPrivateSavedCopy(page, offChoice);
   }
   await expect(box).toBeChecked({ checked: on });
   // Going private may briefly keep the control disabled while an in-flight save finishes.

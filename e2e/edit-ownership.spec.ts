@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, selectDocument, setAutosave } from './settings-helpers';
+import { confirmPrivateSavedCopy, documentAction, selectDocument, setAutosave } from './settings-helpers';
 import { claimFenceElsewhere, heldEditLocks, readOwnership, readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 // Single editing owner per document (#159 W4): Web Lock + IndexedDB fence.
@@ -306,11 +306,13 @@ test('document switch waits for the private-toggle gate before changing document
   const first = await saveAs(page, 'first saved copy');
   await documentAction(page, '#new-draft');
   await saveAs(page, 'second saved copy');
-  // Hold the last pre-private save so the toggle gate stays active.
+  // Hold the last pre-private save so the toggle gate stays active through save + Keep/Delete.
   await page.evaluate(() => {
     (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 2_000;
   });
-  const toggling = page.locator('#autosave').uncheck();
+  // Playwright's uncheck() resolves when the box flips at the start of goPrivate — not when
+  // the gate ends — so do not treat it as "toggle finished" (#260 Keep/Delete follow-up).
+  void page.locator('#autosave').uncheck();
   await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
   // Queue a switch while going-private owns the gate; it must not apply until the gate ends.
   const switching = page.evaluate(id => new Promise<void>(resolve => {
@@ -321,9 +323,13 @@ test('document switch waits for the private-toggle gate before changing document
   }), first);
   await switching;
   await expect(page.locator('#editor')).toHaveValue('second saved copy');
-  await toggling;
-  await expect(page.locator('#autosave')).toBeEnabled();
+  // Keep/Delete still holds the gate after the delayed last-save until dismissed.
+  await expect(page.locator('#editor')).toHaveValue('second saved copy');
+  await confirmPrivateSavedCopy(page, 'keep');
+  // Queued switch applies to the non-private first doc → Autosave checked again.
   await expect.poll(async () => page.locator('#editor').inputValue()).toBe('first saved copy');
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await expect(page.locator('#autosave')).toBeChecked();
   await expect.poll(async () => (await readStoredDocs(page)).map(row => row.text).sort()).toEqual([
     'first saved copy',
     'second saved copy',

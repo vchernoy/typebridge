@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { documentAction, fillHostEditor, setAutosave, setPrivateSession } from './settings-helpers';
+import { confirmPrivateSavedCopy, documentAction, fillHostEditor, setAutosave, setPrivateSession } from './settings-helpers';
 import { PRIVATE_SWITCH_FLAG_FAILED, PRIVATE_SWITCH_SAVE_FAILED } from '../src/editor/privacy';
 import { readStoredDocs } from './storage-helpers';
 
@@ -316,9 +316,7 @@ test('private and normal documents stay independent across two host windows (#25
   await fillHostEditor(a, 'Private window text');
   await expect(a.locator('#save-indicator')).toHaveText('Saved');
   await a.locator('#autosave').uncheck();
-  const dialogA = a.getByRole('dialog', { name: 'Delete the saved copy?' });
-  await expect(dialogA).toBeVisible({ timeout: 15_000 });
-  await dialogA.getByRole('button', { name: 'Keep saved copy' }).click();
+  await confirmPrivateSavedCopy(a, 'keep');
   await expect(a.locator('#private-marker')).toBeVisible();
   await fillHostEditor(a, 'Private window text SECRET');
 
@@ -352,9 +350,7 @@ test('a private document reopens private in a second host window (#257 follow-up
   await fillHostEditor(a, 'Reopen private body');
   await expect(a.locator('#save-indicator')).toHaveText('Saved');
   await a.locator('#autosave').uncheck();
-  const dialog = a.getByRole('dialog', { name: 'Delete the saved copy?' });
-  await expect(dialog).toBeVisible({ timeout: 15_000 });
-  await dialog.getByRole('button', { name: 'Keep saved copy' }).click();
+  await confirmPrivateSavedCopy(a, 'keep');
   await expect(a.locator('#private-marker')).toBeVisible();
   const docId = await a.locator('#drafts').inputValue();
 
