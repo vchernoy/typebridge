@@ -265,7 +265,11 @@ test('automatic ownership after owner closes discards reader search without savi
   await expect(reader.locator('#find-text')).toHaveValue('reader local query');
   await page.close();
   await reader.bringToFront();
-  await reader.evaluate(() => window.dispatchEvent(new Event('focus')));
+  // The closed owner's lock can take a moment to release (WebKit): retry on focus like a user would.
+  await expect.poll(async () => {
+    await reader.evaluate(() => window.dispatchEvent(new Event('focus')));
+    return reader.locator('html').getAttribute('data-role');
+  }).toBe('editor');
   await ready(reader);
   await expect(reader.locator('#find-text')).toHaveValue('public find');
   await expect(reader.locator('#replace-text')).toHaveValue('public replace');
