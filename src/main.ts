@@ -1295,6 +1295,9 @@ async function finishStorageClear(detail: StorageClear & { local: boolean }): Pr
   state.drafts = []; state.active = { ...newDraft(), revision: 0 };
   state.editBlock = ''; state.transferFrozen = false; state.transitioning = false;
   state.saveFailed = false;
+  // An invalidated boot must not finalize over this replacement; enable it here instead.
+  field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
+  findInput.disabled = false; replaceInput.disabled = false;
   if (viewMode) viewer.showMissing('Storage was cleared in another tab');
   else showDraft({ restorePosition: false });
   const message = detail.local ? 'All local data was cleared' : 'Storage was cleared in another tab';
@@ -1307,6 +1310,7 @@ async function finishStorageClear(detail: StorageClear & { local: boolean }): Pr
     state.db = db; state.storageCleared = false; state.storageProblem = '';
     if (!viewMode) { installOwnership(await acquireFor(state.active.id)); rememberActive(); }
     syncAutosaveControl(); updateSaveIndicator();
+    restoreFocusMode(); finishInitialization();
   } catch {
     if (generation !== state.storageGeneration) return;
     state.storageProblem = 'Local data was cleared, but storage could not be reopened. Reload to save new documents.';

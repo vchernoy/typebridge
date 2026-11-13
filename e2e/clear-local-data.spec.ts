@@ -285,3 +285,31 @@ test('per-document clear propagates a matching recovery backup removal failure',
   expect((await stored(page)).rows).toEqual([]);
   await expect(page.locator('#editor')).toHaveJSProperty('readOnly', false);
 });
+
+test('global clear cancels startup waiting for its initial ownership acquisition', async ({ page, context }) => {
+  await page.goto('/editor.html'); await ready(page); const id = await save(page, 'CLEAR CANARY startup target');
+  const other = await context.newPage();
+  await other.addInitScript(() => {
+    const win = window as unknown as { __typebridgeDelayAcquireMs: number; bootAcquireWaiting: boolean };
+    win.__typebridgeDelayAcquireMs = 1500;
+    const timers = window as unknown as { setTimeout: (callback: TimerHandler, delay?: number, ...args: unknown[]) => number };
+    const schedule = timers.setTimeout;
+    timers.setTimeout = function (callback: TimerHandler, delay?: number, ...args: unknown[]) {
+      if (delay === 1500) win.bootAcquireWaiting = true;
+      return schedule.call(window, callback, delay, ...args);
+    };
+  });
+  await other.goto(`/editor.html?doc=${id}`);
+  await expect.poll(() => other.evaluate(() => (window as unknown as { bootAcquireWaiting: boolean }).bootAcquireWaiting)).toBe(true);
+  await clearAll(page);
+  await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+  // The old startup and the fresh session's acquire both have the deliberate delay.
+  await other.waitForTimeout(1800);
+  await expect(other.locator('#editor')).toBeEnabled();
+  await expect(other.locator('#editor')).toHaveValue('');
+  await expect(other.locator('#editor')).toHaveJSProperty('readOnly', false);
+  expect((await stored(other)).all).not.toContain('CANARY');
+  await other.locator('#editor').fill('Fresh after invalidated startup');
+  await expect(other.locator('#save-indicator')).toHaveText('Saved');
+  expect((await stored(other)).all).not.toContain('CANARY');
+});
