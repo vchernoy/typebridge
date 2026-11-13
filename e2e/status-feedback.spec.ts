@@ -456,7 +456,8 @@ test('a database upgrade in another tab stays visible after action feedback and 
   const other = await context.newPage();
   await other.goto('/404');
   await other.evaluate(() => new Promise<void>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 4);
+    // Must be above DATABASE_VERSION so versionchange fires on the first tab.
+    const open = indexedDB.open('typebridge', 5);
     open.onsuccess = () => { open.result.close(); resolve(); };
     open.onerror = () => reject(open.error);
   }));
