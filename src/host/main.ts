@@ -1,3 +1,4 @@
+import { clearedNoticeText, installStorageClearReload, takeClearedNotice } from '../ui/storage-clear-reload';
 /**
  * #175 step 5–7 host page: free-layout editor windows, update notice, and Settings.
  */
@@ -16,6 +17,18 @@ import { installWindowManager } from './window-manager';
 const root = document.querySelector<HTMLElement>('#host-root')!;
 const toolbar = document.querySelector<HTMLElement>('#host-toolbar')!;
 const noticeMount = document.querySelector<HTMLElement>('#host-notice')!;
+try {
+  const notice = takeClearedNotice(sessionStorage);
+  if (notice) {
+    document.documentElement.dataset.clearedNotice = notice;
+    const message = document.createElement('p'); message.setAttribute('role', 'status');
+    message.textContent = clearedNoticeText(notice); noticeMount.append(message);
+  }
+} catch { /* Optional one-shot notice. */ }
+const reloadAfterStorageClear = installStorageClearReload({
+  stop: () => { for (const frame of editorFrames()) editorHooks(frame).__typebridgeStopForStorageClear?.(); },
+});
+
 
 /** A window's side of the host↔window contract (see view/embed-api.ts); empty until it loads. */
 function editorHooks(frame: HTMLIFrameElement): Partial<EditorWindowApi> {
@@ -83,6 +96,7 @@ const manager = installWindowManager({
 
 // The host's side of the host↔window contract (see view/embed-api.ts).
 exposeHostPageApi({
+  __typebridgeReloadAfterStorageClear: reloadAfterStorageClear,
   __typebridgeHostWindows: () => manager.windows(),
   __typebridgeHostLayoutMode: () => manager.layoutMode(),
   __typebridgeHostFocusMode: (enabled, sourceWindowId) => {

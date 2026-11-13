@@ -1,5 +1,5 @@
-import { openDraftDatabase } from './editor/indexeddb';
-import { clearContentMetadata, clearDocumentMetadata, notifyStorageClear, onStorageClear, type StorageClear } from './editor/clear-data';
+import { clearedNoticeText, installStorageClearReload, takeClearedNotice } from './ui/storage-clear-reload';
+import { clearDocumentMetadata, notifyStorageClear, onStorageClear } from './editor/clear-data';
 import { setupClearLocalData } from './ui/clear-local-data';
 import { createDocumentSearch, restoreDocumentTitle } from './view/document-search';
 import { sameFields } from './editor/document-fields';
@@ -1267,62 +1267,38 @@ function handleStorageClear(): void {
   recoveryNotice.hidden = false; recoveryNotice.textContent = state.storageProblem;
   syncAutosaveControl();
 }
-async function finishStorageClear(detail: StorageClear & { local: boolean }): Promise<void> {
+function finishStorageClear(detail: { documentId?: string; failed?: true }): void {
   if (detail.documentId) {
     // Ordinary copies retain their revision/identity and use the normal deleted signal.
     try { clearDocumentMetadata(sessionStorage, detail.documentId); }
     catch { if (!detail.failed) notifyStorageClear(detail.documentId, true); }
     if (detail.failed) { recoveryNotice.hidden = false; recoveryNotice.textContent = 'Some local data could not be cleared.'; }
     void refreshDrafts().catch(() => {});
-    return;
-  }
-  if (!state.storageCleared) handleStorageClear();
-  if (detail.failed) {
-    state.storageGeneration++; // Cancel any successful completion still awaiting old writers.
+  } else if (detail.failed) {
+    if (!state.storageCleared) handleStorageClear();
     state.storageProblem = 'Some local data could not be cleared. Retry before leaving this device.';
     recoveryNotice.hidden = false; recoveryNotice.textContent = state.storageProblem;
-    return;
-  }
-  try { clearContentMetadata(sessionStorage); }
-  catch { notifyStorageClear(undefined, true); return; }
-  const generation = state.storageGeneration;
-  // Late save callbacks/queued appends must settle against the invalidated connection before
-  // a fresh database is opened. They must never write or install old text into the new session.
-  await saver.inFlight()?.catch(() => undefined);
-  await saver.drainChanges();
-  if (generation !== state.storageGeneration) return;
-  recovery.takeCurrentJournal();
-  state.drafts = []; state.active = { ...newDraft(), revision: 0 };
-  state.editBlock = ''; state.transferFrozen = false; state.transitioning = false;
-  state.saveFailed = false;
-  // The clear owns this replacement, including when it interrupted boot. Keep its fields
-  // disabled until the fresh database/ownership is ready; typing must not fall into that gap.
-  field.disabled = true; draftSelect.disabled = true; draftTitle.disabled = true;
-  findInput.disabled = true; replaceInput.disabled = true;
-  if (viewMode) viewer.showMissing('Storage was cleared in another tab');
-  else showDraft({ restorePosition: false });
-  const message = detail.local ? 'All local data was cleared' : 'Storage was cleared in another tab';
-  recoveryNotice.hidden = false; recoveryNotice.textContent = message;
-  await renderRecovery();
-  if (generation !== state.storageGeneration) return;
-  try {
-    const db = await openDraftDatabase(cleared => handleDatabaseUpgrade(cleared));
-    if (generation !== state.storageGeneration) { db.close(); return; }
-    state.db = db; state.storageCleared = false; state.storageProblem = '';
-    if (!viewMode) { installOwnership(await acquireFor(state.active.id)); rememberActive(); }
-    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
-    findInput.disabled = false; replaceInput.disabled = false;
-    syncAutosaveControl(); updateSaveIndicator();
-    restoreFocusMode(); finishInitialization();
-  } catch {
-    if (generation !== state.storageGeneration) return;
-    state.storageProblem = 'Local data was cleared, but storage could not be reopened. Reload to save new documents.';
-    recoveryNotice.textContent = state.storageProblem;
-    field.disabled = false; draftSelect.disabled = false; draftTitle.disabled = false;
-    findInput.disabled = false; replaceInput.disabled = false;
-    syncAutosaveControl();
   }
 }
-onStorageClear(detail => { void finishStorageClear(detail); });
+function stopForClearReload(): void {
+  handleStorageClear();
+  reloadBackup.setSuppressed(true); // Suppress beforeunload, pagehide backup and visibility saves.
+}
+// The host calls this on every child before reloading itself (including a still-booting editor).
+exposeEditorWindowApi({ __typebridgeStopForStorageClear: stopForClearReload });
+onStorageClear(finishStorageClear);
+installStorageClearReload({
+  stop: stopForClearReload,
+  delegate: here => {
+    const reloadHost = embedded ? hostPageApi()?.__typebridgeReloadAfterStorageClear : undefined;
+    if (!reloadHost) return false;
+    reloadHost(here); return true;
+  },
+});
+try {
+  const parentNotice = embedded && windowId === 'main' ? window.parent.document.documentElement.dataset.clearedNotice : undefined;
+  const notice = parentNotice === 'here' || parentNotice === 'elsewhere' ? 'elsewhere' : takeClearedNotice(sessionStorage);
+  if (notice) { recoveryNotice.hidden = false; recoveryNotice.textContent = clearedNoticeText(notice); }
+} catch { /* Optional one-shot notice when session storage is unavailable. */ }
 setupClearLocalData();
 document.querySelector<HTMLButtonElement>('#clear-document-data')?.addEventListener('click', () => { void autosaveToggle?.clearSavedData(); });

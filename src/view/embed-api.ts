@@ -16,6 +16,7 @@ export type TitleEditPayload = { inputType: string; data: string | null; start: 
 
 /** What each editor window exposes; the host calls these on `frame.contentWindow`. */
 export type EditorWindowApi = {
+  __typebridgeStopForStorageClear: () => void;
   /** Empty means this window's current document must not be persisted or enumerated. */
   __typebridgeStoredDocumentId: () => string | undefined;
   /** Update reload: ask (with dialogs in this window) whether reloading is safe. */
@@ -50,6 +51,7 @@ export type EditorWindowApi = {
 
 /** What the host page exposes; editor windows call these on `window.parent`. */
 export type HostPageApi = {
+  __typebridgeReloadAfterStorageClear: (here: boolean) => void;
   /** A window entered or left Focus mode; the host maximizes or restores it (#175 step 6). */
   __typebridgeHostFocusMode: (enabled: boolean, sourceWindowId?: string) => void;
   /** Documents → Rename… in a window: rename in that window's title bar. */
