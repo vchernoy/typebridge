@@ -87,3 +87,12 @@ If the first documents transaction has already started when Autosave is unchecke
 
 
 Private session also waits for a revision-zero first save to settle before its final identity synchronization. Cancellation or abort releases the unsaved document’s shared reservation/fence; a successful commit keeps normal saved-document ownership and metadata without setting the per-document private flag. The session still blocks all later content writes, and turning it off resumes normal Autosave. No replacement final save is made for a document that remained unsaved.
+
+
+### Clear local data (#257 step 4)
+
+Documents offers a separately confirmed **Clear this document’s saved data…** action. It waits for a pending save, removes the saved row and shared log under the ownership fence, clears crash/reload backups and view metadata, and sends metadata-only deletion/clearing notifications. Live text and all Editor histories remain in memory as a fresh private scratch identity. Cancel is nondestructive. Existing Autosave → Keep/Delete behavior is unchanged.
+
+Settings offers **Clear local data…**, separate from Reset settings. It deletes the content-only IndexedDB database; versionchange closes existing connections and invalidates pending access before deletion completes. Already-started transactions drain before the database is erased. Open editors retain their fields/history privately and reject subsequent content writes until reload; viewers retain a read-only copy. Pending deletion says “Storage is being cleared”; successful deletion and metadata cleanup say “Storage was cleared”. Browser storage failures report incomplete erasure rather than success.
+
+Only known TypeBridge content keys are removed from local/session storage: journals, reload backups (including retired namespaces), active hints, positions, legacy drafts/search text and host layout. Settings, Private session, other applications’ storage and offline app assets are kept. A metadata-only channel plus transient storage event notifies other tabs; each tab removes its own session data. Host caches suppress cleared identities until their editor acknowledges them and stop persisting layout after clear-all. No entered text is transmitted or logged.
