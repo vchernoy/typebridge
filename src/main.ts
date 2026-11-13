@@ -57,6 +57,7 @@ import { clearRecovery, listRecovery, writeRecovery } from './editor/recovery';
 import { lineColumnAtOffset } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
 import { setupSearch } from './ui/search';
+import { createSearchPrivacy } from './ui/search-privacy';
 import { setupRules } from './ui/rules';
 import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
@@ -446,19 +447,16 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
     canMutate: canMutatePrimary,
     getFindTarget: () => primarySearch,
     matchSurfaces: [field],
-    mayPersistText: () => mayWrite(),
+    mayPersistText: () => searchPrivacy.mayPersist(),
     findTextKey: findSessionKey,
     replaceTextKey: replaceSessionKey,
   },
 );
-let searchScope = '';
-syncSearchPrivacy = () => {
-  const next = `${state.active.id}:${mayWrite()}`;
-  if (next === searchScope) return;
-  searchScope = next;
-  // Never carry a private query into the next document or a newly writable session.
-  restoreText();
-};
+const searchPrivacy = createSearchPrivacy(
+  () => ({ documentId: state.active.id, writable: mayWrite() }),
+  restoreText,
+);
+syncSearchPrivacy = () => { searchPrivacy.sync(); };
 const { openFind } = setupFindGotoBars({
   field,
   editor,

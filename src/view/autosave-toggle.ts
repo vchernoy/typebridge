@@ -205,6 +205,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
 
   /** Global private-session preference changed (Settings / host prefs sync). */
   async function applySessionChange(sessionOn: boolean): Promise<void> {
+    // Observe search/privacy boundaries immediately, even while last-save is awaiting.
+    deps.syncAutosaveControl();
     if (active) {
       if (sessionOn) {
         deps.autosave.checked = false;
@@ -339,6 +341,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     // 1. Switch immediately.
     state.active = { ...state.active, private: true };
     deps.autosave.checked = false;
+    deps.syncAutosaveControl();
     deps.saver.cancel();
     syncPrivateMarker();
     deps.renderDrafts();
@@ -424,6 +427,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   async function leavePrivate(): Promise<void> {
     const contentDirty = deps.workspace.dirty();
     state.active = { ...state.active, private: false };
+    deps.syncAutosaveControl();
     deps.autosave.checked = true;
     syncPrivateMarker();
 

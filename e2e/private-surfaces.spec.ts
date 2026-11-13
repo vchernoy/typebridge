@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { confirmPrivateSavedCopy, fillHostEditor, setHostAutosave } from './settings-helpers';
+import { confirmPrivateSavedCopy, fillHostEditor, setHostAutosave, setPrivateSession } from './settings-helpers';
 
 for (const session of [false, true]) {
   test(`private ${session ? 'session' : 'document'} keeps title/search text out of storage across reload (#257 step 2)`, async ({ page }) => {
@@ -68,3 +68,49 @@ test('a missing comparison viewer follows same-id revision-one recreation (#261)
   await expect(viewer.locator('#editor')).toHaveValue('Recreated');
   await expect(viewer.locator('#editor')).toHaveAttribute('readonly', '');
 });
+
+
+test('queued session reversal cannot publish a private query (#264 P0)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Public body');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.locator('#editor').press('Control+f');
+  await page.locator('#find-text').fill('public query');
+  await page.locator('#replace-text').fill('public replacement');
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 1500;
+  });
+  await page.locator('#editor').fill('Public dirty');
+  await setPrivateSession(page, true);
+  await page.locator('#find-text').fill('SECRET FIND');
+  await page.locator('#replace-text').fill('SECRET REPLACE');
+  await setPrivateSession(page, false); // before the held last-save completes
+  await expect(page.locator('#find-text')).toHaveValue('public query');
+  await expect(page.locator('#replace-text')).toHaveValue('public replacement');
+  await page.locator('#find-text').dispatchEvent('compositionend');
+  await page.locator('#replace-text').dispatchEvent('compositionend');
+  expect(await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(sessionStorage).filter(([k]) => k.startsWith('typebridge.find.')))))).not.toContain('SECRET');
+});
+
+for (const selector of ['#find-text', '#replace-text']) {
+  test(`restoring public ${selector} invalidates private IME undo (#264 P0)`, async ({ page }) => {
+    await page.goto('/editor.html');
+    await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
+    await expect(page.locator('#editor')).toBeEnabled();
+    await page.locator('#editor').fill('Public body');
+    await expect(page.locator('#save-indicator')).toHaveText('Saved');
+    await page.locator('#editor').press('Control+f');
+    await page.locator(selector).fill('public value');
+    await setPrivateSession(page, true);
+    await page.locator(selector).fill('SECRET IME');
+    await page.locator(selector).dispatchEvent('compositionstart');
+    await setPrivateSession(page, false);
+    await expect(page.locator(selector)).toHaveValue('public value');
+    await page.locator(selector).dispatchEvent('compositionend');
+    await page.locator(selector).press('Control+z');
+    await expect(page.locator(selector)).toHaveValue('public value');
+    expect(await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(sessionStorage).filter(([k]) => k.startsWith('typebridge.find.')))))).not.toContain('SECRET');
+  });
+}

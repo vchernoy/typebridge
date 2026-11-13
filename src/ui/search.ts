@@ -63,6 +63,8 @@ export function setupSearch(
     };
     input.addEventListener('input', save);
     input.addEventListener('compositionend', save);
+    // Observe privacy even when an IME has not emitted its final input yet.
+    input.addEventListener('compositionstart', () => { options.mayPersistText?.(); });
   }
   for (const [input, key] of [[matchCase, CASE_KEY], [regexMode, REGEX_KEY]] as const) {
     try { input.checked = readSearchOption(localStorage, key); } catch { searchStorageResult(key, false); }

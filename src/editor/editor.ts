@@ -322,6 +322,9 @@ export class Editor {
    * sibling's query cannot be undone with stale deltas (#175 step 9).
    */
   syncFromField(): void {
+    // An external restore also invalidates any IME snapshot of the previous private value.
+    this.compositionStart = null;
+    this.imeComposing = false;
     this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
