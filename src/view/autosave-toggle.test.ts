@@ -206,7 +206,7 @@ function harness(options: {
   return {
     toggle, state, autosave, privateMarker, persistLastBeforePrivate,
     announceAction, setSaveStatus, abandonChangeRun, revision,
-    postSignal, clearDocumentBackups, setDirty, cancel, frozenSnapshot,
+    postSignal, clearDocumentBackups, setDirty, cancel, frozenSnapshot, drainChanges,
   };
 }
 
@@ -649,4 +649,22 @@ it('cancelling document clear leaves its row and privacy state unchanged', async
   const { toggle, state } = harness();
   await toggle.clearSavedData();
   expect(state.active.private).not.toBe(true); expect(deleteStoredDraft).not.toHaveBeenCalled();
+});
+
+it('document clearing abandons and drains queued records before deletion and ownership release', async () => {
+  const { toggle, state, abandonChangeRun, drainChanges } = harness({ deleteSaved: true });
+  let release!: () => void;
+  drainChanges.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+  const held = state.ownership!;
+  held.release = vi.fn(async () => undefined);
+  const operation = toggle.clearSavedData();
+  await vi.waitFor(() => expect(drainChanges).toHaveBeenCalledOnce());
+  expect(abandonChangeRun).toHaveBeenCalledOnce();
+  expect(deleteStoredDraft).not.toHaveBeenCalled(); expect(held.release).not.toHaveBeenCalled();
+  release(); await operation;
+  expect(deleteStoredDraft).toHaveBeenCalledOnce(); expect(held.release).toHaveBeenCalledOnce();
+  expect(state.active.id).not.toBe('doc'); expect(state.ownership).toBeUndefined();
+  expect(abandonChangeRun.mock.invocationCallOrder[0]).toBeLessThan(drainChanges.mock.invocationCallOrder[0]);
+  expect(drainChanges.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(deleteStoredDraft).mock.invocationCallOrder[0]);
+  expect(vi.mocked(deleteStoredDraft).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(held.release).mock.invocationCallOrder[0]);
 });

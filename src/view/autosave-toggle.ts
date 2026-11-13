@@ -315,7 +315,10 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       if (state.active.id !== targetId || state.ownership !== targetOwnership || state.editBlock || deps.transferFrozen() || state.transitioning) {
         throw new Error('Document changed');
       }
-      // Keep the fence: this window goes on editing the same id privately.
+      // Stop new records and drain already queued appends before erasing them (#270 P0).
+      deps.abandonChangeRun();
+      await deps.saver.drainChanges();
+      // Keep the fence until deletion commits; the clear action then releases it.
       if (!await deleteStoredDraft(state.db, targetId, targetRevision, await targetOwnership.writeFence())) {
         throw new Error('Draft changed');
       }
@@ -468,6 +471,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       await offerDeleteSavedCopy(true);
       if (state.active.id === id && state.active.revision === 0) {
         // Kept text is a new private scratch document, never a resurrection of the erased identity.
+        const held = state.ownership; state.ownership = undefined; await held?.release();
         state.active = { ...state.active, id: crypto.randomUUID() };
         deps.workspace.bumpSessionGeneration(); deps.workspace.setDocumentId(state.active.id);
         deps.renderDrafts();
