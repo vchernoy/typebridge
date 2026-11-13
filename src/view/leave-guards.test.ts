@@ -86,7 +86,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
       persist: async () => ({ saved: false, conflict: false }),
       snapshot: () => ({ ...state.active, text: field.value, title: 'T', updatedAt: 1 }),
       reloadBackup: {
-        save: () => undefined,
+        save: vi.fn(() => undefined),
         read: () => undefined,
         remove: () => undefined,
         take: vi.fn(() => undefined),
@@ -147,18 +147,30 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(deps.markReloadDiscard).toHaveBeenCalledOnce();
     expect(deps.reloadBackup.take).toHaveBeenCalledOnce();
     expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(true);
-    expect(freezeForDiscard).not.toHaveBeenCalled();
+    expect(freezeForDiscard).toHaveBeenCalledOnce();
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
   });
 
   it('update-reload cancel restores a taken pendingDraft backup (#256 Codex P0)', async () => {
-    const { guards, deps } = harness({ autosaveOn: false });
+    const { guards, deps, unfreezeAfterDiscard } = harness({ autosaveOn: false });
     const stashed = { id: 'doc', title: 'T', text: 'backed', updatedAt: 1, revision: 1 };
     vi.mocked(deps.reloadBackup.take).mockReturnValue(stashed);
     await expect(guards.prepareUpdateReload()).resolves.toBe(true);
     guards.cancelUpdateReload();
     expect(deps.reloadBackup.put).toHaveBeenCalledWith(stashed);
     expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(false);
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+  });
+
+  it('assert after discard consent ignores Autosave-on backup recreate (#256 review P0)', async () => {
+    const { guards, deps, workspace } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    // Prefs sync flipped Autosave on after consent — must stay on private-revision path.
+    (deps.autosave as { checked: boolean }).checked = true;
+    expect(() => guards.assertSafeToReloadAfterUpdate()).not.toThrow();
+    expect(deps.reloadBackup.save).not.toHaveBeenCalled();
+    workspace.bumpContentRevision();
+    expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow(/Private edits changed/);
   });
 
   it('update-reload Keep editing writes no marker (#255)', async () => {

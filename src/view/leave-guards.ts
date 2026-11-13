@@ -177,10 +177,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         return false;
       }
       // Drop any earlier Autosave-on pendingDraft so the next load cannot restore discarded text
-      // (#256 Codex P0). Stash for cancel restore; suppress so prefs sync turning Autosave back
-      // on cannot recreate a backup before navigation.
+      // (#256 Codex P0). Stash for cancel restore; suppress + freeze so prefs sync turning
+      // Autosave back on cannot recreate a backup or persist discarded text before navigation.
       stashedReloadBackup = deps.reloadBackup.take();
       deps.reloadBackup.setSuppressed(true);
+      deps.freezeForDiscard();
       privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
       return true;
     }
@@ -207,9 +208,13 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   }
   /** Validate and arm reload; throws to abort. Does not navigate (host reloads the top page). */
   function assertSafeToReloadAfterUpdate(): void {
-    if (state.transitioning || state.deleting || deps.field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
+    // Discard-reload freeze disables the field on purpose; do not treat that as "busy".
+    if (state.transitioning || state.deleting || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
+    if (deps.field.disabled && !state.transferFrozen) throw new Error('Finish the current action first');
     if (deps.workspace.dirty()) {
-      if (!deps.autosave.checked) {
+      // Consented discard stays on the private-revision path even if Autosave flips on mid-prepare
+      // (#256 review P0): never recreate pendingDraft or ignore the content binding.
+      if (!deps.autosave.checked || privateReloadChoice) {
         if (privateReloadChoice?.id !== state.active.id || privateReloadChoice.generation !== deps.workspace.contentRevision()) {
           throw new Error('Private edits changed');
         }
@@ -258,6 +263,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         deps.reloadBackup.put(stashedReloadBackup);
         stashedReloadBackup = undefined;
       }
+      deps.unfreezeAfterDiscard();
     },
   };
 }
