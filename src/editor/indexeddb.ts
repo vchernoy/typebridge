@@ -30,14 +30,29 @@ export class EditOwnershipLostError extends Error {
 const DATABASE = 'typebridge';
 /**
  * Version 2 adds the editOwnership store; version 3 adds the changes store (#37 R2c).
+ * Version 4 adds discardMarkers for update-reload discard (#255).
  * Documents rows are unchanged; rows without `upTo` mean 0.
  */
-export const DATABASE_VERSION = 3;
+export const DATABASE_VERSION = 4;
 const STORE = 'documents';
 const OWNERSHIP = EDIT_OWNERSHIP_STORE;
 /** Change-log records, keyed [documentId, seq]. */
 export const CHANGES_STORE = 'changes';
 const CHANGES = CHANGES_STORE;
+/** Reload-discard intent, keyed by documentId (#255). */
+export const DISCARD_MARKERS_STORE = 'discardMarkers';
+const DISCARD_MARKERS = DISCARD_MARKERS_STORE;
+
+/** Written at "Discard changes and reload" consent; applied on the next load under a live fence. */
+export type ReloadDiscardMarker = {
+  documentId: string;
+  /** Highest change-id present for the document when the marker was written (0 if none). */
+  upToSeq: number;
+  /** Consenting window's instance id (pairs with sessionStorage intent). */
+  instanceId: string;
+  /** Ownership fence at write time (informational; apply uses the live fence). */
+  fence: number;
+};
 
 /**
  * After a save of `documentId` at `upTo`: delete every record another run wrote (it can never
@@ -104,6 +119,7 @@ export function openDraftDatabase(onVersionChange?: () => void): Promise<IDBData
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(OWNERSHIP)) db.createObjectStore(OWNERSHIP, { keyPath: 'documentId' });
       if (!db.objectStoreNames.contains(CHANGES)) db.createObjectStore(CHANGES, { keyPath: ['documentId', 'seq'] });
+      if (!db.objectStoreNames.contains(DISCARD_MARKERS)) db.createObjectStore(DISCARD_MARKERS, { keyPath: 'documentId' });
     };
     open.onsuccess = () => {
       const db = open.result;
@@ -242,6 +258,105 @@ export async function clearDocumentChanges(
     await assertEditOwner(tx, documentId, owner);
     await request(tx.objectStore(CHANGES).delete(changesOf(documentId)));
     await done;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Read the reload-discard marker for `documentId`, if any. */
+export async function getReloadDiscardMarker(
+  db: IDBDatabase, documentId: string,
+): Promise<ReloadDiscardMarker | undefined> {
+  const tx = db.transaction(DISCARD_MARKERS, 'readonly');
+  const done = finished(tx);
+  const marker = await request(tx.objectStore(DISCARD_MARKERS).get(documentId)) as ReloadDiscardMarker | undefined;
+  await done;
+  return marker;
+}
+
+/**
+ * At update-reload discard consent (#255): record the highest change-id under the live fence so
+ * the next load can delete those records after navigation (no await before location.reload()).
+ */
+export async function writeReloadDiscardMarker(
+  db: IDBDatabase, documentId: string, owner: WriteFence,
+): Promise<ReloadDiscardMarker> {
+  if (!owner?.instanceId || !Number.isSafeInteger(owner.fence)) throw new EditOwnershipLostError();
+  const tx = db.transaction([CHANGES, OWNERSHIP, DISCARD_MARKERS], 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, documentId, owner);
+    const records = await request(tx.objectStore(CHANGES).getAll(changesOf(documentId))) as ChangeRecord[];
+    let upToSeq = 0;
+    for (const record of records) {
+      if (record.seq > upToSeq) upToSeq = record.seq;
+    }
+    const marker: ReloadDiscardMarker = {
+      documentId,
+      upToSeq,
+      instanceId: owner.instanceId,
+      fence: owner.fence,
+    };
+    await request(tx.objectStore(DISCARD_MARKERS).put(marker));
+    await done;
+    return marker;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Cancel path (#255): drop the marker under the fence. Idempotent — missing marker or lost
+ * ownership is a no-op so cancel never throws into the host's cancelReload loop.
+ */
+export async function clearReloadDiscardMarker(
+  db: IDBDatabase, documentId: string, owner: WriteFence,
+): Promise<void> {
+  if (!owner?.instanceId || !Number.isSafeInteger(owner.fence)) return;
+  const tx = db.transaction([OWNERSHIP, DISCARD_MARKERS], 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, documentId, owner);
+    await request(tx.objectStore(DISCARD_MARKERS).delete(documentId));
+    await done;
+  } catch {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+  }
+}
+
+/**
+ * Next load under a new fence (#255): if `reloadConsented`, delete change records with
+ * `seq <= marker.upToSeq` and the marker; otherwise delete only a stale marker. Never deletes
+ * records without consent (sessionStorage intent must have survived the reload).
+ */
+export async function applyReloadDiscardMarker(
+  db: IDBDatabase, documentId: string, owner: WriteFence, reloadConsented: boolean,
+): Promise<{ applied: boolean; upToSeq: number }> {
+  if (!owner?.instanceId || !Number.isSafeInteger(owner.fence)) throw new EditOwnershipLostError();
+  const tx = db.transaction([CHANGES, OWNERSHIP, DISCARD_MARKERS], 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, documentId, owner);
+    const markers = tx.objectStore(DISCARD_MARKERS);
+    const marker = await request(markers.get(documentId)) as ReloadDiscardMarker | undefined;
+    if (!marker) {
+      await done;
+      return { applied: false, upToSeq: 0 };
+    }
+    if (reloadConsented) {
+      await request(tx.objectStore(CHANGES).delete(changesOf(documentId, marker.upToSeq)));
+      await request(markers.delete(documentId));
+      await done;
+      return { applied: true, upToSeq: marker.upToSeq };
+    }
+    await request(markers.delete(documentId));
+    await done;
+    return { applied: false, upToSeq: marker.upToSeq };
   } catch (error) {
     try { tx.abort(); } catch { /* Already finished or aborted. */ }
     void done.catch(() => undefined);
