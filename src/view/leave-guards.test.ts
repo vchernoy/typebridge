@@ -148,6 +148,9 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(deps.reloadBackup.take).toHaveBeenCalledOnce();
     expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(true);
     expect(freezeForDiscard).toHaveBeenCalledOnce();
+    // Freeze must arm before the marker await so Autosave cannot persist mid-prepare (#256 P1).
+    expect(freezeForDiscard.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(deps.markReloadDiscard).mock.invocationCallOrder[0]);
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
   });
 
@@ -160,6 +163,14 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(deps.reloadBackup.put).toHaveBeenCalledWith(stashed);
     expect(deps.reloadBackup.setSuppressed).toHaveBeenCalledWith(false);
     expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+  });
+
+  it('update-reload cancel does not thaw a freeze this prepare did not arm (#256 Codex P1)', async () => {
+    const { guards, unfreezeAfterDiscard, field } = harness({ autosaveOn: false });
+    Object.defineProperty(field, 'disabled', { value: true, configurable: true });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    guards.cancelUpdateReload();
+    expect(unfreezeAfterDiscard).not.toHaveBeenCalled();
   });
 
   it('assert after discard consent ignores Autosave-on backup recreate (#256 review P0)', async () => {
@@ -198,9 +209,10 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
   });
 
   it('update-reload prepare returns false when the marker write fails (#255)', async () => {
-    const { guards, deps } = harness({ autosaveOn: false });
+    const { guards, deps, unfreezeAfterDiscard } = harness({ autosaveOn: false });
     vi.mocked(deps.markReloadDiscard).mockRejectedValue(new Error('quota'));
     await expect(guards.prepareUpdateReload()).resolves.toBe(false);
     expect(deps.clearReloadDiscard).toHaveBeenCalled();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
   });
 });

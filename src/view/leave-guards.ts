@@ -72,6 +72,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
    * text (#256 Codex P0). Restored on cancelUpdateReload if the reload does not proceed.
    */
   let stashedReloadBackup: StoredDraft | undefined;
+  /**
+   * True only when this prepare armed transferFrozen for reload-discard. Cancel must not thaw an
+   * unrelated switch/delete/takeover freeze (#256 Codex P1).
+   */
+  let reloadFreezeArmed = false;
 
   function updateReloadReturnFocus(): HTMLElement {
     const local = document.querySelector<HTMLButtonElement>('#update-reload');
@@ -169,19 +174,26 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       });
       if (!discard) return false;
       if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
+      // Freeze + suppress before the first await so Autosave prefs sync cannot persist discarded
+      // text while markReloadDiscard runs (#256 Codex P1). Only this arm is thawed on cancel.
+      deps.freezeForDiscard();
+      reloadFreezeArmed = true;
+      stashedReloadBackup = deps.reloadBackup.take();
+      deps.reloadBackup.setSuppressed(true);
       try {
         await deps.markReloadDiscard();
       } catch {
         // Marker write failed: refuse prepare so the host cancels every window.
         deps.clearReloadDiscard();
+        deps.reloadBackup.setSuppressed(false);
+        if (stashedReloadBackup) {
+          deps.reloadBackup.put(stashedReloadBackup);
+          stashedReloadBackup = undefined;
+        }
+        reloadFreezeArmed = false;
+        deps.unfreezeAfterDiscard();
         return false;
       }
-      // Drop any earlier Autosave-on pendingDraft so the next load cannot restore discarded text
-      // (#256 Codex P0). Stash for cancel restore; suppress + freeze so prefs sync turning
-      // Autosave back on cannot recreate a backup or persist discarded text before navigation.
-      stashedReloadBackup = deps.reloadBackup.take();
-      deps.reloadBackup.setSuppressed(true);
-      deps.freezeForDiscard();
       privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
       return true;
     }
@@ -263,7 +275,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         deps.reloadBackup.put(stashedReloadBackup);
         stashedReloadBackup = undefined;
       }
-      deps.unfreezeAfterDiscard();
+      // Only thaw a freeze this prepare armed — never a switch/delete/takeover freeze (#256 P1).
+      if (reloadFreezeArmed) {
+        reloadFreezeArmed = false;
+        deps.unfreezeAfterDiscard();
+      }
     },
   };
 }
