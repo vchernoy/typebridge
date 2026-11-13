@@ -190,6 +190,9 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       });
       if (!discard) return false;
       if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
+      // Bind the consented text/title now — before any further await. Freeze blocks scheduleSave,
+      // so a mutation during markReloadDiscard must not become the consented snapshot (#256 Codex P1).
+      const consented = deps.snapshot();
       // Dialog await: Autosave may have flipped on and started persist — refuse privacy discard
       // so an in-flight commit cannot land the discarded text (#256 Codex P1 / residual P2).
       deps.saver.cancel();
@@ -207,10 +210,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       // Only this arm is thawed on cancel.
       stashedReloadBackup = deps.reloadBackup.take();
       deps.reloadBackup.setSuppressed(true);
-      try {
-        await deps.markReloadDiscard();
-      } catch {
-        // Marker write failed: refuse prepare so the host cancels every window.
+      const abortReloadDiscardPrepare = (): void => {
         deps.clearReloadDiscard();
         deps.reloadBackup.setSuppressed(false);
         if (stashedReloadBackup) {
@@ -219,17 +219,29 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         }
         reloadFreezeArmed = false;
         deps.unfreezeAfterDiscard();
+      };
+      try {
+        await deps.markReloadDiscard();
+      } catch {
+        // Marker write failed: refuse prepare so the host cancels every window.
+        abortReloadDiscardPrepare();
         return false;
       }
-      {
-        const snap = deps.snapshot();
-        privateReloadChoice = {
-          id: state.active.id,
-          generation: contentAtPrompt,
-          text: snap.text,
-          title: snap.title,
-        };
+      const afterMark = deps.snapshot();
+      if (
+        deps.workspace.contentRevision() !== contentAtPrompt
+        || consented.text !== afterMark.text
+        || consented.title !== afterMark.title
+      ) {
+        abortReloadDiscardPrepare();
+        return false;
       }
+      privateReloadChoice = {
+        id: state.active.id,
+        generation: contentAtPrompt,
+        text: consented.text,
+        title: consented.title,
+      };
       return true;
     }
     deps.reloadBackup.save();

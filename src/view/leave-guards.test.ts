@@ -226,6 +226,17 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow(/Private edits changed/);
   });
 
+  it('update-reload refuses when text mutates during the marker await (#256 Codex P1)', async () => {
+    const { guards, deps, field, unfreezeAfterDiscard } = harness({ autosaveOn: false });
+    vi.mocked(deps.markReloadDiscard).mockImplementation(async () => {
+      field.value = `${field.value}!`;
+    });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.clearReloadDiscard).toHaveBeenCalled();
+    expect(unfreezeAfterDiscard).toHaveBeenCalledOnce();
+    expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow();
+  });
+
   it('update-reload Keep editing writes no marker (#255)', async () => {
     const { guards, deps } = harness({ autosaveOn: false });
     vi.mocked(askConfirmChoice).mockResolvedValue(false);
