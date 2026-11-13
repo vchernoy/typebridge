@@ -365,7 +365,8 @@ test('pending reload-discard without session intent does not salvage (#256 forei
   expect(planted.intentKeys).toEqual([]);
 
   await page.reload();
-  await expect(editor).toBeEnabled();
+  // Defer yields ownership so the consenting reload can finish; this context stays read-only.
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'reader', { timeout: 10_000 });
   await expect(page.locator('#status')).not.toContainText('Recovered unsaved text');
   await expect(page.getByRole('button', { name: /Recover / })).toHaveCount(0);
   const titles = await page.evaluate(() => new Promise<string[]>((resolve, reject) => {

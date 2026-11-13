@@ -755,7 +755,9 @@ async function salvageOnOwn(documentId: string): Promise<void> {
       pendingActive: isReloadDiscardPendingActive(documentId),
     });
     if (decision === 'defer') {
-      // Another tab still completing the consented reload: do not consume the marker or salvage (#256).
+      // Yield the lock so the consenting reload can reacquire and apply; do not stay editable
+      // while discarded records could still be replayed on save (#256 Codex P0).
+      loseOwnership();
       return;
     }
     if (decision === 'apply' && marker && intent) {

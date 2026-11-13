@@ -11,6 +11,7 @@ import { CONFLICT_COPY, SAVE_FAILED } from '../editor/status';
 import type { StatusLine } from '../ui/status-line';
 import type { EditorState } from './editor-state';
 import { testKnob } from './embed-api';
+import { isReloadDiscardPendingActive } from './reload-discard';
 import type { Workspace } from './workspace';
 
 export type SaveResult = { saved: boolean; conflict: boolean };
@@ -91,7 +92,12 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           const owner = await state.ownership.writeFence();
           const current = deps.currentJournal();
           const journal = current && current.documentId === saved.id && current.revision === state.active.revision && current.text === saved.text && current.title === saved.title ? current : undefined;
-          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, { keepRun: log.keepRun, recoveryId: crypto.randomUUID() });
+          // While a cross-tab reload-discard is in flight, do not replay discarded records into a
+          // "(recovered)" copy on save (#256 Codex P0). The consenting tab applies the marker.
+          const changeRecovery = isReloadDiscardPendingActive(saved.id)
+            ? undefined
+            : { keepRun: log.keepRun, recoveryId: crypto.randomUUID() };
+          const result = await commitOrCreateConflictCopy(state.db, saved, state.active.revision, crypto.randomUUID(), owner, changeRecovery);
           // A conflict copy is a new document: this document's row did not take the text.
           deps.changes.saved(log.keepRun, !result.conflict);
           preparedRun = undefined;
