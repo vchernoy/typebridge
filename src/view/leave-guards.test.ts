@@ -218,6 +218,14 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow(/Private edits changed/);
   });
 
+  it('assert rejects field mutation after discard freeze without a revision bump (#256 CI)', async () => {
+    const { guards, field } = harness({ autosaveOn: false });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    // Mimic post-consent edit while transferFrozen blocks scheduleSave / contentRevision.
+    field.value = `${field.value}!`;
+    expect(() => guards.assertSafeToReloadAfterUpdate()).toThrow(/Private edits changed/);
+  });
+
   it('update-reload Keep editing writes no marker (#255)', async () => {
     const { guards, deps } = harness({ autosaveOn: false });
     vi.mocked(askConfirmChoice).mockResolvedValue(false);

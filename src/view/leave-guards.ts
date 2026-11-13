@@ -63,7 +63,12 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     void deps.persist();
   });
   let allowUpdateReload = false;
-  let privateReloadChoice: { id: string; generation: number } | undefined;
+  /**
+   * Discard consent for update-reload: document id + content revision + exact text/title.
+   * Freeze sets transferFrozen so scheduleSave will not bump contentRevision; assert must
+   * still reject a mutated field value before navigation (#256 CI host-window).
+   */
+  let privateReloadChoice: { id: string; generation: number; text: string; title: string } | undefined;
   /** True after a successful close prepare that left editors frozen pending host commit/cancel. */
   let closeFreezeArmed = false;
   /**
@@ -164,7 +169,13 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
           confirmLabel: 'Discard changes and close',
         });
         if (discarded) {
-          privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
+          const snap = deps.snapshot();
+          privateReloadChoice = {
+            id: state.active.id,
+            generation: contentAtPrompt,
+            text: snap.text,
+            title: snap.title,
+          };
         }
         return discarded;
       }
@@ -210,7 +221,15 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         deps.unfreezeAfterDiscard();
         return false;
       }
-      privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
+      {
+        const snap = deps.snapshot();
+        privateReloadChoice = {
+          id: state.active.id,
+          generation: contentAtPrompt,
+          text: snap.text,
+          title: snap.title,
+        };
+      }
       return true;
     }
     deps.reloadBackup.save();
@@ -243,7 +262,16 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       // Consented discard stays on the private-revision path even if Autosave flips on mid-prepare
       // (#256 review P0): never recreate pendingDraft or ignore the content binding.
       if (!deps.autosave.checked || privateReloadChoice) {
-        if (privateReloadChoice?.id !== state.active.id || privateReloadChoice.generation !== deps.workspace.contentRevision()) {
+        const now = deps.snapshot();
+        // Generation alone is not enough after discard freeze: readOnly/transferFrozen
+        // skips scheduleSave, so value can change without a revision bump.
+        if (
+          !privateReloadChoice
+          || privateReloadChoice.id !== state.active.id
+          || privateReloadChoice.generation !== deps.workspace.contentRevision()
+          || privateReloadChoice.text !== now.text
+          || privateReloadChoice.title !== now.title
+        ) {
           throw new Error('Private edits changed');
         }
       } else {
