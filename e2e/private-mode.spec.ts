@@ -201,6 +201,39 @@ test('global private session last-saves dirty text without private:true (#257 fo
   expect(snap.docs.some(doc => doc.text === 'Session keep DIRTY')).toBe(true);
 });
 
+test('Private session in another tab last-saves this tab’s dirty text (#260 P1)', async ({ page, context }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Cross tab keep');
+  await expect(status(page)).toHaveText('Saved locally');
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 8_000;
+  });
+  await page.locator('#editor').fill('Cross tab keep DIRTY');
+  await expect(page.locator('#save-indicator')).toHaveText('Saving…');
+
+  // Same-origin page that does not claim the document — only fires the storage event.
+  const other = await context.newPage();
+  await other.goto('/404');
+  await other.evaluate(() => localStorage.setItem('typebridge.autosave.v1', 'off'));
+  await other.close();
+
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+  await expect(page.locator('#autosave')).toBeDisabled({ timeout: 15_000 });
+  await expect(page.locator('#private-session')).toBeChecked();
+  await expect.poll(async () => {
+    const docs = await readStoredDocs(page);
+    return docs.some(doc => doc.text === 'Cross tab keep DIRTY' && !(doc as { private?: boolean }).private);
+  }, { timeout: 15_000 }).toBe(true);
+  await page.locator('#editor').fill('Cross tab keep DIRTY SECRET');
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  const snap = await storageSnapshot(page);
+  expect(snap.docs.every(doc => !doc.text.includes('SECRET'))).toBe(true);
+  expect(snap.docs.some(doc => doc.text === 'Cross tab keep DIRTY')).toBe(true);
+});
+
 test('Delete saved copy removes the row and leaves the document private in memory (#257 follow-up)', async ({ page }) => {
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();

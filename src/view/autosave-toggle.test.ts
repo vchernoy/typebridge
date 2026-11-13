@@ -406,4 +406,25 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     await toggle.applySessionChange(true);
     expect(persistLastBeforePrivate).not.toHaveBeenCalled();
   });
+
+  it('syncFromStorage last-saves dirty text when another tab enabled Private session', async () => {
+    const { toggle, persistLastBeforePrivate, state, abandonChangeRun } = harness({
+      sessionDirty: true,
+    });
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    toggle.syncFromStorage();
+    await vi.waitFor(() => {
+      expect(persistLastBeforePrivate).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'saved', title: 'T' }),
+        1,
+        { markPrivate: false },
+      );
+    });
+    expect(state.active.private).toBeUndefined();
+    expect(abandonChangeRun).toHaveBeenCalled();
+  });
 });

@@ -30,6 +30,7 @@ import { installEmbedHooks } from './view/embed-hooks';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
+  AUTOSAVE_PREF_KEY,
   UNTITLED_TITLE,
   configureActiveDraftKey,
   newDraft,
@@ -1148,6 +1149,13 @@ onPrefsChanged(detail => {
     layout: () => { resetLayout(); },
   });
 }, { skipOrigin: prefsOrigin });
+
+// Cross-tab: CustomEvent prefs sync stays same-document; other top-level tabs only get
+// `storage`. Run the session last-save / mirror path when Private session changes (#260 P1).
+window.addEventListener('storage', event => {
+  if (event.key !== null && event.key !== AUTOSAVE_PREF_KEY) return;
+  applyPrivateSessionFromStorage();
+});
 
 // Host page registers the service worker and shows the update notice once (#175 step 3).
 if (!embedded && 'serviceWorker' in navigator && import.meta.env.PROD) {

@@ -2,6 +2,8 @@
  * #175 step 7: shared preference notifications across host + editor windows.
  * localStorage is shared, but `storage` events do not fire in the writing document —
  * same-tab windows need a CustomEvent (and optional direct frame calls).
+ * Cross-tab Private session / Autosave still uses the `storage` event so every tab
+ * can run the session last-save path (#257 follow-up / #260).
  */
 import { editorWindowApi } from './embed-api';
 
