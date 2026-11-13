@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearContentMetadata, clearDocumentMetadata, parseStorageClear, deleteContentDatabase } from './clear-data';
 afterEach(() => vi.unstubAllGlobals());
-function storage(data: Record<string, string>): Storage {
+function storage(data: Record<string, string>, failingKey?: string): Storage {
   const value = { ...data };
   Object.defineProperties(value, {
     getItem: { value: (key: string) => value[key] ?? null },
     setItem: { value: (key: string, raw: string) => { value[key] = raw; } },
-    removeItem: { value: (key: string) => { delete value[key]; } },
+    removeItem: { value: (key: string) => { if (key === failingKey) throw new Error('Removal denied'); delete value[key]; } },
   });
   return value as unknown as Storage;
 }
@@ -58,4 +58,11 @@ it('database deletion failures reject rather than claiming erasure', async () =>
   const promise = deleteContentDatabase(() => {});
   request.onerror!(new Event('error'));
   await expect(promise).rejects.toThrow('blocked');
+});
+
+it.each(['typebridge.pendingDraft.v1', 'typebridge.recovery.v1.owner'])('propagates removal failure for matching backup %s', key => {
+  const raw = JSON.stringify({ id: 'a', documentId: 'a', text: 'retained backup' });
+  const data = storage({ [key]: raw }, key);
+  expect(() => clearDocumentMetadata(data, 'a')).toThrow('Removal denied');
+  expect(data.getItem(key)).toBe(raw);
 });

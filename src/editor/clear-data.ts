@@ -15,7 +15,9 @@ export function clearDocumentMetadata(storage: Storage, id: string): void {
     if (key.startsWith('typebridge.activeDraft.') && raw === id) storage.removeItem(key);
     else if (key.startsWith('typebridge.writingPosition.v1.') && key.endsWith(id)) storage.removeItem(key);
     else if (key.startsWith('typebridge.pendingDraft.') || key.startsWith('typebridge.recovery.v1.')) {
-      try { const item = JSON.parse(raw ?? 'null'); if (item?.id === id || item?.documentId === id) storage.removeItem(key); } catch { /* Unrelated corrupt backup. */ }
+      let item: { id?: string; documentId?: string } | null;
+      try { item = JSON.parse(raw ?? 'null'); } catch { continue; /* Unrelated corrupt backup. */ }
+      if (item?.id === id || item?.documentId === id) storage.removeItem(key);
     } else if (key === 'typebridge.host.windows.v1' && raw) {
       const layout = JSON.parse(raw);
       if (Array.isArray(layout.windows)) {
