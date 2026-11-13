@@ -5,6 +5,7 @@
  * guarantee durability after whole-browser termination. Journals whose owner is gone are offered
  * in a recovery panel: recover as a copy, or discard. Exact-version cleanup is unchanged.
  */
+import { documentFields, sameFields } from '../editor/document-fields';
 import { UNTITLED_TITLE } from '../editor/drafts';
 import { commitDraft, getStoredDraft } from '../editor/indexeddb';
 import { clearRecovery, listRecovery, RECOVERY_PREFIX, writeRecovery, type RecoverySnapshot } from '../editor/recovery';
@@ -92,7 +93,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
       }
       return;
     }
-    const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
+    const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), find: state.active.find ?? '', replace: state.active.replace ?? '', title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
     try {
       writeRecovery(localStorage, entry);
       currentJournal = entry;
@@ -142,8 +143,8 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
         if (state.db) {
           const original = await getStoredDraft(state.db, item.documentId);
           const recovered = await getStoredDraft(state.db, 'recovery-' + item.token);
-          if ((original?.title === item.title && original.text === item.text) ||
-              (recovered?.title === item.title + ' (recovered)' && recovered.text === item.text)) {
+          if ((original && sameFields(original, item)) ||
+              (recovered && sameFields(recovered, { ...item, title: item.title + ' (recovered)' }))) {
             clearRecovery(localStorage, item);
             continue;
           }
@@ -177,9 +178,9 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
         try {
           if (await ownerIsActive(item.tab) === true) throw new Error('The original tab is still open');
           if (!state.db) throw new Error('Storage unavailable');
-          const copy = { id: 'recovery-' + item.token, title: item.title + ' (recovered)', text: item.text, updatedAt: item.timestamp };
+          const copy = { ...documentFields(item), id: 'recovery-' + item.token, title: item.title + ' (recovered)', updatedAt: item.timestamp };
           const result = await commitDraft(state.db, copy, 0);
-          if (!result.ok && (!result.current || result.current.title !== copy.title || result.current.text !== copy.text)) throw new Error('Recovery copy already changed');
+          if (!result.ok && (!result.current || !sameFields(result.current, copy))) throw new Error('Recovery copy already changed');
           if (result.ok) deps.postSignal('saved', result.draft.id, result.draft.revision);
           clearRecovery(localStorage, item);
           await deps.refreshDrafts();

@@ -119,3 +119,26 @@ it('distinguishes a new identical backup write from the pre-save backup at the s
   expect(backup.read()?.text).toBe('old');
   expect(backup.read()).not.toHaveProperty('reloadBackupToken');
 });
+
+it('keeps backups with search-only changes and round-trips four fields without changing histories', () => {
+  (globalThis as { sessionStorage?: Storage }).sessionStorage = memorySession();
+  const publicDraft = draft({ find: 'public find', replace: 'public replace' });
+  let current = publicDraft;
+  let mayWrite = true;
+  const backup = createReloadBackup({ key: 'k', snapshot: () => current, mayBackUp: () => mayWrite, onFailed: () => {} });
+  backup.save();
+  const finishSave = backup.prepareClear(publicDraft);
+  current = draft({ find: 'new find', replace: 'new replace' });
+  backup.save();
+  finishSave();
+  expect(backup.read()).toMatchObject({ find: 'new find', replace: 'new replace' });
+  backup.clear(publicDraft);
+  expect(backup.read()).toBeDefined();
+  mayWrite = false;
+  current = draft({ find: 'SECRET find', replace: 'SECRET replace' });
+  backup.save();
+  expect(sessionStorage.getItem('k')).not.toContain('SECRET');
+  expect(sameContent(draft(), draft({ find: '', replace: '' }))).toBe(true);
+  expect(sameContent(publicDraft, draft({ find: 'public find', replace: 'different' }))).toBe(false);
+  expect(parsePendingDraft(JSON.stringify({ ...draft(), find: 42 }))).toBeUndefined();
+});

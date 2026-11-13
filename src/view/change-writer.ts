@@ -1,7 +1,7 @@
 /**
  * Change-log writer for the shown document (#37 R2c). Each edit becomes one small record, written
  * in change-id order through a single queue so typing never waits for storage. A full save takes
- * `upTo` from here at the same moment it takes the text and title, so the saved row and the log agree.
+ * `upTo` from here at the same moment it takes all four fields, so the saved row and the log agree.
  *
  * Every record continues state that is durable: the stored row, plus the records before it. A run
  * belongs to one document shown once (its id and session generation) and only ever starts at a
@@ -9,23 +9,22 @@
  * first edits after a document is shown reach storage through that first save. When a save stores
  * state the log does not already produce (a new run, a write that failed, an edit that was not
  * recorded), the records after it continue that state, so they are held until the save commits
- * and dropped if it fails (#251 review). Title changes are recorded with an optional `title` on
- * the record (#37 R2c 2d-1). Nothing is written while Autosave is off or in a viewer, matching
+ * and dropped if it fails (#251 review). Each changed field has a value-or-change record in the
+ * shared sequence (#257 step 2a). Nothing is written while Autosave is off or in a viewer, matching
  * the privacy rule for saving.
  *
  * `protects()` is true while a live run covers the latest edit (no failure, no hold). The
  * localStorage journal writes only when this is false or IndexedDB is unusable (#37 R2c 2d-2).
  */
-import { changeBetween, TITLE_ONLY_CHANGE, type ChangeRecord } from '../editor/change-log';
+import { fieldRecord, type ChangeRecord } from '../editor/change-log';
+import { DOCUMENT_FIELDS, documentFields, sameFields, type DocumentFields, type DocumentFieldsInput } from '../editor/document-fields';
 
 export type ChangeWriterDeps = {
   /** False while Autosave is off, in a viewer, or while edits must not be recorded. */
   mayRecord: () => boolean;
   /** The shown document and its session generation (bumped whenever it is shown again). */
   shown: () => { id: string; generation: number };
-  text: () => string;
-  /** Normalized title (`trim() || UNTITLED_TITLE`), matching the saved snapshot. */
-  title: () => string;
+  fields: () => DocumentFieldsInput;
   /** Write one record (with the ownership fence); rejects when it cannot be written. */
   append: (record: ChangeRecord) => Promise<void>;
   newRunId: () => string;
@@ -37,10 +36,7 @@ type Writer = {
   run: string;
   /** Change-id of the last record queued. */
   seq: number;
-  /** The text the next change starts from. */
-  base: string;
-  /** The title the next change starts from. */
-  baseTitle: string;
+  base: DocumentFields;
   /** Set when a write failed or was refused: stop until a full save covers everything queued. */
   failed: boolean;
   /** While a save of state the log does not produce is in flight: resolves with its outcome. */
@@ -89,7 +85,7 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
   }
 
   return {
-    /** Record the edit that led to the current text and/or title. */
+    /** Record the edit that led to the current four fields. */
     edit(): void {
       if (!deps.mayRecord()) {
         // Stop the run: after private edits the next run starts at the next save.
@@ -98,46 +94,35 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
       }
       const w = current();
       if (!w || w.failed) return;
-      const text = deps.text();
-      const title = deps.title();
-      const change = changeBetween(w.base, text);
-      const titleChanged = title !== w.baseTitle;
-      if (!change && !titleChanged) return;
-      w.seq += 1;
-      w.base = text;
-      w.baseTitle = title;
-      const record: ChangeRecord = {
-        documentId: w.documentId,
-        seq: w.seq,
-        run: w.run,
-        change: change ?? TITLE_ONLY_CHANGE,
-        length: text.length,
-        ...(titleChanged ? { title } : {}),
-      };
-      enqueue(w, record);
+      const fields = documentFields(deps.fields());
+      for (const field of DOCUMENT_FIELDS) {
+        if (fields[field] === w.base[field]) continue;
+        w.seq += 1;
+        enqueue(w, fieldRecord({ documentId: w.documentId, seq: w.seq, run: w.run, field }, w.base[field], fields[field]));
+        w.base[field] = fields[field];
+      }
     },
     /**
-     * Called as a full save takes `savedText` and `savedTitle` of `documentId` (after `idle()`):
+     * Called as a full save takes all four saved fields of `documentId` (after `idle()`):
      * `upTo` is the last change-id queued for that state, and `keepRun` the run that continues it.
      * The save deletes every other run's records (a crashed run's tail must never replay onto this
      * text) and this run's records up to `upTo`. Report the outcome with `saved(keepRun, ok)`.
      *
-     * When the log already produces `savedText` and `savedTitle`, later records continue them
+     * When the log already produces all four saved fields, later records continue them
      * either way. Otherwise (no current run, a failed write, an unrecorded edit), later records
      * continue that saved state only: they are held until the save commits, and dropped if it
      * does not (#251 review).
      */
-    upToForSave(documentId: string, savedText: string, savedTitle: string): { upTo: number; keepRun: string } {
+    upToForSave(documentId: string, saved: DocumentFieldsInput): { upTo: number; keepRun: string } {
       const shown = deps.shown();
       let w = writer;
       if (!w || w.documentId !== documentId || shown.id !== documentId || w.generation !== shown.generation) {
-        w = { documentId, generation: shown.generation, run: deps.newRunId(), seq: 0, base: savedText, baseTitle: savedTitle, failed: false };
+        w = { documentId, generation: shown.generation, run: deps.newRunId(), seq: 0, base: documentFields(saved), failed: false };
         writer = shown.id === documentId ? w : undefined;
-      } else if (w.base === savedText && w.baseTitle === savedTitle && !w.failed && !w.anchor) {
+      } else if (sameFields(w.base, saved) && !w.failed && !w.anchor) {
         return { upTo: w.seq, keepRun: w.run };
       }
-      w.base = savedText;
-      w.baseTitle = savedTitle;
+      w.base = documentFields(saved);
       w.failed = false;
       let settle: (ok: boolean) => void = () => undefined;
       w.anchor = new Promise<boolean>(resolve => { settle = resolve; });

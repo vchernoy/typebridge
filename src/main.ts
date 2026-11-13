@@ -1,3 +1,4 @@
+import { documentFields, sameFields } from './editor/document-fields';
 import { setupAppearance } from './ui/appearance';
 import { setupWindowLayoutSetting } from './ui/window-layout-setting';
 import { setupResetSettings } from './ui/reset-settings';
@@ -700,8 +701,7 @@ const { captureHandoffSnapshot, hideEditHereBar, showEditHereBar, takeOverFromHa
 const changeWriter = createChangeWriter({
   mayRecord: () => !viewMode && mayWrite() && !state.suppressEditTracking && !state.loadingDraft,
   shown: () => ({ id: state.active.id, generation: workspace.sessionGeneration() }),
-  text: () => field.value,
-  title: () => draftTitle.value.trim() || UNTITLED_TITLE,
+  fields: () => ({ ...documentFields(state.active), text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE }),
   append: async record => {
     if (!state.db || state.ownership?.documentId !== record.documentId) throw new Error('Not editing this document');
     const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
@@ -720,7 +720,7 @@ async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<v
   // The localStorage journal may hold the same text and title: drop only an entry the copy exactly matches.
   try {
     for (const item of listRecovery(localStorage)) {
-      if (item.documentId === sourceId && item.text === copy.text && item.title + ' (recovered)' === copy.title) clearRecovery(localStorage, item);
+      if (item.documentId === sourceId && sameFields({ ...item, title: item.title + ' (recovered)' }, copy)) clearRecovery(localStorage, item);
     }
     void renderRecovery();
   } catch { /* Storage blocked: the journal panel stays as it was. */ }
@@ -734,7 +734,7 @@ async function salvageOnOwn(documentId: string): Promise<void> {
   if (!ownership || ownership.documentId !== documentId) return;
   try {
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
-    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);
+    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), { ...documentFields(state.active), text: field.value, title: shownTitle });
     if (copy) await announceRecovered(copy, documentId);
   } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
 }

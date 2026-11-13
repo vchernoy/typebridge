@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { replayText, type ChangeRecord } from '../src/editor/change-log';
+import { replayDocument, type ChangeRecord } from '../src/editor/change-log';
 import { setAutosave } from './settings-helpers';
 
 // The change log (#37 R2c step 2b): every edit with Autosave on is a small record; a full save
@@ -33,7 +33,7 @@ async function readLog(page: Page): Promise<{ rows: Row[]; changes: ChangeRecord
 async function rebuilt(page: Page): Promise<string> {
   const { rows, changes } = await readLog(page);
   const row = rows[0]!;
-  return replayText(row.id, row.text, row.upTo ?? 0, changes).text;
+  return replayDocument(row.id, row, row.upTo ?? 0, changes).text;
 }
 
 const holdSaves = (page: Page) => page.evaluate(() => {
@@ -183,7 +183,7 @@ test('after a tab crash, unsaved text from the change log comes back as a copy w
   await expect.poll(() => rebuilt(page)).toBe('Оригинал — несохранённое 🙂');
   await expect.poll(async () => {
     const { changes } = await readLog(page);
-    return changes.some(c => c.title === 'Новое имя');
+    return changes.some(c => c.field === 'title' && c.value === 'Новое имя');
   }).toBe(true);
   const crashed = page.waitForEvent('crash');
   const cdp = await context.newCDPSession(page);

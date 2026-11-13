@@ -5,6 +5,7 @@
  *
  * Write decisions use `mayWrite` (= !privateNow) from #257 — not the checkbox alone.
  */
+import { sameFields, type DocumentFieldsInput } from '../editor/document-fields';
 import { UNTITLED_TITLE } from '../editor/drafts';
 import type { DocumentSignal } from './signals';
 import { commitOrCreateConflictCopy, EditOwnershipLostError, type StoredDraft } from '../editor/indexeddb';
@@ -39,7 +40,7 @@ export type SaverDeps = {
   changes: {
     edit: () => void;
     idle: () => Promise<void>;
-    upToForSave: (documentId: string, savedText: string, savedTitle: string) => { upTo: number; keepRun: string };
+    upToForSave: (documentId: string, saved: DocumentFieldsInput) => { upTo: number; keepRun: string };
     /** Whether the save prepared by upToForSave for `run` committed its text. */
     saved: (run: string, ok: boolean) => void;
   };
@@ -91,7 +92,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     const owner = await state.ownership.writeFence();
     const current = deps.currentJournal();
     const journal = current && current.documentId === saved.id && current.revision === state.active.revision
-      && current.text === saved.text && current.title === saved.title ? current : undefined;
+      && sameFields(current, saved) ? current : undefined;
     const result = await commitOrCreateConflictCopy(
       state.db!, saved, state.active.revision, crypto.randomUUID(), owner,
       { keepRun, recoveryId: crypto.randomUUID() },
@@ -170,7 +171,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
         const saved: StoredDraft = options.markPrivate
           ? { ...frozen, private: true, updatedAt: Date.now() }
           : { ...frozen, updatedAt: Date.now() };
-        const log = deps.changes.upToForSave(saved.id, saved.text, saved.title);
+        const log = deps.changes.upToForSave(saved.id, saved);
         preparedRun = log.keepRun;
         saved.upTo = log.upTo;
         const outcome = await commitPrepared(saved, log.keepRun, {
@@ -227,7 +228,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
           // Taken with the text and title: the row says which change records it already contains (#37 R2c).
-          const log = deps.changes.upToForSave(saved.id, saved.text, saved.title);
+          const log = deps.changes.upToForSave(saved.id, saved);
           preparedRun = log.keepRun;
           saved.upTo = log.upTo;
           // E2e may type while the run is anchored (protects false) before the row commits (#254).

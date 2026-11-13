@@ -3,6 +3,7 @@
  * history). It is not the committed document; it only bridges a reload or navigation when the
  * browser aborts an IndexedDB write on unload. The parse/compare rules are pure functions.
  */
+import { sameFields } from '../editor/document-fields';
 import type { StoredDraft } from '../editor/indexeddb';
 
 /** A stored backup, or undefined when it is missing or malformed. */
@@ -14,7 +15,8 @@ export function parsePendingDraft(raw: string | null): StoredDraft | undefined {
     // Private write identity is not document content and must never reach IndexedDB.
     delete draft.reloadBackupToken;
     if (typeof draft.id !== 'string' || !draft.id || typeof draft.title !== 'string' ||
-        typeof draft.text !== 'string' || typeof draft.updatedAt !== 'number' ||
+        typeof draft.text !== 'string' || (draft.find !== undefined && typeof draft.find !== 'string') ||
+        (draft.replace !== undefined && typeof draft.replace !== 'string') || typeof draft.updatedAt !== 'number' ||
         !Number.isSafeInteger(draft.revision) || (draft.revision ?? -1) < 0) return undefined;
     return draft as StoredDraft;
   } catch { return undefined; }
@@ -22,7 +24,8 @@ export function parsePendingDraft(raw: string | null): StoredDraft | undefined {
 
 /** Same document, title, text and Undo history. */
 export function sameContent(a: StoredDraft, b: StoredDraft): boolean {
-  return a.id === b.id && a.title === b.title && a.text === b.text && JSON.stringify(a.history) === JSON.stringify(b.history);
+  return a.id === b.id && sameFields(a, b) && ['history', 'titleHistory', 'findHistory', 'replaceHistory'].every(key =>
+    JSON.stringify(a[key as keyof StoredDraft]) === JSON.stringify(b[key as keyof StoredDraft]));
 }
 
 /** Matching content/history proves coverage; wall-clock timestamps do not. */
