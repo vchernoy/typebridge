@@ -145,27 +145,7 @@ for (const choice of ['keep', 'delete', 'abort'] as const) {
     const id = await page.locator('#drafts').inputValue();
     const other = await context.newPage(); await other.goto('/editor.html?mode=view');
     await expect(other.locator('#editor')).toBeEnabled();
-    await page.evaluate(() => {
-      const win = window as unknown as { heldFirst: boolean; releaseFirst: (abort: boolean) => void };
-      const put = IDBObjectStore.prototype.put;
-      let intercepted = false;
-      IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
-        const req = put.apply(this, args);
-        if (this.name === 'documents' && !intercepted) {
-          intercepted = true;
-          let hold = true;
-          win.releaseFirst = abort => { hold = false; if (abort) this.transaction.abort(); };
-          req.addEventListener('success', () => {
-            win.heldFirst = true;
-            const keepAlive = (): void => {
-              if (hold) this.get((args[0] as { id: string }).id).addEventListener('success', keepAlive);
-            };
-            keepAlive();
-          });
-        }
-        return req;
-      };
-    });
+    await holdFirstTransaction(page);
     await page.locator('#editor').fill('Before transaction privacy');
     await page.locator('#draft-title').fill('Before title');
     await openFind(page); await page.locator('#find-text').fill('Before find');
@@ -208,6 +188,65 @@ for (const choice of ['keep', 'delete', 'abort'] as const) {
       await expect(page.locator('#editor')).toHaveValue('');
       expect((await traces(page)).documents).toEqual([]);
       await expect(page.getByRole('region', { name: 'Recover unsaved documents' })).toBeHidden();
+    }
+  });
+}
+
+async function holdFirstTransaction(page: Page) {
+  await page.evaluate(() => {
+      const win = window as unknown as { heldFirst: boolean; releaseFirst: (abort: boolean) => void };
+      const put = IDBObjectStore.prototype.put;
+      let intercepted = false;
+      IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+        const req = put.apply(this, args);
+        if (this.name === 'documents' && !intercepted) {
+          intercepted = true;
+          let hold = true;
+          win.releaseFirst = abort => { hold = false; if (abort) this.transaction.abort(); };
+          req.addEventListener('success', () => {
+            win.heldFirst = true;
+            const keepAlive = (): void => {
+              if (hold) this.get((args[0] as { id: string }).id).addEventListener('success', keepAlive);
+            };
+            keepAlive();
+          });
+        }
+        return req;
+      };
+    });
+}
+
+for (const outcome of ['cancel', 'abort', 'commit'] as const) {
+  test(`Private session reconciles first save settlement: ${outcome} (#268 P1)`, async ({ page }) => {
+    page.on('dialog', dialog => dialog.accept());
+    await page.goto('/editor.html'); await ready(page);
+    const id = await page.locator('#drafts').inputValue();
+    if (outcome === 'cancel') {
+      await page.evaluate(() => { (window as unknown as { __typebridgeDelayAfterUpToMs: number }).__typebridgeDelayAfterUpToMs = 1500; });
+    } else await holdFirstTransaction(page);
+    await page.locator('#editor').fill('Before private session');
+    if (outcome === 'cancel') await page.waitForTimeout(700);
+    else await expect.poll(() => page.evaluate(() => (window as unknown as { heldFirst: boolean }).heldFirst)).toBe(true);
+    await setPrivateSession(page, true);
+    await page.locator('#editor').fill('PRIVATE CANARY session period');
+    if (outcome !== 'cancel') await page.evaluate(abort => (window as unknown as { releaseFirst: (abort: boolean) => void }).releaseFirst(abort), outcome === 'abort');
+    await expect(page.locator('#editor')).toBeEditable();
+    if (outcome === 'commit') {
+      await expect.poll(async () => (await traces(page)).documents.length).toBe(1);
+      const data = await traces(page);
+      expect(data.documents[0]).toMatchObject({ id, text: 'Before private session' });
+      expect((data.documents[0] as { private?: boolean }).private).not.toBe(true);
+      expect(JSON.stringify(data)).not.toContain('PRIVATE CANARY');
+      expect(data.owners).toHaveLength(1); expect(data.metadata).toContain(id);
+      expect(await page.evaluate(async docId => (await navigator.locks.query()).held?.some(lock => lock.name?.includes(docId)), id)).toBe(true);
+      await setPrivateSession(page, false);
+      await expect(page.locator('#save-indicator')).toHaveText('Saved');
+      expect(JSON.stringify((await traces(page)).documents)).toContain('PRIVATE CANARY session period');
+    } else {
+      await expect.poll(async () => JSON.stringify(await traces(page)).includes(id)).toBe(false);
+      await noTrace(page, id);
+      await expect.poll(() => page.evaluate(async docId => (await navigator.locks.query()).held?.some(lock => lock.name?.includes(docId)), id)).toBe(false);
+      await expect(page.locator('#editor')).toHaveValue('PRIVATE CANARY session period');
     }
   });
 }

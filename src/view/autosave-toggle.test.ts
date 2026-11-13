@@ -81,6 +81,7 @@ function harness(options: {
   /** Hold persistLastBeforePrivate until this promise resolves (session last-save races). */
   persistGate?: Promise<void>;
   firstCommit?: Promise<StoredDraft | undefined>;
+  syncIdentity?: () => void;
 } = {}) {
   const state = createEditorState();
   state.active = {
@@ -177,6 +178,7 @@ function harness(options: {
     : () => undefined;
 
   const toggle = createAutosaveToggle(state, status, {
+    syncIdentity: options.syncIdentity,
     autosave,
     privateMarker,
     workspace,
@@ -610,4 +612,25 @@ for (const committed of [true, false]) it(`reconciles an in-flight first commit 
   if (committed) expect(persistLastBeforePrivate).toHaveBeenCalledWith(
     expect.objectContaining({ id: 'doc', revision: 1, text: 'saved', private: true }), 1, { markPrivate: true });
   else { expect(persistLastBeforePrivate).not.toHaveBeenCalled(); expect(askConfirmChoice).not.toHaveBeenCalled(); }
+});
+
+for (const committed of [true, false]) it(`session waits for first save settlement before final identity sync: ${committed}`, async () => {
+  let finish!: (draft: StoredDraft | undefined) => void;
+  const firstCommit = new Promise<StoredDraft | undefined>(resolve => { finish = resolve; });
+  let settled = false;
+  const synchronized: boolean[] = [];
+  const { toggle, state, persistLastBeforePrivate } = harness({ revision: 0, sessionDirty: true, firstCommit,
+    syncIdentity: () => synchronized.push(settled) });
+  vi.stubGlobal('localStorage', { getItem: () => 'off' });
+  const transition = toggle.applySessionChange(true);
+  expect(toggle.isActive()).toBe(true); expect(synchronized.at(-1)).toBe(false);
+  await toggle.applySessionChange(false);
+  await toggle.applySessionChange(true); // Cancel the queued opposite target while the first save is held.
+  expect(toggle.isActive()).toBe(true); expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+  settled = true;
+  finish(committed ? { ...state.active, revision: 1 } : undefined);
+  await transition;
+  expect(toggle.isActive()).toBe(false); expect(synchronized.at(-1)).toBe(true);
+  expect(state.active.private).not.toBe(true);
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled();
 });

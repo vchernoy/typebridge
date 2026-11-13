@@ -177,7 +177,14 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
    * Autosave-off (#260 Codex P1).
    */
   async function lastSaveBeforeSession(): Promise<{ saveFailed: boolean }> {
-    if (state.active.revision === 0 || state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
+    if (state.active.revision === 0) {
+      // A cancelled/aborted first save has no post-commit identity callback. Wait so the
+      // session finally can release its reservation/fence after saver.inFlight clears.
+      const pending = deps.saver.inFlight();
+      if (pending) await pending;
+      return { saveFailed: false };
+    }
+    if (state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
     const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
     if (!canSave) return { saveFailed: false };
     // Prefer the last may-write boundary: delayed `storage` can run after post-private typing

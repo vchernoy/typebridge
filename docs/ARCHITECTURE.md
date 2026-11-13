@@ -84,3 +84,6 @@ Step 4 (Clear local data) is separate. This does not clear other saved documents
 
 
 If the first documents transaction has already started when Autosave is unchecked, going private waits for its result before deciding whether the document is still revision zero. Metadata stays suppressed during that wait, but the in-flight write retains its fence. A successful commit follows the saved-document private-flag and Keep/Delete path using the frozen pre-switch fields/revision; abort leaves an editable, trace-free revision-zero document without a replacement save. Delete sends the normal deleted signal and clears pre-switch backups; Keep relies on the committed row without stale-backup recovery. The existing toggle gate refuses a concurrent Autosave transition.
+
+
+Private session also waits for a revision-zero first save to settle before its final identity synchronization. Cancellation or abort releases the unsaved document’s shared reservation/fence; a successful commit keeps normal saved-document ownership and metadata without setting the per-document private flag. The session still blocks all later content writes, and turning it off resumes normal Autosave. No replacement final save is made for a document that remained unsaved.
