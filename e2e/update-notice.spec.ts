@@ -407,35 +407,35 @@ test('pending reload-discard without session intent does not salvage (#256 forei
 });
 
 test('foreign cancel does not clear another tab pending (#256 Codex P0)', async ({ page }) => {
-  // A foreign context calling cancelUpdateReload must leave a consenting tab's pending intact.
+  // Embed exposes __typebridgeCancelUpdateReload; standalone does not. Use the host iframe.
   test.setTimeout(60_000);
-  await page.goto('/editor.html');
-  const editor = page.locator('#editor');
-  await expect(editor).toBeEnabled();
-  await editor.fill('Keep base');
-  await expect(page.locator('#save-indicator')).toHaveText('Saved');
-  const documentId = await page.evaluate(() =>
-    document.querySelector<HTMLSelectElement>('#drafts')?.value ?? '',
-  );
+  await page.goto('/');
+  const frame = page.frameLocator('.host-window iframe.host-editor').first();
+  await expect(frame.locator('#editor')).toBeEnabled({ timeout: 30_000 });
+  await expect(frame.locator('html')).toHaveAttribute('data-embed', '1');
+  await frame.locator('#editor').fill('Keep base');
+  await expect(frame.locator('#save-indicator')).toHaveText('Saved');
+
+  const documentId = await frame.locator('#drafts').inputValue();
   expect(documentId).not.toBe('');
-
   const pendingKey = `typebridge.reloadDiscardPending.v1.${documentId}`;
-  await page.evaluate(key => {
-    localStorage.setItem(key, JSON.stringify({ instanceId: 'consenting-other-tab', at: Date.now() }));
-  }, pendingKey);
-  expect(await page.evaluate(key => localStorage.getItem(key), pendingKey)).toBeTruthy();
-
-  // This tab never wrote the pending flag; cancel must be a no-op for it.
-  await page.evaluate(() => {
-    (window as Window & { __typebridgeCancelUpdateReload?: () => void })
-      .__typebridgeCancelUpdateReload?.();
-  });
-  const after = await page.evaluate(key => {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    return JSON.parse(raw) as { instanceId?: string };
-  }, pendingKey);
-  expect(after?.instanceId).toBe('consenting-other-tab');
+  // Plant pending owned by a different instance (consenting tab), then cancel from this embed.
+  const result = await page.evaluate(async ({ key, docId }) => {
+    const frameEl = document.querySelector<HTMLIFrameElement>('.host-window iframe.host-editor');
+    const win = frameEl?.contentWindow as (Window & {
+      __typebridgeCancelUpdateReload?: () => void;
+    }) | null | undefined;
+    if (!win?.__typebridgeCancelUpdateReload) {
+      return { cancelled: false, reason: 'missing-hook', after: null as string | null };
+    }
+    localStorage.setItem(key, JSON.stringify({ instanceId: 'consenting-other-tab', at: Date.now(), documentId: docId }));
+    win.__typebridgeCancelUpdateReload();
+    return { cancelled: true, reason: 'ok', after: localStorage.getItem(key) };
+  }, { key: pendingKey, docId: documentId });
+  expect(result.cancelled).toBe(true);
+  expect(result.reason).toBe('ok');
+  expect(result.after).toBeTruthy();
+  expect(JSON.parse(result.after!).instanceId).toBe('consenting-other-tab');
 });
 
 test('cancelled update-reload keeps change records for later salvage (#255)', async ({ page }) => {
