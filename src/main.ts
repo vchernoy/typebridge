@@ -550,7 +550,7 @@ function rememberActive(): void {
   const hidden = newPrivateDocument(state.active);
   if (hidden) {
     // A private revision-zero document is edited only here; no shared ownership is needed.
-    if (state.ownership?.documentId === state.active.id) {
+    if (state.ownership?.documentId === state.active.id && !saver.inFlight()) {
       const held = state.ownership; state.ownership = undefined;
       void held.release();
     }

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { answerNextConfirmation, documentAction, openDocuments, openFind, setAutosave, setPrivateSession, setHostAutosave } from './settings-helpers';
+import { confirmPrivateSavedCopy, answerNextConfirmation, documentAction, openDocuments, openFind, setAutosave, setPrivateSession, setHostAutosave } from './settings-helpers';
 
 async function ready(page: Page) {
   await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
@@ -137,3 +137,77 @@ test('explicit Import saves normally during a private session without storing th
   expect(data.documents).toHaveLength(1); expect(JSON.stringify(data.documents)).toContain('Explicit import');
   expect(JSON.stringify(data)).not.toContain(id);
 });
+
+for (const choice of ['keep', 'delete', 'abort'] as const) {
+  test(`privacy reconciles the first transaction already started: ${choice} (#268 P0)`, async ({ page, context }) => {
+    page.on('dialog', dialog => dialog.accept());
+    await page.goto('/editor.html'); await ready(page);
+    const id = await page.locator('#drafts').inputValue();
+    const other = await context.newPage(); await other.goto('/editor.html?mode=view');
+    await expect(other.locator('#editor')).toBeEnabled();
+    await page.evaluate(() => {
+      const win = window as unknown as { heldFirst: boolean; releaseFirst: (abort: boolean) => void };
+      const put = IDBObjectStore.prototype.put;
+      let intercepted = false;
+      IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+        const req = put.apply(this, args);
+        if (this.name === 'documents' && !intercepted) {
+          intercepted = true;
+          let hold = true;
+          win.releaseFirst = abort => { hold = false; if (abort) this.transaction.abort(); };
+          req.addEventListener('success', () => {
+            win.heldFirst = true;
+            const keepAlive = (): void => {
+              if (hold) this.get((args[0] as { id: string }).id).addEventListener('success', keepAlive);
+            };
+            keepAlive();
+          });
+        }
+        return req;
+      };
+    });
+    await page.locator('#editor').fill('Before transaction privacy');
+    await page.locator('#draft-title').fill('Before title');
+    await openFind(page); await page.locator('#find-text').fill('Before find');
+    await page.locator('#replace-text').fill('Before replace');
+    await expect.poll(() => page.evaluate(() => (window as unknown as { heldFirst: boolean }).heldFirst)).toBe(true);
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+    expect(await page.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith('typebridge.pendingDraft.v1')))).toBe(true);
+    expect(await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith('typebridge.recovery.v1.')))).toBe(true);
+    await page.locator('#autosave').uncheck();
+    await expect(page.locator('#private-marker')).toBeVisible();
+    await page.locator('#editor').fill('PRIVATE CANARY after transaction began');
+    await page.locator('#draft-title').fill('PRIVATE CANARY title');
+    await page.locator('#find-text').fill('PRIVATE CANARY find');
+    await page.locator('#replace-text').fill('PRIVATE CANARY replace');
+    await page.evaluate(abort => (window as unknown as { releaseFirst: (abort: boolean) => void }).releaseFirst(abort), choice === 'abort');
+    const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
+    if (choice !== 'abort') {
+      await expect(dialog).toBeVisible();
+      // The original saved signal makes the row visible; Delete must later remove it via its signal.
+      await expect(other.locator(`#drafts option[value="${id}"]`)).toHaveCount(1);
+      await confirmPrivateSavedCopy(page, choice);
+    } else await expect(dialog).toBeHidden();
+    await expect(page.locator('#editor')).toBeEditable();
+    await expect(page.locator('#editor')).toHaveValue('PRIVATE CANARY after transaction began');
+    if (choice === 'keep') {
+      const data = await traces(page);
+      expect(data.documents).toHaveLength(1);
+      expect(data.documents[0]).toMatchObject({ id, private: true, text: 'Before transaction privacy', title: 'Before title', find: 'Before find', replace: 'Before replace' });
+      expect(JSON.stringify(data)).not.toContain('PRIVATE CANARY');
+      await page.reload(); await ready(page);
+      await expect(page.locator('#autosave')).not.toBeChecked();
+      await expect(page.locator('#editor')).toHaveValue('Before transaction privacy');
+      expect((await traces(page)).documents).toHaveLength(1);
+      await expect(page.getByRole('region', { name: 'Recover unsaved documents' })).toBeHidden();
+    } else {
+      await expect.poll(async () => JSON.stringify(await traces(page)).includes(id)).toBe(false);
+      await noTrace(page, id);
+      await expect(other.locator(`#drafts option[value="${id}"]`)).toHaveCount(0);
+      await page.reload(); await ready(page);
+      await expect(page.locator('#editor')).toHaveValue('');
+      expect((await traces(page)).documents).toEqual([]);
+      await expect(page.getByRole('region', { name: 'Recover unsaved documents' })).toBeHidden();
+    }
+  });
+}
