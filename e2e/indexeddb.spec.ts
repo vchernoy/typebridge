@@ -36,16 +36,20 @@ test('stale edits are committed as a separate complete conflict draft', async ({
 
 test('a blocked upgrade reports the blocker and closes a late connection', async ({ page, context }) => {
   const compiled = compiledDatabaseModule();
-  await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  // Neither page runs the app (static asset, same origin), so the blocker's connection is the
+  // only one the upgrade waits for. Firefox fires `blocked` only once every other connection
+  // has reported back, and a connection that closes in its versionchange handler (as the app's
+  // do) counts only when its close reaches the parent: if the held connection reports first,
+  // `blocked` is never sent and the open waits until it closes. Across tabs that order is a
+  // race, so an app connection here made this test hang intermittently in Firefox (#232).
   const blocker = await context.newPage();
-  await blocker.goto('/editor.html');
-  await expect(blocker.locator('#editor')).toBeEnabled();
+  await blocker.goto('/icon-192.png');
   await blocker.evaluate(() => new Promise<void>((resolve, reject) => {
     const open = indexedDB.open('typebridge');
     open.onsuccess = () => { (window as unknown as { held: IDBDatabase }).held = open.result; resolve(); };
     open.onerror = () => reject(open.error);
   }));
+  await page.goto('/icon-192.png');
   await page.addScriptTag({ content: compiled });
   const message = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
