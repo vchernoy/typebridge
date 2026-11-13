@@ -708,11 +708,13 @@ async function markReloadDiscard(): Promise<void> {
   if (viewMode || !state.db || state.editBlock) return;
   const ownership = state.ownership;
   if (!ownership || ownership.documentId !== state.active.id) return;
-  const marker = await writeReloadDiscardMarker(state.db, state.active.id, await ownership.writeFence());
+  const documentId = state.active.id;
+  const fence = await ownership.writeFence();
+  // Pending first so a foreign tab never sees a marker without pending (#256 P1).
+  setReloadDiscardPending(documentId, fence.instanceId);
+  const marker = await writeReloadDiscardMarker(state.db, documentId, fence);
   // Bind only this window's current journal (exact snapshot); never wipe other tabs' entries (#256 P0).
   const journal = recovery.currentJournal();
-  // Cross-tab pending before session intent: foreign tabs must see in-flight reload (#256 Codex P0).
-  setReloadDiscardPending(marker.documentId, marker.instanceId);
   setReloadDiscardIntent(marker.instanceId, {
     documentId: marker.documentId,
     ...(journal && journal.documentId === marker.documentId ? { journal } : {}),
