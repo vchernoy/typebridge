@@ -205,10 +205,21 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     state.active = { ...state.active, private: true };
     deps.autosave.checked = false;
     syncPrivateMarker();
+    // In-flight persist may have moved ownership to a conflict copy (#257 P1). Rebase the
+    // freeze onto that identity so the last pre-private save targets the owned row — keeping
+    // frozen text/title (edits after the in-flight snapshot) while using the copy's id/revision.
+    let freezeTarget = frozen;
+    if (state.active.id !== frozen.id) {
+      freezeTarget = {
+        ...frozen,
+        id: state.active.id,
+        revision: state.active.revision,
+      };
+    }
     try { await deps.saver.drainChanges(); } catch { /* may already be failing */ }
 
     const result = await deps.persistLastBeforePrivate({
-      ...frozen,
+      ...freezeTarget,
       private: true,
       updatedAt: Date.now(),
     }, frozenContentRevision);
@@ -241,7 +252,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       status.announceAction(PRIVATE_SWITCH_FLAG_FAILED, { keepConflict: true });
       return;
     }
-    if (wasDirty && !changeLogCovered && !state.storageProblem) {
+    // Re-check after awaits: a conflict copy drops held change records (#257 P1).
+    if (wasDirty && (!changeLogCovered || !deps.changeLogProtects()) && !state.storageProblem) {
       status.announceAction(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
       return;
     }

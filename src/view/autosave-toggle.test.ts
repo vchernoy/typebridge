@@ -63,6 +63,10 @@ function harness(options: {
   persistSaved?: boolean;
   flagOk?: boolean;
   changeLogProtects?: boolean;
+  /** After await, changeLogProtects() returns this (defaults to changeLogProtects). */
+  changeLogProtectsAfterAwait?: boolean;
+  /** In-flight save moves active/ownership to this conflict copy before resolving. */
+  inFlightConflict?: StoredDraft;
 } = {}) {
   const state = createEditorState();
   state.active = {
@@ -96,6 +100,7 @@ function harness(options: {
   } as unknown as StatusLine;
 
   const revision = { value: 1 };
+  let protects = options.changeLogProtects === true;
   const persistLastBeforePrivate = vi.fn(async () => ({
     saved: options.persistSaved !== false,
     conflict: false,
@@ -109,12 +114,37 @@ function harness(options: {
   const abandonChangeRun = vi.fn();
   const renderDrafts = vi.fn();
   const syncAutosaveControl = vi.fn();
+  const frozenSnapshot: StoredDraft = {
+    id: 'doc',
+    title: 'T',
+    text: options.inFlightConflict ? 'later edits' : 'saved',
+    updatedAt: 1,
+    revision: options.revision ?? 1,
+  };
 
-  vi.mocked(updateDocumentPrivateFlag).mockResolvedValue(
-    options.flagOk === false
-      ? { ok: false, reason: 'conflict', current: state.active }
-      : { ok: true, draft: { ...state.active, private: true } },
-  );
+  vi.mocked(updateDocumentPrivateFlag).mockImplementation(async (_db, id, privateFlag, rev) => {
+    if (options.flagOk === false) return { ok: false, reason: 'conflict', current: state.active };
+    return {
+      ok: true,
+      draft: { ...state.active, id, revision: rev, private: privateFlag },
+    };
+  });
+
+  const inFlight = options.inFlightConflict
+    ? () => Promise.resolve().then(() => {
+      const copy = options.inFlightConflict!;
+      state.active = { ...copy };
+      state.ownership = {
+        documentId: copy.id,
+        writeFence: async () => ({ instanceId: 'i', fence: 2 }),
+        release: async () => undefined,
+      } as never;
+      if (options.changeLogProtectsAfterAwait !== undefined) {
+        protects = options.changeLogProtectsAfterAwait;
+      }
+      return { saved: false, conflict: true };
+    })
+    : () => undefined;
 
   const toggle = createAutosaveToggle(state, status, {
     autosave,
@@ -127,9 +157,9 @@ function harness(options: {
     journalEdit: () => undefined,
     persist,
     persistLastBeforePrivate,
-    snapshot: (): StoredDraft => ({ ...state.active, text: 'saved', title: 'T' }),
-    changeLogProtects: () => options.changeLogProtects === true,
-    saver: { cancel, inFlight: () => undefined, drainChanges },
+    snapshot: (): StoredDraft => ({ ...frozenSnapshot }),
+    changeLogProtects: () => protects,
+    saver: { cancel, inFlight, drainChanges },
     abandonChangeRun,
     refreshDrafts: async () => undefined,
     renderDrafts,
@@ -185,5 +215,54 @@ describe('createAutosaveToggle going private (#257)', () => {
     await toggle.applyDocumentChange(false);
     expect(revision.value).toBe(2);
     expect(persistLastBeforePrivate).toHaveBeenCalledWith(expect.anything(), 1);
+  });
+
+  it('rebases the freeze onto an in-flight conflict copy (#257 P1)', async () => {
+    const conflict: StoredDraft = {
+      id: 'copy',
+      title: 'T (conflict)',
+      text: 'earlier save',
+      updatedAt: 2,
+      revision: 1,
+    };
+    const { toggle, persistLastBeforePrivate, state } = harness({
+      dirty: true,
+      changeLogProtects: true,
+      changeLogProtectsAfterAwait: false,
+      inFlightConflict: conflict,
+    });
+    await toggle.applyDocumentChange(false);
+    expect(persistLastBeforePrivate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'copy',
+        revision: 1,
+        text: 'later edits',
+        title: 'T',
+        private: true,
+      }),
+      1,
+    );
+    expect(state.active.id).toBe('copy');
+    expect(state.active.private).toBe(true);
+  });
+
+  it('warns when an in-flight conflict drops change-log coverage (#257 P1)', async () => {
+    const conflict: StoredDraft = {
+      id: 'copy',
+      title: 'T (conflict)',
+      text: 'earlier save',
+      updatedAt: 2,
+      revision: 1,
+    };
+    const { toggle, announceAction } = harness({
+      dirty: true,
+      persistSaved: false,
+      flagOk: true,
+      changeLogProtects: true,
+      changeLogProtectsAfterAwait: false,
+      inFlightConflict: conflict,
+    });
+    await toggle.applyDocumentChange(false);
+    expect(announceAction).toHaveBeenCalledWith(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
   });
 });
