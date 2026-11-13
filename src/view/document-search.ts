@@ -66,9 +66,11 @@ export function createDocumentSearch(deps: {
       changed();
     },
     /** A reader's explicit takeover can adopt its local query, now under ownership. */
-    owned(): void {
+    owned(intent: 'explicit' | 'automatic'): void {
       if (deps.ignored() || !deps.canEdit() || !local.has(deps.shown().id)) return;
-      local.delete(deps.shown().id);
+      if (intent === 'automatic') { binding.restore(deps.shown(), true); return; }
+      const value = local.get(deps.shown().id)!;
+      binding.restore({ ...deps.shown(), ...value }, true);
       changed();
     },
   };

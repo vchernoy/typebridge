@@ -252,3 +252,27 @@ test('same-tab private handoff transfers four fields and search histories withou
   expect((await storage(page)).serialized).not.toContain('REPLACED');
   expect((await storage(page)).serialized).not.toContain('SECRET');
 });
+
+test('automatic ownership after owner closes discards reader search without saving (#266)', async ({ page, context }) => {
+  const id = await publicDocument(page);
+  const before = (await storage(page)).rows.find(row => row.id === id)!;
+  const reader = await context.newPage();
+  await reader.goto(`/editor.html?doc=${id}`);
+  await expect(reader.locator('html')).toHaveAttribute('data-role', 'reader');
+  await openFind(reader);
+  await reader.locator('#find-text').fill('reader local query');
+  await reader.locator('#replace-text').fill('reader local replacement');
+  await expect(reader.locator('#find-text')).toHaveValue('reader local query');
+  await page.close();
+  await reader.bringToFront();
+  await reader.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await ready(reader);
+  await expect(reader.locator('#find-text')).toHaveValue('public find');
+  await expect(reader.locator('#replace-text')).toHaveValue('public replace');
+  // Cross the normal autosave debounce; a scheduled query save would bump the revision.
+  await reader.waitForTimeout(1000);
+  const after = (await storage(reader)).rows.find(row => row.id === id)!;
+  expect(after.find).toBe('public find'); expect(after.replace).toBe('public replace');
+  expect(after.revision).toBe(before.revision);
+  await expect(reader.locator('#save-indicator')).toHaveText('Saved');
+});

@@ -52,7 +52,7 @@ describe('document search binding (#257 2b)', () => {
     expect(find.field.value).toBe('reader only');
     expect(search.snapshot().find).toBe('A find');
     expect(changed).not.toHaveBeenCalled();
-    state.owner = true; search.owned();
+    state.owner = true; search.owned('explicit');
     expect(changed).toHaveBeenCalledTimes(1);
   });
   it('a transferred canonical snapshot replaces local search and histories', () => {
@@ -104,4 +104,16 @@ it('malformed title history cannot break document loading', () => {
   const title = inputEditor();
   restoreDocumentTitle(title as unknown as Editor, { id: 'a', title: 'Safe title', text: '', updatedAt: 1, revision: 1, titleHistory: { current: 42 } as unknown as import('../editor/editor').EditorHistory }, 'Untitled document');
   expect(title.field.value).toBe('Safe title');
+});
+
+it('automatic ownership drops reader search without scheduling a save', () => {
+  const { state, find, replace, changed, search } = harness();
+  state.owner = false; search.restore(state.row);
+  find.field.value = 'reader only'; find.field.dispatchEvent(new Event('input'));
+  replace.field.value = 'reader replacement'; replace.field.dispatchEvent(new Event('input'));
+  state.owner = true; search.owned('automatic');
+  expect(find.field.value).toBe('A find'); expect(replace.field.value).toBe('A replace');
+  expect(search.snapshot()).toMatchObject({ find: 'A find', replace: 'A replace' });
+  expect(state.row.find).toBe('A find');
+  expect(changed).not.toHaveBeenCalled();
 });

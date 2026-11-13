@@ -173,7 +173,6 @@ const state = createEditorState();
  */
 // eslint-disable-next-line prefer-const -- assigned once later; a const here would be read before it is set.
 let autosaveToggle: AutosaveToggle | undefined;
-let syncSearchOwnership = (): void => {};
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
@@ -323,7 +322,6 @@ function syncAutosaveControl(): void {
   autosaveToggle?.syncPrivateMarker();
 }
 function syncMutationControls(): void {
-  syncSearchOwnership();
   // Comparison viewers own these attributes via applyViewerChrome; do not fight tests that
   // temporarily re-enable controls to prove handlers still refuse mutations.
   if (viewMode) return;
@@ -484,7 +482,6 @@ const documentSearch = createDocumentSearch({
   changed: () => { scheduleSave(); autosaveToggle?.noteWritableSnapshot(); },
   refresh: showMatchCount,
 });
-syncSearchOwnership = () => { documentSearch.owned(); };
 /** Document-identity counter lives on the workspace as sessionGeneration (formerly viewGeneration). */
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
@@ -695,6 +692,7 @@ const {
 } = editAccess;
 const takeover = createTakeover(state, {
   viewMode, field, draftTitle, editor, workspace, autosave, mayWrite, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
+  searchOwned: intent => documentSearch.owned(intent),
   captureFields: () => ({ ...documentSearch.capture(), titleHistory: titleEditor.exportHistory() }),
   restoreFields: () => {
     restoreDocumentTitle(titleEditor, state.active, UNTITLED_TITLE);

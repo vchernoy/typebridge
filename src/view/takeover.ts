@@ -15,6 +15,7 @@ import { mayRetryEditOwnership } from './ownership';
 import type { createSinglePaneWorkspace } from './workspace';
 
 export type TakeoverDeps = {
+  searchOwned?: (intent: 'explicit' | 'automatic') => void;
   captureFields?: () => Pick<StoredDraft, 'find' | 'replace' | 'titleHistory' | 'findHistory' | 'replaceHistory'>;
   restoreFields?: () => void;
   viewMode: boolean;
@@ -167,6 +168,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
       );
       field.setSelectionRange(mapped.start, mapped.end);
       unfreezeEditorsAfterTransition();
+      deps.searchOwned?.('explicit');
       // Only schedule save for non-private takeovers (saved reread / clean yield).
       if (workspace.dirty() && deps.mayWrite() && !input.snapshot?.dirty) {
         saveSoon();
@@ -219,6 +221,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
         showDraft();
       }
       installOwnership(access);
+      deps.searchOwned?.('automatic');
       onEditableHere();
       if (workspace.dirty() && deps.mayWrite()) { saveSoon(); }
     })().finally(() => {
