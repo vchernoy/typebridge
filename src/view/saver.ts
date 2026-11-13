@@ -100,6 +100,8 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
         deps.postSignal('saved', result.draft.id, result.draft.revision);
         if (result.recovered) deps.onRecovered(result.recovered, result.draft.id);
         deps.writingPosition.save();
+        // Same as ordinary persist: session hint / host metadata must follow a conflict copy (#257).
+        deps.rememberActive();
         state.saveFailed = false;
         deps.workspace.setDirty(deps.workspace.contentRevision() !== frozenContentRevision);
         deps.updateSaveIndicator();

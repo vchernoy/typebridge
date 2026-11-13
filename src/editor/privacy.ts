@@ -5,18 +5,27 @@
  */
 import { autosaveEnabled, setAutosaveEnabled } from './drafts';
 
+/**
+ * Last successfully observed Private session value. When localStorage throws after the
+ * session was on, fail closed to this instead of opening mayWrite (#257 P0).
+ */
+let lastKnownPrivateSessionOn = false;
+
 /** Global private session: the existing `typebridge.autosave.v1` preference when off. */
 export function privateSessionOn(): boolean {
   try {
-    return !autosaveEnabled();
+    const on = !autosaveEnabled();
+    lastKnownPrivateSessionOn = on;
+    return on;
   } catch {
-    return false;
+    return lastKnownPrivateSessionOn;
   }
 }
 
 /** Persist the global private session (writes `typebridge.autosave.v1`). */
 export function setPrivateSessionOn(on: boolean): void {
   setAutosaveEnabled(!on);
+  lastKnownPrivateSessionOn = on;
 }
 
 /**

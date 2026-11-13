@@ -58,6 +58,23 @@ describe('privateNow (#257 step 1)', () => {
     expect(localStorage.getItem('typebridge.autosave.v1')).toBe('on');
   });
 
+  it('fails closed to the last known session when localStorage throws (#257 P0)', () => {
+    (globalThis as { localStorage?: Storage }).localStorage = memoryStorage();
+    setPrivateSessionOn(true);
+    expect(privateSessionOn()).toBe(true);
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      get length() { return 0; },
+      key: () => null,
+      getItem: () => { throw new DOMException('Blocked', 'SecurityError'); },
+      setItem: () => { throw new DOMException('Blocked', 'SecurityError'); },
+      removeItem: () => undefined,
+      clear: () => undefined,
+    };
+    expect(privateSessionOn()).toBe(true);
+    expect(privateNow({})).toBe(true);
+    expect(documentAutosaveChecked({})).toBe(false);
+  });
+
   it('exposes the switch-time warning strings from the issue notes', () => {
     expect(PRIVATE_SWITCH_SAVE_FAILED).toMatch(/before going private/);
     expect(PRIVATE_SWITCH_FLAG_FAILED).toMatch(/may not reopen as private/);
