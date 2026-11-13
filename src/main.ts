@@ -758,8 +758,9 @@ async function salvageOnOwn(documentId: string): Promise<void> {
     });
     if (decision === 'defer') {
       // Yield the lock so the consenting reload can reacquire and apply; do not stay editable
-      // while discarded records could still be replayed on save (#256 Codex P0).
-      loseOwnership();
+      // while discarded records could still be replayed on save (#256 Codex P0). Only release if
+      // this salvage's ownership is still installed (user may have switched documents).
+      if (state.ownership === ownership) loseOwnership();
       return;
     }
     if (decision === 'apply' && marker && intent) {

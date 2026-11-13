@@ -214,6 +214,53 @@ test('Discard changes and reload clears change-log so salvage cannot revive (#25
   }))).toBe(0);
 });
 
+test('Discard changes and reload clears pendingDraft so boot cannot restore it (#256 Codex P0)', async ({ page }) => {
+  // Autosave-on backup from a failed save survives turning Autosave off; discard must remove it.
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await waitingUpdate(page);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Saved base');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await editor.fill('PENDING-DRAFT-MUST-NOT-RETURN');
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  // Plant a differing pendingDraft as if visibilitychange backed up the failed edit.
+  await page.evaluate(() => {
+    const id = document.querySelector<HTMLSelectElement>('#drafts')?.value ?? '';
+    const key = [...Object.keys(sessionStorage)].find(k => k.startsWith('typebridge.pendingDraft.v1'))
+      ?? 'typebridge.pendingDraft.v1';
+    sessionStorage.setItem(key, JSON.stringify({
+      id, title: 'Untitled document', text: 'PENDING-DRAFT-MUST-NOT-RETURN',
+      updatedAt: Date.now(), revision: 0, reloadBackupToken: 'e2e',
+    }));
+  });
+  await setAutosave(page, false, 'keep');
+  await expect(page.locator('#autosave')).not.toBeChecked();
+  await page.locator('#update-reload').click();
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await Promise.all([
+    page.waitForEvent('framenavigated'),
+    dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click(),
+  ]);
+  await expect(editor).toBeEnabled();
+  await expect(editor).not.toHaveValue('PENDING-DRAFT-MUST-NOT-RETURN');
+  await expect(editor).toHaveValue('Saved base');
+  expect(await page.evaluate(() =>
+    Object.keys(sessionStorage).some(key => key.startsWith('typebridge.pendingDraft.v1')),
+  )).toBe(false);
+});
+
 test('Discard changes and reload keeps an unrelated same-document journal (#256 P0)', async ({ page }) => {
   // Fails if apply clears every journal for documentId instead of the exact consented snapshot.
   test.setTimeout(60_000);

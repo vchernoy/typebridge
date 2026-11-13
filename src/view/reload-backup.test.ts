@@ -73,6 +73,20 @@ describe('reload backup', () => {
     createReloadBackup({ key: 'k', snapshot: () => draft(), mayBackUp: () => true, onFailed: () => { failed++; } }).save();
     expect(failed).toBe(1);
   });
+
+  it('take removes and put restores without mayBackUp (#256 Codex P0)', () => {
+    (globalThis as { sessionStorage?: Storage }).sessionStorage = memorySession();
+    const current = draft({ text: 'backed-up discard' });
+    const backup = createReloadBackup({
+      key: 'k', snapshot: () => draft({ text: 'live' }), mayBackUp: () => false, onFailed: () => {},
+    });
+    sessionStorage.setItem('k', JSON.stringify({ ...current, reloadBackupToken: 'tok' }));
+    const taken = backup.take();
+    expect(taken?.text).toBe('backed-up discard');
+    expect(backup.read()).toBeUndefined();
+    backup.put(taken!);
+    expect(backup.read()?.text).toBe('backed-up discard');
+  });
 });
 
 

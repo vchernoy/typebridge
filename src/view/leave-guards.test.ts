@@ -89,6 +89,8 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
         save: () => undefined,
         read: () => undefined,
         remove: () => undefined,
+        take: vi.fn(() => undefined),
+        put: vi.fn(() => undefined),
         suppressed: () => false,
         setSuppressed: () => undefined,
       },
@@ -143,8 +145,18 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     const { guards, discardUnsavedRecovery, freezeForDiscard, deps } = harness({ autosaveOn: false });
     await expect(guards.prepareUpdateReload()).resolves.toBe(true);
     expect(deps.markReloadDiscard).toHaveBeenCalledOnce();
+    expect(deps.reloadBackup.take).toHaveBeenCalledOnce();
     expect(freezeForDiscard).not.toHaveBeenCalled();
     expect(discardUnsavedRecovery).not.toHaveBeenCalled();
+  });
+
+  it('update-reload cancel restores a taken pendingDraft backup (#256 Codex P0)', async () => {
+    const { guards, deps } = harness({ autosaveOn: false });
+    const stashed = { id: 'doc', title: 'T', text: 'backed', updatedAt: 1, revision: 1 };
+    vi.mocked(deps.reloadBackup.take).mockReturnValue(stashed);
+    await expect(guards.prepareUpdateReload()).resolves.toBe(true);
+    guards.cancelUpdateReload();
+    expect(deps.reloadBackup.put).toHaveBeenCalledWith(stashed);
   });
 
   it('update-reload Keep editing writes no marker (#255)', async () => {

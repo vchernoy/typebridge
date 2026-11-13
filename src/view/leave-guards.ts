@@ -27,6 +27,8 @@ export type LeaveGuardDeps = {
     save: () => void;
     read: () => StoredDraft | undefined;
     remove: () => void;
+    take: () => StoredDraft | undefined;
+    put: (draft: StoredDraft) => void;
     suppressed: () => boolean;
     setSuppressed: (next: boolean) => void;
   };
@@ -65,6 +67,11 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
    * cancel can thaw without wiping journal/change-log recovery (#254 Codex P1).
    */
   let pendingCloseDiscard = false;
+  /**
+   * Reload-discard prepare removed this window's pendingDraft so boot cannot restore discarded
+   * text (#256 Codex P0). Restored on cancelUpdateReload if the reload does not proceed.
+   */
+  let stashedReloadBackup: StoredDraft | undefined;
 
   function updateReloadReturnFocus(): HTMLElement {
     const local = document.querySelector<HTMLButtonElement>('#update-reload');
@@ -169,6 +176,9 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         deps.clearReloadDiscard();
         return false;
       }
+      // Drop any earlier Autosave-on pendingDraft so the next load cannot restore discarded text
+      // (#256 Codex P0). Stash for cancelRestore; mayBackUp is false while Autosave is off.
+      stashedReloadBackup = deps.reloadBackup.take();
       privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
       return true;
     }
@@ -242,6 +252,10 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       deps.reloadBackup.setSuppressed(false);
       // Session intent first so a leftover IDB marker cannot delete records on a later load (#255).
       deps.clearReloadDiscard();
+      if (stashedReloadBackup) {
+        deps.reloadBackup.put(stashedReloadBackup);
+        stashedReloadBackup = undefined;
+      }
     },
   };
 }
