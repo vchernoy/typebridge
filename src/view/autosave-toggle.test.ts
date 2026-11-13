@@ -427,4 +427,20 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     expect(state.active.private).toBeUndefined();
     expect(abandonChangeRun).toHaveBeenCalled();
   });
+
+  it('warns when the private-session last-save fails instead of announcing Autosave off', async () => {
+    const { toggle, persistLastBeforePrivate, announceAction, setSaveStatus } = harness({
+      sessionDirty: true,
+      persistSaved: false,
+    });
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalled();
+    expect(announceAction).toHaveBeenCalledWith(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
+    expect(setSaveStatus.mock.calls.some(call => String(call[0]).includes('Autosave off'))).toBe(false);
+  });
 });

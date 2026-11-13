@@ -145,11 +145,13 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   /**
    * Last save of dirty text typed while writes were still allowed, without setting the
    * document `private` flag (#257 switching steps / follow-up item 1).
+   * Returns whether that last save failed so callers can warn instead of announcing a clean
+   * Autosave-off (#260 Codex P1).
    */
-  async function lastSaveBeforeSession(): Promise<void> {
-    if (state.active.private || !deps.workspace.dirty()) return;
+  async function lastSaveBeforeSession(): Promise<{ saveFailed: boolean }> {
+    if (state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
     const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
-    if (!canSave) return;
+    if (!canSave) return { saveFailed: false };
     const frozen = deps.snapshot();
     const frozenContentRevision = deps.workspace.contentRevision();
     const pending = deps.saver.inFlight();
@@ -163,11 +165,12 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       };
     }
     try { await deps.saver.drainChanges(); } catch { /* may already be failing */ }
-    await deps.persistLastBeforePrivate({
+    const result = await deps.persistLastBeforePrivate({
       ...freezeTarget,
       updatedAt: Date.now(),
     }, frozenContentRevision, { markPrivate: false });
     deps.abandonChangeRun();
+    return { saveFailed: !result.saved };
   }
 
   /** Global private-session preference changed (Settings / host prefs sync). */
@@ -191,8 +194,13 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         if (!deps.controlBlocked()) deps.autosave.disabled = true;
         if (!deps.controlBlocked()) {
           status.clearNotices();
-          await lastSaveBeforeSession();
-          announce(AUTOSAVE_OFF);
+          const { saveFailed } = await lastSaveBeforeSession();
+          // Match goPrivate: do not paper over a failed last-save with AUTOSAVE_OFF (#260 P1).
+          if (saveFailed) {
+            status.announceAction(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
+          } else {
+            announce(AUTOSAVE_OFF);
+          }
         } else {
           status.showSaveState();
         }
