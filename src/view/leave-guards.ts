@@ -4,7 +4,8 @@
  * user confirms discarding it, and that choice is bound to the exact text it was made for.
  *
  * Window-close discard clears the journal and change log on commit (deferred so cancel can thaw
- * without wiping recovery). Update-reload does not clear change records yet — see #255.
+ * without wiping recovery). Update-reload writes a durable discard marker at consent (#255);
+ * assert → location.reload() stays synchronous; records are cleared on the next load.
  */
 import type { StoredDraft } from '../editor/indexeddb';
 import { clearRecovery, type RecoverySnapshot } from '../editor/recovery';
@@ -35,6 +36,13 @@ export type LeaveGuardDeps = {
    * records for this document so a later owner does not recover what was discarded (#37 R2c 2d-2).
    */
   discardUnsavedRecovery: () => Promise<void>;
+  /**
+   * Update-reload discard consent (#255): write the IndexedDB marker + sessionStorage intent.
+   * Throws (or rejects) when the marker cannot be written — prepare must then return false.
+   */
+  markReloadDiscard: () => Promise<void>;
+  /** Cancel update-reload: drop session intent and best-effort remove the IDB marker. */
+  clearReloadDiscard: () => void;
   /** Freeze body + title editors (and mutation controls) for the discard-cleanup window. */
   freezeForDiscard: () => void;
   /** Undo freezeForDiscard when the leave aborts after cleanup. */
@@ -108,7 +116,6 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   /**
    * Confirm close discard. Consent is bound to the content revision shown in the dialog.
    * Destructive journal/change-log clear is deferred until host commit so cancel keeps recovery.
-   * Update-reload does not clear change records yet (#255).
    */
   async function confirmCloseDiscard(prompt: {
     title: string; message: string; confirmLabel: string;
@@ -144,7 +151,8 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         }
         return discarded;
       }
-      // Update-reload: consent only — change-log/journal clear is #255.
+      // Update-reload: consent + durable marker; assert → reload stays sync (#255).
+      const contentAtPrompt = deps.workspace.contentRevision();
       const discard = await askConfirmChoice({
         title: 'Reload without saving?',
         message: 'Autosave is off. Text and title changes will be lost. Copy or export them first if you want to keep them.',
@@ -152,10 +160,17 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
         cancelLabel: 'Keep editing',
         returnFocus: updateReloadReturnFocus(),
       });
-      if (discard) {
-        privateReloadChoice = { id: state.active.id, generation: deps.workspace.contentRevision() };
+      if (!discard) return false;
+      if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
+      try {
+        await deps.markReloadDiscard();
+      } catch {
+        // Marker write failed: refuse prepare so the host cancels every window.
+        deps.clearReloadDiscard();
+        return false;
       }
-      return discard;
+      privateReloadChoice = { id: state.active.id, generation: contentAtPrompt };
+      return true;
     }
     deps.reloadBackup.save();
     if (deps.workspace.dirty()) await deps.persist();
@@ -221,10 +236,12 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
     reloadAfterUpdate,
     commitWindowClose,
     cancelWindowClose,
-    /** The update reload was cancelled: re-enable the unload warning and backups. */
+    /** The update reload was cancelled: drop discard intent/marker and re-enable unload backups. */
     cancelUpdateReload(): void {
       allowUpdateReload = false;
       deps.reloadBackup.setSuppressed(false);
+      // Session intent first so a leftover IDB marker cannot delete records on a later load (#255).
+      deps.clearReloadDiscard();
     },
   };
 }

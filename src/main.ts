@@ -39,7 +39,14 @@ import {
 import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, clearDocumentChanges, type StoredDraft } from './editor/indexeddb';
+import {
+  listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, clearDocumentChanges,
+  writeReloadDiscardMarker, clearReloadDiscardMarker, getReloadDiscardMarker, applyReloadDiscardMarker,
+  type StoredDraft,
+} from './editor/indexeddb';
+import {
+  setReloadDiscardIntent, readReloadDiscardIntent, clearReloadDiscardIntent,
+} from './view/reload-discard';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
@@ -691,14 +698,54 @@ async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<v
   try { await refreshDrafts(); } catch { /* The copy is stored; the list catches up on focus. */ }
   statusLine.announceAction(`Recovered unsaved text from an earlier session as “${copy.title}” in Documents. Your current document was kept.`);
 }
+/**
+ * Update-reload discard (#255): write marker + session intent at consent. No-op without a live
+ * fence (same gate as discardUnsavedRecovery). Throws when the marker cannot be stored.
+ */
+async function markReloadDiscard(): Promise<void> {
+  if (viewMode || !state.db || state.editBlock) return;
+  const ownership = state.ownership;
+  if (!ownership || ownership.documentId !== state.active.id) return;
+  const marker = await writeReloadDiscardMarker(state.db, state.active.id, await ownership.writeFence());
+  setReloadDiscardIntent(marker.instanceId, marker.documentId);
+}
+
+/** Cancel update-reload: drop session intent first, then best-effort IDB marker (#255). */
+function clearReloadDiscard(): void {
+  clearReloadDiscardIntent(instanceId);
+  // Also clear by any marker we may have written (same instanceId while this page lives).
+  const documentId = state.active.id;
+  if (!state.db || !state.ownership || state.ownership.documentId !== documentId) return;
+  void state.ownership.writeFence().then(fence => {
+    clearReloadDiscardIntent(fence.instanceId);
+    return clearReloadDiscardMarker(state.db!, documentId, fence);
+  }).catch(() => undefined);
+}
+
 /** On starting to edit a document, keep what a crashed window typed into it as a copy. */
 async function salvageOnOwn(documentId: string): Promise<void> {
   if (viewMode || !state.db) return;
   const ownership = state.ownership;
   if (!ownership || ownership.documentId !== documentId) return;
   try {
+    const fence = await ownership.writeFence();
+    // Apply a consented reload-discard marker before salvage can revive discarded text (#255).
+    const marker = await getReloadDiscardMarker(state.db, documentId);
+    if (marker) {
+      const consented = readReloadDiscardIntent(marker.instanceId) === documentId;
+      const result = await applyReloadDiscardMarker(state.db, documentId, fence, consented);
+      clearReloadDiscardIntent(marker.instanceId);
+      if (result.applied) {
+        try {
+          for (const item of listRecovery(localStorage)) {
+            if (item.documentId === documentId) clearRecovery(localStorage, item);
+          }
+          void renderRecovery();
+        } catch { /* Optional journal. */ }
+      }
+    }
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
-    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);
+    const copy = await salvageChanges(state.db, documentId, fence, crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);
     if (copy) await announceRecovered(copy, documentId);
   } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
 }
@@ -1051,6 +1098,8 @@ const leaveGuards = createLeaveGuards(state, {
   freezeForDiscard: () => { freezeEditorsForTransition(); },
   unfreezeAfterDiscard: () => { unfreezeEditorsAfterTransition(); },
   discardUnsavedRecovery: () => discardUnsavedRecovery(),
+  markReloadDiscard: () => markReloadDiscard(),
+  clearReloadDiscard: () => { clearReloadDiscard(); },
 });
 const { prepareUpdateReload, reloadAfterUpdate } = leaveGuards;
 updateStats();
