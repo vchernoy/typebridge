@@ -15,6 +15,9 @@ import { mayRetryEditOwnership } from './ownership';
 import type { createSinglePaneWorkspace } from './workspace';
 
 export type TakeoverDeps = {
+  searchOwned?: (intent: 'explicit' | 'automatic') => void;
+  captureFields?: () => Pick<StoredDraft, 'find' | 'replace' | 'titleHistory' | 'findHistory' | 'replaceHistory'>;
+  restoreFields?: () => void;
   viewMode: boolean;
   field: HTMLTextAreaElement;
   draftTitle: HTMLInputElement;
@@ -47,6 +50,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
   const { acquireFor, installOwnership, freezeEditorsForTransition, unfreezeEditorsAfterTransition } = deps.editAccess;
   function captureHandoffSnapshot(): HandoffSnapshot {
     return {
+      ...deps.captureFields?.(),
       text: field.value,
       title: draftTitle.value.trim() || UNTITLED_TITLE,
       history: editor.exportHistory(),
@@ -109,6 +113,8 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
         writingPosition.save();
         state.active = {
           ...state.active,
+          find: input.snapshot.find ?? '', replace: input.snapshot.replace ?? '',
+          titleHistory: input.snapshot.titleHistory, findHistory: input.snapshot.findHistory, replaceHistory: input.snapshot.replaceHistory,
           text: input.snapshot.text,
           title: input.snapshot.title,
           history: input.snapshot.history as EditorHistory | undefined,
@@ -121,6 +127,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
           field.value = input.snapshot.text;
           draftTitle.value = input.snapshot.title;
           syncTitleTooltip();
+          deps.restoreFields?.();
           if (input.snapshot.history) editor.restoreHistory(input.snapshot.history as EditorHistory);
           else editor.restoreHistory(undefined);
         } finally {
@@ -161,6 +168,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
       );
       field.setSelectionRange(mapped.start, mapped.end);
       unfreezeEditorsAfterTransition();
+      deps.searchOwned?.('explicit');
       // Only schedule save for non-private takeovers (saved reread / clean yield).
       if (workspace.dirty() && deps.mayWrite() && !input.snapshot?.dirty) {
         saveSoon();
@@ -213,6 +221,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
         showDraft();
       }
       installOwnership(access);
+      deps.searchOwned?.('automatic');
       onEditableHere();
       if (workspace.dirty() && deps.mayWrite()) { saveSoon(); }
     })().finally(() => {

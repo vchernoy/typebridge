@@ -19,8 +19,8 @@ test('find text survives reload within a tab; search options persist in a new ta
   await expect(page.locator('#match-case')).toBeChecked();
   await expect(page.locator('#regex-mode')).toBeChecked();
   const other = await context.newPage(); await other.goto('/editor.html');
-  await expect(other.locator('#find-text')).toHaveValue('');
-  await expect(other.locator('#replace-text')).toHaveValue('');
+  await expect(other.locator('#find-text')).toHaveValue('Русский 🙂');
+  await expect(other.locator('#replace-text')).toHaveValue('Заменить');
   await expect(other.locator('#match-case')).toBeChecked();
   await expect(other.locator('#regex-mode')).toBeChecked();
   await openFind(other);
@@ -28,15 +28,16 @@ test('find text survives reload within a tab; search options persist in a new ta
   await page.reload(); await expect(page.locator('#find-text')).toHaveValue('Русский 🙂');
 });
 
-test('options restore when a page is reopened without retaining search text', async ({ page, context }) => {
+test('saved document search and options restore when a page is reopened', async ({ page, context }) => {
   await page.goto('/editor.html');
   await openFind(page);
   await page.locator('#regex-mode').check();
-  await page.locator('#find-text').fill('private text');
+  await page.locator('#find-text').fill('saved search');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
   await page.close();
   const reopened = await context.newPage(); await reopened.goto('/editor.html');
   await expect(reopened.locator('#regex-mode')).toBeChecked();
-  await expect(reopened.locator('#find-text')).toHaveValue('');
+  await expect(reopened.locator('#find-text')).toHaveValue('saved search');
 });
 
 test('blocked settings storage keeps search usable and reports the problem', async ({ page }) => {
@@ -52,6 +53,7 @@ test('blocked settings storage keeps search usable and reports the problem', asy
   await page.locator('#editor').fill('Русский текст');
   await openFind(page);
   await page.locator('#find-text').fill('текст');
+  await page.locator('#match-case').check();
   await expect(page.getByText('Find settings could not be saved or restored in this browser.')).toBeVisible();
   await page.getByRole('button', { name: 'Next match', exact: true }).click();
   await expect(page.locator('#find-status')).toHaveText('1 of 1');
@@ -96,25 +98,26 @@ test('settings warning clears only after the failed setting is saved', async ({ 
     const original = Storage.prototype.setItem;
     (window as unknown as { failFind: boolean }).failFind = true;
     Storage.prototype.setItem = function (key, value) {
-      if (key === 'typebridge.find.query.v1' && (window as unknown as { failFind: boolean }).failFind) throw new DOMException('blocked', 'SecurityError');
+      if (key === 'typebridge.find.matchCase.v1' && (window as unknown as { failFind: boolean }).failFind) throw new DOMException('blocked', 'SecurityError');
       return original.call(this, key, value);
     };
   });
   await page.goto('/editor.html');
   await page.locator('#enabled').uncheck();
   await openFind(page);
-  await page.locator('#find-text').fill('a');
+  await page.locator('#match-case').check();
   const warning = page.getByText('Find settings could not be saved or restored in this browser.');
   await expect(warning).toBeVisible();
-  await page.locator('#replace-text').fill('other');
+  await page.locator('#regex-mode').check();
   await expect(warning).toBeVisible();
   await page.evaluate(() => { (window as unknown as { failFind: boolean }).failFind = false; });
-  await page.locator('#find-text').fill('ab');
+  await page.locator('#match-case').uncheck();
+  await page.locator('#match-case').check();
   await expect(warning).toHaveCount(0);
-  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('ab');
+  expect(await page.evaluate(() => localStorage.getItem('typebridge.find.matchCase.v1'))).toBe('true');
 });
 
-test('browser profile restart keeps preferences but a new session has no find text', async ({ playwright, browserName, baseURL }, testInfo) => {
+test('browser profile restart keeps preferences and saved document search', async ({ playwright, browserName, baseURL }, testInfo) => {
   if (!baseURL) throw new Error('A Playwright baseURL is required');
   const appURL = new URL('/editor.html', baseURL).href;
   const launchOptions = { ...testInfo.project.use.launchOptions };
@@ -127,13 +130,14 @@ test('browser profile restart keeps preferences but a new session has no find te
     await openFind(page);
     await page.locator('#match-case').check();
     await page.locator('#regex-mode').check();
-    await page.locator('#find-text').fill('private');
+    await page.locator('#find-text').fill('saved search');
+    await expect(page.locator('#save-indicator')).toHaveText('Saved');
     await ctx.close();
     ctx = await playwright[browserName].launchPersistentContext(dir, launchOptions);
     page = await ctx.newPage(); await page.goto(appURL);
     await expect(page.locator('#match-case')).toBeChecked();
     await expect(page.locator('#regex-mode')).toBeChecked();
-    await expect(page.locator('#find-text')).toHaveValue('');
+    await expect(page.locator('#find-text')).toHaveValue('saved search');
   } finally { await ctx.close(); await rm(dir, { recursive: true, force: true }); }
 });
 

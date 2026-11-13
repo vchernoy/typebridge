@@ -6,7 +6,6 @@
 import type { Editor } from '../editor/editor';
 import { offsetForLineColumn, parseGotoInput } from '../editor/goto-line';
 import { SHORTCUTS } from '../editor/keyboard-shortcuts';
-import { FIND_KEY } from '../editor/search-settings';
 import { registerEscapeLayer } from './escape-layers';
 
 export type FindGotoDeps = {
@@ -37,14 +36,6 @@ export function setupFindGotoBars(deps: FindGotoDeps): { openFind: () => void; o
     deps.leaveFocusMode();
     setBar(gotoBar, gotoOpen, false);
     setBar(findBar, findOpen, true);
-    // Re-read the shared last search so another window's query is visible immediately.
-    try {
-      const shared = sessionStorage.getItem(FIND_KEY);
-      if (shared !== null && deps.findInput.value !== shared) {
-        deps.findInput.value = shared;
-        deps.findEditor.syncFromField();
-      }
-    } catch { /* Optional restore. */ }
     deps.showMatchCount();
     deps.findInput.focus();
     deps.findInput.select();

@@ -77,22 +77,23 @@ test('two iframe windows isolate session hints and share document ownership', as
   await alpha.locator('#replace-text').fill('alpha-replace');
   await beta.locator('#find-open').click();
   await expect(beta.locator('#find-bar')).toBeVisible();
-  await expect(beta.locator('#find-text')).toHaveValue('shared-find');
+  await expect(beta.locator('#find-text')).toHaveValue('');
   await beta.locator('#find-text').fill('shared-find-2');
   await beta.locator('#replace-text').fill('beta-replace');
 
   const keys = await sessionKeys(page);
   expect(keys).toContain('typebridge.activeDraft.v1::w:alpha');
   expect(keys).toContain('typebridge.activeDraft.v1::w:beta');
-  expect(keys).toContain('typebridge.find.query.v1');
+  expect(keys).not.toContain('typebridge.find.query.v1');
   expect(keys).not.toContain('typebridge.find.query.v1::w:alpha');
   expect(keys).not.toContain('typebridge.find.query.v1::w:beta');
   expect(keys).not.toContain('typebridge.activeDraft.v1');
-  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('shared-find-2');
-  expect(keys).toContain('typebridge.find.replace.v1::w:alpha');
-  expect(keys).toContain('typebridge.find.replace.v1::w:beta');
-  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:alpha'))).toBe('alpha-replace');
-  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:beta'))).toBe('beta-replace');
+  await expect(alpha.locator('#find-text')).toHaveValue('shared-find');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBeNull();
+  expect(keys).not.toContain('typebridge.find.replace.v1::w:alpha');
+  expect(keys).not.toContain('typebridge.find.replace.v1::w:beta');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:alpha'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:beta'))).toBeNull();
 
   // Reload each iframe: active-document hints stay independent.
   await reloadFrame(page, '#win-alpha');

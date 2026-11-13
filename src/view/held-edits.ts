@@ -15,6 +15,7 @@ import type { FocusHandoffController } from './focus-handoff';
 const REPLAY_AFTER_TAKEOVER = new Set(['undo', 'redo', 'delete-draft', 'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all']);
 
 export type HeldEditsDeps = {
+  captureSearchCommand?: () => () => void;
   draftTitle: HTMLInputElement;
   applyHeldTitleOps: (ops: HeldTitleOp[], changed: boolean) => { start: number; end: number };
   quietReader: () => boolean;
@@ -26,7 +27,7 @@ export function createHeldEdits(state: EditorState, statusLine: StatusLine, deps
   const { draftTitle, applyHeldTitleOps, quietReader, readOnlyNow } = deps;
   const { showSaveState, announceAction } = statusLine;
   /** A control clicked in a quiet reader; it runs once this window can edit that document. */
-  let replayButton: { button: HTMLButtonElement; documentId: string } | undefined;
+  let replayButton: { button: HTMLButtonElement; documentId: string; restoreSearch?: () => void } | undefined;
   /** Title edits held during a takeover, tied to their document (#197). */
   let titleBuffer: { documentId: string; baseValue: string; ops: HeldTitleOp[]; fromHost: boolean } | undefined;
   /** Rename… started while read-only: select the (possibly newer) title once editable. */
@@ -55,7 +56,7 @@ export function createHeldEdits(state: EditorState, statusLine: StatusLine, deps
     replayButton = undefined;
     if (!pendingAction || pendingAction.documentId !== state.active.id || readOnlyNow()) return;
     const { button } = pendingAction;
-    if (button.isConnected && !button.disabled) button.click();
+    if (button.isConnected && !button.disabled) { pendingAction.restoreSearch?.(); button.click(); }
   }
   /** Focus handoff feedback: editing arrived, or the takeover failed and held edits are dropped. */
   function onHandoffAnnouncement(text: string): void {
@@ -119,7 +120,7 @@ export function createHeldEdits(state: EditorState, statusLine: StatusLine, deps
       if (!button || !REPLAY_AFTER_TAKEOVER.has(button.id) || !quietReader()) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      replayButton = { button, documentId: state.active.id };
+      replayButton = { button, documentId: state.active.id, restoreSearch: button.id.startsWith('replace-') ? deps.captureSearchCommand?.() : undefined };
       requestEditHere();
     }, true);
   }

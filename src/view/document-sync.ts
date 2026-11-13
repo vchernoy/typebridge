@@ -14,6 +14,7 @@ import { DOCUMENT_SIGNAL_CHANNEL, createDocumentSignal, decideReread, parseDocum
 import type { Workspace } from './workspace';
 
 export type DocumentSyncDeps = {
+  captureFields?: () => Pick<StoredDraft, 'find' | 'replace' | 'titleHistory' | 'findHistory' | 'replaceHistory'>;
   viewMode: boolean;
   field: HTMLTextAreaElement;
   draftTitle: HTMLInputElement;
@@ -93,6 +94,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
       const title = deps.draftTitle.value.trim();
       if (title) copy.title = title;
       copy.history = deps.editor.exportHistory();
+      Object.assign(copy, deps.captureFields?.());
       const start = deps.field.selectionStart;
       const end = deps.field.selectionEnd;
       const access = await deps.acquireFor(copy.id);

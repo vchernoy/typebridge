@@ -1,4 +1,5 @@
-import { documentFields, sameFields } from './editor/document-fields';
+import { createDocumentSearch, restoreDocumentTitle } from './view/document-search';
+import { sameFields } from './editor/document-fields';
 import { setupAppearance } from './ui/appearance';
 import { setupWindowLayoutSetting } from './ui/window-layout-setting';
 import { setupResetSettings } from './ui/reset-settings';
@@ -44,7 +45,6 @@ import {
   setPrivateSessionOn,
 } from './editor/privacy';
 import { nextUntitledTitle } from './editor/untitled-title';
-import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
 import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, clearDocumentChanges, type StoredDraft } from './editor/indexeddb';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
@@ -161,9 +161,6 @@ try {
   }
 } catch { /* Optional. */ }
 configureActiveDraftKey(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, windowId));
-// #175 step 9: Find query is shared across windows; Replace text stays per-window.
-const findSessionKey = FIND_KEY;
-const replaceSessionKey = scopeSessionKey(REPLACE_KEY, windowId);
 const updateDismissKey = scopeSessionKey('typebridge.updateNotice.dismissed.v1', windowId);
 // Minted per page load and never read from sessionStorage, which duplicated tabs can clone.
 const instanceId = crypto.randomUUID();
@@ -438,15 +435,13 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', a
 
 
 const primarySearch: { field: HTMLTextAreaElement; editor: Editor } = { field, editor };
-const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(
+const { findInput, replaceInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(
   primarySearch,
   enabled,
   {
     canMutate: canMutatePrimary,
     getFindTarget: () => primarySearch,
     matchSurfaces: [field],
-    findTextKey: findSessionKey,
-    replaceTextKey: replaceSessionKey,
   },
 );
 const { openFind } = setupFindGotoBars({
@@ -480,6 +475,13 @@ if (viewMode) titleEditor.setReadOnly(true);
 enabled.addEventListener('change', () => {
   titleEditor.setEnabled(enabled.checked);
 });
+const documentSearch = createDocumentSearch({
+  find: findEditor, replace: replaceEditor, shown: () => state.active,
+  canEdit: () => !readOnlyNow(),
+  ignored: () => state.loadingDraft || state.suppressEditTracking || state.transferFrozen,
+  changed: () => { scheduleSave(); autosaveToggle?.noteWritableSnapshot(); },
+  refresh: showMatchCount,
+});
 /** Document-identity counter lives on the workspace as sessionGeneration (formerly viewGeneration). */
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
@@ -506,6 +508,7 @@ let changeLogProtects = (): boolean => false;
 let changeLogIdle = (): Promise<void> => Promise.resolve();
 const recovery = createRecovery(state, statusLine, {
   viewMode, autosave, mayWrite, field, draftTitle,
+  search: () => documentSearch.values(),
   anchor: status.parentElement!,
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   refreshDrafts: () => refreshDrafts(),
@@ -516,6 +519,7 @@ const recovery = createRecovery(state, statusLine, {
 const { ownerReady, journalEdit, renderRecovery } = recovery;
 
 field.disabled = true;
+findInput.disabled = true; replaceInput.disabled = true;
 draftSelect.disabled = true;
 draftTitle.disabled = true;
 autosave.checked = true;
@@ -527,7 +531,7 @@ if (privateSession) {
 // navigation/reload when the browser aborts an IndexedDB transaction on unload.
 const PENDING_KEY = scopeSessionKey('typebridge.pendingDraft.v1', windowId);
 function snapshot(): StoredDraft {
-  return { ...state.active, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, history: editor.exportHistory(), updatedAt: Date.now() };
+  return { ...state.active, ...documentSearch.snapshot(), text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, titleHistory: titleEditor.exportHistory(), history: editor.exportHistory(), updatedAt: Date.now() };
 }
 const reloadBackup = createReloadBackup({
   key: PENDING_KEY,
@@ -634,7 +638,8 @@ function showDraft(options?: { restorePosition?: boolean }): void {
   try {
     editor.load(state.active.text);
     if (!viewMode) editor.restoreHistory(state.active.history);
-    draftTitle.value = state.active.title;
+    restoreDocumentTitle(titleEditor, state.active, UNTITLED_TITLE);
+    documentSearch.restore(state.active);
     syncTitleTooltip();
     workspace.setDirty(false);
     state.saveFailed = false; // The editor no longer holds the unsaved text.
@@ -660,6 +665,7 @@ const { applyTitleEdit, applyHeldTitleOps, setTitle, commitTitle } = createTitle
   scheduleTitleSave: () => { scheduleSave(true); },
 });
 const heldEdits = createHeldEdits(state, statusLine, {
+  captureSearchCommand: () => { const value = documentSearch.capture(); return () => documentSearch.apply(value); },
   draftTitle, applyHeldTitleOps,
   quietReader: () => quietReader(),
   readOnlyNow: () => readOnlyNow(),
@@ -667,7 +673,7 @@ const heldEdits = createHeldEdits(state, statusLine, {
 });
 const { onEditableHere } = heldEdits;
 const editAccess = createEditAccess(state, statusLine, {
-  viewMode, instanceId, webLocks, workspace, editor, titleEditor, ownershipNotice, undo, redo, autosave,
+  viewMode, instanceId, webLocks, workspace, editor, titleEditor, searchEditors: [findEditor, replaceEditor], ownershipNotice, undo, redo, autosave,
   mayWrite, writingPosition, quietReader,
   syncHistory: () => { syncHistory(); },
   syncMutationControls: () => { syncMutationControls(); },
@@ -686,6 +692,12 @@ const {
 } = editAccess;
 const takeover = createTakeover(state, {
   viewMode, field, draftTitle, editor, workspace, autosave, mayWrite, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
+  searchOwned: intent => documentSearch.owned(intent),
+  captureFields: () => ({ ...documentSearch.capture(), titleHistory: titleEditor.exportHistory() }),
+  restoreFields: () => {
+    restoreDocumentTitle(titleEditor, state.active, UNTITLED_TITLE);
+    documentSearch.restore(state.active, true);
+  },
   focusHandoff: () => focusHandoff,
   showDraft: () => { showDraft(); },
   syncTitleTooltip: () => { syncTitleTooltip(); },
@@ -701,7 +713,7 @@ const { captureHandoffSnapshot, hideEditHereBar, showEditHereBar, takeOverFromHa
 const changeWriter = createChangeWriter({
   mayRecord: () => !viewMode && mayWrite() && !state.suppressEditTracking && !state.loadingDraft,
   shown: () => ({ id: state.active.id, generation: workspace.sessionGeneration() }),
-  fields: () => ({ ...documentFields(state.active), text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE }),
+  fields: () => ({ text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, ...documentSearch.values() }),
   append: async record => {
     if (!state.db || state.ownership?.documentId !== record.documentId) throw new Error('Not editing this document');
     const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
@@ -734,7 +746,7 @@ async function salvageOnOwn(documentId: string): Promise<void> {
   if (!ownership || ownership.documentId !== documentId) return;
   try {
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
-    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), { ...documentFields(state.active), text: field.value, title: shownTitle });
+    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), { text: field.value, title: shownTitle, ...documentSearch.values() });
     if (copy) await announceRecovered(copy, documentId);
   } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
 }
@@ -782,6 +794,9 @@ draftTitle.addEventListener('input', () => {
   rememberActive();
   scheduleSave(true);
   autosaveToggle?.noteWritableSnapshot();
+});
+for (const event of ['historychange', 'compositionend']) draftTitle.addEventListener(event, () => {
+  scheduleSave(true); autosaveToggle?.noteWritableSnapshot();
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, privateMarker, workspace, viewMode, embedded,
@@ -945,10 +960,12 @@ const viewer = createViewerMode(state, {
   updateStats: () => { updateStats(); },
   setSaveStatus: (text, kind) => { setSaveStatus(text, kind); },
   restoreFocusMode: () => { restoreFocusMode(); },
-  finishInitialization: () => { finishInitialization(); },
+  finishInitialization: () => { findInput.disabled = false; replaceInput.disabled = false; finishInitialization(); },
   onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
+  clearSearch: () => documentSearch.restore(state.active, true),
 });
 const sync = createDocumentSync(state, statusLine, {
+  captureFields: () => ({ ...documentSearch.capture(), titleHistory: titleEditor.exportHistory() }),
   viewMode, field, draftTitle, editor, workspace, mayWrite, writingPosition, saver, viewer,
   focusHandoff: () => focusHandoff,
   hideEditHereBar: () => { hideEditHereBar(); },
@@ -981,7 +998,7 @@ if (!viewMode) {
     isViewMode: () => viewMode,
     isOwner: () => !!state.ownership && state.editBlock === '',
     editBlock: () => state.editBlock,
-    isComposing: () => editor.composing,
+    isComposing: () => [editor, titleEditor, findEditor, replaceEditor].some(input => input.composing),
     isTransitioning: () => state.transitioning || state.deleting || state.transferFrozen || takeover.ownershipRetryPending(),
     isSaving: () => !!saver.inFlight(),
     saveFailed: () => state.saveFailed,
@@ -1076,7 +1093,7 @@ void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
   persist: () => persist(),
   restoreFocusMode: () => { restoreFocusMode(); },
   renderRecovery: () => renderRecovery(),
-  finishInitialization: () => { finishInitialization(); },
+  finishInitialization: () => { findInput.disabled = false; replaceInput.disabled = false; finishInitialization(); },
 }));
 
 setupComparisonOpen({

@@ -1,12 +1,12 @@
 import { SHORTCUTS } from '../editor/keyboard-shortcuts';
 import { Editor } from '../editor/editor';
 import { buildSearchPattern, findMatches, replaceMatchAt, replacedAllStatus } from '../editor/search';
-import { CASE_KEY, FIND_KEY, REGEX_KEY, REPLACE_KEY, readSearchOption, readSearchText } from '../editor/search-settings';
+import { CASE_KEY, REGEX_KEY, clearLegacySearchText, readSearchOption } from '../editor/search-settings';
 
 export type SearchTarget = { field: HTMLTextAreaElement; editor: Editor };
 
 /**
- * Find & Replace: query/replacement persistence, Match case/Regex options, transliterating
+ * Find & Replace: Match case/Regex settings, transliterating
  * Find/Replace inputs, navigation (including zero-width matches) and Replace/Replace all.
  * Find follows `getFindTarget` (any visible active pane). Replace uses the same
  * target after `canMutate` so read-only companions stay protected.
@@ -19,12 +19,10 @@ export function setupSearch(
     getFindTarget?: () => SearchTarget;
     /** Editor surfaces whose edits refresh the open Find match total (active pane may change). */
     matchSurfaces?: HTMLTextAreaElement[];
-    /** sessionStorage keys for Find/Replace text (#175 window scoping). */
-    findTextKey?: string;
-    replaceTextKey?: string;
   } = {},
 ): {
   findInput: HTMLInputElement;
+  replaceInput: HTMLInputElement;
   findEditor: Editor;
   replaceEditor: Editor;
   syncSearchEditors: () => void;
@@ -49,17 +47,8 @@ export function setupSearch(
     if (success) failedSearchKeys.delete(key); else failedSearchKeys.add(key);
     searchStorageWarning.textContent = failedSearchKeys.size ? 'Find settings could not be saved or restored in this browser.' : '';
   }
-  const findTextKey = options.findTextKey ?? FIND_KEY;
-  const replaceTextKey = options.replaceTextKey ?? REPLACE_KEY;
-  for (const [input, key] of [[findInput, findTextKey], [replaceInput, replaceTextKey]] as const) {
-    try { input.value = readSearchText(sessionStorage, key); } catch { searchStorageResult(key, false); }
-    const save = (): void => {
-      try { sessionStorage.setItem(key, input.value); searchStorageResult(key, true); }
-      catch { searchStorageResult(key, false); }
-    };
-    input.addEventListener('input', save);
-    input.addEventListener('compositionend', save);
-  }
+  // Search content belongs to the document (#257 2b); never restore/publish legacy keys.
+  try { clearLegacySearchText(sessionStorage); } catch { /* Storage is optional; no text is written. */ }
   for (const [input, key] of [[matchCase, CASE_KEY], [regexMode, REGEX_KEY]] as const) {
     try { input.checked = readSearchOption(localStorage, key); } catch { searchStorageResult(key, false); }
     input.addEventListener('change', () => {
@@ -142,18 +131,6 @@ export function setupSearch(
   findInput.addEventListener('input', showMatchCount);
   for (const surface of matchSurfaces) surface.addEventListener('input', showMatchCount);
   for (const input of [matchCase, regexMode]) input.addEventListener('change', showMatchCount);
-  // Sibling host windows share FIND_KEY; pick up live updates without reload (#175 step 9).
-  if (findTextKey === FIND_KEY) {
-    window.addEventListener('storage', event => {
-      if (event.storageArea !== sessionStorage || event.key !== FIND_KEY) return;
-      const next = event.newValue ?? '';
-      if (findInput.value === next) return;
-      findInput.value = next;
-      // Drop pending transliteration from the previous local query (#175 Codex P2).
-      findEditor.syncFromField();
-      showMatchCount();
-    });
-  }
   document.querySelector<HTMLButtonElement>('#find-next')!.addEventListener('click', () => findNext());
   document.querySelector<HTMLButtonElement>('#find-prev')!.addEventListener('click', () => findNext(true));
   document.querySelector<HTMLButtonElement>('#replace-one')!.addEventListener('click', () => {
@@ -198,5 +175,5 @@ export function setupSearch(
     }
     return saved;
   }
-  return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions };
+  return { findInput, replaceInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions };
 }

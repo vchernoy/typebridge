@@ -550,8 +550,16 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   await page.locator('#redo').click({ force: true });
   await page.locator('#convert-latin').click({ force: true });
   await page.locator('#find-open').click();
-  await page.locator('#find-text').fill('second');
-  await page.locator('#replace-text').fill('leaked');
+  // Search fields now belong to the document too (#257 2b), so they freeze with it.
+  // Try real keyboard edits without waiting for Playwright.fill's editable gate to thaw.
+  await expect(page.locator('#find-text')).toHaveJSProperty('readOnly', true);
+  await expect(page.locator('#replace-text')).toHaveJSProperty('readOnly', true);
+  const searchBefore = await page.locator('#find-text').inputValue();
+  const replaceBefore = await page.locator('#replace-text').inputValue();
+  await page.locator('#find-text').pressSequentially('second');
+  await page.locator('#replace-text').pressSequentially('leaked');
+  await expect(page.locator('#find-text')).toHaveValue(searchBefore);
+  await expect(page.locator('#replace-text')).toHaveValue(replaceBefore);
   await page.locator('#replace-one').click({ force: true });
   await page.locator('#replace-all').click({ force: true });
   await page.keyboard.press('ControlOrMeta+z');

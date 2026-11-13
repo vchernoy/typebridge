@@ -23,10 +23,11 @@ describe('migrateStandaloneSession', () => {
       'typebridge.writingPosition.v1.view:doc-1': '{"start":1}',
       'typebridge.writingPosition.v1.w:w2.doc-2': '{"start":2}',
     });
-    expect(migrateStandaloneSession(storage, 'main')).toBe(4);
+    expect(migrateStandaloneSession(storage, 'main')).toBe(3);
     expect(storage.getItem('typebridge.activeDraft.v1::w:main')).toBe('doc-1');
     expect(storage.getItem('typebridge.pendingDraft.v1::w:main')).toBe('{"id":"doc-1"}');
-    expect(storage.getItem('typebridge.find.replace.v1::w:main')).toBe('с');
+    expect(storage.getItem('typebridge.find.replace.v1::w:main')).toBeNull();
+    expect(storage.getItem('typebridge.find.replace.v1')).toBeNull();
     expect(storage.getItem('typebridge.writingPosition.v1.w:main.doc-1')).toBe('{"start":3}');
     expect(storage.getItem('typebridge.activeDraft.v1')).toBeNull();
     expect(storage.getItem('typebridge.pendingDraft.v1')).toBeNull();

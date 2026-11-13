@@ -8,7 +8,7 @@ Next and Previous wrap through matches and reveal the selected match in the text
 
 Find and Replace follow the transliteration toggle in Regex mode as well, so patterns can use Russian letters; toggle transliteration off with its shortcut (see [editor behavior](EDITOR-BEHAVIOR.md)) while typing Latin syntax such as `\s` or `$<name>`. Replacement uses native `String.prototype.replace` substitution, so every JavaScript token behaves exactly as in JavaScript: `$$`, `$&`, prefix/suffix tokens, numeric captures (`$12` with only group 1 means group 1 then `2`) and `$<name>`. Unmatched captures expand to empty strings. In literal mode replacement tokens remain literal. Replace All is one undoable edit; Replace and Replace All share substitution behavior.
 
-Match case/Regex preferences survive reload in localStorage. Query/replacement strings use this tab's sessionStorage; browser session restoration may retain them. See [settings persistence](SETTINGS-PERSISTENCE.md). Real devices and assistive technology remain unverified ([#11](https://github.com/vchernoy/typebridge/issues/11)).
+Match case/Regex preferences survive reload in localStorage. Find/Replace values and their independent histories belong to the shown document (#257 step 2b). They use its save/recovery machinery. Private edits remain in memory, and privacy switches leave the fields unchanged. Viewers search locally in memory without writing document content; legacy standalone search-content keys are removed. See [settings persistence](SETTINGS-PERSISTENCE.md). Real devices and assistive technology remain unverified ([#11](https://github.com/vchernoy/typebridge/issues/11)).
 
 ## Case and Unicode behavior
 
