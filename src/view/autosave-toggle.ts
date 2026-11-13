@@ -155,8 +155,10 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
 
   /**
    * Record the current editor surface while writes are still allowed. Call from input /
-   * title / history paths (and after showing a writable document) so a delayed cross-tab
-   * Private session notification can last-save this boundary instead of post-private text.
+   * title / history paths **after** `scheduleSave()` bumps `contentRevision` (and after
+   * showing a writable document) so a delayed cross-tab Private session notification can
+   * last-save this boundary instead of post-private text, and so the freeze matches the
+   * post-edit revision (#260 / #262).
    */
   function noteWritableSnapshot(): void {
     if (privateNow(state.active)) return;

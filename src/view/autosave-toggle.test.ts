@@ -524,12 +524,13 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     const { toggle, persistLastBeforePrivate, frozenSnapshot, revision } = harness({
       sessionDirty: true,
     });
-    // Writes still allowed — record the pre-privacy boundary (as input handlers do).
+    // Writes still allowed — record the pre-privacy boundary after the edit bump (#262).
     vi.stubGlobal('localStorage', {
       getItem: () => null,
       setItem: () => undefined,
       removeItem: () => undefined,
     });
+    revision.value = 2;
     toggle.noteWritableSnapshot();
     // Another tab flipped Private session; localStorage already says private, but the
     // storage handler has not run yet. Post-private typing lands in the live field.
@@ -544,7 +545,30 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     await toggle.applySessionChange(true);
     expect(persistLastBeforePrivate).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'saved', title: 'T' }),
-      1,
+      2,
+      { markPrivate: false },
+    );
+  });
+
+  it('pairs the writable cache with the post-edit content revision (#262)', async () => {
+    const { toggle, persistLastBeforePrivate, revision } = harness({ sessionDirty: true });
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    // Simulate scheduleSave bumping before noteWritableSnapshot (main.ts call order).
+    revision.value = 5;
+    toggle.noteWritableSnapshot();
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'saved', title: 'T' }),
+      5,
       { markPrivate: false },
     );
   });

@@ -760,13 +760,14 @@ const saver = createSaver(state, statusLine, {
 });
 const { persist, scheduleSave } = saver;
 field.addEventListener('input', () => {
-  // Cache while mayWrite so a delayed cross-tab Private session last-save stays pre-private (#260).
-  autosaveToggle?.noteWritableSnapshot();
+  // scheduleSave bumps contentRevision first; cache after so the session last-save freeze
+  // matches the post-edit revision (#260 / #262).
   scheduleSave();
+  autosaveToggle?.noteWritableSnapshot();
 });
 field.addEventListener('historychange', () => {
-  autosaveToggle?.noteWritableSnapshot();
   scheduleSave();
+  autosaveToggle?.noteWritableSnapshot();
 });
 draftTitle.addEventListener('focus', () => {
   activatePane(PRIMARY_PANE_ID);
@@ -779,8 +780,8 @@ syncTitleTooltip();
 draftTitle.addEventListener('input', () => {
   syncTitleTooltip();
   rememberActive();
-  autosaveToggle?.noteWritableSnapshot();
   scheduleSave(true);
+  autosaveToggle?.noteWritableSnapshot();
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, privateMarker, workspace, viewMode, embedded,
