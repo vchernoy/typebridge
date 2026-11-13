@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { confirmPrivateSavedCopy, fillHostEditor, setHostAutosave, setPrivateSession } from './settings-helpers';
+import { confirmPrivateSavedCopy, fillHostEditor, openFind, setHostAutosave, setPrivateSession } from './settings-helpers';
 
 for (const session of [false, true]) {
   test(`private ${session ? 'session' : 'document'} keeps title/search text out of storage across reload (#257 step 2)`, async ({ page }) => {
@@ -114,3 +114,30 @@ for (const selector of ['#find-text', '#replace-text']) {
     expect(await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(sessionStorage).filter(([k]) => k.startsWith('typebridge.find.')))))).not.toContain('SECRET');
   });
 }
+
+test('finishing entry into private keeps an in-memory Find query typed during last-save (#264 P2)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Keep body');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openFind(page);
+  await page.locator('#find-text').fill('public query');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 2_000;
+  });
+  await page.locator('#editor').fill('Keep body DIRTY');
+  await expect(page.locator('#save-indicator')).toHaveText('Saving…');
+  const enabling = setPrivateSession(page, true);
+  await expect(page.locator('#private-session')).toBeChecked();
+  await page.locator('#find-text').fill('private only');
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+  await enabling;
+  // After finish(), the private query must still be in memory (not wiped by a late restore).
+  await expect(page.locator('#autosave')).toBeDisabled({ timeout: 15_000 });
+  await expect(page.locator('#find-text')).toHaveValue('private only');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+});
+

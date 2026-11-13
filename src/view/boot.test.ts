@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { StoredDraft } from '../editor/indexeddb';
-import { chooseBootDocument } from './boot';
+import { applyRestoredPendingWritable, chooseBootDocument } from './boot';
 
 const ID_A = '11111111-1111-4111-8111-111111111111';
 const ID_B = '22222222-2222-4222-8222-222222222222';
@@ -36,5 +36,24 @@ describe('chooseBootDocument', () => {
     expect(chooseBootDocument({ ...base, secondaryHostWindow: true, selected: ID_NEW }).chosen.id).toBe(ID_NEW);
     // A remembered saved document still wins.
     expect(chooseBootDocument({ ...base, secondaryHostWindow: true, selected: ID_B }).chosen.id).toBe(ID_B);
+  });
+});
+
+describe('applyRestoredPendingWritable (#263)', () => {
+  it('refreshes the writable cache after bumping content revision', () => {
+    const order: string[] = [];
+    const revision = { value: 0 };
+    const workspace = {
+      setDirty: (dirty: boolean) => { order.push(`dirty:${dirty}`); },
+      bumpContentRevision: () => {
+        revision.value += 1;
+        order.push(`bump:${revision.value}`);
+        return revision.value;
+      },
+    };
+    const noteWritableSnapshot = vi.fn(() => { order.push(`note:${revision.value}`); });
+    applyRestoredPendingWritable(workspace, noteWritableSnapshot);
+    expect(order).toEqual(['dirty:true', 'bump:1', 'note:1']);
+    expect(noteWritableSnapshot).toHaveBeenCalledTimes(1);
   });
 });
