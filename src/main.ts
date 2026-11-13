@@ -707,7 +707,12 @@ async function markReloadDiscard(): Promise<void> {
   const ownership = state.ownership;
   if (!ownership || ownership.documentId !== state.active.id) return;
   const marker = await writeReloadDiscardMarker(state.db, state.active.id, await ownership.writeFence());
-  setReloadDiscardIntent(marker.instanceId, marker.documentId);
+  // Bind only this window's current journal (exact snapshot); never wipe other tabs' entries (#256 P0).
+  const journal = recovery.currentJournal();
+  setReloadDiscardIntent(marker.instanceId, {
+    documentId: marker.documentId,
+    ...(journal && journal.documentId === marker.documentId ? { journal } : {}),
+  });
 }
 
 /** Cancel update-reload: drop session intent first, then best-effort IDB marker (#255). */
@@ -732,14 +737,14 @@ async function salvageOnOwn(documentId: string): Promise<void> {
     // Apply a consented reload-discard marker before salvage can revive discarded text (#255).
     const marker = await getReloadDiscardMarker(state.db, documentId);
     if (marker) {
-      const consented = readReloadDiscardIntent(marker.instanceId) === documentId;
+      const intent = readReloadDiscardIntent(marker.instanceId);
+      const consented = intent?.documentId === documentId;
       const result = await applyReloadDiscardMarker(state.db, documentId, fence, consented);
       clearReloadDiscardIntent(marker.instanceId);
-      if (result.applied) {
+      if (result.applied && intent?.journal) {
+        // Exact-version clear only — unrelated same-document journals stay recoverable (#256 P0).
         try {
-          for (const item of listRecovery(localStorage)) {
-            if (item.documentId === documentId) clearRecovery(localStorage, item);
-          }
+          clearRecovery(localStorage, intent.journal);
           void renderRecovery();
         } catch { /* Optional journal. */ }
       }

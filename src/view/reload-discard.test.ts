@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import type { RecoverySnapshot } from '../editor/recovery';
 import {
   clearReloadDiscardIntent,
   readReloadDiscardIntent,
@@ -6,25 +7,64 @@ import {
   setReloadDiscardIntent,
 } from './reload-discard';
 
+function memorySession(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() { return map.size; },
+    key: (i: number) => [...map.keys()][i] ?? null,
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => { map.set(k, v); },
+    removeItem: (k: string) => { map.delete(k); },
+    clear: () => { map.clear(); },
+  };
+}
+
+const realSession = (globalThis as { sessionStorage?: Storage }).sessionStorage;
 afterEach(() => {
-  try { sessionStorage.clear(); } catch { /* node may lack sessionStorage */ }
+  (globalThis as { sessionStorage?: Storage }).sessionStorage = realSession;
+});
+
+const journal = (over: Partial<RecoverySnapshot> = {}): RecoverySnapshot => ({
+  token: 'tok-1',
+  tab: 'tab-a',
+  documentId: 'doc-1',
+  revision: 1,
+  timestamp: 100,
+  title: 'Untitled document',
+  text: 'discarded',
+  ...over,
 });
 
 describe('reload discard session intent (#255)', () => {
   it('stores and clears intent by instance id', () => {
-    if (typeof sessionStorage === 'undefined') return;
-    setReloadDiscardIntent('inst-a', 'doc-1');
-    expect(readReloadDiscardIntent('inst-a')).toBe('doc-1');
-    expect(sessionStorage.getItem(reloadDiscardIntentKey('inst-a'))).toBe('doc-1');
+    (globalThis as { sessionStorage?: Storage }).sessionStorage = memorySession();
+    setReloadDiscardIntent('inst-a', { documentId: 'doc-1' });
+    expect(readReloadDiscardIntent('inst-a')).toEqual({ documentId: 'doc-1' });
+    expect(sessionStorage.getItem(reloadDiscardIntentKey('inst-a'))).toContain('doc-1');
     clearReloadDiscardIntent('inst-a');
     expect(readReloadDiscardIntent('inst-a')).toBeUndefined();
   });
 
   it('keeps another instance intent when clearing one', () => {
-    if (typeof sessionStorage === 'undefined') return;
-    setReloadDiscardIntent('inst-a', 'doc-1');
-    setReloadDiscardIntent('inst-b', 'doc-2');
+    (globalThis as { sessionStorage?: Storage }).sessionStorage = memorySession();
+    setReloadDiscardIntent('inst-a', { documentId: 'doc-1' });
+    setReloadDiscardIntent('inst-b', { documentId: 'doc-2' });
     clearReloadDiscardIntent('inst-a');
-    expect(readReloadDiscardIntent('inst-b')).toBe('doc-2');
+    expect(readReloadDiscardIntent('inst-b')).toEqual({ documentId: 'doc-2' });
+  });
+
+  it('round-trips the exact consented journal snapshot', () => {
+    (globalThis as { sessionStorage?: Storage }).sessionStorage = memorySession();
+    const snap = journal();
+    setReloadDiscardIntent('inst-a', { documentId: 'doc-1', journal: snap });
+    expect(readReloadDiscardIntent('inst-a')).toEqual({ documentId: 'doc-1', journal: snap });
+  });
+
+  it('ignores a malformed journal field and still returns document consent', () => {
+    (globalThis as { sessionStorage?: Storage }).sessionStorage = memorySession();
+    sessionStorage.setItem(reloadDiscardIntentKey('inst-a'), JSON.stringify({
+      documentId: 'doc-1', journal: { token: '', text: 'x' },
+    }));
+    expect(readReloadDiscardIntent('inst-a')).toEqual({ documentId: 'doc-1' });
   });
 });

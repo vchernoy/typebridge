@@ -214,6 +214,64 @@ test('Discard changes and reload clears change-log so salvage cannot revive (#25
   }))).toBe(0);
 });
 
+test('Discard changes and reload keeps an unrelated same-document journal (#256 P0)', async ({ page }) => {
+  // Fails if apply clears every journal for documentId instead of the exact consented snapshot.
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+      if (sessionStorage.getItem('typebridge.e2e.blockDocumentPuts') === 'yes' && this.name === 'documents') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return original.apply(this, args);
+    };
+  });
+  await waitingUpdate(page);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Before block');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const documentId = await page.evaluate(() => {
+    const select = document.querySelector<HTMLSelectElement>('#drafts');
+    return select?.value ?? '';
+  });
+  expect(documentId).not.toBe('');
+  // Orphan journal from another tab/crash: different text, same document id.
+  const orphan = {
+    token: 'orphan-token',
+    tab: 'orphan-tab',
+    documentId,
+    revision: 1,
+    timestamp: Date.now() - 60_000,
+    title: 'Untitled document',
+    text: 'UNRELATED-ORPHAN-JOURNAL-TEXT',
+  };
+  await page.evaluate(entry => {
+    localStorage.setItem(
+      `typebridge.recovery.v1.${entry.tab}.${entry.documentId}`,
+      JSON.stringify(entry),
+    );
+  }, orphan);
+  await page.evaluate(() => sessionStorage.setItem('typebridge.e2e.blockDocumentPuts', 'yes'));
+  await editor.fill('Discarded after failed save');
+  await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  await setAutosave(page, false, 'keep');
+  await page.locator('#update-reload').click();
+  const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
+  await Promise.all([
+    page.waitForEvent('framenavigated'),
+    dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click(),
+  ]);
+  await expect(editor).toBeEnabled();
+  await expect(page.locator('#status')).not.toContainText('Recovered unsaved text');
+  const orphanLeft = await page.evaluate(entry => {
+    const raw = localStorage.getItem(`typebridge.recovery.v1.${entry.tab}.${entry.documentId}`);
+    return raw === JSON.stringify(entry);
+  }, orphan);
+  expect(orphanLeft).toBe(true);
+});
+
 test('cancelled update-reload keeps change records for later salvage (#255)', async ({ page }) => {
   // Fails if cancel leaves session intent so a later ownership salvage deletes the records.
   test.setTimeout(60_000);
