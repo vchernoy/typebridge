@@ -683,7 +683,7 @@ const {
   recoverParkedHandoffOwnership,
 } = editAccess;
 const takeover = createTakeover(state, {
-  viewMode, field, draftTitle, editor, workspace, autosave, writingPosition, editHereBar, editHereWarning, editAccess,
+  viewMode, field, draftTitle, editor, workspace, autosave, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
   focusHandoff: () => focusHandoff,
   showDraft: () => { showDraft(); },
   syncTitleTooltip: () => { syncTitleTooltip(); },

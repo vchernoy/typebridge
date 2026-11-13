@@ -6,6 +6,7 @@
 import { UNTITLED_TITLE } from '../editor/drafts';
 import type { Editor, EditorHistory } from '../editor/editor';
 import { getStoredDraft, type StoredDraft } from '../editor/indexeddb';
+import { documentAutosaveChecked } from '../editor/privacy';
 import type { EditAccessControl } from './edit-access';
 import type { EditorState } from './editor-state';
 import type { FocusHandoffController } from './focus-handoff';
@@ -20,6 +21,7 @@ export type TakeoverDeps = {
   editor: Editor;
   workspace: ReturnType<typeof createSinglePaneWorkspace>;
   autosave: HTMLInputElement;
+  privateMarker: HTMLElement;
   writingPosition: { save: () => void };
   editHereBar: HTMLElement;
   editHereWarning: HTMLElement;
@@ -37,7 +39,7 @@ export type TakeoverDeps = {
 
 export function createTakeover(state: EditorState, deps: TakeoverDeps) {
   const {
-    viewMode, field, draftTitle, editor, workspace, autosave, writingPosition, editHereBar, editHereWarning,
+    viewMode, field, draftTitle, editor, workspace, autosave, privateMarker, writingPosition, editHereBar, editHereWarning,
     showDraft, syncTitleTooltip, updateSaveIndicator, saveSoon, onEditableHere, rereadDisplayed, markDeletedElsewhere,
   } = deps;
   const { acquireFor, installOwnership, freezeEditorsForTransition, unfreezeEditorsAfterTransition } = deps.editAccess;
@@ -47,8 +49,13 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
       title: draftTitle.value.trim() || UNTITLED_TITLE,
       history: editor.exportHistory(),
       dirty: workspace.dirty(),
+      private: state.active.private === true,
       revision: state.active.revision,
     };
+  }
+  function mirrorPrivacyChrome(): void {
+    autosave.checked = documentAutosaveChecked(state.active);
+    privateMarker.hidden = autosave.checked;
   }
   let editHereReason: HandoffRefuseReason | undefined;
   let editHereDocumentId: string | undefined;
@@ -104,6 +111,8 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
           title: input.snapshot.title,
           history: input.snapshot.history as EditorHistory | undefined,
           revision: input.snapshot.revision,
+          // Carry the source document flag — never invent private from dirty (#257 P1).
+          private: input.snapshot.private,
         };
         state.suppressEditTracking = true;
         try {
@@ -137,10 +146,9 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
         }
       }
       installOwnership(access);
-      // Private/unsaved transfer must not silently persist (#257).
-      if (input.snapshot?.dirty) {
-        state.active = { ...state.active, private: true };
-        autosave.checked = false;
+      // Mirror chrome from document flag + current session; dirty alone must not force private (#257).
+      if (input.snapshot) {
+        mirrorPrivacyChrome();
         updateSaveIndicator();
       }
       const mapped = mapSelectionAcrossTextChange(

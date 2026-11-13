@@ -19,7 +19,7 @@ describe('handoff helpers', () => {
       toInstanceId: 'i',
       requestId: 'r',
       at: 1,
-      snapshot: { text: 'secret', title: 't', dirty: true, revision: 1 },
+      snapshot: { text: 'secret', title: 't', dirty: true, private: false, revision: 1 },
     });
     expect(released).toEqual({
       v: 1,
