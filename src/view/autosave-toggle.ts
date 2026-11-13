@@ -70,6 +70,10 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   let autosaveToggleGate: Promise<void> | undefined;
   let releaseAutosaveToggleGate: (() => void) | undefined;
   let pendingSession: boolean | undefined;
+  /** Session value currently being applied via `applySessionChange` (not document go-private). */
+  let sessionApplyTarget: boolean | undefined;
+  /** Last session preference that finished applying (for CustomEvent + storage dedupe). */
+  let appliedSessionOn: boolean | undefined;
 
   function beginGate(): void {
     if (autosaveToggleGate) return;
@@ -103,6 +107,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   function finish(refocus: boolean): void {
     endGate();
     active = false;
+    sessionApplyTarget = undefined;
     deps.syncAutosaveControl();
     if (refocus && !deps.embedded) {
       try { deps.autosave.focus({ preventScroll: true }); } catch { /* ignore */ }
@@ -176,15 +181,25 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   /** Global private-session preference changed (Settings / host prefs sync). */
   async function applySessionChange(sessionOn: boolean): Promise<void> {
     if (active) {
-      pendingSession = sessionOn;
       if (sessionOn) {
         deps.autosave.checked = false;
         deps.saver.cancel();
         syncPrivateMarker();
       }
+      // Same-tab host fan-out + storage can both arrive while the first last-save awaits.
+      // Do not queue a replay of the same target — that would re-snapshot post-session typing (#260 P1).
+      if (sessionApplyTarget === sessionOn || pendingSession === sessionOn) return;
+      pendingSession = sessionOn;
+      return;
+    }
+    // Echo after the transition already finished (second of CustomEvent / storage).
+    if (appliedSessionOn === sessionOn) {
+      mirrorFromDocument();
+      deps.syncAutosaveControl();
       return;
     }
     active = true;
+    sessionApplyTarget = sessionOn;
     beginGate();
     try {
       mirrorFromDocument();
@@ -225,6 +240,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         announce('Autosave on');
       }
     } finally {
+      appliedSessionOn = sessionOn;
       finish(false);
     }
   }

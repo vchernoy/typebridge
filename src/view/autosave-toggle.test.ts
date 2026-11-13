@@ -78,6 +78,8 @@ function harness(options: {
   inFlightConflict?: StoredDraft;
   deleteSaved?: boolean;
   sessionDirty?: boolean;
+  /** Hold persistLastBeforePrivate until this promise resolves (session last-save races). */
+  persistGate?: Promise<void>;
 } = {}) {
   const state = createEditorState();
   state.active = {
@@ -112,11 +114,14 @@ function harness(options: {
 
   const revision = { value: 1 };
   let protects = options.changeLogProtects === true;
-  const persistLastBeforePrivate = vi.fn(async (_frozen, _rev, opts?: { markPrivate?: boolean }) => ({
-    saved: options.persistSaved !== false,
-    conflict: false,
-    markPrivate: opts?.markPrivate,
-  }));
+  const persistLastBeforePrivate = vi.fn(async (_frozen, _rev, opts?: { markPrivate?: boolean }) => {
+    if (options.persistGate) await options.persistGate;
+    return {
+      saved: options.persistSaved !== false,
+      conflict: false,
+      markPrivate: opts?.markPrivate,
+    };
+  });
   const persist = vi.fn(async () => ({ saved: true, conflict: false }));
   const cancel = vi.fn();
   const drainChanges = vi.fn(async () => {
@@ -191,7 +196,7 @@ function harness(options: {
   return {
     toggle, state, autosave, privateMarker, persistLastBeforePrivate,
     announceAction, setSaveStatus, abandonChangeRun, revision,
-    postSignal, clearDocumentBackups, setDirty, cancel,
+    postSignal, clearDocumentBackups, setDirty, cancel, frozenSnapshot,
   };
 }
 
@@ -442,5 +447,48 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     expect(persistLastBeforePrivate).toHaveBeenCalled();
     expect(announceAction).toHaveBeenCalledWith(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
     expect(setSaveStatus.mock.calls.some(call => String(call[0]).includes('Autosave off'))).toBe(false);
+  });
+
+  it('does not last-save post-session typing when session-on is notified twice (#260 P1)', async () => {
+    let releaseGate!: () => void;
+    const persistGate = new Promise<void>(resolve => { releaseGate = resolve; });
+    const { toggle, persistLastBeforePrivate, frozenSnapshot } = harness({
+      sessionDirty: true,
+      persistGate,
+    });
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    const first = toggle.applySessionChange(true);
+    await vi.waitFor(() => expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1));
+    // Typing after Private session is already on — must not enter a replayed last-save.
+    frozenSnapshot.text = 'POST SESSION SECRET';
+    void toggle.applySessionChange(true);
+    releaseGate();
+    await first;
+    // Allow a queued microtask replay if one were scheduled.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
+    expect(persistLastBeforePrivate).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'saved', title: 'T' }),
+      1,
+      { markPrivate: false },
+    );
+  });
+
+  it('skips a duplicate session-on after the transition already finished', async () => {
+    const { toggle, persistLastBeforePrivate } = harness({ sessionDirty: true });
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
   });
 });
