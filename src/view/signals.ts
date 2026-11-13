@@ -38,16 +38,18 @@ export function parseDocumentSignal(value: unknown): DocumentSignal | undefined 
 
 /**
  * Whether a validated signal should update a viewer showing `displayedId` at `displayedRevision`.
- * Deleted applies when still showing that document. Saved/renamed require a strictly newer revision.
+ * Deleted applies when still showing that document. Saved/renamed require a strictly newer revision,
+ * except a missing viewer must reread a same-ID recreation even when its revision restarted.
  */
 export function shouldApplyDocumentSignal(
   signal: DocumentSignal,
   displayedId: string,
   displayedRevision: number,
+  missing = false,
 ): boolean {
   if (signal.documentId !== displayedId) return false;
   if (signal.type === 'deleted') return true;
-  return signal.revision > displayedRevision;
+  return missing || signal.revision > displayedRevision;
 }
 
 /** Build a metadata-only signal; never accepts text, title or history. */

@@ -97,9 +97,12 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     // Keep the hash: it is reserved for portable share links (#39).
     try { history.replaceState(null, '', href + window.location.hash); } catch { /* The address bar is optional. */ }
   }
+  // Keep the requested identity while the missing screen clears the displayed snapshot.
+  let requestedId = deps.requestedViewId;
   let viewerLoad = 0;
   async function viewerOpen(id: string): Promise<void> {
     const load = ++viewerLoad;
+    requestedId = id;
     deps.workspace.bumpSessionGeneration();
     try {
       if (!state.db) throw new Error('Storage unavailable');
@@ -144,6 +147,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     }
   }
   return {
+    documentId: (): string | undefined => requestedId,
     /** Show another saved document (Documents picker). */
     open: viewerOpen,
     initialize: initializeViewer,

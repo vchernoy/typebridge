@@ -24,7 +24,7 @@ export type DocumentSyncDeps = {
   mayWrite: () => boolean;
   writingPosition: { save: () => void };
   saver: { inFlight: () => Promise<SaveResult> | undefined };
-  viewer: { showDocument: (draft: StoredDraft) => void; showMissing: (message: string) => void; MISSING: string };
+  viewer: { documentId: () => string | undefined; showDocument: (draft: StoredDraft) => void; showMissing: (message: string) => void; MISSING: string };
   focusHandoff: () => { cancel: () => void; pending: () => boolean } | undefined;
   hideEditHereBar: () => void;
   applyEditAccess: () => void;
@@ -154,6 +154,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
     primaryVersionNotice = '';
     syncVersionNoticeDisplay();
   }
+  const representedId = (): string | undefined => deps.viewMode ? deps.viewer.documentId() : state.active.id;
   let rereadSeq = 0;
   /** Authoritative reread of the displayed document; signals and focus only decide when to run it. */
   /** A signal or focus arrived while the window was still loading; reread once it has. */
@@ -165,15 +166,16 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
   }
   async function rereadDisplayed(): Promise<void> {
     if (deps.field.disabled) { rereadAfterInit = true; return; }
-    if (!state.db || state.loadingDraft || (deps.viewMode && state.viewMissing)) return;
+    if (!state.db || state.loadingDraft) return;
     // A local commit may be mid-flight; wait so the displayed revision is current.
     while (!deps.viewMode && deps.saver.inFlight()) await deps.saver.inFlight()!.catch(() => undefined);
-    const id = state.active.id;
+    const id = representedId();
+    if (!id) return;
     const generationAtStart = deps.workspace.sessionGeneration();
     const seq = ++rereadSeq;
     let stored: StoredDraft | undefined;
     try { stored = await getStoredDraft(state.db, id); } catch { return; }
-    if (seq !== rereadSeq || generationAtStart !== deps.workspace.sessionGeneration() || state.active.id !== id) return;
+    if (seq !== rereadSeq || generationAtStart !== deps.workspace.sessionGeneration() || representedId() !== id) return;
     if (!deps.viewMode && deps.saver.inFlight()) { void rereadDisplayed(); return; }
     // A clean read-only ordinary window follows the saved version like a viewer; unsaved text is never replaced.
     const reader = !deps.viewMode && state.editBlock !== '' && !deps.workspace.dirty();
@@ -215,7 +217,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
     // While loading, `active` is not the represented document yet; reread once it is.
     if (deps.field.disabled) { rereadAfterInit = true; return; }
     scheduleListRefresh();
-    if (shouldApplyDocumentSignal(signal, state.active.id, state.active.revision)) {
+    if (shouldApplyDocumentSignal(signal, representedId() ?? '', state.active.revision, deps.viewMode && state.viewMissing)) {
       // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
       if (deps.ownershipRetryPending()) deps.rereadAfterOwnershipRetry();
       else void rereadDisplayed();

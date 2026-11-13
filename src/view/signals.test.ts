@@ -39,6 +39,8 @@ describe('document signals', () => {
     expect(shouldApplyDocumentSignal(saved, DOC, 3)).toBe(true);
     expect(shouldApplyDocumentSignal(saved, DOC, 4)).toBe(false);
     expect(shouldApplyDocumentSignal(saved, OTHER, 3)).toBe(false);
+    expect(shouldApplyDocumentSignal(saved, DOC, 99, true)).toBe(true);
+    expect(shouldApplyDocumentSignal(saved, OTHER, 99, true)).toBe(false);
     const deleted = parseDocumentSignal({ v: 1, type: 'deleted', documentId: DOC, revision: 4, at: 1 })!;
     expect(shouldApplyDocumentSignal(deleted, DOC, 99)).toBe(true);
   });
