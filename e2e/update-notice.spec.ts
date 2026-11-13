@@ -406,6 +406,38 @@ test('pending reload-discard without session intent does not salvage (#256 forei
   expect(after.marker).toBe(true);
 });
 
+test('foreign cancel does not clear another tab pending (#256 Codex P0)', async ({ page }) => {
+  // A foreign context calling cancelUpdateReload must leave a consenting tab's pending intact.
+  test.setTimeout(60_000);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Keep base');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const documentId = await page.evaluate(() =>
+    document.querySelector<HTMLSelectElement>('#drafts')?.value ?? '',
+  );
+  expect(documentId).not.toBe('');
+
+  const pendingKey = `typebridge.reloadDiscardPending.v1.${documentId}`;
+  await page.evaluate(key => {
+    localStorage.setItem(key, JSON.stringify({ instanceId: 'consenting-other-tab', at: Date.now() }));
+  }, pendingKey);
+  expect(await page.evaluate(key => localStorage.getItem(key), pendingKey)).toBeTruthy();
+
+  // This tab never wrote the pending flag; cancel must be a no-op for it.
+  await page.evaluate(() => {
+    (window as Window & { __typebridgeCancelUpdateReload?: () => void })
+      .__typebridgeCancelUpdateReload?.();
+  });
+  const after = await page.evaluate(key => {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as { instanceId?: string };
+  }, pendingKey);
+  expect(after?.instanceId).toBe('consenting-other-tab');
+});
+
 test('cancelled update-reload keeps change records for later salvage (#255)', async ({ page }) => {
   // Fails if cancel leaves session intent so a later ownership salvage deletes the records.
   test.setTimeout(60_000);

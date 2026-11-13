@@ -102,8 +102,20 @@ export function isReloadDiscardPendingActive(documentId: string, now = Date.now(
   return now - pending.at <= RELOAD_DISCARD_PENDING_TTL_MS;
 }
 
-export function clearReloadDiscardPending(documentId: string): void {
-  try { localStorage.removeItem(reloadDiscardPendingKey(documentId)); } catch { /* optional */ }
+/**
+ * Drop the cross-tab pending flag only when this tab owns it (`instanceId` matches).
+ * Foreign cancel/prepare-fail must not erase another tab's in-flight consent (#256 Codex P0).
+ * Returns whether the flag was removed.
+ */
+export function clearReloadDiscardPending(documentId: string, instanceId: string): boolean {
+  try {
+    const pending = readReloadDiscardPending(documentId);
+    if (!pending || pending.instanceId !== instanceId) return false;
+    localStorage.removeItem(reloadDiscardPendingKey(documentId));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** What salvageOnOwn should do for a marker / pending combination (#256 foreign-tab P0). */

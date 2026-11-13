@@ -85,8 +85,17 @@ describe('reload discard pending flag (#256 foreign-tab P0)', () => {
     expect(readReloadDiscardPending('doc-1')).toEqual({ instanceId: 'inst-a', at });
     expect(isReloadDiscardPendingActive('doc-1', at + 1_000)).toBe(true);
     expect(isReloadDiscardPendingActive('doc-1', at + RELOAD_DISCARD_PENDING_TTL_MS + 1)).toBe(false);
-    clearReloadDiscardPending('doc-1');
+    expect(clearReloadDiscardPending('doc-1', 'inst-a')).toBe(true);
     expect(isReloadDiscardPendingActive('doc-1', at + 1_000)).toBe(false);
+  });
+
+  it('does not clear a pending flag owned by another instance (#256 Codex P0)', () => {
+    (globalThis as { localStorage?: Storage }).localStorage = memoryStorage();
+    const at = 1_000_000;
+    setReloadDiscardPending('doc-1', 'consenting', at);
+    expect(clearReloadDiscardPending('doc-1', 'foreign')).toBe(false);
+    expect(readReloadDiscardPending('doc-1')).toEqual({ instanceId: 'consenting', at });
+    expect(isReloadDiscardPendingActive('doc-1', at + 1_000)).toBe(true);
   });
 
   it('defers salvage for a foreign tab while pending is active without consent', () => {

@@ -730,10 +730,12 @@ async function markReloadDiscard(): Promise<void> {
 function clearReloadDiscard(): void {
   clearReloadDiscardIntent(instanceId);
   const documentId = state.active.id;
-  clearReloadDiscardPending(documentId);
+  // Only erase pending this tab wrote — foreign cancel must not clear another consent (#256 P0).
+  clearReloadDiscardPending(documentId, instanceId);
   if (!state.db || !state.ownership || state.ownership.documentId !== documentId) return;
   void state.ownership.writeFence().then(fence => {
     clearReloadDiscardIntent(fence.instanceId);
+    clearReloadDiscardPending(documentId, fence.instanceId);
     return clearReloadDiscardMarker(state.db!, documentId, fence);
   }).catch(() => undefined);
 }
@@ -763,7 +765,8 @@ async function salvageOnOwn(documentId: string): Promise<void> {
     if (decision === 'apply' && marker && intent) {
       const result = await applyReloadDiscardMarker(state.db, documentId, fence, true);
       clearReloadDiscardIntent(marker.instanceId);
-      clearReloadDiscardPending(documentId);
+      // Clear the consenting instance's pending (survives reload; not this page's instanceId).
+      clearReloadDiscardPending(documentId, marker.instanceId);
       if (result.applied && intent.journal) {
         // Exact-version clear only — unrelated same-document journals stay recoverable (#256 P0).
         try {
@@ -775,9 +778,9 @@ async function salvageOnOwn(documentId: string): Promise<void> {
       // Stale marker (cancel cleared pending, or pending TTL elapsed): drop marker only.
       await applyReloadDiscardMarker(state.db, documentId, fence, false);
       clearReloadDiscardIntent(marker.instanceId);
-      clearReloadDiscardPending(documentId);
+      clearReloadDiscardPending(documentId, marker.instanceId);
     } else {
-      clearReloadDiscardPending(documentId);
+      clearReloadDiscardPending(documentId, instanceId);
     }
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
     const copy = await salvageChanges(state.db, documentId, fence, crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);
