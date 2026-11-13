@@ -290,21 +290,29 @@ test('global clear cancels startup waiting for its initial ownership acquisition
   await page.goto('/editor.html'); await ready(page); const id = await save(page, 'CLEAR CANARY startup target');
   const other = await context.newPage();
   await other.addInitScript(() => {
-    const win = window as unknown as { __typebridgeDelayAcquireMs: number; bootAcquireWaiting: boolean };
+    const win = window as unknown as { __typebridgeDelayAcquireMs: number; bootAcquireWaiting: boolean; oldBootTimerFinished: boolean; releaseFreshAcquire?: () => void };
     win.__typebridgeDelayAcquireMs = 1500;
     const timers = window as unknown as { setTimeout: (callback: TimerHandler, delay?: number, ...args: unknown[]) => number };
     const schedule = timers.setTimeout;
+    let acquisitions = 0;
     timers.setTimeout = function (callback: TimerHandler, delay?: number, ...args: unknown[]) {
-      if (delay === 1500) win.bootAcquireWaiting = true;
-      return schedule.call(window, callback, delay, ...args);
+      if (delay !== 1500 || typeof callback !== 'function') return schedule.call(window, callback, delay, ...args);
+      win.bootAcquireWaiting = true;
+      if (++acquisitions > 1) { win.releaseFreshAcquire = () => callback(...args); return 0; }
+      return schedule.call(window, () => { callback(...args); win.oldBootTimerFinished = true; }, delay);
     };
   });
   await other.goto(`/editor.html?doc=${id}`);
   await expect.poll(() => other.evaluate(() => (window as unknown as { bootAcquireWaiting: boolean }).bootAcquireWaiting)).toBe(true);
   await clearAll(page);
   await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
-  // The old startup and the fresh session's acquire both have the deliberate delay.
-  await other.waitForTimeout(1800);
+  // Hold the replacement acquire until the old startup has settled. No input is accepted
+  // into the empty editor before that new persistence pipeline is ready.
+  await expect.poll(() => other.evaluate(() => typeof (window as unknown as { releaseFreshAcquire?: () => void }).releaseFreshAcquire)).toBe('function');
+  await expect(other.locator('#editor')).toBeDisabled();
+  await expect.poll(() => other.evaluate(() => (window as unknown as { oldBootTimerFinished: boolean }).oldBootTimerFinished)).toBe(true);
+  await expect(other.locator('#editor')).toHaveValue('');
+  await other.evaluate(() => (window as unknown as { releaseFreshAcquire: () => void }).releaseFreshAcquire());
   await expect(other.locator('#editor')).toBeEnabled();
   await expect(other.locator('#editor')).toHaveValue('');
   await expect(other.locator('#editor')).toHaveJSProperty('readOnly', false);
@@ -312,4 +320,37 @@ test('global clear cancels startup waiting for its initial ownership acquisition
   await other.locator('#editor').fill('Fresh after invalidated startup');
   await expect(other.locator('#save-indicator')).toHaveText('Saved');
   expect((await stored(other)).all).not.toContain('CANARY');
+});
+
+test('a pending emergency Recover cannot recreate erased content in the replacement database', async ({ page, context }) => {
+  await page.goto('/editor.html'); await ready(page);
+  await page.evaluate(() => localStorage.setItem('typebridge.recovery.v1.closed.erased', JSON.stringify({
+    token: 'clear-pending-recovery', tab: 'closed', documentId: 'erased', revision: 1, timestamp: Date.now(),
+    title: 'CLEAR CANARY recovery title', text: 'CLEAR CANARY emergency body',
+  })));
+  await page.reload(); await ready(page);
+  const recover = page.getByRole('button', { name: /^Recover CLEAR CANARY recovery title/ });
+  await expect(recover).toBeVisible();
+  const clearing = await context.newPage(); await clearing.goto('/editor.html'); await expect(clearing.locator('#editor')).toBeEnabled();
+  await page.evaluate(() => {
+    const query = navigator.locks.query.bind(navigator.locks);
+    const win = window as unknown as { recoveryOwnerWaiting: boolean; releaseRecoveryOwner: () => Promise<void> };
+    let hold = true;
+    navigator.locks.query = () => {
+      if (!hold) return query(); hold = false; win.recoveryOwnerWaiting = true;
+      return new Promise(resolve => { win.releaseRecoveryOwner = async () => {
+        resolve(await query()); await new Promise(done => setTimeout(done, 0));
+      }; });
+    };
+  });
+  await recover.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { recoveryOwnerWaiting: boolean }).recoveryOwnerWaiting)).toBe(true);
+  await clearAll(clearing);
+  await expect(page.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+  await expect(page.locator('#autosave')).toBeEnabled();
+  await page.evaluate(() => (window as unknown as { releaseRecoveryOwner: () => Promise<void> }).releaseRecoveryOwner());
+  const data = await stored(page);
+  expect(data.rows).toEqual([]); expect(data.all).not.toContain('CANARY');
+  expect(data.all).not.toContain('recovery-clear-pending-recovery');
+  await expect(page.locator('#editor')).toHaveValue('');
 });
