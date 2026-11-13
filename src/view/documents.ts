@@ -56,8 +56,11 @@ export type DocumentActionsDeps = {
 export function createDocumentActions(state: EditorState, status: StatusLine, deps: DocumentActionsDeps) {
   async function switchDraft(id?: string): Promise<SwitchResult> {
     if (deps.viewMode || state.transitioning) return { opened: false, conflict: false };
+    const storageGeneration = state.storageGeneration;
+    const storageCurrent = (): boolean => storageGeneration === state.storageGeneration;
+    const requireCurrentStorage = (): void => { if (!storageCurrent()) throw new Error('Storage invalidated'); };
     { const toggling = deps.autosaveGate(); if (toggling) await toggling; }
-    if (state.transitioning) return { opened: false, conflict: false };
+    if (state.transitioning || !storageCurrent()) return { opened: false, conflict: false };
     deps.clearHeldEdits();
     deps.focusHandoff()?.cancel();
     if (id === state.active.id) { deps.renderDrafts(); return { opened: true, conflict: false }; }
@@ -78,6 +81,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       while (true) {
         while (deps.workspace.dirty() && deps.mayWrite() && !state.editBlock) {
           const result = await deps.persist();
+          requireCurrentStorage();
           if (result.conflict) flushConflict = true;
           if (!result.saved && state.saveFailed) {
             announceAbortedFlushConflict();
@@ -106,6 +110,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
           }
           // Same consent as close: clear journal/change-log while this document's fence is live.
           await deps.discardUnsavedRecovery();
+          requireCurrentStorage();
           // Typing during the awaited clear must cancel the switch (main had no await here) (#254).
           if (!sessionPersistStillCurrent(persistToken, {
             sessionId: deps.workspace.sessionId,
@@ -118,6 +123,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
         }
         const version = deps.workspace.contentRevision();
         next = id && state.db ? await getStoredDraft(state.db, id) : undefined;
+        requireCurrentStorage();
         if (id && !next) throw new Error('Draft no longer exists');
         if (deps.workspace.contentRevision() === version) break;
       }
@@ -126,9 +132,11 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       let target = next ?? deps.allocateNewDraft();
       const access = await deps.acquireFor(target.id);
       acquired = access.ownership;
+      requireCurrentStorage();
       if (acquired && next && state.db) {
         // Reread under the new fence: the previous owner may have saved just before releasing.
         const fresh = await getStoredDraft(state.db, next.id);
+        requireCurrentStorage();
         if (!fresh) throw new Error('Draft no longer exists');
         target = fresh;
       }
@@ -148,14 +156,18 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       return { opened: true, conflict: flushConflict };
     } catch {
       void acquired?.release();
+      if (!storageCurrent()) return { opened: false, conflict: flushConflict };
       announceAbortedFlushConflict();
       status.announceAction('Could not open document — current text was kept', { keepConflict: flushConflict });
       return { opened: false, conflict: flushConflict };
     }
     finally {
-      state.transitioning = false;
-      deps.unfreezeEditorsAfterTransition();
-      deps.renderDrafts();
+      // A clear/upgrade owns the replacement session and its access state now.
+      if (storageCurrent()) {
+        state.transitioning = false;
+        deps.unfreezeEditorsAfterTransition();
+        deps.renderDrafts();
+      }
     }
   }
   async function deleteActive(): Promise<void> {

@@ -238,3 +238,50 @@ test('a throwing content metadata key reports incomplete erasure in every tab', 
   await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('typebridge.recovery.v1.throwing'))).toContain('CANARY');
 });
+
+test('global clear cancels a switch that is waiting to acquire an erased target', async ({ page, context }) => {
+  await page.goto('/editor.html'); await ready(page); await save(page, 'Current clear initiator');
+  const seed = await context.newPage(); await seed.goto('/editor.html'); await expect(seed.locator('#editor')).toBeEnabled();
+  await documentAction(seed, '#new-draft');
+  const target = await save(seed, 'CLEAR CANARY switched target'); await seed.close();
+  const other = await context.newPage(); await other.goto('/editor.html'); await expect(other.locator('#editor')).toBeEnabled();
+  await documentAction(other, '#new-draft');
+  await ready(other);
+  await other.evaluate(() => { (window as unknown as { __typebridgeDelayAcquireMs: number }).__typebridgeDelayAcquireMs = 1500; });
+  await openDocuments(other); await other.locator('#drafts').selectOption(target);
+  await expect(other.locator('#editor')).toHaveJSProperty('readOnly', true);
+  await clearAll(page);
+  await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+  // Cover the deliberately delayed acquire and its stale completion, not only the initial reset.
+  await other.waitForTimeout(1800);
+  await expect(other.locator('#editor')).toHaveValue('');
+  await expect(other.locator('#draft-title')).not.toHaveValue(/CANARY/);
+  await expect(other.locator('#editor')).toHaveJSProperty('readOnly', false);
+  expect((await stored(other)).all).not.toContain('CANARY');
+  await other.locator('#editor').fill('Fresh after cancelled switch');
+  await expect(other.locator('#save-indicator')).toHaveText('Saved');
+  expect((await stored(other)).all).not.toContain('CANARY');
+});
+
+test('per-document clear propagates a matching recovery backup removal failure', async ({ page, context }) => {
+  await page.goto('/editor.html'); await ready(page); const id = await save(page, 'Document before partial clear');
+  const other = await context.newPage(); await other.goto(`/editor.html?doc=${id}`);
+  await expect(other.locator('#editor')).toHaveValue('Document before partial clear');
+  const key = `typebridge.recovery.v1.blocked.${id}`;
+  await page.evaluate(({ id, key }) => {
+    localStorage.setItem(key, JSON.stringify({ token: 't', tab: 'blocked', documentId: id, revision: 1,
+      timestamp: Date.now(), title: 'Recovery', text: 'CLEAR CANARY retained document backup' }));
+    const remove = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = function (name: string) {
+      if (name === key) throw new DOMException('Denied', 'SecurityError');
+      remove.call(this, name);
+    };
+  }, { id, key });
+  await documentAction(page, '#clear-document-data');
+  await page.getByRole('dialog', { name: 'Clear this document’s saved data?' }).getByRole('button', { name: 'Clear saved data', exact: true }).click();
+  await expect(other.locator('[role=alert]').filter({ hasText: 'Some local data could not be cleared.' })).toBeVisible();
+  await expect(page.locator('[role=alert]').filter({ hasText: 'Some local data could not be cleared.' })).toBeVisible();
+  expect(await page.evaluate(key => localStorage.getItem(key), key)).toContain('CANARY');
+  expect((await stored(page)).rows).toEqual([]);
+  await expect(page.locator('#editor')).toHaveJSProperty('readOnly', false);
+});
