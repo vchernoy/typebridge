@@ -186,7 +186,7 @@ test('signals carry metadata only', async ({ page, context }) => {
 test('a dirty editor gets a notice and its text is never replaced or saved over', async ({ page }) => {
   await page.goto('/editor.html');
   const row = await saveDocument(page, 'Shared base');
-  await setAutosave(page, false, 'keep');
+  await setAutosave(page, false);
   await page.locator('#editor').fill('Private unsaved edits');
   await expect(page.locator('#version-notice')).toBeHidden();
 

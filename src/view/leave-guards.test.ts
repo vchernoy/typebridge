@@ -81,6 +81,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
       viewMode: true,
       field,
       autosave,
+      mayWrite: () => autosave.checked,
       workspace,
       saver: { cancel: () => undefined },
       persist: async () => ({ saved: false, conflict: false }),

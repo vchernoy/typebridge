@@ -82,6 +82,25 @@
 .save-indicator[data-state="saved"]::before {
   background: currentColor;
 }
+.private-marker {
+  flex: none;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.private-marker[hidden] {
+  display: none !important;
+}
+.autosave-doc-toggle {
+  flex: none;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  gap: 0.35em;
+}
 .viewer-badge {
   flex: 0 1 auto;
   min-width: 0;

@@ -148,7 +148,7 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
       deps.applyEditAccess();
       // Another window owns the document: keep the recovered text here (and its reload backup) for copy/export.
       if (state.editBlock) status.setSaveStatus('Recovered unsaved text, but another window is editing this document, so it was not saved. Copy or export it.', 'failure');
-      else if (deps.autosave.checked) { status.setSaveStatus('Recovered unsaved text; saving…'); await deps.persist(); }
+      else if (deps.autosave.checked && !state.active.private) { status.setSaveStatus('Recovered unsaved text; saving…'); await deps.persist(); }
       else status.setSaveStatus('Recovered unsaved text; autosave is off');
     } else if (state.editBlock) status.showSaveState();
   } catch (error) {

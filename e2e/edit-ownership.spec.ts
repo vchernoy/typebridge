@@ -277,7 +277,7 @@ test('retry does not claim ownership after the document was deleted elsewhere', 
   expect((await readStoredDocs(other)).map(row => row.id)).not.toContain(id);
 });
 
-test('a clean reader adopts a recreated document after Delete saved copy', async ({ page, context }) => {
+test('a clean reader adopts the latest save after the owner edits and closes (#257)', async ({ page, context }) => {
   await openOrdinary(page);
   const id = await saveAs(page, 'original text');
   const other = await context.newPage();
@@ -286,50 +286,43 @@ test('a clean reader adopts a recreated document after Delete saved copy', async
   await expect(other.locator('#editor')).toHaveValue('original text');
   await expect.poll(async () => (await readStoredDocs(other)).find(row => row.id === id)?.revision).toBe(1);
 
-  await page.locator('#settings-open').click();
-  await page.locator('#autosave').uncheck();
-  await page.getByRole('dialog', { name: 'Delete the saved copy?' }).getByRole('button', { name: 'Delete saved copy' }).click();
-  await expect(page.locator('#status')).toContainText('Autosave off');
-  await page.locator('#editor').fill('recreated at revision 1');
-  await page.locator('#autosave').check();
+  await page.locator('#editor').fill('updated for the reader');
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
-  await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === id)?.revision).toBe(1);
-  await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === id)?.text).toBe('recreated at revision 1');
+  await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === id)?.text).toBe('updated for the reader');
 
   await page.close();
   await expect.poll(async () => {
     await nudge(other);
     return role(other).getAttribute('data-role');
   }).toBe('editor');
-  await expect(other.locator('#editor')).toHaveValue('recreated at revision 1');
+  await expect(other.locator('#editor')).toHaveValue('updated for the reader');
   await other.locator('#editor').fill('reader continues');
   await expect(other.locator('#save-indicator')).toHaveText('Saved');
   expect((await readStoredDocs(other)).map(row => [row.id, row.text])).toEqual([[id, 'reader continues']]);
 });
 
-test('document switch waits for Autosave-off delete prompt before changing documents', async ({ page }) => {
+test('document switch waits for the private-toggle gate before changing documents (#257)', async ({ page }) => {
   await openOrdinary(page);
   const first = await saveAs(page, 'first saved copy');
   await documentAction(page, '#new-draft');
   await saveAs(page, 'second saved copy');
-  await page.locator('#settings-open').click();
-  await expect(page.locator('#settings-panel')).toBeVisible();
-  await page.locator('#autosave').uncheck();
-  const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
-  await expect(dialog).toBeVisible();
-  await expect(page.locator('#autosave')).toBeDisabled();
-  // Queue a switch while the prompt owns the document; it must not apply until the prompt closes.
+  // Hold the last pre-private save so the toggle gate stays active.
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 2_000;
+  });
+  const toggling = page.locator('#autosave').uncheck();
+  await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
+  // Queue a switch while going-private owns the gate; it must not apply until the gate ends.
   const switching = page.evaluate(id => new Promise<void>(resolve => {
     const select = document.querySelector<HTMLSelectElement>('#drafts')!;
     select.value = id;
     select.dispatchEvent(new Event('change', { bubbles: true }));
-    // switchDraft awaits the Autosave toggle gate; resolve on the next task after dispatch.
     queueMicrotask(() => resolve());
   }), first);
   await switching;
   await expect(page.locator('#editor')).toHaveValue('second saved copy');
-  await dialog.getByRole('button', { name: 'Keep saved copy' }).click();
-  await expect(dialog).toBeHidden();
+  await toggling;
+  await expect(page.locator('#autosave')).toBeEnabled();
   await expect.poll(async () => page.locator('#editor').inputValue()).toBe('first saved copy');
   await expect.poll(async () => (await readStoredDocs(page)).map(row => row.text).sort()).toEqual([
     'first saved copy',

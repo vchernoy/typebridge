@@ -78,12 +78,12 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
   function enqueue(w: Writer, record: ChangeRecord): void {
     const anchor = w.anchor;
     // Records queued behind a failed one are skipped, not written: the run stops at the failure
-    // until a save covers everything queued. Nothing lands once Autosave is off, not even a
-    // record queued before, and nothing continues a save that did not commit (#251 review).
+    // until a save covers everything queued. New edits are gated in edit() via mayRecord; once
+    // queued, a record must still land so a failed last save can rebuild text as of the
+    // privacy switch (#257 / #251).
     queue = queue.then(async () => {
       if (anchor && !await anchor) return;
       if (w.failed) return;
-      if (!deps.mayRecord()) { markFailed(w); return; }
       return deps.append(record);
     }).catch(() => { markFailed(w); });
   }

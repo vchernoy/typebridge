@@ -21,6 +21,7 @@ export type EditAccess = { ownership?: EditOwnership; block: EditBlock; generati
 export type DocumentActionsDeps = {
   viewMode: boolean;
   autosave: HTMLInputElement;
+  mayWrite: () => boolean;
   workspace: Workspace;
   writingPosition: { save: () => void; remove: (id: string) => void };
   saver: { cancel: () => void; saveSoon: () => void; inFlight: () => Promise<SaveResult> | undefined; drainChanges: () => Promise<void> };
@@ -75,7 +76,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       deps.saver.cancel();
       let next: StoredDraft | undefined;
       while (true) {
-        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
+        while (deps.workspace.dirty() && deps.mayWrite() && !state.editBlock) {
           const result = await deps.persist();
           if (result.conflict) flushConflict = true;
           if (!result.saved && state.saveFailed) {
@@ -84,7 +85,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
           }
         }
         // Text this window cannot save (Autosave off, or another window owns the document) needs consent to drop.
-        if (deps.workspace.dirty() && (!deps.autosave.checked || state.editBlock)) {
+        if (deps.workspace.dirty() && (!deps.mayWrite() || state.editBlock)) {
           const persistToken = deps.workspace.capturePersistGeneration();
           const contentAtPrompt = deps.workspace.contentRevision();
           if (!await askConfirmChoice({ title: 'Discard unsaved changes?', message: state.editBlock
@@ -168,7 +169,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       ? 'Permanently delete this saved document? It is also open in another window, which will keep its text until you close it there.'
       : 'Permanently delete this saved document?';
     if (!await askConfirmChoice({ title: 'Delete document?', message: deleteMessage, confirmLabel: 'Delete document', cancelLabel: 'Keep document', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
-      if (deps.workspace.dirty() && deps.autosave.checked) deps.saver.saveSoon();
+      if (deps.workspace.dirty() && deps.mayWrite()) deps.saver.saveSoon();
       return;
     }
     state.transitioning = true;
@@ -177,7 +178,7 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
     let savedBeforeDelete = false;
     try {
       { const pendingSave = deps.saver.inFlight(); if (pendingSave && !(await pendingSave).saved) throw new Error('Save failed'); }
-      if (deps.workspace.dirty() && deps.autosave.checked) {
+      if (deps.workspace.dirty() && deps.mayWrite()) {
         if (!(await deps.persist()).saved) throw new Error('Save failed');
         savedBeforeDelete = true;
       }
@@ -212,16 +213,16 @@ export function createDocumentActions(state: EditorState, status: StatusLine, de
       // state the save situation, so they do not also append riskText().
       if (state.editBlock) {
         status.announceAction('Could not delete document — another window is editing it. Your text is kept.', { kind: 'failure' });
-      } else if (deps.workspace.dirty() && !state.saveFailed && deps.autosave.checked && !state.storageProblem) {
+      } else if (deps.workspace.dirty() && !state.saveFailed && deps.mayWrite() && !state.storageProblem) {
         status.announceAction('Could not delete document — your changes are unsaved; saving again…', { kind: 'progress', omitRisk: true });
-      } else if (deps.workspace.dirty() && !deps.autosave.checked && !state.storageProblem) {
+      } else if (deps.workspace.dirty() && !deps.mayWrite() && !state.storageProblem) {
         status.announceAction('Could not delete document — your changes are unsaved; autosave is off', { kind: 'progress', omitRisk: true });
       } else status.announceAction(savedBeforeDelete ? 'Could not delete document — Saved locally; your text is kept.' : 'Could not delete document — your text is kept.');
     } finally {
       state.transitioning = false;
       state.deleting = false;
       deps.unfreezeEditorsAfterTransition();
-      if (!committed && deps.workspace.dirty() && deps.autosave.checked && !state.editBlock) {
+      if (!committed && deps.workspace.dirty() && deps.mayWrite() && !state.editBlock) {
         deps.saver.saveSoon();
       }
     }

@@ -1,0 +1,170 @@
+import { expect, test, type Page } from '@playwright/test';
+import { documentAction, setAutosave, setPrivateSession } from './settings-helpers';
+
+const status = (page: Page) => page.locator('#status-line');
+
+async function storageSnapshot(page: Page): Promise<{
+  docs: Array<{ text: string; title: string; private?: boolean }>;
+  changeTexts: string[];
+  recovery: string[];
+  pending: string | null;
+}> {
+  return page.evaluate(async () => {
+    const docs = await new Promise<Array<{ text: string; title: string; private?: boolean }>>((resolve, reject) => {
+      const open = indexedDB.open('typebridge');
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        const req = db.transaction('documents').objectStore('documents').getAll();
+        req.onsuccess = () => { db.close(); resolve(req.result as Array<{ text: string; title: string; private?: boolean }>); };
+        req.onerror = () => { db.close(); reject(req.error); };
+      };
+    });
+    const changeTexts = await new Promise<string[]>((resolve, reject) => {
+      const open = indexedDB.open('typebridge');
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        if (![...db.objectStoreNames].includes('changes')) {
+          db.close();
+          resolve([]);
+          return;
+        }
+        const req = db.transaction('changes').objectStore('changes').getAll();
+        req.onsuccess = () => {
+          db.close();
+          const rows = req.result as Array<{ text?: string; title?: string }>;
+          resolve(rows.flatMap(row => [row.text ?? '', row.title ?? '']).filter(Boolean));
+        };
+        req.onerror = () => { db.close(); reject(req.error); };
+      };
+    });
+    const recovery: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('typebridge.recovery.v1.')) {
+        recovery.push(localStorage.getItem(key) ?? '');
+      }
+    }
+    let pending: string | null = null;
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith('typebridge.pendingDraft.v1')) {
+        pending = sessionStorage.getItem(key);
+        break;
+      }
+    }
+    return { docs, changeTexts, recovery, pending };
+  });
+}
+
+test('typing while private leaves no post-switch storage trace after reload (#257)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Before private');
+  await page.getByRole('textbox', { name: 'Document title' }).fill('Switch title');
+  await expect(status(page)).toHaveText('Saved locally');
+
+  await setAutosave(page, false);
+  await expect(page.locator('#private-marker')).toBeVisible();
+
+  await page.locator('#editor').fill('Before private SECRET after');
+  await page.getByRole('textbox', { name: 'Document title' }).fill('Secret title');
+  await expect(status(page)).toHaveText(/Autosave off/);
+
+  // Force a reload-backup opportunity, then reload without discarding UI text first.
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  const before = await storageSnapshot(page);
+  expect(before.docs.every(doc => !doc.text.includes('SECRET'))).toBe(true);
+  expect(before.docs.every(doc => doc.title !== 'Secret title')).toBe(true);
+  expect(before.changeTexts.every(text => !text.includes('SECRET') && text !== 'Secret title')).toBe(true);
+  expect(before.recovery.every(raw => !raw.includes('SECRET') && !raw.includes('Secret title'))).toBe(true);
+  expect(before.pending === null || (!before.pending.includes('SECRET') && !before.pending.includes('Secret title'))).toBe(true);
+  expect(before.docs.some(doc => doc.private === true && doc.text === 'Before private')).toBe(true);
+
+  await page.reload();
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(page.locator('#editor')).toHaveValue('Before private');
+  await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue('Switch title');
+  await expect(page.locator('#autosave')).not.toBeChecked();
+  await expect(page.locator('#private-marker')).toBeVisible();
+  const after = await storageSnapshot(page);
+  expect(after.docs.every(doc => !doc.text.includes('SECRET'))).toBe(true);
+  expect(after.docs.every(doc => !(doc.title ?? '').includes('Secret'))).toBe(true);
+});
+
+test('private typing during goPrivate keeps the document dirty (#257 P0)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Freeze base');
+  await expect(status(page)).toHaveText('Saved locally');
+
+  // Hold the last pre-private save so typing after the switch still happens before dirty is set.
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 1_500;
+  });
+  const toggling = setAutosave(page, false);
+  await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
+  await page.locator('#editor').press('End');
+  // Digits are not transliterated — a stable private-period marker.
+  await page.locator('#editor').pressSequentially(' 99');
+  await toggling;
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+  const snap = await storageSnapshot(page);
+  expect(snap.docs.every(doc => !doc.text.includes('99'))).toBe(true);
+  expect(snap.docs.some(doc => doc.private === true && doc.text === 'Freeze base')).toBe(true);
+
+  // Leaving must confirm: dirty was not cleared by comparing against a post-typing revision.
+  await documentAction(page, '#new-draft');
+  await expect(page.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(page.locator('#editor')).toHaveValue('Freeze base 99');
+});
+
+test('going private mid-save does not store text typed after the switch (#257)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Pre switch base');
+  await expect(status(page)).toHaveText('Saved locally');
+
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 2_000;
+  });
+  await page.locator('#editor').press('End');
+  await page.locator('#editor').pressSequentially('!');
+  // Debounce starts the held save; then switch private and type secrets while it is still in flight.
+  await page.waitForTimeout(400);
+  await setAutosave(page, false);
+  await page.locator('#editor').press('End');
+  await page.locator('#editor').pressSequentially(' SECRET');
+  await page.waitForTimeout(2_500);
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+
+  const snap = await storageSnapshot(page);
+  expect(snap.docs.every(doc => !doc.text.includes('SECRET'))).toBe(true);
+  expect(snap.changeTexts.every(text => !text.includes('SECRET'))).toBe(true);
+  expect(snap.docs.some(doc => doc.private === true)).toBe(true);
+  await expect(page.locator('#autosave')).not.toBeChecked();
+});
+
+test('global private session blocks writes for a normal document (#257)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Session base');
+  await expect(status(page)).toHaveText('Saved locally');
+  await setPrivateSession(page, true);
+  await expect(page.locator('#autosave')).toBeDisabled();
+  await page.locator('#editor').fill('Session base SECRET');
+  await expect(status(page)).toHaveText(/Autosave off/);
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  const snap = await storageSnapshot(page);
+  expect(snap.docs.every(doc => !doc.text.includes('SECRET'))).toBe(true);
+  expect(snap.changeTexts.every(text => !text.includes('SECRET'))).toBe(true);
+  expect(snap.recovery.every(raw => !raw.includes('SECRET'))).toBe(true);
+});

@@ -22,6 +22,8 @@ export type HandoffSnapshot = {
   title: string;
   history?: unknown;
   dirty: boolean;
+  /** Source document's own `private` flag — not inferred from dirty or the global session (#257). */
+  private: boolean;
   revision: number;
 };
 

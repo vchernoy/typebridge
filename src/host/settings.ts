@@ -8,7 +8,7 @@ import { setupRules } from '../ui/rules';
 import { setupSettings, openSettingsTo, ensureSettingsOpen } from '../ui/settings';
 import { setupWindowLayoutSetting } from '../ui/window-layout-setting';
 import { exposeHostPageApi } from '../view/embed-api';
-import { setAutosaveEnabled, autosaveEnabled } from '../editor/drafts';
+import { privateSessionOn, setPrivateSessionOn } from '../editor/privacy';
 import {
   TRANSLITERATION_SHORTCUTS,
   isApplePlatform,
@@ -44,13 +44,13 @@ export function installHostSettings(deps: {
   const layout = setupWindowLayoutSetting(preferenceSaved, { prefsOrigin: PREFS_ORIGIN });
   const resetRules = setupRules(() => [], { prefsOrigin: PREFS_ORIGIN });
 
-  const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
+  const privateSession = document.querySelector<HTMLInputElement>('#private-session')!;
   const tabIndent = document.querySelector<HTMLInputElement>('#tab-indent')!;
   const shortcutSelect = document.querySelector<HTMLSelectElement>('#translit-shortcut')!;
   const shortcutStatus = document.querySelector<HTMLElement>('#shortcut-status');
   const shortcutReset = document.querySelector<HTMLButtonElement>('#shortcut-reset');
 
-  try { autosave.checked = autosaveEnabled(); } catch { autosave.checked = true; }
+  try { privateSession.checked = privateSessionOn(); } catch { privateSession.checked = false; }
   try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { tabIndent.checked = true; }
 
   let shortcut: TransliterationShortcut = 'default';
@@ -140,18 +140,18 @@ export function installHostSettings(deps: {
   });
   shortcutReset?.addEventListener('click', () => { saveShortcut('default'); });
 
-  const autosaveStatus = document.querySelector<HTMLElement>('#host-settings-status');
-  autosave.addEventListener('change', () => {
-    const requested = autosave.checked;
+  const settingsStatus = document.querySelector<HTMLElement>('#host-settings-status');
+  privateSession.addEventListener('change', () => {
+    const requested = privateSession.checked;
     try {
-      setAutosaveEnabled(requested);
-      if (autosaveStatus) autosaveStatus.textContent = '';
+      setPrivateSessionOn(requested);
+      if (settingsStatus) settingsStatus.textContent = '';
       broadcast('autosave');
     } catch {
       // Do not promise privacy (or saving) when the preference could not be stored.
-      try { autosave.checked = autosaveEnabled(); } catch { autosave.checked = !requested; }
-      if (autosaveStatus) {
-        autosaveStatus.textContent = 'Autosave preference could not be saved in this browser.';
+      try { privateSession.checked = privateSessionOn(); } catch { privateSession.checked = !requested; }
+      if (settingsStatus) {
+        settingsStatus.textContent = 'Private session preference could not be saved in this browser.';
       }
     }
   });
@@ -160,13 +160,13 @@ export function installHostSettings(deps: {
     const requested = tabIndent.checked;
     try {
       localStorage.setItem(TAB_INDENT_KEY, requested ? 'on' : 'off');
-      if (autosaveStatus) autosaveStatus.textContent = '';
+      if (settingsStatus) settingsStatus.textContent = '';
       broadcast('tabIndent');
     } catch {
       try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; }
       catch { tabIndent.checked = !requested; }
-      if (autosaveStatus) {
-        autosaveStatus.textContent = 'Tab indents preference could not be saved in this browser.';
+      if (settingsStatus) {
+        settingsStatus.textContent = 'Tab indents preference could not be saved in this browser.';
       }
     }
   });
@@ -181,7 +181,7 @@ export function installHostSettings(deps: {
     }
     if (detail.origin === PREFS_ORIGIN) return;
     if (detail.name === 'autosave' || detail.name === 'reset') {
-      try { autosave.checked = autosaveEnabled(); } catch { /* keep */ }
+      try { privateSession.checked = privateSessionOn(); } catch { /* keep */ }
     }
     if (detail.name === 'tabIndent' || detail.name === 'reset') {
       try { tabIndent.checked = localStorage.getItem(TAB_INDENT_KEY) !== 'off'; } catch { /* keep */ }

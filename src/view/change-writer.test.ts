@@ -96,13 +96,17 @@ describe('change writer', () => {
     expect((await recovered()).text).toBe('частное 2!');
   });
 
-  it('records still queued when Autosave goes off are never written (#251 review)', async () => {
+  it('records queued before privacy still write so a failed last save can rebuild (#257)', async () => {
     const { env, writer, type, save } = harness();
     await save();
     type('S'); type('Se');
     env.autosave = false; // before the queued writes run
     await writer.idle();
-    expect(env.records).toEqual([]);
+    // Pre-switch queue must land; edit() still blocks any further records.
+    expect(env.records).toHaveLength(2);
+    type('Secret');
+    await writer.idle();
+    expect(env.records).toHaveLength(2);
   });
 
   it('a document shown again records nothing until a save starts its new run', async () => {

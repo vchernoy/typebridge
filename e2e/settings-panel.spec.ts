@@ -8,7 +8,8 @@ test('Settings opens a side panel with every setting, and Escape or × closes it
   // The settings no longer clutter the page.
   await expect(panel).toBeHidden();
   await expect(page.locator('details')).toHaveCount(0);
-  await expect(page.locator('#autosave')).toBeHidden();
+  await expect(page.locator('#autosave')).toBeVisible();
+  await expect(page.locator('#autosave')).toBeChecked();
   await expect(open).toHaveAttribute('aria-expanded', 'false');
   await open.click();
   await expect(panel).toBeVisible();
@@ -19,7 +20,7 @@ test('Settings opens a side panel with every setting, and Escape or × closes it
   }
   await expect(panel.getByLabel('Shortcut', { exact: true })).toBeVisible();
   await expect(panel.getByRole('textbox', { name: 'Transliteration mappings' })).toBeVisible();
-  await expect(panel.getByRole('checkbox', { name: 'Autosave' })).toBeChecked();
+  await expect(panel.getByRole('checkbox', { name: /Private session/ })).not.toBeChecked();
   await expect(panel.getByRole('checkbox', { name: 'Tab indents' })).toBeChecked();
   // Escape closes it, returns focus to Settings and does not enter Focus mode.
   await page.keyboard.press('Escape');

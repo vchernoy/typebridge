@@ -16,6 +16,8 @@ import type { DocumentSignal } from './signals';
 export type RecoveryDeps = {
   viewMode: boolean;
   autosave: HTMLInputElement;
+  /** False while privateNow (#257). */
+  mayWrite: () => boolean;
   field: HTMLTextAreaElement;
   draftTitle: HTMLInputElement;
   /** The journal warning and recovery panel are inserted before this element. */
@@ -64,7 +66,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
    */
   async function clearSupersededJournal(entry: RecoverySnapshot): Promise<void> {
     await deps.changeLogIdle();
-    if (deps.viewMode || !deps.autosave.checked) return;
+    if (deps.viewMode || !deps.mayWrite()) return;
     if (!deps.changeLogProtects() || !deps.indexedDbUsable()) return;
     if (currentJournal !== entry || entry.documentId !== state.active.id) return;
     try {
@@ -74,7 +76,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   }
 
   function journalEdit(): void {
-    if (deps.viewMode || !deps.autosave.checked) return;
+    if (deps.viewMode || !deps.mayWrite()) return;
     // Change log covers this edit and IndexedDB can take it: do not write (#37 R2c 2d-2).
     // Clear a stale "backup unavailable" warning from an earlier unprotected write (#254 Codex P2).
     // Clear this tab's superseded working journal once the log is idle and still protects (#254 Claude P2).

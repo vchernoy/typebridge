@@ -4,7 +4,7 @@ import { setAutosave } from './settings-helpers';
 
 // The change log (#37 R2c step 2b): every edit with Autosave on is a small record; a full save
 // says which records it contains (upTo) and removes them. Recovery from it comes in step 2c.
-type Row = { id: string; title: string; text: string; revision: number; upTo?: number };
+type Row = { id: string; title: string; text: string; revision: number; upTo?: number; private?: boolean };
 
 async function readLog(page: Page): Promise<{ rows: Row[]; changes: ChangeRecord[] }> {
   return page.evaluate(() => new Promise<{ rows: Row[]; changes: ChangeRecord[] }>((resolve, reject) => {
@@ -18,7 +18,9 @@ async function readLog(page: Page): Promise<{ rows: Row[]; changes: ChangeRecord
       tx.oncomplete = () => {
         db.close();
         resolve({
-          rows: (rows.result as Row[]).map(({ id, title, text, revision, upTo }) => ({ id, title, text, revision, upTo })),
+          rows: (rows.result as Row[]).map(({ id, title, text, revision, upTo, private: isPrivate }) => ({
+            id, title, text, revision, upTo, private: isPrivate,
+          })),
           changes: changes.result as ChangeRecord[],
         });
       };
@@ -118,20 +120,25 @@ test('turning Autosave off while a save waits for the change log saves no privat
   expect(rows.map(row => row.text).join()).not.toContain('секрет');
 });
 
-test('deleting the saved copy when turning Autosave off leaves no change records behind (#251 review)', async ({ page }) => {
+test('going private abandons queued change records for later private typing (#257 / #251)', async ({ page }) => {
   await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Удалить всё');
   await expect(page.locator('#status')).toContainText('Saved locally');
-  // Hold the change-log write so it is still queued when the saved copy is deleted.
+  // Hold the change-log write so it is still queued when going private.
   await page.evaluate(() => { (window as unknown as { __typebridgeDelayChangeAppendMs: number }).__typebridgeDelayChangeAppendMs = 800; });
   await field.press('End');
   await page.keyboard.type('!?');
-  await setAutosave(page, false, 'delete');
+  await setAutosave(page, false);
+  await expect(page.locator('#private-marker')).toBeVisible();
+  await field.press('End');
+  await page.keyboard.type(' секрет');
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 2_000))); // every held write has landed
   const log = await readLog(page);
-  expect(log.rows).toEqual([]);
+  expect(log.rows).toHaveLength(1);
+  expect(log.rows[0]!.private).toBe(true);
+  expect(log.rows.map(row => row.text).join()).not.toContain('секрет');
   expect(log.changes).toEqual([]);
 });
 

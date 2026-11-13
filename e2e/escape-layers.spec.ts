@@ -48,20 +48,21 @@ test('Settings, menu and Find close one layer at a time in plan order (#132)', a
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
 });
 
-test('privacy dialog consumes Escape before Settings; next Escape closes Settings (#132)', async ({ page }) => {
+test('confirm dialog consumes Escape before Settings; next Escape closes Settings (#132)', async ({ page }) => {
   await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Текст для сохранения');
   await expect(page.locator('#status')).toContainText('Saved locally');
   await page.locator('#settings-open').click();
-  await page.locator('#autosave').uncheck();
+  await expect(page.locator('#settings-panel')).toBeVisible();
+  // Open a confirm from More while Settings is open; Escape dismisses confirm first.
+  await page.locator('#more-open').click();
+  await page.locator('#clear').click();
   await expect(page.locator('.confirm-dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.confirm-dialog')).toHaveCount(0);
   await expect(page.locator('#settings-panel')).toBeVisible();
-  await expect(page.locator('#autosave')).toBeFocused();
-  await expect(page.locator('#drafts option')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(page.locator('#settings-panel')).toBeHidden();
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);

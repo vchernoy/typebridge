@@ -31,11 +31,16 @@ import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
   ACTIVE_DRAFT_KEY_BASE,
   UNTITLED_TITLE,
-  autosaveEnabled,
   configureActiveDraftKey,
   newDraft,
   setActiveDraftId,
 } from './editor/drafts';
+import {
+  documentAutosaveChecked,
+  privateNow,
+  privateSessionOn,
+  setPrivateSessionOn,
+} from './editor/privacy';
 import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
@@ -66,7 +71,7 @@ import { openShareDialog } from './ui/share-dialog';
 import { setupComparisonOpen } from './ui/comparison-open';
 import { setupFindGotoBars } from './ui/find-goto-bars';
 import { parseEmbedMode } from './view/embed';
-import { onPrefsChanged } from './view/prefs-sync';
+import { notifyPrefsChanged, onPrefsChanged } from './view/prefs-sync';
 import { SIGNAL_POLL_INTERVAL_MS } from './view/signals';
 import { formatDocumentStats } from './editor/document-stats';
 // Companion routing is parsed before any ordinary open/restore path (#159 W2).
@@ -221,6 +226,13 @@ setupKeyboardShortcuts();
 const editor = new Editor(field);
 /** Declared early: syncMutationControls runs during module init before draft locals. */
 const autosave = document.querySelector<HTMLInputElement>('#autosave')!;
+const privateMarker = document.querySelector<HTMLElement>('#private-marker')!;
+const privateSession = document.querySelector<HTMLInputElement>('#private-session');
+/** Write gate: false while privateNow (#257). */
+function mayWrite(): boolean {
+  return !privateNow(state.active);
+}
+
 if (viewMode) {
   editor.setReadOnly(true);
   workspace.setPaneRole('readonly');
@@ -245,7 +257,7 @@ const statusLine = createStatusLine({
     dirty: workspace.dirty(),
     blocked: state.editBlock !== '',
     saveFailed: state.saveFailed,
-    autosaveOn: autosave.checked,
+    autosaveOn: mayWrite(),
   }),
   editBlock: () => state.editBlock,
   quietReader: () => quietReader(),
@@ -303,8 +315,12 @@ function autosaveControlBlocked(): boolean {
 }
 function syncAutosaveControl(): void {
   if (viewMode || autosaveToggle?.isActive()) return;
+  // Global private session locks the per-document checkbox off (#257).
+  const session = privateSessionOn();
   // Also disabled for a whole document switch, flush included (#97).
-  autosave.disabled = autosaveControlBlocked() || state.transitioning;
+  autosave.disabled = session || autosaveControlBlocked() || state.transitioning;
+  if (session) autosave.checked = false;
+  autosaveToggle?.syncPrivateMarker();
 }
 function syncMutationControls(): void {
   // Comparison viewers own these attributes via applyViewerChrome; do not fight tests that
@@ -466,11 +482,12 @@ enabled.addEventListener('change', () => {
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
+  const writing = mayWrite();
   const indicator = state.storageProblem || state.saveFailed ? 'failed'
     : state.deletedElsewhere ? 'unsaved'
-    : quietReader() ? (!autosave.checked || !state.db ? 'unsaved' : 'saved')
+    : quietReader() ? (!writing || !state.db ? 'unsaved' : 'saved')
     : state.editBlock ? (workspace.dirty() ? 'unsaved' : 'readonly')
-    : !autosave.checked || !state.db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
+    : !writing || !state.db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
   const label = { failed: 'Save failed', readonly: 'Read-only', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[indicator];
   if (saveIndicator.textContent !== label) saveIndicator.textContent = label;
   saveIndicator.dataset.state = indicator;
@@ -486,7 +503,7 @@ const writingPosition = setupWritingPosition(
 let changeLogProtects = (): boolean => false;
 let changeLogIdle = (): Promise<void> => Promise.resolve();
 const recovery = createRecovery(state, statusLine, {
-  viewMode, autosave, field, draftTitle,
+  viewMode, autosave, mayWrite, field, draftTitle,
   anchor: status.parentElement!,
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
   refreshDrafts: () => refreshDrafts(),
@@ -500,7 +517,10 @@ field.disabled = true;
 draftSelect.disabled = true;
 draftTitle.disabled = true;
 autosave.checked = true;
-try { autosave.checked = autosaveEnabled(); } catch { /* Keep editing available if preferences are blocked. */ }
+try { autosave.checked = documentAutosaveChecked(state.active); } catch { /* Keep editing available if preferences are blocked. */ }
+if (privateSession) {
+  try { privateSession.checked = privateSessionOn(); } catch { /* optional Settings control */ }
+}
 // A tab-scoped emergency snapshot is not the committed draft. It only bridges
 // navigation/reload when the browser aborts an IndexedDB transaction on unload.
 const PENDING_KEY = scopeSessionKey('typebridge.pendingDraft.v1', windowId);
@@ -510,7 +530,7 @@ function snapshot(): StoredDraft {
 const reloadBackup = createReloadBackup({
   key: PENDING_KEY,
   snapshot,
-  mayBackUp: () => !viewMode && workspace.dirty() && autosave.checked && !state.deleting,
+  mayBackUp: () => !viewMode && workspace.dirty() && mayWrite() && !state.deleting,
   // Keep any conflict notice and the current risk; only replace the primary.
   // Trailing period stays; renderStatusBody joins risk with a space after it.
   onFailed: () => { setRiskStatus('Unsaved text could not be backed up for reload. Copy or export it.', 'failure'); },
@@ -617,6 +637,9 @@ function showDraft(options?: { restorePosition?: boolean }): void {
     workspace.setDirty(false);
     state.saveFailed = false; // The editor no longer holds the unsaved text.
   } finally { state.loadingDraft = false; }
+  // Per-document Autosave mirrors the shown document (and global session) (#257).
+  autosaveToggle?.syncFromDocument();
+  syncAutosaveControl();
   if (options?.restorePosition !== false) writingPosition.restore(state.active.id);
   renderDrafts();
   updateStats();
@@ -647,7 +670,8 @@ const editAccess = createEditAccess(state, statusLine, {
   syncHistory: () => { syncHistory(); },
   syncMutationControls: () => { syncMutationControls(); },
   updateSaveIndicator: () => { updateSaveIndicator(); },
-  syncAutosaveCheckboxFromStorage: () => { syncAutosaveCheckboxFromStorage(); },
+  // Re-owning must mirror the document flag, not re-apply the global session announce (#257).
+  syncAutosaveCheckboxFromStorage: () => { autosaveToggle?.syncFromDocument(); syncAutosaveControl(); },
   onOwned: documentId => { void salvageOnOwn(documentId); },
   showDraft: () => { showDraft(); },
   cancelSave: () => { saver.cancel(); },
@@ -659,7 +683,7 @@ const {
   recoverParkedHandoffOwnership,
 } = editAccess;
 const takeover = createTakeover(state, {
-  viewMode, field, draftTitle, editor, workspace, autosave, writingPosition, editHereBar, editHereWarning, editAccess,
+  viewMode, field, draftTitle, editor, workspace, autosave, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
   focusHandoff: () => focusHandoff,
   showDraft: () => { showDraft(); },
   syncTitleTooltip: () => { syncTitleTooltip(); },
@@ -673,7 +697,7 @@ const { captureHandoffSnapshot, hideEditHereBar, showEditHereBar, takeOverFromHa
 /** Read-only pane B retries ownership when focused or the tab becomes visible again. */
 // Change log for crash recovery (#37 R2c): one small record per edit while Autosave is on.
 const changeWriter = createChangeWriter({
-  mayRecord: () => !viewMode && autosave.checked && !state.suppressEditTracking && !state.loadingDraft,
+  mayRecord: () => !viewMode && mayWrite() && !state.suppressEditTracking && !state.loadingDraft,
   shown: () => ({ id: state.active.id, generation: workspace.sessionGeneration() }),
   text: () => field.value,
   title: () => draftTitle.value.trim() || UNTITLED_TITLE,
@@ -714,7 +738,7 @@ async function salvageOnOwn(documentId: string): Promise<void> {
   } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
 }
 const saver = createSaver(state, statusLine, {
-  viewMode, autosave, draftTitle, workspace, writingPosition,
+  viewMode, mayWrite, draftTitle, workspace, writingPosition,
   snapshot: () => snapshot(),
   currentJournal: () => recovery.currentJournal(),
   suppressEditTracking: () => state.suppressEditTracking,
@@ -754,26 +778,39 @@ draftTitle.addEventListener('input', () => {
   scheduleSave(true);
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {
-  autosave, workspace, viewMode, embedded,
-  prefsOrigin,
+  autosave, privateMarker, workspace, viewMode, embedded,
   transferFrozen: () => state.transferFrozen,
   controlBlocked: () => autosaveControlBlocked(),
-  preferenceSaved,
   journalEdit: () => { journalEdit(); },
   persist: () => persist(),
+  persistLastBeforePrivate: (frozen, frozenContentRevision) =>
+    saver.persistLastBeforePrivate(frozen, frozenContentRevision),
+  snapshot: () => snapshot(),
+  changeLogProtects: () => changeLogProtects(),
   saver,
-  postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
-  refreshDrafts: () => refreshDrafts(),
-  loseOwnership: () => { loseOwnership(); },
   abandonChangeRun: () => { changeWriter.abandon(); },
+  refreshDrafts: () => refreshDrafts(),
+  renderDrafts: () => { renderDrafts(); },
+  loseOwnership: () => { loseOwnership(); },
+  syncAutosaveControl: () => { syncAutosaveControl(); },
 });
-const applyAutosaveChange = autosaveToggle.apply;
+const applyDocumentAutosave = autosaveToggle.applyDocumentChange;
 const syncAutosaveCheckboxFromStorage = autosaveToggle.syncFromStorage;
 autosave.addEventListener('change', () => {
-  void applyAutosaveChange(autosave.checked, {
-    promptDeleteSavedCopy: !embedded,
-    persistPreference: true,
-  });
+  void applyDocumentAutosave(autosave.checked);
+});
+privateSession?.addEventListener('change', () => {
+  const on = privateSession.checked;
+  try {
+    setPrivateSessionOn(on);
+    preferenceSaved('private session', true);
+  } catch {
+    try { privateSession.checked = privateSessionOn(); } catch { privateSession.checked = !on; }
+    preferenceSaved('private session', false);
+    return;
+  }
+  void autosaveToggle?.applySessionChange(on);
+  notifyPrefsChanged({ name: 'autosave', origin: prefsOrigin });
 });
 /** Explicit discard: drop the journal and every change-log record for this document (#37 R2c 2d-2 / #254). */
 async function discardUnsavedRecovery(): Promise<void> {
@@ -802,7 +839,7 @@ async function discardUnsavedRecovery(): Promise<void> {
   } catch { /* Leaving anyway; a later owner may still see records if the clear failed. */ }
 }
 const documents = createDocumentActions(state, statusLine, {
-  viewMode, autosave, workspace, writingPosition, saver,
+  viewMode, autosave, mayWrite, workspace, writingPosition, saver,
   persist: () => persist(),
   autosaveGate: () => autosaveToggle?.gate(),
   focusHandoff: () => focusHandoff,
@@ -925,7 +962,7 @@ if (!viewMode) {
     isSaving: () => !!saver.inFlight(),
     saveFailed: () => state.saveFailed,
     isDirty: () => workspace.dirty(),
-    autosaveOn: () => autosave.checked,
+    autosaveOn: () => mayWrite(),
     confirmDiscardDirtyForHandoff: async () => {
       const discard = await askConfirmChoice({
         title: 'Discard unsaved changes?',
@@ -1056,7 +1093,7 @@ document.querySelector<HTMLButtonElement>('#share-link')!.addEventListener('clic
   });
 });
 const leaveGuards = createLeaveGuards(state, {
-  viewMode, field, autosave, workspace, saver, reloadBackup, recovery,
+  viewMode, field, autosave, mayWrite, workspace, saver, reloadBackup, recovery,
   persist: () => persist(),
   snapshot: () => snapshot(),
   freezeForDiscard: () => { freezeEditorsForTransition(); },
@@ -1074,11 +1111,12 @@ if (!embedded) {
   ], announce: announceAction });
 }
 
-function applyAutosaveFromStorage(): void {
-  let next: boolean;
-  try { next = autosaveEnabled(); }
+function applyPrivateSessionFromStorage(): void {
+  let sessionOn: boolean;
+  try { sessionOn = privateSessionOn(); }
   catch { return; }
-  void applyAutosaveChange(next, { promptDeleteSavedCopy: false, persistPreference: false });
+  if (privateSession) privateSession.checked = sessionOn;
+  void autosaveToggle?.applySessionChange(sessionOn);
 }
 
 // A shared preference changed in another window: re-read it here (view/prefs-apply.ts).
@@ -1087,7 +1125,7 @@ onPrefsChanged(detail => {
     appearance: () => { appearanceSettings.applyFromStorage(); },
     typing: () => { typingSettings.applyFromStorage(); },
     tabIndent: () => { applyTabIndentFromStorage(); },
-    autosave: () => { applyAutosaveFromStorage(); },
+    autosave: () => { applyPrivateSessionFromStorage(); },
     findOptions: () => { resetOptions(); },
     layout: () => { resetLayout(); },
   });

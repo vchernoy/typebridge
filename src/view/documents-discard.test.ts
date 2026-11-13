@@ -80,6 +80,7 @@ describe('switchDraft discard cleanup (#254 Codex P1)', () => {
     const deps: DocumentActionsDeps = {
       viewMode: false,
       autosave: { checked: false } as HTMLInputElement,
+      mayWrite: () => false,
       workspace,
       writingPosition: { save: () => undefined, remove: () => undefined },
       saver: {
