@@ -52,13 +52,21 @@ export type SaverDeps = {
   renderDrafts: () => void;
 };
 
+/**
+ * Discard-reload freezes without `transitioning`; delete/switch set `transitioning` then flush
+ * under that freeze. Only the former must block persist (#256 Codex P1).
+ */
+export function persistBlockedByFreeze(state: Pick<EditorState, 'transferFrozen' | 'transitioning'>): boolean {
+  return state.transferFrozen && !state.transitioning;
+}
+
 export function createSaver(state: EditorState, status: StatusLine, deps: SaverDeps) {
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let saving: Promise<SaveResult> | undefined;
   async function persist(): Promise<SaveResult> {
     if (deps.viewMode) return { saved: true, conflict: false };
     clearTimeout(saveTimer);
-    if (state.deleting || state.transferFrozen || !deps.autosave.checked || !deps.workspace.dirty()) {
+    if (state.deleting || persistBlockedByFreeze(state) || !deps.autosave.checked || !deps.workspace.dirty()) {
       return { saved: !deps.workspace.dirty(), conflict: false };
     }
     if (state.editBlock) return { saved: false, conflict: false };
@@ -72,12 +80,16 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       let preparedRun: string | undefined;
       try {
         if (!state.db) throw new Error('Storage unavailable');
-        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock && !state.transferFrozen) {
+        while (deps.workspace.dirty() && deps.autosave.checked && !state.editBlock && !persistBlockedByFreeze(state)) {
           // Queued change records land first, so this save's cleanup covers every one of them.
           await deps.changes.idle();
           // Waiting yielded: Autosave may be off now, with private text typed since (#251 review).
-          // Never capture text unless every saving guard still holds — including discard/takeover freeze.
-          if (state.deleting || state.transferFrozen || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock) break;
+          // Never capture text unless every saving guard still holds — including discard freeze
+          // (not delete/switch, which flush under transitioning + transferFrozen).
+          if (
+            state.deleting || persistBlockedByFreeze(state)
+            || !deps.workspace.dirty() || !deps.autosave.checked || state.editBlock
+          ) break;
           const version = deps.workspace.contentRevision();
           const saved = deps.snapshot();
           // Taken with the text and title: the row says which change records it already contains (#37 R2c).
@@ -173,7 +185,7 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       saving = undefined;
       // An edit can arrive while the post-commit draft list is loading.
       if (
-        !state.deleting && !state.transferFrozen && deps.workspace.dirty()
+        !state.deleting && !persistBlockedByFreeze(state) && deps.workspace.dirty()
         && deps.autosave.checked && !state.saveFailed && !state.editBlock
       ) {
         clearTimeout(saveTimer);
