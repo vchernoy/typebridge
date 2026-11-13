@@ -148,7 +148,8 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   }
 
   async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
-    if (state.transitioning || state.deleting || deps.field.disabled) return false;
+    // transferFrozen (not only field.disabled): takeover freeze uses readOnly, not disabled.
+    if (state.transitioning || state.deleting || deps.field.disabled || state.transferFrozen) return false;
     privateReloadChoice = undefined;
     if (deps.workspace.dirty() && !deps.autosave.checked) {
       if (kind === 'close') {
@@ -174,8 +175,12 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
       });
       if (!discard) return false;
       if (deps.workspace.contentRevision() !== contentAtPrompt) return false;
-      // Freeze + suppress before the first await so Autosave prefs sync cannot persist discarded
-      // text while markReloadDiscard runs (#256 Codex P1). Only this arm is thawed on cancel.
+      // Dialog await: Autosave may have flipped on and started persist — refuse privacy discard
+      // and cancel any in-flight save so it cannot commit after we freeze (#256 Codex P1).
+      deps.saver.cancel();
+      if (deps.autosave.checked || state.transferFrozen) return false;
+      // Freeze + suppress before the next await so Autosave prefs sync cannot persist discarded
+      // text while markReloadDiscard runs. Only this arm is thawed on cancel.
       deps.freezeForDiscard();
       reloadFreezeArmed = true;
       stashedReloadBackup = deps.reloadBackup.take();

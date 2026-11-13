@@ -82,7 +82,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
       field,
       autosave,
       workspace,
-      saver: { cancel: () => undefined },
+      saver: { cancel: vi.fn(() => undefined) },
       persist: async () => ({ saved: false, conflict: false }),
       snapshot: () => ({ ...state.active, text: field.value, title: 'T', updatedAt: 1 }),
       reloadBackup: {
@@ -103,7 +103,7 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     };
     const guards = createLeaveGuards(state, deps);
     return {
-      guards, workspace, field, discardUnsavedRecovery, deps,
+      guards, state, workspace, field, discardUnsavedRecovery, deps,
       freezeForDiscard, unfreezeAfterDiscard, isFrozen: () => frozen,
     };
   }
@@ -171,6 +171,26 @@ describe('leave-guards discard consent (#37 R2c 2d-2 / #254)', () => {
     await expect(guards.prepareUpdateReload()).resolves.toBe(false);
     guards.cancelUpdateReload();
     expect(unfreezeAfterDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload refuses when already transferFrozen (#256 Codex P1)', async () => {
+    const { guards, state, freezeForDiscard, deps } = harness({ autosaveOn: false });
+    state.transferFrozen = true;
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
+    expect(freezeForDiscard).not.toHaveBeenCalled();
+  });
+
+  it('update-reload refuses when Autosave turns on during the dialog (#256 Codex P1)', async () => {
+    const { guards, deps, freezeForDiscard } = harness({ autosaveOn: false });
+    vi.mocked(askConfirmChoice).mockImplementation(async () => {
+      (deps.autosave as { checked: boolean }).checked = true;
+      return true;
+    });
+    await expect(guards.prepareUpdateReload()).resolves.toBe(false);
+    expect(deps.saver.cancel).toHaveBeenCalled();
+    expect(deps.markReloadDiscard).not.toHaveBeenCalled();
+    expect(freezeForDiscard).not.toHaveBeenCalled();
   });
 
   it('assert after discard consent ignores Autosave-on backup recreate (#256 review P0)', async () => {
