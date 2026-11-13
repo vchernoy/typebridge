@@ -30,8 +30,7 @@ test('database version change closes the old connection and warns the editor', a
   await second.goto('/editor.html');
   await expect(second.locator('#editor')).toBeEnabled();
   const upgraded = await second.evaluate(() => new Promise<boolean>((resolve, reject) => {
-    // Must be above DATABASE_VERSION so versionchange fires on the first tab.
-    const request = indexedDB.open('typebridge', 5);
+    const request = indexedDB.open('typebridge', 6);
     request.onsuccess = () => { request.result.close(); resolve(true); };
     request.onerror = () => reject(request.error);
   }));
@@ -164,4 +163,22 @@ test('a failed IndexedDB deletion retries pending autosave without further typin
   await page.evaluate(() => (window as unknown as { restoreDelete: () => void }).restoreDelete());
   await page.reload();
   await expect(editor).toHaveValue('Новая несохранённая правка 🙂');
+});
+
+test('the editor starts when both localStorage and sessionStorage access are blocked (#258)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => { errors.push(error.message); });
+  await page.addInitScript(() => {
+    for (const name of ['localStorage', 'sessionStorage']) {
+      Object.defineProperty(window, name, {
+        configurable: true,
+        get() { throw new DOMException('Access denied', 'SecurityError'); },
+      });
+    }
+  });
+  await page.goto('/editor.html');
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#editor')).toBeEnabled();
+  // A throw during startup leaves the static editor enabled but the app uninitialized.
+  expect(errors).toEqual([]);
 });

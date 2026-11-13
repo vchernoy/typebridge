@@ -39,16 +39,7 @@ import {
 import { nextUntitledTitle } from './editor/untitled-title';
 import { FIND_KEY, REPLACE_KEY } from './editor/search-settings';
 import { askConfirmChoice } from './ui/confirm-dialog';
-import {
-  listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, clearDocumentChanges,
-  writeReloadDiscardMarker, clearReloadDiscardMarker, getReloadDiscardMarker, applyReloadDiscardMarker,
-  type StoredDraft,
-} from './editor/indexeddb';
-import {
-  setReloadDiscardIntent, readReloadDiscardIntent, clearReloadDiscardIntent,
-  setReloadDiscardPending, clearReloadDiscardPending, isReloadDiscardPendingActive,
-  reloadDiscardSalvageAction,
-} from './view/reload-discard';
+import { listStoredDrafts, getStoredDraft, commitOrCreateConflictCopy, appendChange, salvageChanges, clearDocumentChanges, type StoredDraft } from './editor/indexeddb';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
 import {
@@ -106,6 +97,17 @@ if (embedded) {
  * only copy of unsaved pane-B text. Never touch IndexedDB documents.
  */
 try { localStorage.removeItem('typebridge.split.v1'); } catch { /* Optional. */ }
+// #256 (reverted) left reload-discard keys; the session one can hold a journal with text (#257).
+// Reading `localStorage`/`sessionStorage` itself throws when storage is blocked: stay inside the try.
+for (const [area, prefix] of [['session', 'typebridge.reloadDiscard.v1.'], ['local', 'typebridge.reloadDiscardPending.v1.']] as const) {
+  try {
+    const storage = area === 'session' ? sessionStorage : localStorage;
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const key = storage.key(i);
+      if (key?.startsWith(prefix)) storage.removeItem(key);
+    }
+  } catch { /* Optional cleanup. */ }
+}
 try {
   const doomed: string[] = [];
   for (let i = 0; i < sessionStorage.length; i++) {
@@ -700,91 +702,14 @@ async function announceRecovered(copy: StoredDraft, sourceId: string): Promise<v
   try { await refreshDrafts(); } catch { /* The copy is stored; the list catches up on focus. */ }
   statusLine.announceAction(`Recovered unsaved text from an earlier session as “${copy.title}” in Documents. Your current document was kept.`);
 }
-/**
- * Update-reload discard (#255): write marker + session intent at consent. Throws when a marker
- * cannot be stored (no db/fence/ownership) so prepare refuses rather than reloading with a
- * discard that will not clear journals or change records (#256 Codex P0).
- */
-async function markReloadDiscard(): Promise<void> {
-  if (viewMode || !state.db || state.editBlock) {
-    throw new Error('Reload discard marker unavailable');
-  }
-  const ownership = state.ownership;
-  if (!ownership || ownership.documentId !== state.active.id) {
-    throw new Error('Reload discard marker unavailable');
-  }
-  const documentId = state.active.id;
-  const fence = await ownership.writeFence();
-  // Pending first so a foreign tab never sees a marker without pending (#256 P1).
-  setReloadDiscardPending(documentId, fence.instanceId);
-  const marker = await writeReloadDiscardMarker(state.db, documentId, fence);
-  // Bind only this window's current journal (exact snapshot); never wipe other tabs' entries (#256 P0).
-  const journal = recovery.currentJournal();
-  setReloadDiscardIntent(marker.instanceId, {
-    documentId: marker.documentId,
-    ...(journal && journal.documentId === marker.documentId ? { journal } : {}),
-  });
-}
-
-/** Cancel update-reload: drop intent/pending first, then best-effort IDB marker (#255). */
-function clearReloadDiscard(): void {
-  clearReloadDiscardIntent(instanceId);
-  const documentId = state.active.id;
-  // Only erase pending this tab wrote — foreign cancel must not clear another consent (#256 P0).
-  clearReloadDiscardPending(documentId, instanceId);
-  if (!state.db || !state.ownership || state.ownership.documentId !== documentId) return;
-  void state.ownership.writeFence().then(fence => {
-    clearReloadDiscardIntent(fence.instanceId);
-    clearReloadDiscardPending(documentId, fence.instanceId);
-    return clearReloadDiscardMarker(state.db!, documentId, fence);
-  }).catch(() => undefined);
-}
-
 /** On starting to edit a document, keep what a crashed window typed into it as a copy. */
 async function salvageOnOwn(documentId: string): Promise<void> {
   if (viewMode || !state.db) return;
   const ownership = state.ownership;
   if (!ownership || ownership.documentId !== documentId) return;
   try {
-    const fence = await ownership.writeFence();
-    // Apply a consented reload-discard marker before salvage can revive discarded text (#255).
-    const marker = await getReloadDiscardMarker(state.db, documentId);
-    const intent = marker ? readReloadDiscardIntent(marker.instanceId) : undefined;
-    const consented = !!marker && intent?.documentId === documentId;
-    const decision = reloadDiscardSalvageAction({
-      hasMarker: !!marker,
-      consented,
-      pendingActive: isReloadDiscardPendingActive(documentId),
-    });
-    if (decision === 'defer') {
-      // Yield the lock so the consenting reload can reacquire and apply; do not stay editable
-      // while discarded records could still be replayed on save (#256 Codex P0). Only release if
-      // this salvage's ownership is still installed (user may have switched documents).
-      if (state.ownership === ownership) loseOwnership();
-      return;
-    }
-    if (decision === 'apply' && marker && intent) {
-      const result = await applyReloadDiscardMarker(state.db, documentId, fence, true);
-      clearReloadDiscardIntent(marker.instanceId);
-      // Clear the consenting instance's pending (survives reload; not this page's instanceId).
-      clearReloadDiscardPending(documentId, marker.instanceId);
-      if (result.applied && intent.journal) {
-        // Exact-version clear only — unrelated same-document journals stay recoverable (#256 P0).
-        try {
-          clearRecovery(localStorage, intent.journal);
-          void renderRecovery();
-        } catch { /* Optional journal. */ }
-      }
-    } else if (decision === 'drop-marker' && marker) {
-      // Stale marker (cancel cleared pending, or pending TTL elapsed): drop marker only.
-      await applyReloadDiscardMarker(state.db, documentId, fence, false);
-      clearReloadDiscardIntent(marker.instanceId);
-      clearReloadDiscardPending(documentId, marker.instanceId);
-    } else {
-      clearReloadDiscardPending(documentId, instanceId);
-    }
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
-    const copy = await salvageChanges(state.db, documentId, fence, crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);
+    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);
     if (copy) await announceRecovered(copy, documentId);
   } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
 }
@@ -1137,8 +1062,6 @@ const leaveGuards = createLeaveGuards(state, {
   freezeForDiscard: () => { freezeEditorsForTransition(); },
   unfreezeAfterDiscard: () => { unfreezeEditorsAfterTransition(); },
   discardUnsavedRecovery: () => discardUnsavedRecovery(),
-  markReloadDiscard: () => markReloadDiscard(),
-  clearReloadDiscard: () => { clearReloadDiscard(); },
 });
 const { prepareUpdateReload, reloadAfterUpdate } = leaveGuards;
 updateStats();
