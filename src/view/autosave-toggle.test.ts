@@ -519,4 +519,33 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     await toggle.applySessionChange(true);
     expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
   });
+
+  it('last-saves the cached writable snapshot when storage is delayed after private typing (#260 P1)', async () => {
+    const { toggle, persistLastBeforePrivate, frozenSnapshot, revision } = harness({
+      sessionDirty: true,
+    });
+    // Writes still allowed — record the pre-privacy boundary (as input handlers do).
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    toggle.noteWritableSnapshot();
+    // Another tab flipped Private session; localStorage already says private, but the
+    // storage handler has not run yet. Post-private typing lands in the live field.
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    frozenSnapshot.text = 'POST PRIVATE TYPING';
+    revision.value = 99;
+    toggle.noteWritableSnapshot(); // must no-op while privateNow
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'saved', title: 'T' }),
+      1,
+      { markPrivate: false },
+    );
+  });
 });

@@ -760,9 +760,12 @@ const saver = createSaver(state, statusLine, {
 });
 const { persist, scheduleSave } = saver;
 field.addEventListener('input', () => {
+  // Cache while mayWrite so a delayed cross-tab Private session last-save stays pre-private (#260).
+  autosaveToggle?.noteWritableSnapshot();
   scheduleSave();
 });
 field.addEventListener('historychange', () => {
+  autosaveToggle?.noteWritableSnapshot();
   scheduleSave();
 });
 draftTitle.addEventListener('focus', () => {
@@ -776,6 +779,7 @@ syncTitleTooltip();
 draftTitle.addEventListener('input', () => {
   syncTitleTooltip();
   rememberActive();
+  autosaveToggle?.noteWritableSnapshot();
   scheduleSave(true);
 });
 autosaveToggle = createAutosaveToggle(state, statusLine, {

@@ -74,6 +74,12 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   let sessionApplyTarget: boolean | undefined;
   /** Last session preference that finished applying (for CustomEvent + storage dedupe). */
   let appliedSessionOn: boolean | undefined;
+  /**
+   * Last text/title/history (+ content revision) taken while `mayWrite` / !privateNow.
+   * Cross-tab `storage` can arrive after localStorage already flipped; live snapshot() then
+   * can include post-private typing. Prefer this boundary for the session last-save (#260 P1).
+   */
+  let lastWritable: { draft: StoredDraft; contentRevision: number } | undefined;
 
   function beginGate(): void {
     if (autosaveToggleGate) return;
@@ -148,6 +154,19 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   }
 
   /**
+   * Record the current editor surface while writes are still allowed. Call from input /
+   * title / history paths (and after showing a writable document) so a delayed cross-tab
+   * Private session notification can last-save this boundary instead of post-private text.
+   */
+  function noteWritableSnapshot(): void {
+    if (privateNow(state.active)) return;
+    lastWritable = {
+      draft: deps.snapshot(),
+      contentRevision: deps.workspace.contentRevision(),
+    };
+  }
+
+  /**
    * Last save of dirty text typed while writes were still allowed, without setting the
    * document `private` flag (#257 switching steps / follow-up item 1).
    * Returns whether that last save failed so callers can warn instead of announcing a clean
@@ -157,8 +176,12 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     if (state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
     const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
     if (!canSave) return { saveFailed: false };
-    const frozen = deps.snapshot();
-    const frozenContentRevision = deps.workspace.contentRevision();
+    // Prefer the last may-write boundary: delayed `storage` can run after post-private typing
+    // already landed in the field while mayWrite() already returned false (#260 P1).
+    const boundary = lastWritable;
+    const frozen = boundary?.draft ?? deps.snapshot();
+    const frozenContentRevision = boundary?.contentRevision ?? deps.workspace.contentRevision();
+    lastWritable = undefined;
     const pending = deps.saver.inFlight();
     if (pending) await pending;
     let freezeTarget = frozen;
@@ -230,10 +253,12 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         return;
       }
       // Session turned off: per-document flag decides.
+      lastWritable = undefined;
       if (!deps.autosave.checked) {
         status.showSaveState();
         return;
       }
+      noteWritableSnapshot();
       const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
       if (!canSave) {
         status.showSaveState();
@@ -423,8 +448,10 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   /** After showDraft / document switch: mirror the shown document (and session). */
   function syncFromDocument(): void {
     if (active) return;
+    lastWritable = undefined;
     mirrorFromDocument();
     if (!deps.autosave.checked) deps.saver.cancel();
+    else noteWritableSnapshot();
   }
 
   /** Re-read global session after host/prefs sync, then mirror the shown document. */
@@ -439,6 +466,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   return {
     applyDocumentChange,
     applySessionChange,
+    noteWritableSnapshot,
     syncFromDocument,
     syncFromStorage,
     syncPrivateMarker,
