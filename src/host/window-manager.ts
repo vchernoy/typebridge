@@ -1,3 +1,4 @@
+import { onStorageClear } from '../editor/clear-data';
 /**
  * #175 step 5–6: free/stacked window manager for the host page.
  * Owns chrome (title bar, resize), tiling, layout mode, Focus maximize — never document text.
@@ -134,8 +135,20 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
   /** Host size at the last resize pass: a window that filled it keeps filling the new size. */
   let lastView: { width: number; height: number } | undefined;
   let activeId = 'main';
+  let storageCleared = false;
+  const clearedWindows = new Map<string, string>();
+  onStorageClear(detail => {
+    if (!detail.documentId) { storageCleared = true; return; }
+    layouts = layouts.map(win => {
+      if (win.documentId !== detail.documentId) return win;
+      clearedWindows.set(win.id, detail.documentId!);
+      return { ...win, documentId: undefined };
+    });
+    if (preFocusLayouts) preFocusLayouts = preFocusLayouts.map(win => win.documentId === detail.documentId ? { ...win, documentId: undefined } : win);
+  });
 
   const persist = (): void => {
+    if (storageCleared) return;
     // While Focus maximizes a window, keep persisting the pre-Focus geometry so reload
     // can restore the prior free/stacked arrangement (and which window was focused).
     const base = hostFocus && preFocusLayouts ? preFocusLayouts : layouts;
@@ -143,7 +156,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       const frame = frames.get(win.id);
       // Prefer a live probe; if the iframe is already gone (host unload), keep the last known id.
       const probed = frame && deps.readDocumentId ? deps.readDocumentId(frame) : undefined;
-      const documentId = probed ?? win.documentId;
+      const documentId = clearedWindows.has(win.id) ? undefined : probed ?? win.documentId;
       return documentId ? { ...win, documentId } : { ...win, documentId: undefined };
     });
     if (hostFocus && preFocusLayouts) preFocusLayouts = next;
@@ -1064,6 +1077,10 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     if (!data || data.type !== 'typebridge-active-draft') return;
     if (typeof data.windowId !== 'string' || typeof data.documentId !== 'string') return;
     if (!layouts.some(win => win.id === data.windowId)) return;
+    if (clearedWindows.has(data.windowId)) {
+      if (data.documentId === clearedWindows.get(data.windowId)) return;
+      clearedWindows.delete(data.windowId);
+    }
     layouts = layouts.map(win => (
       win.id === data.windowId ? { ...win, documentId: data.documentId } : win
     ));

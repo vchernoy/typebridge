@@ -22,6 +22,7 @@ export type EditorState = {
    * upgrade in another tab). Nothing in this page restores it; only a reload can.
    */
   storageProblem: string;
+  storageCleared: boolean;
   /**
    * Why this window cannot edit the shown document ('' when it can). Single editing owner per
    * document (#159 W4): an ordinary window edits only while it holds the document's Web Lock
@@ -55,6 +56,7 @@ export function createEditorState(): EditorState {
     drafts: [],
     saveFailed: false,
     storageProblem: '',
+    storageCleared: false,
     editBlock: '',
     ownership: undefined,
     transitioning: false,

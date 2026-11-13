@@ -82,6 +82,7 @@ function harness(options: {
   persistGate?: Promise<void>;
   firstCommit?: Promise<StoredDraft | undefined>;
   syncIdentity?: () => void;
+  documentCleared?: (id: string) => void;
 } = {}) {
   const state = createEditorState();
   state.active = {
@@ -179,6 +180,7 @@ function harness(options: {
 
   const toggle = createAutosaveToggle(state, status, {
     syncIdentity: options.syncIdentity,
+    documentCleared: options.documentCleared,
     autosave,
     privateMarker,
     workspace,
@@ -633,4 +635,18 @@ for (const committed of [true, false]) it(`session waits for first save settleme
   expect(toggle.isActive()).toBe(false); expect(synchronized.at(-1)).toBe(true);
   expect(state.active.private).not.toBe(true);
   expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+});
+
+it('explicit document clear requires confirmation and never makes a replacement last-save', async () => {
+  const documentCleared = vi.fn();
+  const { toggle, state, persistLastBeforePrivate, clearDocumentBackups } = harness({ deleteSaved: true, documentCleared });
+  await toggle.clearSavedData();
+  expect(deleteStoredDraft).toHaveBeenCalled(); expect(documentCleared).toHaveBeenCalledWith('doc');
+  expect(clearDocumentBackups).toHaveBeenCalledWith('doc'); expect(state.active).toMatchObject({ revision: 0, private: true });
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+});
+it('cancelling document clear leaves its row and privacy state unchanged', async () => {
+  const { toggle, state } = harness();
+  await toggle.clearSavedData();
+  expect(state.active.private).not.toBe(true); expect(deleteStoredDraft).not.toHaveBeenCalled();
 });

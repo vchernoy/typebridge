@@ -32,7 +32,7 @@ export type ViewerDeps = {
   setSaveStatus: (text: string, kind?: Exclude<StatusKind, 'action'>) => void;
   restoreFocusMode: () => void;
   finishInitialization: () => void;
-  onDatabaseUpgrade: () => void;
+  onDatabaseUpgrade: (cleared?: boolean) => void;
 };
 
 export function createViewerMode(state: EditorState, deps: ViewerDeps) {
@@ -41,7 +41,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
   const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
   const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
   const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
-  const VIEWER_DISABLED_CONTROLS = ['rename-draft', 'new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
+  const VIEWER_DISABLED_CONTROLS = ['clear-document-data', 'rename-draft', 'new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
     'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
   /** Controls that only make sense while a saved document is shown. */
   const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];
@@ -148,6 +148,12 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     }
   }
   return {
+    showCleared: (message: string): void => {
+      requestedId = undefined; state.viewMissing = true;
+      viewerNotice.textContent = message; viewerNotice.hidden = false;
+      viewerBadge.textContent = 'Cleared saved copy · Read-only';
+      deps.renderDrafts();
+    },
     documentId: (): string | undefined => requestedId,
     /** Show another saved document (Documents picker). */
     open: viewerOpen,

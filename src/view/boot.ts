@@ -71,7 +71,7 @@ export type BootDeps = {
   workspace: Workspace;
   writingPosition: { restore: (id: string) => void; prune: (ids: Iterable<string>) => void };
   ownerReady: Promise<void>;
-  onDatabaseUpgrade: () => void;
+  onDatabaseUpgrade: (cleared?: boolean) => void;
   noteWritableSnapshot: () => void;
   readPending: () => StoredDraft | undefined;
   clearPending: (saved: StoredDraft) => void;

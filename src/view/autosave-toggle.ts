@@ -29,6 +29,7 @@ import type { Workspace } from './workspace';
 
 export type AutosaveToggleDeps = {
   syncIdentity?: () => void;
+  documentCleared?: (id: string) => void;
   autosave: HTMLInputElement;
   privateMarker: HTMLElement;
   workspace: Workspace;
@@ -294,14 +295,14 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
    * Offer Keep/Delete after going private. When true, `skipAutosaveOff` means a status message
    * was already announced that must not be replaced by AUTOSAVE_OFF (#260 Codex P1 / P2).
    */
-  async function offerDeleteSavedCopy(): Promise<{ skipAutosaveOff: boolean }> {
+  async function offerDeleteSavedCopy(confirmed = false): Promise<{ skipAutosaveOff: boolean }> {
     if (state.active.revision < 1) return { skipAutosaveOff: false };
     // Bind deletion to this document before any await — defense if a switch somehow races the gate.
     const targetId = state.active.id;
     const targetRevision = state.active.revision;
     const targetOwnership = state.ownership;
     if (!targetOwnership || targetOwnership.documentId !== targetId) return { skipAutosaveOff: false };
-    const deleteSaved = await askConfirmChoice({
+    const deleteSaved = confirmed || await askConfirmChoice({
       title: 'Delete the saved copy?',
       message: 'Delete the saved copy of this document? Keep saved copy leaves it in your Documents list.',
       confirmLabel: 'Delete saved copy',
@@ -325,6 +326,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         deps.workspace.setDirty(true);
       }
       status.clearNotices();
+      if (confirmed) deps.documentCleared?.(targetId);
       // Deletion is durable; list refresh failure must not look like a failed delete (#260 Codex P2).
       try {
         await deps.refreshDrafts();
@@ -449,6 +451,31 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     announce('Autosave on');
   }
 
+  async function clearSavedData(): Promise<void> {
+    if (active || deps.controlBlocked() || state.active.revision < 1) return;
+    active = true; beginGate(); deps.autosave.disabled = true;
+    const id = state.active.id;
+    try {
+      if (!await askConfirmChoice({ title: 'Clear this document’s saved data?',
+        message: 'Permanently delete this document’s saved copy, change records, crash and reload backups, and saved view metadata on this device? This cannot be undone. The text stays privately in this window until you leave.',
+        confirmLabel: 'Clear saved data', cancelLabel: 'Cancel',
+        returnFocus: () => deps.autosave.ownerDocument?.querySelector<HTMLElement>('#doc-menu-open') ?? deps.autosave })) return;
+      if (state.active.id !== id) return;
+      state.active = { ...state.active, private: true }; deps.autosave.checked = false;
+      deps.saver.cancel(); syncPrivateMarker();
+      const pending = deps.saver.inFlight(); if (pending) await pending;
+      if (state.active.id !== id) return;
+      await offerDeleteSavedCopy(true);
+      if (state.active.id === id && state.active.revision === 0) {
+        // Kept text is a new private scratch document, never a resurrection of the erased identity.
+        state.active = { ...state.active, id: crypto.randomUUID() };
+        deps.workspace.bumpSessionGeneration(); deps.workspace.setDocumentId(state.active.id);
+        deps.renderDrafts();
+      }
+      syncPrivateMarker();
+    } finally { finish(false); }
+  }
+
   /** After showDraft / document switch: mirror the shown document (and session). */
   function syncFromDocument(): void {
     if (active) return;
@@ -464,6 +491,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
   }
 
   return {
+    clearSavedData,
     applyDocumentChange,
     applySessionChange,
     noteWritableSnapshot,
