@@ -331,8 +331,10 @@ export async function clearReloadDiscardMarker(
 
 /**
  * Next load under a new fence (#255): if `reloadConsented`, delete change records with
- * `seq <= marker.upToSeq` and the marker; otherwise delete only a stale marker. Never deletes
- * records without consent (sessionStorage intent must have survived the reload).
+ * `seq <= marker.upToSeq` and the marker; otherwise delete only a stale marker. Callers must not
+ * pass `reloadConsented=false` while a cross-tab pending reload is still active — that would let
+ * a foreign tab consume the marker and then salvage discarded records (#256 Codex P0). Never
+ * deletes records without consent (sessionStorage intent must have survived the reload).
  */
 export async function applyReloadDiscardMarker(
   db: IDBDatabase, documentId: string, owner: WriteFence, reloadConsented: boolean,

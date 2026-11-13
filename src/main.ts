@@ -46,6 +46,8 @@ import {
 } from './editor/indexeddb';
 import {
   setReloadDiscardIntent, readReloadDiscardIntent, clearReloadDiscardIntent,
+  setReloadDiscardPending, clearReloadDiscardPending, isReloadDiscardPendingActive,
+  reloadDiscardSalvageAction,
 } from './view/reload-discard';
 import { installFocusHandoff, type FocusHandoffController } from './view/focus-handoff';
 import { createSinglePaneWorkspace, PRIMARY_PANE_ID } from './view/workspace';
@@ -709,17 +711,19 @@ async function markReloadDiscard(): Promise<void> {
   const marker = await writeReloadDiscardMarker(state.db, state.active.id, await ownership.writeFence());
   // Bind only this window's current journal (exact snapshot); never wipe other tabs' entries (#256 P0).
   const journal = recovery.currentJournal();
+  // Cross-tab pending before session intent: foreign tabs must see in-flight reload (#256 Codex P0).
+  setReloadDiscardPending(marker.documentId, marker.instanceId);
   setReloadDiscardIntent(marker.instanceId, {
     documentId: marker.documentId,
     ...(journal && journal.documentId === marker.documentId ? { journal } : {}),
   });
 }
 
-/** Cancel update-reload: drop session intent first, then best-effort IDB marker (#255). */
+/** Cancel update-reload: drop intent/pending first, then best-effort IDB marker (#255). */
 function clearReloadDiscard(): void {
   clearReloadDiscardIntent(instanceId);
-  // Also clear by any marker we may have written (same instanceId while this page lives).
   const documentId = state.active.id;
+  clearReloadDiscardPending(documentId);
   if (!state.db || !state.ownership || state.ownership.documentId !== documentId) return;
   void state.ownership.writeFence().then(fence => {
     clearReloadDiscardIntent(fence.instanceId);
@@ -736,18 +740,35 @@ async function salvageOnOwn(documentId: string): Promise<void> {
     const fence = await ownership.writeFence();
     // Apply a consented reload-discard marker before salvage can revive discarded text (#255).
     const marker = await getReloadDiscardMarker(state.db, documentId);
-    if (marker) {
-      const intent = readReloadDiscardIntent(marker.instanceId);
-      const consented = intent?.documentId === documentId;
-      const result = await applyReloadDiscardMarker(state.db, documentId, fence, consented);
+    const intent = marker ? readReloadDiscardIntent(marker.instanceId) : undefined;
+    const consented = !!marker && intent?.documentId === documentId;
+    const decision = reloadDiscardSalvageAction({
+      hasMarker: !!marker,
+      consented,
+      pendingActive: isReloadDiscardPendingActive(documentId),
+    });
+    if (decision === 'defer') {
+      // Another tab still completing the consented reload: do not consume the marker or salvage (#256).
+      return;
+    }
+    if (decision === 'apply' && marker && intent) {
+      const result = await applyReloadDiscardMarker(state.db, documentId, fence, true);
       clearReloadDiscardIntent(marker.instanceId);
-      if (result.applied && intent?.journal) {
+      clearReloadDiscardPending(documentId);
+      if (result.applied && intent.journal) {
         // Exact-version clear only — unrelated same-document journals stay recoverable (#256 P0).
         try {
           clearRecovery(localStorage, intent.journal);
           void renderRecovery();
         } catch { /* Optional journal. */ }
       }
+    } else if (decision === 'drop-marker' && marker) {
+      // Stale marker (cancel cleared pending, or pending TTL elapsed): drop marker only.
+      await applyReloadDiscardMarker(state.db, documentId, fence, false);
+      clearReloadDiscardIntent(marker.instanceId);
+      clearReloadDiscardPending(documentId);
+    } else {
+      clearReloadDiscardPending(documentId);
     }
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
     const copy = await salvageChanges(state.db, documentId, fence, crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), field.value, shownTitle);

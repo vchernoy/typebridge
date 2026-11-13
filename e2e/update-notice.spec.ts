@@ -314,6 +314,10 @@ test('cancelled update-reload keeps change records for later salvage (#255)', as
   const dialog = page.getByRole('dialog', { name: 'Reload without saving?', exact: true });
   await dialog.getByRole('button', { name: 'Discard changes and reload', exact: true }).click();
   await expect(page.locator('#update-notice')).toContainText('Could not reload safely');
+  // Cross-tab pending flag must be cleared so another tab can salvage.
+  expect(await page.evaluate(() =>
+    Object.keys(localStorage).some(key => key.startsWith('typebridge.reloadDiscardPending.v1.')),
+  )).toBe(false);
   // Intent cleared; change records must still be present.
   await expect.poll(() => page.evaluate(needle => new Promise<boolean>((resolve, reject) => {
     const open = indexedDB.open('typebridge');
