@@ -5,18 +5,18 @@ async function ready(page: Page) {
   await expect(page.locator('#editor')).toBeEnabled();
 }
 async function stored(page: Page) {
-  return page.evaluate(() => new Promise<{ rows: Array<{ id: string; text: string }>; all: string }>((resolve, reject) => {
+  return page.evaluate(() => new Promise<{ rows: Array<{ id: string; text: string }>; all: string; stores: Record<string, unknown[]> }>((resolve, reject) => {
     const open = indexedDB.open('typebridge');
     open.onupgradeneeded = () => open.transaction!.abort();
     const metadata = () => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } });
-    open.onerror = () => { if (open.error?.name === 'AbortError') resolve({ rows: [], all: metadata() }); else reject(open.error); };
+    open.onerror = () => { if (open.error?.name === 'AbortError') resolve({ rows: [], all: metadata(), stores: {} }); else reject(open.error); };
     open.onsuccess = () => {
       const db = open.result, names = [...db.objectStoreNames];
-      if (!names.length) { db.close(); resolve({ rows: [], all: metadata() }); return; }
+      if (!names.length) { db.close(); resolve({ rows: [], all: metadata(), stores: {} }); return; }
       const tx = db.transaction(names), requests = names.map(name => tx.objectStore(name).getAll());
       tx.oncomplete = () => {
         const result = Object.fromEntries(names.map((name, i) => [name, requests[i].result]));
-        db.close(); resolve({ rows: result.documents ?? [], all: JSON.stringify(result) + metadata() });
+        db.close(); resolve({ rows: result.documents ?? [], all: JSON.stringify(result) + metadata(), stores: result });
       };
       tx.onerror = () => reject(tx.error);
     };
@@ -104,14 +104,14 @@ test('clear one document preserves other documents, keeps live text private, and
 
 test('clear-all failure is reported without pretending the saved data was removed', async ({ page }) => {
   await page.goto('/editor.html'); await ready(page); await save(page, 'Retained after failed clear');
-  await page.evaluate(() => { indexedDB.deleteDatabase = () => { throw new DOMException('Blocked', 'SecurityError'); }; });
+  await page.evaluate(() => { Object.defineProperty(IDBFactory.prototype, 'deleteDatabase', { configurable: true, value: () => { throw new DOMException('Blocked', 'SecurityError'); } }); });
   await clearAll(page);
   await expect(page.getByText('Some local data could not be cleared.', { exact: false }).first()).toBeVisible();
   expect((await stored(page)).rows).toHaveLength(1);
   await expect(page.locator('#editor')).toHaveValue('Retained after failed clear');
 });
 
-test('host clear-all removes layout and empties both live editor windows', async ({ page }) => {
+test('host and two tabs reload after clearing two host windows; notices are one-shot and saving resumes', async ({ page, context }) => {
   await page.goto('/');
   const frame = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(frame.locator('#editor')).toBeEnabled();
@@ -122,16 +122,40 @@ test('host clear-all removes layout and empties both live editor windows', async
   const second = page.frameLocator('.host-window[data-window-id="w2"] iframe');
   await expect(second.locator('#editor')).toBeEnabled();
   await second.locator('#editor').fill('CLEAR CANARY second'); await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  const originalMain = await frame.locator('html').getAttribute('data-instance-id');
+  const originalSecond = await second.locator('html').getAttribute('data-instance-id');
+  await page.evaluate(() => { (window as unknown as { oldHost?: boolean }).oldHost = true; });
+  const tabs = await Promise.all([context.newPage(), context.newPage()]);
+  for (const tab of tabs) { await tab.goto(`/editor.html?doc=${id}`); await expect(tab.locator('#editor')).toHaveValue('CLEAR CANARY host'); }
+  const before = await Promise.all(tabs.map(tab => tab.locator('html').getAttribute('data-instance-id')));
   await clearAll(page);
   await expect(frame.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
-  await expect(second.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+  await expect(page.locator('iframe.host-editor')).toHaveCount(1);
+  expect(await page.evaluate(() => (window as unknown as { oldHost?: boolean }).oldHost)).toBeUndefined();
+  await expect(frame.locator('html')).not.toHaveAttribute('data-instance-id', originalMain!);
+  await expect(page.locator('#host-notice').getByText('All local data was cleared', { exact: true })).toBeVisible();
   await expect(frame.locator('#editor')).toHaveValue('');
-  await expect(second.locator('#editor')).toHaveValue('');
   expect((await stored(page)).all).not.toContain('CLEAR CANARY');
   expect((await stored(page)).all).not.toContain(id);
-  await page.locator('#settings-close').click();
-  await page.getByRole('button', { name: 'Tile side by side' }).click();
-  expect(await page.evaluate(() => localStorage.getItem('typebridge.host.windows.v1'))).toBeNull();
+  await frame.locator('#editor').fill('Fresh host text');
+  await expect(frame.locator('#save-indicator')).toHaveText('Saved');
+  for (const [i, tab] of tabs.entries()) {
+    await ready(tab); await expect(tab.locator('html')).not.toHaveAttribute('data-instance-id', before[i]!);
+    await expect(tab.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+    expect(await tab.evaluate(() => sessionStorage.getItem('typebridge.clearedNotice.v1'))).toBeNull();
+    await save(tab, 'Fresh tab ' + i);
+  }
+  await page.getByRole('button', { name: 'New window', exact: true }).click();
+  await expect(second.locator('html')).not.toHaveAttribute('data-instance-id', originalSecond!);
+  await expect(second.locator('#editor')).toBeEnabled(); await second.locator('#editor').fill('Fresh second window');
+  await expect(second.locator('#save-indicator')).toHaveText('Saved');
+  expect((await stored(page)).all).not.toContain('CANARY');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.clearedNotice.v1'))).toBeNull();
+  await tabs[0].reload(); await ready(tabs[0]);
+  await expect(tabs[0].getByText('Storage was cleared in another tab', { exact: true })).toHaveCount(0);
+  await page.reload(); await expect(frame.locator('#editor')).toBeEnabled();
+  await expect(page.getByText('All local data was cleared', { exact: true })).toHaveCount(0);
+  await expect(frame.getByText('Storage was cleared in another tab', { exact: true })).toHaveCount(0);
 });
 
 test('an already-started save cannot restore data or backups after clear-all', async ({ page }) => {
@@ -223,9 +247,12 @@ test('document clear drains a delayed queued append before deleting its content'
 test('a throwing content metadata key reports incomplete erasure in every tab', async ({ page, context }) => {
   await page.goto('/editor.html'); await ready(page); const id = await save(page, 'Saved before partial clear');
   const other = await context.newPage(); await other.goto(`/editor.html?doc=${id}`); await expect(other.locator('#editor')).toHaveValue('Saved before partial clear');
+  const before = await page.locator('html').getAttribute('data-instance-id');
+  const otherBefore = await other.locator('html').getAttribute('data-instance-id');
   await page.evaluate(() => {
     localStorage.setItem('typebridge.recovery.v1.throwing', 'CLEAR CANARY retained metadata');
     const remove = Storage.prototype.removeItem;
+    (window as unknown as { restoreStorageRemoval: () => void }).restoreStorageRemoval = () => { Storage.prototype.removeItem = remove; };
     Storage.prototype.removeItem = function (key: string) {
       if (key === 'typebridge.recovery.v1.throwing') throw new DOMException('Denied', 'SecurityError');
       remove.call(this, key);
@@ -237,6 +264,16 @@ test('a throwing content metadata key reports incomplete erasure in every tab', 
   await expect(page.getByText('All local data was cleared', { exact: true })).toHaveCount(0);
   await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('typebridge.recovery.v1.throwing'))).toContain('CANARY');
+  await expect(page.locator('html')).toHaveAttribute('data-instance-id', before!);
+  await expect(other.locator('html')).toHaveAttribute('data-instance-id', otherBefore!);
+  await page.evaluate(() => (window as unknown as { restoreStorageRemoval: () => void }).restoreStorageRemoval());
+  await clearAll(page);
+  await expect(page.locator('html')).not.toHaveAttribute('data-instance-id', before!);
+  await expect(other.locator('html')).not.toHaveAttribute('data-instance-id', otherBefore!);
+  await expect(page.getByText('All local data was cleared', { exact: true })).toBeVisible();
+  await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+  expect((await stored(page)).all).not.toContain('CANARY');
+  await save(page, 'Fresh after retry');
 });
 
 test('global clear cancels a switch that is waiting to acquire an erased target', async ({ page, context }) => {
@@ -253,7 +290,7 @@ test('global clear cancels a switch that is waiting to acquire an erased target'
   await clearAll(page);
   await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
   // Cover the deliberately delayed acquire and its stale completion, not only the initial reset.
-  await other.waitForTimeout(1800);
+  await expect(other.locator('#editor')).toBeEnabled();
   await expect(other.locator('#editor')).toHaveValue('');
   await expect(other.locator('#draft-title')).not.toHaveValue(/CANARY/);
   await expect(other.locator('#editor')).toHaveJSProperty('readOnly', false);
@@ -291,12 +328,12 @@ test('global clear cancels startup waiting for its initial ownership acquisition
   const other = await context.newPage();
   await other.addInitScript(() => {
     const win = window as unknown as { __typebridgeDelayAcquireMs: number; bootAcquireWaiting: boolean; oldBootTimerFinished: boolean; releaseFreshAcquire?: () => void };
-    win.__typebridgeDelayAcquireMs = 1500;
+    if (!sessionStorage.getItem('typebridge.clearedNotice.v1')) win.__typebridgeDelayAcquireMs = 1500;
     const timers = window as unknown as { setTimeout: (callback: TimerHandler, delay?: number, ...args: unknown[]) => number };
     const schedule = timers.setTimeout;
     let acquisitions = 0;
     timers.setTimeout = function (callback: TimerHandler, delay?: number, ...args: unknown[]) {
-      if (delay !== 1500 || typeof callback !== 'function') return schedule.call(window, callback, delay, ...args);
+      if (!win.__typebridgeDelayAcquireMs || delay !== 1500 || typeof callback !== 'function') return schedule.call(window, callback, delay, ...args);
       win.bootAcquireWaiting = true;
       if (++acquisitions > 1) { win.releaseFreshAcquire = () => callback(...args); return 0; }
       return schedule.call(window, () => { callback(...args); win.oldBootTimerFinished = true; }, delay);
@@ -306,13 +343,8 @@ test('global clear cancels startup waiting for its initial ownership acquisition
   await expect.poll(() => other.evaluate(() => (window as unknown as { bootAcquireWaiting: boolean }).bootAcquireWaiting)).toBe(true);
   await clearAll(page);
   await expect(other.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
-  // Hold the replacement acquire until the old startup has settled. No input is accepted
-  // into the empty editor before that new persistence pipeline is ready.
-  await expect.poll(() => other.evaluate(() => typeof (window as unknown as { releaseFreshAcquire?: () => void }).releaseFreshAcquire)).toBe('function');
-  await expect(other.locator('#editor')).toBeDisabled();
-  await expect.poll(() => other.evaluate(() => (window as unknown as { oldBootTimerFinished: boolean }).oldBootTimerFinished)).toBe(true);
-  await expect(other.locator('#editor')).toHaveValue('');
-  await other.evaluate(() => (window as unknown as { releaseFreshAcquire: () => void }).releaseFreshAcquire());
+  // The old acquisition/callback is discarded by navigation, not completed in this page.
+  await expect.poll(() => other.evaluate(() => (window as unknown as { bootAcquireWaiting?: boolean }).bootAcquireWaiting)).toBeUndefined();
   await expect(other.locator('#editor')).toBeEnabled();
   await expect(other.locator('#editor')).toHaveValue('');
   await expect(other.locator('#editor')).toHaveJSProperty('readOnly', false);
@@ -348,9 +380,29 @@ test('a pending emergency Recover cannot recreate erased content in the replacem
   await clearAll(clearing);
   await expect(page.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
   await expect(page.locator('#autosave')).toBeEnabled();
-  await page.evaluate(() => (window as unknown as { releaseRecoveryOwner: () => Promise<void> }).releaseRecoveryOwner());
+  expect(await page.evaluate(() => typeof (window as unknown as { releaseRecoveryOwner?: () => Promise<void> }).releaseRecoveryOwner)).toBe('undefined');
   const data = await stored(page);
-  expect(data.rows).toEqual([]); expect(data.all).not.toContain('CANARY');
+  expect(data.rows).toEqual([]);
+  expect(data.stores.changes).toEqual([]); expect(data.stores.editOwnership).toEqual([]);
+  expect(data.all).not.toContain('CANARY');
   expect(data.all).not.toContain('recovery-clear-pending-recovery');
   await expect(page.locator('#editor')).toHaveValue('');
+});
+
+
+test('two global clears in a row each reload into a fresh editable document', async ({ page }) => {
+  await page.goto('/editor.html'); await ready(page);
+  for (let i = 0; i < 2; i++) {
+    const id = await save(page, 'CLEAR CANARY round ' + i);
+    const instance = await page.locator('html').getAttribute('data-instance-id');
+    await clearAll(page);
+    await ready(page);
+    await expect(page.locator('html')).not.toHaveAttribute('data-instance-id', instance!);
+    await expect(page.getByText('All local data was cleared', { exact: true })).toBeVisible();
+    await expect(page.locator('#editor')).toHaveValue('');
+    await expect(page.locator('#editor')).toHaveJSProperty('readOnly', false);
+    const data = await stored(page); expect(data.all).not.toContain('CANARY'); expect(data.all).not.toContain(id);
+    expect(data.stores.documents).toEqual([]); expect(data.stores.changes).toEqual([]); expect(data.stores.editOwnership).toEqual([]);
+  }
+  await save(page, 'Fresh after two clears');
 });
