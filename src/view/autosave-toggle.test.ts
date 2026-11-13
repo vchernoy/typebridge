@@ -303,6 +303,74 @@ describe('createAutosaveToggle going private (#257)', () => {
     expect(state.active.private).toBe(true);
     expect(setDirty).toHaveBeenCalledWith(true);
   });
+
+  it('keeps delete-failure feedback instead of Autosave off (#260 Codex P1)', async () => {
+    const { toggle, announceAction, setSaveStatus } = harness({ deleteSaved: true });
+    vi.mocked(deleteStoredDraft).mockResolvedValue(false);
+    await toggle.applyDocumentChange(false);
+    expect(announceAction).toHaveBeenCalledWith(
+      'Could not delete saved document; current text is kept',
+      { keepConflict: true },
+    );
+    expect(setSaveStatus.mock.calls.every(call => !String(call[0]).includes('Autosave off'))).toBe(true);
+    expect(announceAction.mock.calls.at(-1)?.[0]).toBe('Could not delete saved document; current text is kept');
+  });
+
+  it('reports list-refresh failure separately from a successful delete (#260 Codex P2)', async () => {
+    const state = createEditorState();
+    state.active = { id: 'doc', title: 'T', text: 'saved', updatedAt: 1, revision: 1 };
+    state.db = {} as IDBDatabase;
+    state.ownership = {
+      documentId: 'doc',
+      writeFence: async () => ({ instanceId: 'i', fence: 1 }),
+      release: async () => undefined,
+    } as never;
+    const autosave = { checked: true, disabled: false } as HTMLInputElement;
+    const announceAction = vi.fn();
+    const setSaveStatus = vi.fn();
+    const status = {
+      announceAction,
+      setSaveStatus,
+      clearNotices: vi.fn(),
+      showSaveState: vi.fn(),
+      showSaving: vi.fn(),
+      riskText: () => '',
+    } as unknown as StatusLine;
+    vi.mocked(deleteStoredDraft).mockResolvedValue(true);
+    vi.mocked(askConfirmChoice).mockResolvedValue(true);
+    const toggle = createAutosaveToggle(state, status, {
+      autosave,
+      privateMarker: { hidden: true } as HTMLElement,
+      workspace: makeWorkspace(false),
+      viewMode: false,
+      embedded: true,
+      transferFrozen: () => false,
+      controlBlocked: () => false,
+      journalEdit: () => undefined,
+      persist: async () => ({ saved: true, conflict: false }),
+      persistLastBeforePrivate: async () => ({ saved: true, conflict: false }),
+      snapshot: () => ({ ...state.active }),
+      changeLogProtects: () => true,
+      saver: { cancel: () => undefined, inFlight: () => undefined, drainChanges: async () => undefined },
+      abandonChangeRun: () => undefined,
+      refreshDrafts: async () => { throw new Error('list failed'); },
+      renderDrafts: () => undefined,
+      loseOwnership: () => undefined,
+      postSignal: () => undefined,
+      clearDocumentBackups: () => undefined,
+      syncAutosaveControl: () => undefined,
+    });
+    await toggle.applyDocumentChange(false);
+    expect(announceAction).toHaveBeenCalledWith(
+      'Saved copy deleted, but the document list could not be refreshed',
+      { keepConflict: true },
+    );
+    expect(announceAction).not.toHaveBeenCalledWith(
+      'Could not delete saved document; current text is kept',
+      expect.anything(),
+    );
+    expect(state.active.revision).toBe(0);
+  });
 });
 
 describe('createAutosaveToggle private session (#257 follow-up)', () => {

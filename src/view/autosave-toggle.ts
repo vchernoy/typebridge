@@ -221,13 +221,17 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     }
   }
 
-  async function offerDeleteSavedCopy(): Promise<void> {
-    if (state.active.revision < 1) return;
+  /**
+   * Offer Keep/Delete after going private. When true, `skipAutosaveOff` means a status message
+   * was already announced that must not be replaced by AUTOSAVE_OFF (#260 Codex P1 / P2).
+   */
+  async function offerDeleteSavedCopy(): Promise<{ skipAutosaveOff: boolean }> {
+    if (state.active.revision < 1) return { skipAutosaveOff: false };
     // Bind deletion to this document before any await — defense if a switch somehow races the gate.
     const targetId = state.active.id;
     const targetRevision = state.active.revision;
     const targetOwnership = state.ownership;
-    if (!targetOwnership || targetOwnership.documentId !== targetId) return;
+    if (!targetOwnership || targetOwnership.documentId !== targetId) return { skipAutosaveOff: false };
     const deleteSaved = await askConfirmChoice({
       title: 'Delete the saved copy?',
       message: 'Delete the saved copy of this document? Keep saved copy leaves it in your Documents list.',
@@ -235,7 +239,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       cancelLabel: 'Keep saved copy',
       returnFocus: deps.autosave,
     });
-    if (!deleteSaved) return;
+    if (!deleteSaved) return { skipAutosaveOff: false };
     try {
       if (!state.db || targetOwnership.documentId !== targetId) throw new Error('Storage unavailable');
       if (state.active.id !== targetId || state.ownership !== targetOwnership || state.editBlock || deps.transferFrozen() || state.transitioning) {
@@ -252,10 +256,18 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         deps.workspace.setDirty(true);
       }
       status.clearNotices();
-      await deps.refreshDrafts();
+      // Deletion is durable; list refresh failure must not look like a failed delete (#260 Codex P2).
+      try {
+        await deps.refreshDrafts();
+      } catch {
+        status.announceAction('Saved copy deleted, but the document list could not be refreshed', { keepConflict: true });
+        return { skipAutosaveOff: true };
+      }
+      return { skipAutosaveOff: false };
     } catch (error) {
       if (error instanceof EditOwnershipLostError) deps.loseOwnership();
       status.announceAction('Could not delete saved document; current text is kept', { keepConflict: true });
+      return { skipAutosaveOff: true };
     }
   }
 
@@ -335,7 +347,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       }
     }
 
-    await offerDeleteSavedCopy();
+    const { skipAutosaveOff } = await offerDeleteSavedCopy();
 
     if (warnFlag) {
       status.announceAction(PRIVATE_SWITCH_FLAG_FAILED, { keepConflict: true });
@@ -345,6 +357,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       status.announceAction(PRIVATE_SWITCH_SAVE_FAILED, { keepConflict: true });
       return;
     }
+    // Keep delete-failure / list-refresh feedback visible (#260 Codex P1).
+    if (skipAutosaveOff) return;
     announce(AUTOSAVE_OFF);
   }
 
