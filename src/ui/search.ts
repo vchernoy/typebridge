@@ -16,6 +16,8 @@ export function setupSearch(
   enabled: HTMLInputElement,
   options: {
     canMutate?: () => boolean;
+    /** Text stays in memory while the shown document/session is private. */
+    mayPersistText?: () => boolean;
     getFindTarget?: () => SearchTarget;
     /** Editor surfaces whose edits refresh the open Find match total (active pane may change). */
     matchSurfaces?: HTMLTextAreaElement[];
@@ -30,6 +32,7 @@ export function setupSearch(
   syncSearchEditors: () => void;
   showMatchCount: () => void;
   resetOptions: () => boolean;
+  restoreText: () => void;
 } {
   const field = primary.field;
   const canMutate = options.canMutate ?? (() => true);
@@ -54,6 +57,7 @@ export function setupSearch(
   for (const [input, key] of [[findInput, findTextKey], [replaceInput, replaceTextKey]] as const) {
     try { input.value = readSearchText(sessionStorage, key); } catch { searchStorageResult(key, false); }
     const save = (): void => {
+      if (options.mayPersistText && !options.mayPersistText()) return;
       try { sessionStorage.setItem(key, input.value); searchStorageResult(key, true); }
       catch { searchStorageResult(key, false); }
     };
@@ -145,6 +149,7 @@ export function setupSearch(
   // Sibling host windows share FIND_KEY; pick up live updates without reload (#175 step 9).
   if (findTextKey === FIND_KEY) {
     window.addEventListener('storage', event => {
+      if (options.mayPersistText && !options.mayPersistText()) return;
       if (event.storageArea !== sessionStorage || event.key !== FIND_KEY) return;
       const next = event.newValue ?? '';
       if (findInput.value === next) return;
@@ -198,5 +203,13 @@ export function setupSearch(
     }
     return saved;
   }
-  return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions };
+  function restoreText(): void {
+    for (const [input, key, ed] of [[findInput, findTextKey, findEditor], [replaceInput, replaceTextKey, replaceEditor]] as const) {
+      try { input.value = readSearchText(sessionStorage, key); }
+      catch { input.value = ''; searchStorageResult(key, false); }
+      ed.syncFromField();
+    }
+    showMatchCount();
+  }
+  return { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions, restoreText };
 }

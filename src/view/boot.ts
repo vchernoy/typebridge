@@ -86,6 +86,7 @@ export type BootDeps = {
   restoreFocusMode: () => void;
   renderRecovery: () => Promise<void>;
   finishInitialization: () => void;
+  noteWritableSnapshot?: () => void;
 };
 
 export async function initializeDrafts(state: EditorState, status: StatusLine, deps: BootDeps): Promise<void> {
@@ -146,6 +147,7 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
     bootAccess = undefined;
     if (restorePending) {
       deps.workspace.setDirty(true); deps.workspace.bumpContentRevision();
+      deps.noteWritableSnapshot?.();
       deps.applyEditAccess();
       // Another window owns the document: keep the recovered text here (and its reload backup) for copy/export.
       if (state.editBlock) status.setSaveStatus('Recovered unsaved text, but another window is editing this document, so it was not saved. Copy or export it.', 'failure');

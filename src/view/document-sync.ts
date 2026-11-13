@@ -163,7 +163,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
   }
   async function rereadDisplayed(): Promise<void> {
     if (deps.field.disabled) { rereadAfterInit = true; return; }
-    if (!state.db || state.loadingDraft || (deps.viewMode && state.viewMissing)) return;
+    if (!state.db || state.loadingDraft) return;
     // A local commit may be mid-flight; wait so the displayed revision is current.
     while (!deps.viewMode && deps.saver.inFlight()) await deps.saver.inFlight()!.catch(() => undefined);
     const id = state.active.id;
@@ -177,7 +177,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
     const reader = !deps.viewMode && state.editBlock !== '' && !deps.workspace.dirty();
     const action = decideReread({
       role: deps.viewMode || reader ? 'viewer' : 'editor',
-      displayedRevision: state.active.revision,
+      displayedRevision: deps.viewMode && state.viewMissing ? 0 : state.active.revision,
       displayedUpdatedAt: state.active.updatedAt,
       stored,
     });
@@ -213,7 +213,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
     // While loading, `active` is not the represented document yet; reread once it is.
     if (deps.field.disabled) { rereadAfterInit = true; return; }
     scheduleListRefresh();
-    if (shouldApplyDocumentSignal(signal, state.active.id, state.active.revision)) {
+    if (shouldApplyDocumentSignal(signal, state.active.id, state.active.revision, deps.viewMode && state.viewMissing)) {
       // Do not bump sessionGeneration under an in-flight ownership acquire (stillHere would release).
       if (deps.ownershipRetryPending()) deps.rereadAfterOwnershipRetry();
       else void rereadDisplayed();

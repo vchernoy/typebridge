@@ -59,14 +59,15 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     if (state.storageProblem) deps.setSaveStatus(state.storageProblem, 'failure');
     else deps.setSaveStatus(state.viewMissing ? '' : VIEWER_STATUS);
   }
-  function showViewerMissing(message: string): void {
+  function showViewerMissing(message: string, requestedId = state.active.id): void {
     deps.workspace.bumpSessionGeneration();
     deps.workspace.setDocumentId('');
     state.viewMissing = true;
     state.loadingDraft = true;
     try { deps.editor.load(''); deps.draftTitle.value = ''; deps.syncTitleTooltip(); }
     finally { state.loadingDraft = false; }
-    state.active = { ...newDraft(), revision: 0 };
+    // Keep the missing identity for recreation signals, but no deleted content/history.
+    state.active = { ...newDraft(), id: requestedId, revision: 0 };
     deps.workspace.setDirty(false);
     viewerNotice.textContent = message;
     viewerNotice.hidden = false;
@@ -104,7 +105,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
       const next = await getStoredDraft(state.db, id);
       if (load !== viewerLoad) return;
       if (!next || next.revision < 1) {
-        showViewerMissing(VIEWER_MISSING);
+        showViewerMissing(VIEWER_MISSING, id);
         // Keep the address on the requested id so a reload shows the same missing state.
         syncViewerUrl(id);
       } else {
@@ -128,7 +129,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
       const requested = deps.requestedViewId ? await getStoredDraft(state.db, deps.requestedViewId) : undefined;
       state.drafts = await listStoredDrafts(state.db);
       if (requested && requested.revision >= 1) showViewerDocument(requested, false);
-      else showViewerMissing(VIEWER_MISSING);
+      else showViewerMissing(VIEWER_MISSING, deps.requestedViewId ?? undefined);
       deps.writingPosition.prune(state.drafts.map(draft => draft.id));
     } catch (error) {
       state.db?.close(); state.db = undefined;

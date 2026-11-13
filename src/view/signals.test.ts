@@ -88,3 +88,13 @@ describe('decideReread', () => {
     expect(SIGNAL_POLL_INTERVAL_MS).toBeGreaterThanOrEqual(15_000);
   });
 });
+
+describe('missing viewer recreation (#257 step 2 residual)', () => {
+  it('accepts a same-id revision-one recreation only for a missing viewer', () => {
+    const signal = createDocumentSignal('saved', DOC, 1, 20);
+    expect(shouldApplyDocumentSignal(signal, DOC, 5)).toBe(false);
+    expect(shouldApplyDocumentSignal(signal, DOC, 5, true)).toBe(true);
+    expect(shouldApplyDocumentSignal(signal, OTHER, 5, true)).toBe(false);
+    expect(decideReread({ role: 'viewer', displayedRevision: 0, stored: { revision: 1 } })).toBe('refresh');
+  });
+});

@@ -458,10 +458,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
 
   /** Re-read global session after host/prefs sync, then mirror the shown document. */
   function syncFromStorage(): void {
-    if (active) {
-      pendingSession = privateSessionOn();
-      return;
-    }
+    // Use the same dedupe/reversal logic during an active transition too.
     void applySessionChange(privateSessionOn());
   }
 

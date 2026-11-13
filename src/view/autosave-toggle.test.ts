@@ -572,4 +572,20 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
       { markPrivate: false },
     );
   });
+  it('storage sync cancels a queued opposite value during an active same-target apply (#257 residual)', async () => {
+    let release!: () => void;
+    const persistGate = new Promise<void>(resolve => { release = resolve; });
+    const { toggle, persistLastBeforePrivate } = harness({ sessionDirty: true, persistGate });
+    let pref = 'off';
+    vi.stubGlobal('localStorage', { getItem: () => pref, setItem: () => undefined, removeItem: () => undefined });
+    const first = toggle.applySessionChange(true);
+    await vi.waitFor(() => expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1));
+    pref = 'on'; toggle.syncFromStorage();
+    pref = 'off'; toggle.syncFromStorage();
+    release(); await first;
+    await Promise.resolve(); await Promise.resolve();
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
+  });
+
 });

@@ -44,9 +44,11 @@ export function shouldApplyDocumentSignal(
   signal: DocumentSignal,
   displayedId: string,
   displayedRevision: number,
+  missing = false,
 ): boolean {
   if (signal.documentId !== displayedId) return false;
   if (signal.type === 'deleted') return true;
+  if (missing) return true;
   return signal.revision > displayedRevision;
 }
 

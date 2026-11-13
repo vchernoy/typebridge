@@ -175,6 +175,7 @@ const state = createEditorState();
  */
 // eslint-disable-next-line prefer-const -- assigned once later; a const here would be read before it is set.
 let autosaveToggle: AutosaveToggle | undefined;
+let syncSearchPrivacy = (): void => {};
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
@@ -315,6 +316,7 @@ function autosaveControlBlocked(): boolean {
   return state.editBlock !== '';
 }
 function syncAutosaveControl(): void {
+  syncSearchPrivacy();
   if (viewMode || autosaveToggle?.isActive()) return;
   // Global private session locks the per-document checkbox off (#257).
   const session = privateSessionOn();
@@ -437,17 +439,26 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', a
 
 
 const primarySearch: { field: HTMLTextAreaElement; editor: Editor } = { field, editor };
-const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions } = setupSearch(
+const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions, restoreText } = setupSearch(
   primarySearch,
   enabled,
   {
     canMutate: canMutatePrimary,
     getFindTarget: () => primarySearch,
     matchSurfaces: [field],
+    mayPersistText: () => mayWrite(),
     findTextKey: findSessionKey,
     replaceTextKey: replaceSessionKey,
   },
 );
+let searchScope = '';
+syncSearchPrivacy = () => {
+  const next = `${state.active.id}:${mayWrite()}`;
+  if (next === searchScope) return;
+  searchScope = next;
+  // Never carry a private query into the next document or a newly writable session.
+  restoreText();
+};
 const { openFind } = setupFindGotoBars({
   field,
   editor,
@@ -550,7 +561,7 @@ function rememberActive(): void {
         type: 'typebridge-active-draft',
         windowId,
         documentId: state.active.id,
-        title: draftTitle.value,
+        title: mayWrite() ? draftTitle.value : state.active.title,
       }, window.location.origin);
     } catch { /* Cross-origin parent — host will probe on unload. */ }
   }
@@ -1062,6 +1073,7 @@ void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
   embedded,
   windowId: windowId ?? undefined,
   mayWrite, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,
+  noteWritableSnapshot: () => { autosaveToggle?.noteWritableSnapshot(); },
   onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
   readPending: () => readPending(),
   clearPending: saved => { clearPending(saved); },
