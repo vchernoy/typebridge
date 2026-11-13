@@ -51,12 +51,12 @@ describe('changeBetween / applyChange', () => {
 describe('four-field records and consistent replay (#257 2a)', () => {
   it.each(DOCUMENT_FIELDS)('%s uses values below 256 UTF-16 units and deltas at/above 256', field => {
     const id = { documentId: DOC, seq: 1, run: 'r', field };
-    expect(fieldRecord(id, 'old', '')).toEqual({ ...id, value: '' });
-    expect(fieldRecord(id, '', 'x'.repeat(255))).toEqual({ ...id, value: 'x'.repeat(255) });
+    expect(fieldRecord(id, 'old', '')).toEqual({ ...id, value: '', previous: 'old' });
+    expect(fieldRecord(id, '', 'x'.repeat(255))).toEqual({ ...id, value: 'x'.repeat(255), previous: '' });
     const long = fieldRecord(id, '', 'x'.repeat(256));
     expect(long).toEqual({ ...id, change: [0, '', 'x'.repeat(256)], length: 256 });
     expect(replayDocument(DOC, { ...initial, [field]: '' }, 0, [long])[field]).toBe('x'.repeat(256));
-    expect(fieldRecord(id, 'x'.repeat(300), 'short')).toEqual({ ...id, value: 'short' });
+    expect(fieldRecord(id, 'x'.repeat(300), 'short')).toEqual({ ...id, change: [0, 'x'.repeat(300), 'short'], length: 5 });
   });
 
   it('property: every crash cut and snapshot recovers one real four-field instant', () => {
@@ -79,10 +79,10 @@ describe('four-field records and consistent replay (#257 2a)', () => {
   });
 
   const interleaved: ChangeRecord[] = [
-    { documentId: DOC, seq: 1, run: 'r', field: 'text', value: 'a' },
-    { documentId: DOC, seq: 2, run: 'r', field: 'find', value: 'query' },
-    { documentId: DOC, seq: 3, run: 'r', field: 'title', value: 'New' },
-    { documentId: DOC, seq: 4, run: 'r', field: 'replace', value: 'replacement' },
+    { documentId: DOC, seq: 1, run: 'r', field: 'text', value: 'a', previous: initial.text },
+    { documentId: DOC, seq: 2, run: 'r', field: 'find', value: 'query', previous: '' },
+    { documentId: DOC, seq: 3, run: 'r', field: 'title', value: 'New', previous: initial.title },
+    { documentId: DOC, seq: 4, run: 'r', field: 'replace', value: 'replacement', previous: '' },
   ];
   const prefix: DocumentFields = { ...initial, text: 'a', find: 'query' };
   it('stops all fields at a gap instead of applying a later title/replace', () => {
@@ -105,7 +105,9 @@ describe('four-field records and consistent replay (#257 2a)', () => {
     { field: 'find', value: 'x'.repeat(256) },
     { field: 'find', value: '', change: [0, '', ''] },
     { field: 'find', change: [-1, '', 'x'.repeat(300)], length: 300 },
-    { field: 'find', change: [0, '', 'short'], length: 5 },
+    { field: 'find', change: [0, '', 'short'], length: -1 },
+    { field: 'find', value: 'x', previous: 42 },
+    { field: 'find', value: 'x', previous: 'x'.repeat(256) },
     { change: [0, '', ''], length: 0, title: 'old schema' },
   ])('invalid record stops the document, including an invalid tail %j', invalid => {
     const bad = { documentId: DOC, seq: 3, run: 'r', ...invalid };
@@ -116,4 +118,25 @@ describe('four-field records and consistent replay (#257 2a)', () => {
   it('ignores other documents and unrelated malformed data', () => {
     expect(replayDocument(DOC, initial, 0, [null, 'junk', ...interleaved, { ...interleaved[0], documentId: 'other' }])).toEqual({ text: 'a', title: 'New', find: 'query', replace: 'replacement', lastSeq: 4, applied: 4 });
   });
+});
+
+it.each(DOCUMENT_FIELDS)('a mismatching %s predecessor stops every later field', field => {
+  const record = fieldRecord({ documentId: DOC, seq: 1, run: 'r', field }, 'prior', 'next');
+  const later = fieldRecord({ documentId: DOC, seq: 2, run: 'r', field: 'title' }, initial.title, 'later');
+  expect(replayDocument(DOC, { ...initial, [field]: 'foreign' }, 0, [record, later])).toEqual({
+    ...initial, [field]: 'foreign', lastSeq: 0, applied: 0, stopped: 'mismatch',
+  });
+});
+
+it.each(DOCUMENT_FIELDS)('%s long-to-short and long-to-empty deltas still fit-check and replay', field => {
+  const before = 'x'.repeat(256);
+  for (const after of ['x'.repeat(255), '']) {
+    const record = fieldRecord({ documentId: DOC, seq: 1, run: 'r', field }, before, after);
+    expect(record.change).toBeDefined();
+    expect(record).not.toHaveProperty('previous');
+    expect(replayDocument(DOC, { ...initial, [field]: before }, 0, [record])).toEqual({
+      ...initial, [field]: after, lastSeq: 1, applied: 1,
+    });
+    expect(replayDocument(DOC, { ...initial, [field]: 'foreign' }, 0, [record])).toMatchObject({ applied: 0, stopped: 'mismatch' });
+  }
 });

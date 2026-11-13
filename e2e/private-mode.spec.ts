@@ -42,11 +42,11 @@ async function storageSnapshot(page: Page): Promise<{
         const req = db.transaction('changes').objectStore('changes').getAll();
         req.onsuccess = () => {
           db.close();
-          const rows = req.result as Array<{ text?: string; title?: string; find?: string; replace?: string; value?: string; change?: [number, string, string] }>;
+          const rows = req.result as Array<{ text?: string; title?: string; find?: string; replace?: string; value?: string; previous?: string; change?: [number, string, string] }>;
           // Real change-log records store deleted/inserted text in change, not row.text.
           // Inspect both sides plus title so the privacy assertion actually checks the log.
           resolve(rows.flatMap(row => [
-            row.text ?? '', row.title ?? '', row.find ?? '', row.replace ?? '', row.value ?? '', row.change?.[1] ?? '', row.change?.[2] ?? '',
+            row.text ?? '', row.title ?? '', row.find ?? '', row.replace ?? '', row.value ?? '', row.previous ?? '', row.change?.[1] ?? '', row.change?.[2] ?? '',
           ]).filter(Boolean));
         };
         req.onerror = () => { db.close(); reject(req.error); };

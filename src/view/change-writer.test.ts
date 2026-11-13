@@ -163,8 +163,8 @@ describe('change writer', () => {
   it('a run-starting save removes a crashed run\'s longer tail (#251 review)', async () => {
     const { env, type, save, recovered } = harness({ text: 'a', title: 'T', upTo: 0 });
     env.records = [
-      { documentId: 'doc', seq: 1, run: 'crashed', field: 'text', value: 'ab' },
-      { documentId: 'doc', seq: 2, run: 'crashed', field: 'text', value: 'abc' },
+      { documentId: 'doc', seq: 1, run: 'crashed', field: 'text', value: 'ab', previous: 'a' },
+      { documentId: 'doc', seq: 2, run: 'crashed', field: 'text', value: 'abc', previous: 'ab' },
     ];
     env.text = 'ax';
     await save();
@@ -211,7 +211,7 @@ describe('change writer', () => {
     rename('Новое имя');
     await writer.idle();
     expect(env.records).toEqual([{
-      documentId: 'doc', seq: 1, run: 'run-1', field: 'title', value: 'Новое имя',
+      documentId: 'doc', seq: 1, run: 'run-1', field: 'title', value: 'Новое имя', previous: 'Заметка',
     }]);
     expect(await recovered()).toMatchObject({ text: 'Сохранено', lastSeq: 1, title: 'Новое имя', applied: 1 });
   });

@@ -233,7 +233,7 @@ test('the change log: fenced appends, cleanup by upTo, clear on demand and on de
     const db = await api.openDraftDatabase();
     const seqs = async (id: string) => (await api.listChanges(db, id)).map(r => r.seq);
     const failure = async (run: () => Promise<unknown>) => { try { await run(); return 'wrote'; } catch (error) { return (error as Error).name; } };
-    const record = (documentId: string, seq: number) => ({ documentId, seq, run: 'run-a', field: 'text' as const, value: 'а'.repeat(seq) });
+    const record = (documentId: string, seq: number) => ({ documentId, seq, run: 'run-a', field: 'text' as const, value: 'а'.repeat(seq), previous: 'а'.repeat(seq - 1) });
     const fence = await api.claimEditOwnership(db, 'log', 'window-a', 1);
     const owner = { instanceId: 'window-a', fence };
     await api.commitOrCreateConflictCopy(db, { id: 'log', title: 'Журнал', text: '', updatedAt: 1 }, 0, 'copy-1', owner);
@@ -281,9 +281,9 @@ test('crash recovery from the change log keeps another run\'s text as a copy, on
     const owner = { instanceId: 'window-a', fence };
     await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет', updatedAt: 1 }, 0, 'c1', owner);
     // A window that crashed had typed ", мир 🙂" after the stored row.
-    const crashed = (seq: number, value: string) => ({ documentId: 'crash', seq, run: 'crashed', field: 'text' as const, value });
+    const crashed = (seq: number, value: string, previous = 'Привет') => ({ documentId: 'crash', seq, run: 'crashed', field: 'text' as const, value, previous });
     await api.appendChange(db, crashed(1, 'Привет, мир'), owner);
-    await api.appendChange(db, crashed(2, 'Привет, мир 🙂'), owner);
+    await api.appendChange(db, crashed(2, 'Привет, мир 🙂', 'Привет, мир'), owner);
     const copy = await api.salvageChanges(db, 'crash', owner, 'rec-1', undefined, 5);
     const left = await api.listChanges(db, 'crash');
     const again = await api.salvageChanges(db, 'crash', owner, 'rec-2', undefined, 6);
@@ -299,7 +299,7 @@ test('crash recovery from the change log keeps another run\'s text as a copy, on
     const sameText = await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет#', updatedAt: 9, upTo: 0 }, 1, 'c3', owner, { keepRun: 'mine', recoveryId: 'rec-x' });
     const afterSameText = (await api.listChanges(db, 'crash')).length;
     // A save of a new run first keeps a crashed run's text, in the same transaction.
-    await api.appendChange(db, crashed(1, 'Привет#?'), owner);
+    await api.appendChange(db, crashed(1, 'Привет#?', 'Привет#'), owner);
     const saved = await api.commitOrCreateConflictCopy(db, { id: 'crash', title: 'Заметка', text: 'Привет, друг', updatedAt: 10, upTo: 0 }, 2, 'c2', owner, { keepRun: 'mine', recoveryId: 'rec-4' });
     const original = await api.getStoredDraft(db, 'crash');
     const ids = (await api.listStoredDrafts(db)).map(d => d.id).sort();
@@ -330,7 +330,7 @@ test('clearDocumentChanges removes every run of the document under the ownership
     await api.commitOrCreateConflictCopy(db, { id: 'discard', title: 'T', text: 'a', updatedAt: 1 }, 0, 'c1', owner);
     await api.commitOrCreateConflictCopy(db, { id: 'other-doc', title: 'O', text: 'x', updatedAt: 1 }, 0, 'c2');
     const rec = (documentId: string, seq: number, run: string, inserted: string) => ({
-      documentId, seq, run, field: 'text' as const, value: 'a' + inserted,
+      documentId, seq, run, field: 'text' as const, value: 'a' + inserted, previous: 'a',
     });
     await api.appendChange(db, rec('discard', 1, 'mine', 'b'), owner);
     await api.appendChange(db, rec('discard', 2, 'other', 'c'));
@@ -387,20 +387,20 @@ test('crash recovery restores a renamed title from the change log (#37 R2c 2d-1)
     await api.commitOrCreateConflictCopy(db, { id: 'title-crash', title: 'Старое', text: 'Текст', updatedAt: 1 }, 0, 'c1', owner);
     // Crashed run renamed the document and typed more.
     await api.appendChange(db, {
-      documentId: 'title-crash', seq: 1, run: 'crashed', field: 'title', value: 'Новое имя',
+      documentId: 'title-crash', seq: 1, run: 'crashed', field: 'title', value: 'Новое имя', previous: 'Старое',
     }, owner);
     await api.appendChange(db, {
-      documentId: 'title-crash', seq: 2, run: 'crashed', field: 'text', value: 'Текст!',
+      documentId: 'title-crash', seq: 2, run: 'crashed', field: 'text', value: 'Текст!', previous: 'Текст',
     }, owner);
     const renamed = await api.salvageChanges(db, 'title-crash', owner, 'rec-title', undefined, 2);
     // Title-only loss (text unchanged) still produces a copy with the new title.
     await api.appendChange(db, {
-      documentId: 'title-crash', seq: 1, run: 'crashed', field: 'title', value: 'Только заголовок',
+      documentId: 'title-crash', seq: 1, run: 'crashed', field: 'title', value: 'Только заголовок', previous: 'Старое',
     }, owner);
     const titleOnly = await api.salvageChanges(db, 'title-crash', owner, 'rec-title-only', undefined, 3);
     // Shown text + shown title equal to the lost state keeps the records (rule 5).
     await api.appendChange(db, {
-      documentId: 'title-crash', seq: 1, run: 'crashed', field: 'title', value: 'Показанное',
+      documentId: 'title-crash', seq: 1, run: 'crashed', field: 'title', value: 'Показанное', previous: 'Старое',
     }, owner);
     const kept = await api.salvageChanges(db, 'title-crash', owner, 'rec-keep', undefined, 4, { text: 'Текст', title: 'Показанное' });
     const keptCount = (await api.listChanges(db, 'title-crash')).length;
@@ -462,17 +462,17 @@ test('four-field replay recovers one prefix and preserves search-only loss at sa
     const owner = { instanceId: 'owner', fence };
     const base = { id: 'four', text: 'body', title: 'Title', find: 'old find', replace: 'old replace', updatedAt: 1 };
     await api.commitOrCreateConflictCopy(db, base, 0, 'unused', owner);
-    await api.appendChange(db, { documentId: 'four', seq: 1, run: 'crashed', field: 'find', value: 'query' }, owner);
+    await api.appendChange(db, { documentId: 'four', seq: 1, run: 'crashed', field: 'find', value: 'query', previous: 'old find' }, owner);
     await api.appendChange(db, { documentId: 'four', seq: 2, run: 'crashed', field: 'text', change: [4, '', 'x'.repeat(256)], length: 260 }, owner);
-    await api.appendChange(db, { documentId: 'four', seq: 3, run: 'crashed', field: 'title', value: 'Renamed' }, owner);
+    await api.appendChange(db, { documentId: 'four', seq: 3, run: 'crashed', field: 'title', value: 'Renamed', previous: 'Title' }, owner);
     // Missing seq 4: a later replacement must not be combined with the earlier prefix.
-    await api.appendChange(db, { documentId: 'four', seq: 5, run: 'crashed', field: 'replace', value: 'past gap' }, owner);
+    await api.appendChange(db, { documentId: 'four', seq: 5, run: 'crashed', field: 'replace', value: 'past gap', previous: 'old replace' }, owner);
     const recovered = await api.salvageChanges(db, 'four', owner, 'prefix', undefined, 2);
     const left = await api.listChanges(db, 'four');
     // Search-only loss must not be mistaken for the shown or newly committed text/title.
-    await api.appendChange(db, { documentId: 'four', seq: 1, run: 'crashed', field: 'replace', value: 'lost replace' }, owner);
+    await api.appendChange(db, { documentId: 'four', seq: 1, run: 'crashed', field: 'replace', value: 'lost replace', previous: 'old replace' }, owner);
     const searchOnly = await api.salvageChanges(db, 'four', owner, 'search-only', undefined, 3, base);
-    await api.appendChange(db, { documentId: 'four', seq: 1, run: 'crashed', field: 'find', value: 'lost find' }, owner);
+    await api.appendChange(db, { documentId: 'four', seq: 1, run: 'crashed', field: 'find', value: 'lost find', previous: 'old find' }, owner);
     const saved = await api.commitOrCreateConflictCopy(db, { ...base, find: 'saved find', upTo: 0 }, 1, 'unused-2', owner, { keepRun: 'new', recoveryId: 'save-recovery' });
     // A conflict copy keeps all four values (but starts with its own upTo).
     const conflict = await api.commitOrCreateConflictCopy(db, { ...base, find: 'conflict find', replace: 'conflict replace', upTo: 99 }, 1, 'conflict', owner);
@@ -594,3 +594,61 @@ test('the editor carries four stored fields through autosave and a search-only r
   await page.addScriptTag({ content: compiledDatabaseModule() });
   expect(await read()).toMatchObject({ text: 'body after reload', find: 'reload find', replace: 'reload replace' });
 });
+
+for (const abort of [false, true]) {
+  test(`conflict-copy run cleanup ${abort ? 'rolls back with an aborted copy' : 'prevents duplicate salvage and preserves other runs/documents'} (#265)`, async ({ page }) => {
+    await page.goto('/icon-192.png');
+    await page.addScriptTag({ content: compiledDatabaseModule() });
+    const result = await page.evaluate(async abort => {
+      const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+      const db = await api.openDraftDatabase();
+      const owner = { instanceId: 'owner', fence: await api.claimEditOwnership(db, 'original', 'owner', 1) };
+      const base = { id: 'original', text: 'base', title: 'Title', find: '', replace: '', updatedAt: 1 };
+      await api.commitDraft(db, base, 0);
+      await api.appendChange(db, { documentId: base.id, seq: 1, run: 'mine', field: 'text', value: 'my edit', previous: 'base' }, owner);
+      await api.appendChange(db, { documentId: base.id, seq: 2, run: 'other', field: 'find', value: 'other search', previous: '' }, owner);
+      await api.appendChange(db, { documentId: 'other-document', seq: 1, run: 'mine', field: 'text', value: 'other body', previous: '' });
+      // An older writer changed the row without advancing its log position.
+      await api.commitDraft(db, { ...base, text: 'foreign revision', upTo: 0 }, 1);
+      const originalDelete = IDBObjectStore.prototype.delete;
+      let abortedAtCleanup = false;
+      if (abort) {
+        IDBObjectStore.prototype.delete = function (...args: Parameters<IDBObjectStore['delete']>) {
+          const request = originalDelete.apply(this, args);
+          if (this.name === 'changes') request.addEventListener('success', () => {
+            abortedAtCleanup = true;
+            this.transaction.abort();
+          });
+          return request;
+        };
+      }
+      let rejected = false;
+      try {
+        await api.commitOrCreateConflictCopy(db, { ...base, text: 'my edit', upTo: 1 }, 1, 'conflict-copy', owner, { keepRun: 'mine', recoveryId: 'unexpected' });
+      } catch { rejected = true; }
+      finally { IDBObjectStore.prototype.delete = originalDelete; }
+      const original = await api.getStoredDraft(db, base.id);
+      const copy = await api.getStoredDraft(db, 'conflict-copy');
+      const originalLog = await api.listChanges(db, base.id);
+      const otherLog = await api.listChanges(db, 'other-document');
+      // Reacquire under a new fence. There must be no leftover 'mine' prefix to salvage.
+      const nextOwner = { instanceId: 'next', fence: await api.claimEditOwnership(db, base.id, 'next', 3) };
+      const recovered = abort ? undefined : await api.salvageChanges(db, base.id, nextOwner, 'duplicate', 'other', 4);
+      db.close();
+      return { rejected, abortedAtCleanup, original, copy, originalLog, otherLog, recovered };
+    }, abort);
+    expect(result.original).toMatchObject({ text: 'foreign revision', revision: 2, upTo: 0 });
+    expect(result.otherLog.map(r => r.run)).toEqual(['mine']);
+    if (abort) {
+      expect(result.rejected).toBe(true);
+      expect(result.abortedAtCleanup).toBe(true);
+      expect(result.copy).toBeUndefined();
+      expect(result.originalLog.map(r => r.run)).toEqual(['mine', 'other']);
+    } else {
+      expect(result.rejected).toBe(false);
+      expect(result.copy).toMatchObject({ text: 'my edit', upTo: 0 });
+      expect(result.originalLog.map(r => r.run)).toEqual(['other']);
+      expect(result.recovered).toBeUndefined();
+    }
+  });
+}

@@ -10,8 +10,8 @@ export type TextChange = [position: number, deleted: string, inserted: string];
 export const SHORT_VALUE_LIMIT = 256;
 type RecordIdentity = { documentId: string; seq: number; run: string; field: DocumentField };
 export type ChangeRecord = RecordIdentity & (
-  | { value: string; change?: never; length?: never }
-  | { change: TextChange; length: number; value?: never }
+  | { value: string; previous: string; change?: never; length?: never }
+  | { change: TextChange; length: number; value?: never; previous?: never }
 );
 export type ReplayStop = 'gap' | 'other-run' | 'mismatch';
 export type ReplayResult = DocumentFields & { lastSeq: number; applied: number; stopped?: ReplayStop };
@@ -37,8 +37,8 @@ export function applyChange(text: string, change: TextChange): string | undefine
 
 /** Capture a value, never a reference to live document state (queued pre-private records stay safe). */
 export function fieldRecord(identity: RecordIdentity, before: string, after: string): ChangeRecord {
-  return after.length < SHORT_VALUE_LIMIT
-    ? { ...identity, value: after }
+  return before.length < SHORT_VALUE_LIMIT && after.length < SHORT_VALUE_LIMIT
+    ? { ...identity, value: after, previous: before }
     : { ...identity, change: changeBetween(before, after) ?? [0, '', ''], length: after.length };
 }
 
@@ -47,8 +47,9 @@ function validRecord(value: unknown, documentId: string): value is ChangeRecord 
   const r = value as Record<string, unknown>;
   if (r.documentId !== documentId || !Number.isSafeInteger(r.seq) || (r.seq as number) <= 0 ||
       typeof r.run !== 'string' || !r.run || !DOCUMENT_FIELDS.includes(r.field as DocumentField)) return false;
-  if ('value' in r) return typeof r.value === 'string' && r.value.length < SHORT_VALUE_LIMIT && !('change' in r) && !('length' in r);
-  return Number.isSafeInteger(r.length) && (r.length as number) >= SHORT_VALUE_LIMIT &&
+  if ('value' in r) return typeof r.value === 'string' && r.value.length < SHORT_VALUE_LIMIT &&
+    typeof r.previous === 'string' && r.previous.length < SHORT_VALUE_LIMIT && !('change' in r) && !('length' in r);
+  return !('previous' in r) && Number.isSafeInteger(r.length) && (r.length as number) >= 0 &&
     Array.isArray(r.change) && r.change.length === 3 && Number.isSafeInteger(r.change[0]) && r.change[0] >= 0 &&
     typeof r.change[1] === 'string' && typeof r.change[2] === 'string';
 }
@@ -74,6 +75,7 @@ export function replayDocument(documentId: string, snapshot: DocumentFieldsInput
     const record = raw;
     run ??= record.run;
     if (record.run !== run) return result('other-run');
+    if (record.value !== undefined && current[record.field] !== record.previous) return result('mismatch');
     const next = record.value !== undefined ? record.value : applyChange(current[record.field], record.change);
     if (next === undefined || (record.change !== undefined && next.length !== record.length)) return result('mismatch');
     current[record.field] = next;

@@ -222,7 +222,18 @@ export async function commitOrCreateConflictCopy(
       ? { ...draft, ...documentFields(draft), id: copyId, title: draft.title + ' (conflict copy)', revision: 1, upTo: 0 }
       : { ...draft, ...documentFields(draft), revision: expectedRevision + 1, upTo: draft.upTo ?? 0 };
     let recovered: StoredDraft | undefined;
-    if (conflict) await request(store.add(next));
+    if (conflict) {
+      await request(store.add(next));
+      if (changes) {
+        // The copy now contains this run's edits. They must not be salvaged again onto the
+        // foreign revision under the original id. Keep other runs and documents untouched.
+        const log = tx.objectStore(CHANGES);
+        const records = await request(log.getAll(changesOf(draft.id))) as ChangeRecord[];
+        for (const record of records) {
+          if (record.run === changes.keepRun) await request(log.delete([draft.id, record.seq]));
+        }
+      }
+    }
     else {
       await request(store.put(next));
       if (changes) {
