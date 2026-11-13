@@ -50,7 +50,8 @@ test('a blocked upgrade reports the blocker and closes a late connection', async
   const message = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
     const original = indexedDB.open.bind(indexedDB);
-    indexedDB.open = ((name: string) => original(name, 4)) as typeof indexedDB.open;
+    // Force a version above DATABASE_VERSION so the real open upgrades while the blocker holds vN.
+    indexedDB.open = ((name: string) => original(name, api.DATABASE_VERSION + 1)) as typeof indexedDB.open;
     try { await api.openDraftDatabase(); return 'unexpected success'; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
     finally { indexedDB.open = original; }
@@ -58,7 +59,7 @@ test('a blocked upgrade reports the blocker and closes a late connection', async
   expect(message).toContain('Close other TypeBridge tabs');
   await blocker.evaluate(() => (window as unknown as { held: IDBDatabase }).held.close());
   const nextUpgrade = await page.evaluate(() => new Promise<boolean>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 5);
+    const open = indexedDB.open('typebridge', 6);
     open.onblocked = () => resolve(false);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => { open.result.close(); resolve(true); };
@@ -108,7 +109,7 @@ test('the ownership fence gates commits and deletes in the same transaction (#15
     return { stores, first, second, saved: saved.draft.revision, staleCommit, wrongWindow, staleDelete, afterStale, copyCount: copies.length,
       conflict: { flag: conflict.conflict, id: conflict.draft.id }, notMine, released, afterRelease, deleted, droppedRecord, unsavedRecord };
   });
-  expect(result.stores).toEqual(['changes', 'documents', 'editOwnership']);
+  expect(result.stores).toEqual(['changes', 'discardMarkers', 'documents', 'editOwnership']);
   expect([result.first, result.second]).toEqual([1, 2]);
   expect(result.saved).toBe(1);
   expect(result.staleCommit).toBe('EditOwnershipLostError');
@@ -142,7 +143,7 @@ test('upgrading a version 1 database keeps documents and adds the ownership and 
     open.onsuccess = () => { const db = open.result; resolve({ version: db.version, names: [...db.objectStoreNames].sort() }); db.close(); };
     open.onerror = () => reject(open.error);
   }));
-  expect(stores).toEqual({ version: 3, names: ['changes', 'documents', 'editOwnership'] });
+  expect(stores).toEqual({ version: 4, names: ['changes', 'discardMarkers', 'documents', 'editOwnership'] });
 });
 
 
@@ -386,4 +387,112 @@ test('crash recovery restores a renamed title from the change log (#37 R2c 2d-1)
     kept: undefined, keptCount: 1,
     wrongTitle: { title: 'Показанное (recovered)', text: 'Текст' },
   });
+});
+
+test('reload discard marker write/apply under the fence (#255)', async ({ page }) => {
+  // Fails without discardMarkers store or if apply deletes without consent / clears above upToSeq.
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const stores = [...db.objectStoreNames].sort();
+    const fence = await api.claimEditOwnership(db, 'reload-doc', 'window-a', 1);
+    const owner = { instanceId: 'window-a', fence };
+    await api.commitOrCreateConflictCopy(db, { id: 'reload-doc', title: 'T', text: 'a', updatedAt: 1 }, 0, 'c1', owner);
+    const rec = (seq: number, run: string, inserted: string) => ({
+      documentId: 'reload-doc', seq, run, change: [0, '', inserted] as [number, string, string], length: inserted.length,
+    });
+    await api.appendChange(db, rec(1, 'run-a', 'x'), owner);
+    await api.appendChange(db, rec(2, 'run-a', 'y'), owner);
+    await api.appendChange(db, rec(3, 'run-b', 'z'), owner);
+    const marker = await api.writeReloadDiscardMarker(db, 'reload-doc', owner);
+    const stored = await api.getReloadDiscardMarker(db, 'reload-doc');
+    // No fence → write refuses.
+    let noFence: 'wrote' | 'refused' | 'other';
+    try {
+      await api.writeReloadDiscardMarker(db, 'reload-doc', undefined as unknown as { instanceId: string; fence: number });
+      noFence = 'wrote';
+    } catch (error) {
+      noFence = (error as Error).name === 'EditOwnershipLostError' ? 'refused' : 'other';
+    }
+    // Stale / cancelled: delete marker only.
+    const stale = await api.applyReloadDiscardMarker(db, 'reload-doc', owner, false);
+    const afterStale = await api.listChanges(db, 'reload-doc');
+    const markerGone = await api.getReloadDiscardMarker(db, 'reload-doc');
+    // Rewrite and apply with consent: delete seq <= upToSeq.
+    await api.appendChange(db, rec(4, 'run-c', 'w'), owner);
+    const marker2 = await api.writeReloadDiscardMarker(db, 'reload-doc', owner);
+    const applied = await api.applyReloadDiscardMarker(db, 'reload-doc', owner, true);
+    const left = await api.listChanges(db, 'reload-doc');
+    // Cancel clear is idempotent.
+    await api.clearReloadDiscardMarker(db, 'reload-doc', owner);
+    await api.clearReloadDiscardMarker(db, 'reload-doc', owner);
+    db.close();
+    return {
+      stores,
+      version: api.DATABASE_VERSION,
+      markerUpTo: marker.upToSeq,
+      storedUpTo: stored?.upToSeq,
+      noFence,
+      staleApplied: stale.applied,
+      afterStaleSeqs: afterStale.map(r => r.seq),
+      markerGone: markerGone === undefined,
+      marker2UpTo: marker2.upToSeq,
+      applied,
+      leftSeqs: left.map(r => r.seq),
+    };
+  });
+  expect(result.stores).toEqual(['changes', 'discardMarkers', 'documents', 'editOwnership']);
+  expect(result.version).toBe(4);
+  expect(result.markerUpTo).toBe(3);
+  expect(result.storedUpTo).toBe(3);
+  expect(result.noFence).toBe('refused');
+  expect(result.staleApplied).toBe(false);
+  expect(result.afterStaleSeqs).toEqual([1, 2, 3]);
+  expect(result.markerGone).toBe(true);
+  expect(result.marker2UpTo).toBe(4);
+  expect(result.applied).toEqual({ applied: true, upToSeq: 4 });
+  expect(result.leftSeqs).toEqual([]);
+});
+
+test('v3 database upgrades to v4 and keeps documents and changes (#255)', async ({ page }) => {
+  // Stay on a static asset so the editor never salvages the seeded change record.
+  await page.goto('/icon-192.png');
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const del = indexedDB.deleteDatabase('typebridge');
+    del.onsuccess = () => resolve();
+    del.onerror = () => reject(del.error);
+  }));
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', 3);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      db.createObjectStore('documents', { keyPath: 'id' });
+      db.createObjectStore('editOwnership', { keyPath: 'documentId' });
+      db.createObjectStore('changes', { keyPath: ['documentId', 'seq'] });
+      const docs = open.transaction!.objectStore('documents');
+      docs.put({ id: 'v3', title: 'Old', text: 'kept', updatedAt: 1, revision: 1, upTo: 0 });
+      open.transaction!.objectStore('changes').put({
+        documentId: 'v3', seq: 1, run: 'r', change: [0, '', 'x'], length: 1,
+      });
+    };
+    open.onsuccess = () => { open.result.close(); resolve(); };
+    open.onerror = () => reject(open.error);
+  }));
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const stores = [...db.objectStoreNames].sort();
+    const docs = await api.listStoredDrafts(db);
+    const changes = await api.listChanges(db, 'v3');
+    db.close();
+    return { stores, doc: docs.find(d => d.id === 'v3'), changeCount: changes.length, version: api.DATABASE_VERSION };
+  });
+  expect(result.version).toBe(4);
+  expect(result.stores).toEqual(['changes', 'discardMarkers', 'documents', 'editOwnership']);
+  expect(result.doc?.text).toBe('kept');
+  expect(result.changeCount).toBe(1);
 });
