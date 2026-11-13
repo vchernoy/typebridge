@@ -80,6 +80,8 @@ function harness(options: {
   sessionDirty?: boolean;
   /** Hold persistLastBeforePrivate until this promise resolves (session last-save races). */
   persistGate?: Promise<void>;
+  firstCommit?: Promise<StoredDraft | undefined>;
+  syncIdentity?: () => void;
 } = {}) {
   const state = createEditorState();
   state.active = {
@@ -154,7 +156,12 @@ function harness(options: {
   vi.mocked(deleteStoredDraft).mockResolvedValue(true);
   vi.mocked(askConfirmChoice).mockResolvedValue(options.deleteSaved === true);
 
-  const inFlight = options.inFlightConflict
+  const inFlight = options.firstCommit
+    ? () => options.firstCommit!.then(draft => {
+      if (draft) state.active = { ...draft, private: state.active.private };
+      return { saved: !!draft, conflict: false };
+    })
+    : options.inFlightConflict
     ? () => Promise.resolve().then(() => {
       const copy = options.inFlightConflict!;
       state.active = { ...copy };
@@ -171,6 +178,7 @@ function harness(options: {
     : () => undefined;
 
   const toggle = createAutosaveToggle(state, status, {
+    syncIdentity: options.syncIdentity,
     autosave,
     privateMarker,
     workspace,
@@ -572,4 +580,57 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
       { markPrivate: false },
     );
   });
+});
+
+it('going private before the first save never makes a last save, even when dirty', async () => {
+  const { toggle, persistLastBeforePrivate } = harness({ revision: 0, dirty: true });
+  await toggle.applyDocumentChange(false);
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+  expect(updateDocumentPrivateFlag).not.toHaveBeenCalled();
+});
+it('session privacy never last-saves a new document', async () => {
+  const { toggle, persistLastBeforePrivate } = harness({ revision: 0, sessionDirty: true });
+  await toggle.applySessionChange(true);
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+});
+
+for (const committed of [true, false]) it(`reconciles an in-flight first commit before finishing privacy: ${committed}`, async () => {
+  let finish!: (draft: StoredDraft | undefined) => void;
+  const firstCommit = new Promise<StoredDraft | undefined>(resolve => { finish = resolve; });
+  const { toggle, state, autosave, persistLastBeforePrivate, revision } = harness({ revision: 0, dirty: true, firstCommit });
+  const owner = state.ownership;
+  const transition = toggle.applyDocumentChange(false);
+  expect(toggle.isActive()).toBe(true); expect(state.active.private).toBe(true);
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled(); expect(state.ownership).toBe(owner);
+  await toggle.applyDocumentChange(true); // Refused by the existing active-transition gate.
+  expect(toggle.isActive()).toBe(true);
+  expect(state.active.private).toBe(true); expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+  revision.value = 2;
+  finish(committed ? { ...state.active, revision: 1 } : undefined);
+  await transition;
+  expect(autosave.checked).toBe(false); expect(toggle.isActive()).toBe(false);
+  if (committed) expect(persistLastBeforePrivate).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'doc', revision: 1, text: 'saved', private: true }), 1, { markPrivate: true });
+  else { expect(persistLastBeforePrivate).not.toHaveBeenCalled(); expect(askConfirmChoice).not.toHaveBeenCalled(); }
+});
+
+for (const committed of [true, false]) it(`session waits for first save settlement before final identity sync: ${committed}`, async () => {
+  let finish!: (draft: StoredDraft | undefined) => void;
+  const firstCommit = new Promise<StoredDraft | undefined>(resolve => { finish = resolve; });
+  let settled = false;
+  const synchronized: boolean[] = [];
+  const { toggle, state, persistLastBeforePrivate } = harness({ revision: 0, sessionDirty: true, firstCommit,
+    syncIdentity: () => synchronized.push(settled) });
+  vi.stubGlobal('localStorage', { getItem: () => 'off' });
+  const transition = toggle.applySessionChange(true);
+  expect(toggle.isActive()).toBe(true); expect(synchronized.at(-1)).toBe(false);
+  await toggle.applySessionChange(false);
+  await toggle.applySessionChange(true); // Cancel the queued opposite target while the first save is held.
+  expect(toggle.isActive()).toBe(true); expect(persistLastBeforePrivate).not.toHaveBeenCalled();
+  settled = true;
+  finish(committed ? { ...state.active, revision: 1 } : undefined);
+  await transition;
+  expect(toggle.isActive()).toBe(false); expect(synchronized.at(-1)).toBe(true);
+  expect(state.active.private).not.toBe(true);
+  expect(persistLastBeforePrivate).not.toHaveBeenCalled();
 });

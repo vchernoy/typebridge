@@ -31,3 +31,8 @@ Shipped in #266: Find/Replace bound to document fields and independent histories
 ### Private mode step 2c — carried residuals
 
 Implemented in this change, pending review/CI: missing comparison viewers retain the requested document ID and accept recreation at revision 1 (#261), including missed-signal reconciliation on focus; pending startup restore refreshes the writable boundary after its revision bump (#263); storage preference sync uses the same-target/reversal guard. Refs #257. Steps 3–4 remain separate.
+
+
+### Private mode step 3 — new private documents leave no trace
+
+Implemented in this change, pending independent review and CI: private revision-zero documents omit rows/logs/ownership records, active hints, positions, backups, and host-layout IDs. Their local picker labels them Private / Not saved; other windows learn no new document. Saving opts into normal ownership and metadata. New tests inspect IndexedDB, session/local storage, BroadcastChannel messages, host layout, second-tab pickers, reload/close, and resuming saving. Step 4 remains later work. Refs #257, #255.

@@ -16,6 +16,8 @@ export type TitleEditPayload = { inputType: string; data: string | null; start: 
 
 /** What each editor window exposes; the host calls these on `frame.contentWindow`. */
 export type EditorWindowApi = {
+  /** Empty means this window's current document must not be persisted or enumerated. */
+  __typebridgeStoredDocumentId: () => string | undefined;
   /** Update reload: ask (with dialogs in this window) whether reloading is safe. */
   __typebridgePrepareUpdateReload: () => Promise<boolean>;
   /** Update reload: validate and arm it; throws to abort. Does not navigate. */

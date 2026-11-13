@@ -53,3 +53,8 @@ export const PRIVATE_SWITCH_SAVE_FAILED =
 
 export const PRIVATE_SWITCH_FLAG_FAILED =
   "Your last changes before going private couldn't be saved, and this document may not reopen as private.";
+
+/** A private document with no committed copy must leave no persistent identity (#257 step 3). */
+export function newPrivateDocument(doc: { revision: number; private?: boolean }, sessionOn = privateSessionOn()): boolean {
+  return doc.revision === 0 && privateNow(doc, sessionOn);
+}

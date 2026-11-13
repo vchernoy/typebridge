@@ -5,8 +5,8 @@ import { editOwnerLockName, mayAcquireEditOwnership } from '../view/ownership';
 export type EditOwnership = {
   readonly documentId: string;
   /**
-   * Credentials for the IndexedDB write gate. The fence is claimed on acquire; if that claim
-   * failed (a storage error), it is claimed again here, still under the lock. Rejects with
+   * Credentials for the IndexedDB write gate. Saved documents claim on acquire; new documents
+   * defer the claim until this first write. Failed claims retry here, still under the lock. Rejects with
    * EditOwnershipLostError after release or loss.
    */
   writeFence(): Promise<WriteFence>;
@@ -35,6 +35,8 @@ export function acquireEditOwnership(options: {
   onLost: () => void;
   /** Take the lock from a suspended/unresponsive owner (#175 step 4). */
   steal?: boolean;
+  /** A never-saved document reserves only the in-memory lock until its first write. */
+  deferClaim?: boolean;
 }): Promise<AcquireResult> {
   const { db, locks, documentId, instanceId, onLost, steal = false } = options;
   if (!mayAcquireEditOwnership(locks !== undefined) || !locks) return Promise.resolve({ status: 'unsupported' });
@@ -42,6 +44,7 @@ export function acquireEditOwnership(options: {
     let granted = false;
     let released = false;
     let fence: WriteFence | undefined;
+    let claiming: Promise<WriteFence> | undefined;
     let letGo!: () => void;
     const held = new Promise<void>(done => { letGo = done; });
     const claim = async (): Promise<WriteFence> => {
@@ -52,14 +55,17 @@ export function acquireEditOwnership(options: {
       documentId,
       async writeFence() {
         if (released) throw new EditOwnershipLostError();
-        const current = fence ?? await claim();
+        const current = fence ?? await (claiming ??= claim().finally(() => { claiming = undefined; }));
         if (released) throw new EditOwnershipLostError();
         return current;
       },
       async release() {
         if (released) return;
         released = true;
-        try { if (fence) await releaseEditOwnership(db, documentId, fence, Date.now()); }
+        try {
+          if (claiming) await claiming.catch(() => undefined);
+          if (fence) await releaseEditOwnership(db, documentId, fence, Date.now());
+        }
         catch { /* The next owner's claim raises the fence anyway. */ }
         finally { letGo(); }
       },
@@ -68,7 +74,7 @@ export function acquireEditOwnership(options: {
     locks.request(editOwnerLockName(documentId), lockOptions, async lock => {
       if (!lock) { resolve({ status: 'busy' }); return; }
       // Claiming now invalidates any stale owner's fence; a failed claim is retried before the first write.
-      try { await claim(); } catch { /* writeFence() claims again. */ }
+      try { if (!options.deferClaim) await claim(); } catch { /* writeFence() claims again. */ }
       granted = true;
       resolve({ status: 'acquired', ownership });
       await held;

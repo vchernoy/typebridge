@@ -16,7 +16,7 @@ vi.mock('../editor/recovery', () => ({
   clearRecovery: vi.fn(),
 }));
 
-import { commitOrCreateConflictCopy } from '../editor/indexeddb';
+import { commitOrCreateConflictCopy, EditOwnershipLostError } from '../editor/indexeddb';
 import { createSaver } from './saver';
 
 beforeEach(() => {
@@ -226,4 +226,35 @@ describe('persistLastBeforePrivate (#257)', () => {
     expect(state.active.private).toBeUndefined();
     expect(state.active.text).toBe('pre-session');
   });
+});
+
+it.each([false, true, 'released'])('claims a new document before its first save, respecting privacy during acquisition: %s', async cancel => {
+  const state = createEditorState(); state.db = {} as IDBDatabase;
+  state.active = { id: 'new', title: 'T', text: 'body', revision: 0, updatedAt: 1 };
+  let dirty = true, writable = true;
+  const order: string[] = [];
+  const takeOwnership = vi.fn(async () => {
+    order.push('claim');
+    if (cancel) writable = false;
+    if (cancel === 'released') throw new EditOwnershipLostError();
+    state.ownership = { documentId: 'new', writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
+  });
+  vi.mocked(commitOrCreateConflictCopy).mockImplementation(async () => {
+    order.push('commit'); expect(state.ownership?.documentId).toBe('new');
+    return { draft: { ...state.active, revision: 1 }, conflict: false };
+  });
+  const workspace = { ...makeWorkspace('new'), dirty: () => dirty, setDirty: (value: boolean) => { dirty = value; } };
+  const saver = createSaver(state, {
+    showSaving: () => {}, kind: () => 'action', shouldAttachDraftListRefreshFailure: () => false,
+  } as unknown as StatusLine, {
+    viewMode: false, mayWrite: () => writable, draftTitle: { value: 'T' } as HTMLInputElement, workspace,
+    writingPosition: { save: () => {} }, snapshot: () => state.active, currentJournal: () => undefined,
+    suppressEditTracking: () => false, readOnlyNow: () => false, preparePendingClear: () => () => {},
+    clearVersionNotice: () => {}, postSignal: () => {}, journalEdit: () => {},
+    changes: { edit: () => {}, idle: async () => {}, upToForSave: () => ({ upTo: 0, keepRun: 'run' }), saved: () => {} },
+    onRecovered: () => {}, rememberActive: () => { order.push('identity'); }, updateSaveIndicator: () => {},
+    syncTitleTooltip: () => {}, takeOwnership, loseOwnership: () => {}, refreshDrafts: async () => {}, renderDrafts: () => {},
+  });
+  expect(await saver.persist()).toEqual({ saved: !cancel, conflict: false });
+  expect(order).toEqual(cancel ? ['claim'] : ['claim', 'commit', 'identity']);
 });

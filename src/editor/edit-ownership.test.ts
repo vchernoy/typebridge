@@ -63,6 +63,33 @@ describe('acquireEditOwnership', () => {
   const acquire = (instanceId: string, onLost = () => undefined) =>
     acquireEditOwnership({ db, locks: locks as unknown as LockManager, documentId: DOC, instanceId, onLost });
 
+  it('a new document claims no IndexedDB fence until its first write', async () => {
+    const result = await acquireEditOwnership({ db, locks: locks as unknown as LockManager,
+      documentId: DOC, instanceId: 'new', onLost: () => undefined, deferClaim: true });
+    if (result.status !== 'acquired') throw new Error('not acquired');
+    expect(storage.fences.size).toBe(0);
+    const [a, b] = await Promise.all([result.ownership.writeFence(), result.ownership.writeFence()]);
+    expect(a).toEqual(b); expect(a.fence).toBe(1);
+    expect(storage.fences.get(DOC)).toBe(1);
+    await result.ownership.release();
+  });
+  it('releases a deferred claim that was still in flight when privacy released ownership', async () => {
+    const result = await acquireEditOwnership({ db, locks: locks as unknown as LockManager,
+      documentId: DOC, instanceId: 'new', onLost: () => undefined, deferClaim: true });
+    if (result.status !== 'acquired') throw new Error('not acquired');
+    const writing = result.ownership.writeFence();
+    const releasing = result.ownership.release();
+    const [write] = await Promise.allSettled([writing, releasing]);
+    expect(write.status).toBe('rejected');
+    expect(storage.released).toEqual([{ documentId: DOC, instanceId: 'new', fence: 1 }]);
+  });
+  it('closing an unwritten new document leaves no ownership record', async () => {
+    const result = await acquireEditOwnership({ db, locks: locks as unknown as LockManager,
+      documentId: DOC, instanceId: 'new', onLost: () => undefined, deferClaim: true });
+    if (result.status !== 'acquired') throw new Error('not acquired');
+    await result.ownership.release();
+    expect(storage.fences.size).toBe(0); expect(storage.released).toEqual([]);
+  });
   it('leaves clients without Web Locks as readers', async () => {
     await expect(acquireEditOwnership({ db, locks: undefined, documentId: DOC, instanceId: 'a', onLost: () => undefined }))
       .resolves.toEqual({ status: 'unsupported' });

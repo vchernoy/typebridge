@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   documentAutosaveChecked,
+  newPrivateDocument,
   PRIVATE_SWITCH_FLAG_FAILED,
   PRIVATE_SWITCH_SAVE_FAILED,
   privateNow,
@@ -95,4 +96,11 @@ describe('privateNow (#257 step 1)', () => {
     expect(PRIVATE_SWITCH_SAVE_FAILED).toMatch(/before going private/);
     expect(PRIVATE_SWITCH_FLAG_FAILED).toMatch(/may not reopen as private/);
   });
+});
+
+it('hides only never-saved private identities, including global private session', () => {
+  expect(newPrivateDocument({ revision: 0 }, true)).toBe(true);
+  expect(newPrivateDocument({ revision: 0, private: true }, false)).toBe(true);
+  expect(newPrivateDocument({ revision: 0 }, false)).toBe(false);
+  expect(newPrivateDocument({ revision: 1, private: true }, true)).toBe(false);
 });

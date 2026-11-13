@@ -28,6 +28,7 @@ import type { DocumentSignal } from './signals';
 import type { Workspace } from './workspace';
 
 export type AutosaveToggleDeps = {
+  syncIdentity?: () => void;
   autosave: HTMLInputElement;
   privateMarker: HTMLElement;
   workspace: Workspace;
@@ -97,6 +98,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
 
   function syncPrivateMarker(): void {
     deps.privateMarker.hidden = deps.autosave.checked;
+    deps.syncIdentity?.();
   }
 
   function mirrorFromDocument(): void {
@@ -175,6 +177,13 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
    * Autosave-off (#260 Codex P1).
    */
   async function lastSaveBeforeSession(): Promise<{ saveFailed: boolean }> {
+    if (state.active.revision === 0) {
+      // A cancelled/aborted first save has no post-commit identity callback. Wait so the
+      // session finally can release its reservation/fence after saver.inFlight clears.
+      const pending = deps.saver.inFlight();
+      if (pending) await pending;
+      return { saveFailed: false };
+    }
     if (state.active.private || !deps.workspace.dirty()) return { saveFailed: false };
     const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
     if (!canSave) return { saveFailed: false };
@@ -275,6 +284,7 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
         announce('Autosave on');
       }
     } finally {
+      deps.syncIdentity?.();
       appliedSessionOn = sessionOn;
       finish(false);
     }
@@ -345,28 +355,20 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     // Drop stale conflict/action chrome; an in-flight save may re-announce after await.
     status.clearNotices();
 
-    // Never-saved clean docs: nothing pre-private to keep (step 3 covers creation-time no-trace).
-    if (frozen.revision < 1 && !wasDirty) {
-      announce(AUTOSAVE_OFF);
-      return;
-    }
-
+    // A first transaction may already have committed even though our frozen revision is zero.
+    // Preserve its fence until it settles, then decide whether this is still a never-saved document.
     const pending = deps.saver.inFlight();
     if (pending) await pending;
     state.active = { ...state.active, private: true };
     deps.autosave.checked = false;
     syncPrivateMarker();
-    // In-flight persist may have moved ownership to a conflict copy (#257 P1). Rebase the
-    // freeze onto that identity so the last pre-private save targets the owned row — keeping
-    // frozen text/title (edits after the in-flight snapshot) while using the copy's id/revision.
-    let freezeTarget = frozen;
-    if (state.active.id !== frozen.id) {
-      freezeTarget = {
-        ...frozen,
-        id: state.active.id,
-        revision: state.active.revision,
-      };
+    if (state.active.revision < 1) {
+      deps.abandonChangeRun();
+      announce(AUTOSAVE_OFF);
+      return;
     }
+    // Only the identity/revision follow the completed commit; fields and content revision stay frozen.
+    const freezeTarget = { ...frozen, id: state.active.id, revision: state.active.revision };
     try { await deps.saver.drainChanges(); } catch { /* may already be failing */ }
 
     const result = await deps.persistLastBeforePrivate({

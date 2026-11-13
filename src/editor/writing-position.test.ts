@@ -21,9 +21,9 @@ function setup(namespace = 'window:') {
   vi.stubGlobal('window', win);
   vi.stubGlobal('document', doc);
   vi.stubGlobal('sessionStorage', { setItem, getItem, removeItem, get length() { return stored.size; }, key: (index: number) => [...stored.keys()][index] ?? null });
-  let id = 'first';
+  let id: string | undefined = 'first';
   const api = setupWritingPosition(field, () => id, namespace);
-  return { field, win, doc, setItem, getItem, removeItem, stored, frames, api, switchId: (next: string) => { id = next; } };
+  return { field, win, doc, setItem, getItem, removeItem, stored, frames, api, switchId: (next: string | undefined) => { id = next; } };
 }
 
 it('batches a burst and writes only the latest position after inactivity', () => {
@@ -212,4 +212,15 @@ it('same-document restore discards transient captures without overwriting saved 
   expect(field.scrollTop).toBe(90);
   vi.advanceTimersByTime(1000);
   expect(setItem).not.toHaveBeenCalled();
+});
+
+it('drops a queued position when the current document becomes unrecordable', () => {
+  const { field, api, switchId, setItem } = setup();
+  field.dispatchEvent(new Event('select'));
+  switchId(undefined);
+  vi.advanceTimersByTime(POSITION_SAVE_DELAY_MS);
+  api.save();
+  expect(setItem).not.toHaveBeenCalled();
+  switchId('first'); api.save();
+  expect(setItem).toHaveBeenCalledOnce();
 });
