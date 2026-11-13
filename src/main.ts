@@ -98,8 +98,10 @@ if (embedded) {
  */
 try { localStorage.removeItem('typebridge.split.v1'); } catch { /* Optional. */ }
 // #256 (reverted) left reload-discard keys; the session one can hold a journal with text (#257).
-for (const [storage, prefix] of [[sessionStorage, 'typebridge.reloadDiscard.v1.'], [localStorage, 'typebridge.reloadDiscardPending.v1.']] as const) {
+// Reading `localStorage`/`sessionStorage` itself throws when storage is blocked: stay inside the try.
+for (const [area, prefix] of [['session', 'typebridge.reloadDiscard.v1.'], ['local', 'typebridge.reloadDiscardPending.v1.']] as const) {
   try {
+    const storage = area === 'session' ? sessionStorage : localStorage;
     for (let i = storage.length - 1; i >= 0; i--) {
       const key = storage.key(i);
       if (key?.startsWith(prefix)) storage.removeItem(key);

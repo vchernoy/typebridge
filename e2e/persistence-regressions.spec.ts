@@ -164,3 +164,21 @@ test('a failed IndexedDB deletion retries pending autosave without further typin
   await page.reload();
   await expect(editor).toHaveValue('Новая несохранённая правка 🙂');
 });
+
+test('the editor starts when both localStorage and sessionStorage access are blocked (#258)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => { errors.push(error.message); });
+  await page.addInitScript(() => {
+    for (const name of ['localStorage', 'sessionStorage']) {
+      Object.defineProperty(window, name, {
+        configurable: true,
+        get() { throw new DOMException('Access denied', 'SecurityError'); },
+      });
+    }
+  });
+  await page.goto('/editor.html');
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#editor')).toBeEnabled();
+  // A throw during startup leaves the static editor enabled but the app uninitialized.
+  expect(errors).toEqual([]);
+});
