@@ -18,7 +18,7 @@ async function openDocMenu(frame: FrameLocator): Promise<void> {
   await expect(panel).toBeVisible();
 }
 
-test('host windows share the last Find query; Replace stays per window', async ({ page }) => {
+test('host windows keep Find/Replace on their own documents', async ({ page }) => {
   test.setTimeout(90_000);
   const main = await openHost(page);
   await page.getByRole('button', { name: 'New window' }).click();
@@ -34,12 +34,14 @@ test('host windows share the last Find query; Replace stays per window', async (
 
   await second.locator('#find-open').click();
   await expect(second.locator('#find-bar')).toBeVisible();
-  await expect(second.locator('#find-text')).toHaveValue('shared-query');
+  await expect(second.locator('#find-text')).toHaveValue('');
+  await second.locator('#find-text').fill('second-query');
   await second.locator('#replace-text').fill('second-replace');
 
-  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('shared-query');
-  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:main'))).toBe('main-replace');
-  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:w2'))).toBe('second-replace');
+  await expect(main.locator('#find-text')).toHaveValue('shared-query');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:main'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.replace.v1::w:w2'))).toBeNull();
 });
 
 test('host window that is not editing keeps Find, and Replace takes over editing', async ({ page }) => {

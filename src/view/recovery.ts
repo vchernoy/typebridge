@@ -21,6 +21,7 @@ export type RecoveryDeps = {
   mayWrite: () => boolean;
   field: HTMLTextAreaElement;
   draftTitle: HTMLInputElement;
+  search?: () => Pick<import('../editor/indexeddb').StoredDraft, 'find' | 'replace'>;
   /** The journal warning and recovery panel are inserted before this element. */
   anchor: Element;
   postSignal: (type: DocumentSignal['type'], documentId: string, revision: number) => void;
@@ -93,7 +94,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
       }
       return;
     }
-    const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), find: state.active.find ?? '', replace: state.active.replace ?? '', title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
+    const entry: RecoverySnapshot = { token: crypto.randomUUID(), tab: journalTab, documentId: state.active.id, revision: state.active.revision, timestamp: Date.now(), find: deps.search?.().find ?? state.active.find ?? '', replace: deps.search?.().replace ?? state.active.replace ?? '', title: deps.draftTitle.value.trim() || UNTITLED_TITLE, text: deps.field.value };
     try {
       writeRecovery(localStorage, entry);
       currentJournal = entry;

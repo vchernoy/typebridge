@@ -90,6 +90,7 @@ export class Editor {
       redo: this.redoStack.map(d => [d[0], d[1], d[2], [...d[3]], [...d[4]]] as Delta), current: this.field.value };
   }
   restoreHistory(history?: EditorHistory): void {
+    this.compositionStart = null; this.imeComposing = false;
     this.undoStack = []; this.redoStack = [];
     if (history && history.current === this.field.value &&
       Array.isArray(history.undo) && Array.isArray(history.redo) &&
@@ -310,6 +311,7 @@ export class Editor {
     this.field.dispatchEvent(new Event('input', { bubbles: true }));
   }
   load(value: string): void {
+    this.compositionStart = null; this.imeComposing = false;
     this.field.value = value; this.field.setSelectionRange(0, 0);
     this.undoStack = []; this.redoStack = []; this.pending = null; this.before = null;
     this.known = this.capture(); this.lastEditAt = 0; this.notifyHistory();

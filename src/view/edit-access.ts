@@ -24,6 +24,7 @@ export type EditAccessDeps = {
   workspace: ReturnType<typeof createSinglePaneWorkspace>;
   editor: Editor;
   titleEditor: Editor;
+  searchEditors?: Editor[];
   ownershipNotice: HTMLElement;
   undo: HTMLButtonElement;
   redo: HTMLButtonElement;
@@ -54,6 +55,7 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
   /** Reflect ownership + transfer freeze in the editors, controls and guidance (ordinary windows only). */
   function applyEditAccess(): void {
     if (viewMode) return;
+    for (const search of deps.searchEditors ?? []) search.setReadOnly(state.transferFrozen);
     // Must match readOnlyNow: stay frozen for the whole switch/delete interval even if
     // installOwnership runs before the handler finishes (e.g. refreshDrafts after delete).
     const blocked = state.editBlock !== '' || state.transferFrozen;
@@ -107,6 +109,7 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
   /** Freeze Editor + title gates and mutation controls for the ownership-transfer window. */
   function freezeEditorsForTransition(): void {
     state.transferFrozen = true;
+    for (const search of deps.searchEditors ?? []) search.setReadOnly(true);
     workspace.setPaneRole('readonly');
     editor.setReadOnly(true);
     titleEditor.setReadOnly(true);

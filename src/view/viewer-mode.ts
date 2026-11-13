@@ -12,6 +12,7 @@ import { comparisonViewerHref } from './route';
 import type { Workspace } from './workspace';
 
 export type ViewerDeps = {
+  clearSearch?: () => void;
   field: HTMLTextAreaElement;
   draftTitle: HTMLInputElement;
   draftSelect: HTMLSelectElement;
@@ -67,6 +68,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     try { deps.editor.load(''); deps.draftTitle.value = ''; deps.syncTitleTooltip(); }
     finally { state.loadingDraft = false; }
     state.active = { ...newDraft(), revision: 0 };
+    deps.clearSearch?.();
     deps.workspace.setDirty(false);
     viewerNotice.textContent = message;
     viewerNotice.hidden = false;

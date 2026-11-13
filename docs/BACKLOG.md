@@ -22,4 +22,8 @@ Current follow-ups and priorities are listed once, in [ROADMAP.md](ROADMAP.md); 
 
 ## #257 private mode: step 2a model/log
 
-Four-field document storage and a shared value-or-change recovery log are implemented in this change, pending independent review/CI. Refs #257, #255, #37. Undo/Redo behavior stays unchanged. Document-bound Find/Replace UI (2b), residuals (2c), new-private-document traces (3), and clear local data (4) are later PRs. See the architecture for the boundary; the search-UI privacy checklist is not complete in 2a.
+The four-field model/log foundation shipped in #265 (`c0f9be4`), Refs #257, #255, #37. Step 2b below binds its UI. Residuals (2c), new-private-document traces (3), and clear local data (4) remain later PRs.
+
+## #257 step 2b: document search UI
+
+Implemented in this change, pending review/CI: Find/Replace bound to document fields and independent histories; title history captured/restored; viewer queries in memory only; privacy toggles preserve fields; old search-content keys removed. Host layout stores ids/geometry with no live title strings. Refs #257, #255. Step 2c residuals and steps 3–4 are later PRs.
