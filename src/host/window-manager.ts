@@ -95,6 +95,8 @@ export type WindowManager = {
   cycleFocus: () => void;
   /** Focus a window's title for renaming (Documents → Rename… in that window). */
   renameWindow: (id: string) => void;
+  /** The global clear reload must never persist the erased layout on unload. */
+  stopPersistenceForStorageClear: () => void;
   dispose: () => void;
 };
 
@@ -1020,6 +1022,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       syncEmbeddedFocusChrome(false);
       persist();
     },
+    stopPersistenceForStorageClear: () => { storageCleared = true; },
     dispose: () => {
       if (disposed) return;
       disposed = true;

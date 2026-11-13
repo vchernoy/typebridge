@@ -26,7 +26,10 @@ try {
   }
 } catch { /* Optional one-shot notice. */ }
 const reloadAfterStorageClear = installStorageClearReload({
-  stop: () => { for (const frame of editorFrames()) editorHooks(frame).__typebridgeStopForStorageClear?.(); },
+  stop: () => {
+    manager.stopPersistenceForStorageClear();
+    for (const frame of editorFrames()) editorHooks(frame).__typebridgeStopForStorageClear?.();
+  },
 });
 
 
