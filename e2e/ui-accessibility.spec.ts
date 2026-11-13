@@ -48,7 +48,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.getByRole('textbox', { name: 'Find', exact: true }).fill('text');
     await textContrast(page.locator('#find-status'));
     await openSettings(page);
-    await textContrast(page.locator('#autosave-hint'));
+    await textContrast(page.locator('#private-session-hint'));
     await closeSettings(page);
     await openDocuments(page);
     await textContrast(page.locator('#doc-menu .menu-label'));

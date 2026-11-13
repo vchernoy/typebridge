@@ -88,6 +88,7 @@ describe('recovery read warning (#254 Codex P2)', () => {
     const recovery = createRecovery(state, status, {
       viewMode: false,
       autosave: { checked: true } as HTMLInputElement,
+      mayWrite: () => true,
       field: { value: '' } as HTMLTextAreaElement,
       draftTitle: { value: '' } as HTMLInputElement,
       anchor: document.createElement('div') as unknown as Element,

@@ -14,6 +14,12 @@ export type StoredDraft = {
    * this document after it continue this text; missing means 0 (rows from before the log).
    */
   upTo?: number;
+  /**
+   * When true, this document is private (#257): text/title/undo typed while private are never
+   * written. Missing means false. The flag is metadata written when going private so the
+   * document reopens private.
+   */
+  private?: boolean;
 };
 export type CommitResult =
   | { ok: true; draft: StoredDraft }
@@ -228,6 +234,50 @@ export async function commitOrCreateConflictCopy(
   }
 }
 
+
+/**
+ * Ownership-fenced update of only the `private` flag (#257). Never changes text, title,
+ * history or upTo. Never overrides a revision conflict (CAS). Used when the last full save
+ * before going private failed but the flag must still become durable.
+ */
+export async function updateDocumentPrivateFlag(
+  db: IDBDatabase,
+  documentId: string,
+  privateFlag: boolean,
+  expectedRevision: number,
+  owner: WriteFence,
+): Promise<
+  | { ok: true; draft: StoredDraft }
+  | { ok: false; reason: 'conflict' | 'missing'; current: StoredDraft | undefined }
+> {
+  if (!owner?.instanceId || !Number.isSafeInteger(owner.fence)) throw new EditOwnershipLostError();
+  const tx = db.transaction([STORE, OWNERSHIP], 'readwrite');
+  const done = finished(tx);
+  try {
+    await assertEditOwner(tx, documentId, owner);
+    const store = tx.objectStore(STORE);
+    const current = await request(store.get(documentId)) as StoredDraft | undefined;
+    if (!current) {
+      await done;
+      return { ok: false, reason: 'missing', current: undefined };
+    }
+    if (current.revision !== expectedRevision) {
+      await done;
+      return { ok: false, reason: 'conflict', current };
+    }
+    // Missing means false — omit the field when clearing rather than storing false.
+    const next: StoredDraft = { ...current };
+    if (privateFlag) next.private = true;
+    else delete next.private;
+    await request(store.put(next));
+    await done;
+    return { ok: true, draft: next };
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished or aborted. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}
 
 /**
  * Remove every change-log record for `documentId` (#37 R2c 2d-2 / #254). Used when the user

@@ -18,6 +18,7 @@ export type LeaveGuardDeps = {
   viewMode: boolean;
   field: HTMLTextAreaElement;
   autosave: HTMLInputElement;
+  mayWrite: () => boolean;
   workspace: Workspace;
   saver: { cancel: () => void };
   persist: () => Promise<SaveResult>;
@@ -131,7 +132,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   async function prepareLeaveWithUnsaved(kind: 'reload' | 'close'): Promise<boolean> {
     if (state.transitioning || state.deleting || deps.field.disabled) return false;
     privateReloadChoice = undefined;
-    if (deps.workspace.dirty() && !deps.autosave.checked) {
+    if (deps.workspace.dirty() && !deps.mayWrite()) {
       if (kind === 'close') {
         const contentAtPrompt = deps.workspace.contentRevision();
         const discarded = await confirmCloseDiscard({
@@ -182,7 +183,7 @@ export function createLeaveGuards(state: EditorState, deps: LeaveGuardDeps) {
   function assertSafeToReloadAfterUpdate(): void {
     if (state.transitioning || state.deleting || deps.field.disabled || document.querySelector('.confirm-backdrop')) throw new Error('Finish the current action first');
     if (deps.workspace.dirty()) {
-      if (!deps.autosave.checked) {
+      if (!deps.mayWrite()) {
         if (privateReloadChoice?.id !== state.active.id || privateReloadChoice.generation !== deps.workspace.contentRevision()) {
           throw new Error('Private edits changed');
         }

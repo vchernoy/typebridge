@@ -137,8 +137,9 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
         }
       }
       installOwnership(access);
-      // Private/unsaved transfer must not silently persist even if shared Autosave is on.
-      if (input.snapshot?.dirty && autosave.checked) {
+      // Private/unsaved transfer must not silently persist (#257).
+      if (input.snapshot?.dirty) {
+        state.active = { ...state.active, private: true };
         autosave.checked = false;
         updateSaveIndicator();
       }
@@ -151,7 +152,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
       field.setSelectionRange(mapped.start, mapped.end);
       unfreezeEditorsAfterTransition();
       // Only schedule save for non-private takeovers (saved reread / clean yield).
-      if (workspace.dirty() && autosave.checked && !input.snapshot?.dirty) {
+      if (workspace.dirty() && autosave.checked && !state.active.private && !input.snapshot?.dirty) {
         saveSoon();
       }
       return true;
@@ -203,7 +204,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
       }
       installOwnership(access);
       onEditableHere();
-      if (workspace.dirty() && autosave.checked) { saveSoon(); }
+      if (workspace.dirty() && autosave.checked && !state.active.private) { saveSoon(); }
     })().finally(() => {
       ownershipRetry = undefined;
       if (!rereadAfterOwnershipRetry) return;

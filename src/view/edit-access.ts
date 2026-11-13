@@ -195,7 +195,7 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
     if (access.ownership) {
       installOwnership(access);
       announceAction('Editing stayed in this window — the other window could not take over.', { keepConflict: true });
-      if (workspace.dirty() && autosave.checked) {
+      if (workspace.dirty() && autosave.checked && !state.active.private) {
         saveSoon();
       }
       return;

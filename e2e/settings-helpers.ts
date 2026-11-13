@@ -39,44 +39,57 @@ export async function setSetting(page: Page, selector: string, on: boolean): Pro
 }
 
 /**
- * Toggle Autosave in Settings. Turning it off opens the delete-saved-copy dialog
- * (#114); choose Keep or Delete before the panel is closed.
+ * Per-document Autosave checkbox in the editor chrome (#257).
+ * Unchecked marks the shown document private. No delete-saved-copy prompt in step 1
+ * (clear local data is a later step). The optional third argument is ignored for
+ * call-site compatibility with older Keep/Delete flows.
  */
 export async function setAutosave(
   page: Page,
   on: boolean,
-  offChoice: 'keep' | 'delete' = 'keep',
+  _offChoice: 'keep' | 'delete' = 'keep',
 ): Promise<void> {
-  await openSettings(page);
+  void _offChoice;
   const box = page.locator('#autosave');
+  await expect(box).toBeEnabled();
   if (on) await box.check();
-  else {
-    await box.uncheck();
-    const dialog = page.getByRole('dialog', { name: 'Delete the saved copy?' });
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', {
-      name: offChoice === 'delete' ? 'Delete saved copy' : 'Keep saved copy',
-    }).click();
-    await expect(dialog).toBeHidden();
-    await expect(box).toBeEnabled();
-  }
+  else await box.uncheck();
+  await expect(box).toBeChecked({ checked: on });
+  // Going private may briefly keep the control disabled while an in-flight save finishes.
+  await expect(box).toBeEnabled({ timeout: 15_000 });
+}
+
+/**
+ * Global private session in Settings (`typebridge.autosave.v1`, inverted: on = save nothing).
+ * Used by standalone and host pages (#257).
+ */
+export async function setPrivateSession(page: Page, on: boolean): Promise<void> {
+  await openSettings(page);
+  const box = page.locator('#private-session');
+  if (on) await box.check();
+  else await box.uncheck();
+  await expect.poll(async () => page.evaluate(() => {
+    return localStorage.getItem('typebridge.autosave.v1') === 'off';
+  })).toBe(on);
   await closeSettings(page);
 }
 
 /**
- * #175 step 7: Autosave lives on the host Settings panel. Turning it off writes the
- * shared preference; embedded windows apply without the per-window delete dialog.
+ * #175 / #257: host Settings private session. `on` true means Autosave/saving is enabled
+ * (private session off), matching the historical setHostAutosave(true) meaning.
  */
 export async function setHostAutosave(page: Page, on: boolean): Promise<void> {
   await openSettings(page);
-  const box = page.locator('#autosave');
-  if (on) await box.check();
-  else await box.uncheck();
+  const box = page.locator('#private-session');
+  // private-session checked = save nothing = historical Autosave off.
+  if (on) await box.uncheck();
+  else await box.check();
   await expect.poll(async () => page.evaluate(() => {
     const raw = localStorage.getItem('typebridge.autosave.v1');
     return raw !== 'off';
   })).toBe(on);
-  // Confirm every live editor iframe mirrored the shared preference.
+  // Confirm every live editor iframe mirrored the shared preference onto its per-doc checkbox
+  // (new/non-private docs follow the session).
   await expect.poll(async () => page.evaluate(want => {
     const frames = [...document.querySelectorAll<HTMLIFrameElement>('iframe.host-editor')];
     if (frames.length === 0) return false;

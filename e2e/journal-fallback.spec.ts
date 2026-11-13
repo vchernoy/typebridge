@@ -152,8 +152,8 @@ test('after a later change-log failure the journal is written again (#254)', asy
   );
 });
 
-test('after Delete saved copy, Autosave-on typing journals until a new save commits (#254)', async ({ page }) => {
-  // Fails if protects() stays true after deleteStoredDraft removed the durable base (#254 Codex P1).
+test('after leaving private, Autosave-on typing journals until a new save commits (#257 / #254)', async ({ page }) => {
+  // Going private then leaving must restart journaling for post-private edits.
   await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
@@ -167,7 +167,7 @@ test('after Delete saved copy, Autosave-on typing journals until a new save comm
   });
   expect(await journalKeys(page)).toEqual([]);
 
-  await setAutosave(page, false, 'delete');
+  await setAutosave(page, false);
   await expect(page.locator('#save-indicator')).toHaveText('Not saved');
   // Turn Autosave back on with no edit yet, then hold the ensuing full save.
   await page.evaluate(() => {
@@ -269,7 +269,7 @@ test('switch discard clears change-log so salvage cannot revive (#254)', async (
   const firstDocId = await page.locator('#drafts option:checked').getAttribute('value');
   expect(firstDocId).toBeTruthy();
 
-  await setAutosave(page, false, 'keep');
+  await setAutosave(page, false);
   await field.fill('Private after keep saved copy');
   await expect(page.locator('#save-indicator')).toHaveText('Not saved');
 
@@ -311,7 +311,7 @@ test('switch discard cancels when typing during discard hold (#254)', async ({ p
   const docId = await page.locator('#drafts option:checked').getAttribute('value');
   expect(docId).toBeTruthy();
 
-  await setAutosave(page, false, 'keep');
+  await setAutosave(page, false);
   await field.press('End');
   await page.keyboard.type('!');
   await expect(page.locator('#save-indicator')).toHaveText('Not saved');

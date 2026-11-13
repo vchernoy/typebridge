@@ -15,7 +15,7 @@ for (const width of [390, 1280]) {
     await expect(about).toContainText('not synced between devices');
     await expect(about).toContainText('Undo history');
     await expect(about).toContainText('reopen offline');
-    await expect(page.locator('#autosave-hint')).toContainText('text and title are not saved');
+    await expect(page.locator('#private-session-hint')).toContainText('text and title are not saved');
     await page.keyboard.press('Escape');
     await expect(page.locator('#settings-panel')).toBeHidden();
     await expect(link).toBeFocused();

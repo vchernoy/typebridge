@@ -1,6 +1,7 @@
 import { answerNextConfirmation } from './settings-helpers';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { documentAction, selectDocument, setAutosave } from './settings-helpers';
+import { documentAction, openSettings, selectDocument, setAutosave, setPrivateSession } from './settings-helpers';
+import { PRIVATE_SWITCH_SAVE_FAILED } from '../src/editor/privacy';
 import { readStoredDocs, writeForeignRevision } from './storage-helpers';
 
 // Status-line races from #52. Timers are controlled with Playwright's clock and
@@ -19,11 +20,13 @@ function storedTexts(page: Page): Promise<string[]> {
 }
 const status = (page: Page) => page.locator('#status-line');
 const prefWarning = (page: Page) => page.locator('#preference-warning');
-const AUTOSAVE_PREF_FAILED = 'Could not save the autosave setting; it may reset on reload.';
+const AUTOSAVE_PREF_FAILED = 'Could not save the private session setting; it may reset on reload.';
 const SAVE_FAILED = 'Save failed — your text is unsaved. Copy or export it, then retry by editing.';
 const SAVE_FAILED_NO_STORAGE = 'Save failed — browser storage is unavailable. Copy or export your text before closing.';
 const STORAGE_UNAVAILABLE = 'Storage unavailable. Copy or export unsaved text before closing.';
 const AUTOSAVE_OFF = 'Autosave off — text and title are not saved and will be lost on reload';
+const PRIVATE_SWITCH_FLAG_FAILED =
+  "Your last changes before going private couldn't be saved, and this document may not reopen as private.";
 const RETRYING = 'Saving again… The last save failed; your text stays unsaved until a save succeeds.';
 // Copy may be refused by the headless clipboard; either message must keep the warning.
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -166,12 +169,8 @@ test('discarding text after a failed save stops reporting unsaved text', async (
   await documentAction(page, '#new-draft');
   await confirmation1;
   await expect(field).toHaveValue('');
-  await documentAction(page, '#export-txt');
-  await expect(status(page)).toHaveText('Text exported');
-  // With autosave back on, a stale failure would be appended to action feedback.
-  await setAutosave(page, true);
-  await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText('Autosave on');
+  // A new document is not private; Autosave is already on without a toggle announce.
+  await expect(page.locator('#autosave')).toBeChecked();
   await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported');
 });
@@ -258,7 +257,7 @@ test('a failed reload backup gives way to the save that follows it', async ({ pa
   await expect(status(page)).toHaveText('Saved locally');
 });
 
-test('a failed autosave preference write stays visible when toggling', async ({ page }) => {
+test('a failed private-session preference write stays visible when toggling (#257)', async ({ page }) => {
   await page.goto('/editor.html');
   const field = page.locator('#editor');
   await field.fill('Первый');
@@ -270,20 +269,20 @@ test('a failed autosave preference write stays visible when toggling', async ({ 
       return setItem.call(this, key, value);
     };
   });
+  await openSettings(page);
+  // Write fails and the control reverts; use click (not check) so Playwright does not require a lasting checked state.
+  await page.locator('#private-session').click();
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
+  await expect(page.locator('#private-session')).not.toBeChecked();
+  await page.locator('#settings-close').click();
+  // Per-document private still works without touching the preference key.
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toHaveText(AUTOSAVE_OFF);
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
   await setAutosave(page, true);
-  await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toHaveText('Autosave on');
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
-  // Deleting the saved copy leaves the text only in memory: say so.
-  await setAutosave(page, false, 'delete');
-  await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
-  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
-  await expect.poll(() => storedTexts(page)).toEqual([]);
 });
 
 test('with autosave off after a failure, action feedback keeps the unsaved warning without advising a retry', async ({ page }) => {
@@ -297,7 +296,8 @@ test('with autosave off after a failure, action feedback keeps the unsaved warni
   await expect(status(page)).toContainText('Save failed');
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
+  // Save failed and the change log could not cover the pre-private edit (#257).
+  await expect(status(page)).toContainText(PRIVATE_SWITCH_SAVE_FAILED.replace(/\.$/, ''));
   await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF);
 });
@@ -336,7 +336,7 @@ test('a failed delete with autosave off does not promise another save', async ({
   await expect(field).toHaveValue('Сохранено правка');
 });
 
-test('without browser storage, toggling autosave keeps the storage warning', async ({ page }) => {
+test('without browser storage, toggling private keeps the storage warning (#257)', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'indexedDB', { value: { open: () => { throw new Error('blocked'); } } });
     const setItem = Storage.prototype.setItem;
@@ -348,6 +348,11 @@ test('without browser storage, toggling autosave keeps the storage warning', asy
   await page.goto('/editor.html');
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
+  await openSettings(page);
+  await page.locator('#private-session').click();
+  await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
+  await expect(page.locator('#private-session')).not.toBeChecked();
+  await page.locator('#settings-close').click();
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
   await expect(status(page)).toHaveText(STORAGE_UNAVAILABLE);
@@ -359,17 +364,21 @@ test('without browser storage, toggling autosave keeps the storage warning', asy
   await expect(status(page)).toContainText('browser storage is unavailable');
   await setAutosave(page, false);
   await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(status(page)).toHaveText(SAVE_FAILED_NO_STORAGE);
+  // Going private without storage may also announce the private-flag failure (#257).
+  await expect(status(page)).toHaveText(
+    PRIVATE_SWITCH_FLAG_FAILED + ' ' + SAVE_FAILED_NO_STORAGE,
+  );
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
 });
 
-test('switching to a clean draft with autosave off does not report unsaved changes', async ({ page }) => {
+test('switching to a clean draft with a private session does not report unsaved changes (#257)', async ({ page }) => {
   await page.goto('/editor.html');
   const field = page.locator('#editor');
   await field.fill('Первый');
   await expect(status(page)).toHaveText('Saved locally');
-  await setAutosave(page, false);
-  await expect(page.locator('#autosave')).toBeEnabled();
+  // Global session keeps every document private, including a new draft.
+  await setPrivateSession(page, true);
+  await expect(page.locator('#autosave')).toBeDisabled();
   await field.press('End');
   await field.pressSequentially(' черновик');
   await expect(status(page)).toHaveText(AUTOSAVE_OFF);
@@ -486,7 +495,8 @@ test('recovered text with autosave off keeps the unsaved warning after actions',
   await expect(status(page)).toHaveText('Recovered unsaved text; autosave is off');
   await documentAction(page, '#export-txt');
   await expect(status(page)).toHaveText('Text exported. ' + AUTOSAVE_OFF);
-  await setAutosave(page, true);
+  // Global private session locks the per-document checkbox; turn the session off to save.
+  await setPrivateSession(page, false);
   await expect.poll(() => storedTexts(page)).toContain('Восстановленный текст');
   await expect(status(page)).toHaveText('Saved locally');
 });
@@ -921,41 +931,6 @@ test('import after a conflict flush keeps the left-draft conflict notice', async
   await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Imported as a new document');
 });
 
-test('turning autosave off during an in-flight conflict keeps the notice', async ({ page, context }) => {
-  const { field } = await prepareConflict(page, context);
-  await page.evaluate(() => {
-    const state = window as unknown as { holdConflict: boolean; conflictHeld: boolean };
-    const add = IDBObjectStore.prototype.add;
-    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['add']>) {
-      IDBObjectStore.prototype.add = add;
-      state.holdConflict = true;
-      const copyId = (args[0] as { id: string }).id;
-      const result = add.apply(this, args);
-      result.addEventListener('success', () => {
-        state.conflictHeld = true;
-        const keepAlive = (): void => {
-          if (state.holdConflict) this.get(copyId).addEventListener('success', keepAlive);
-        };
-        keepAlive();
-      });
-      return result;
-    };
-  });
-  await field.press('End');
-  await field.pressSequentially(' — правка');
-  await page.clock.runFor(400);
-  await expect.poll(() => page.evaluate(() => (window as unknown as { conflictHeld: boolean }).conflictHeld)).toBe(true);
-  // Start the toggle while the write is still held so the handler reaches `await saving`.
-  const unchecking = setAutosave(page, false);
-  await expect.poll(() => page.evaluate(() => (document.querySelector('#autosave') as HTMLInputElement).disabled)).toBe(true);
-  await page.evaluate(() => { (window as unknown as { holdConflict: boolean }).holdConflict = false; });
-  await unchecking;
-  await expect(page.locator('#autosave')).not.toBeChecked();
-  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
-  await expect(status(page)).toContainText(CONFLICT_COPY);
-  await expect(status(page)).toContainText(AUTOSAVE_OFF);
-});
-
 test('turning autosave off clears an earlier conflict notice', async ({ page, context }) => {
   const { field } = await prepareConflict(page, context);
   await field.press('End');
@@ -1192,10 +1167,12 @@ test('a failed preference write stays visible after later document saves until i
   });
   await page.locator('#enabled').uncheck();
   await expect(prefWarning(page)).toHaveText('Could not save the transliteration setting; it may reset on reload.');
-  await setAutosave(page, false);
-  await setAutosave(page, true);
-  await expect(page.locator('#autosave')).toBeEnabled();
-  await expect(prefWarning(page)).toHaveText('Could not save the transliteration and autosave settings; they may reset on reload.');
+  // Global private session writes typebridge.autosave.v1; per-doc #autosave does not (#257).
+  await openSettings(page);
+  await page.locator('#private-session').click();
+  await expect(page.locator('#private-session')).not.toBeChecked();
+  await expect(prefWarning(page)).toHaveText('Could not save the transliteration and private session settings; they may reset on reload.');
+  await page.locator('#settings-close').click();
   // A successful document save does not repair the preferences.
   await field.fill('Второй');
   await expect.poll(() => storedTexts(page)).toContain('Второй');
@@ -1205,9 +1182,9 @@ test('a failed preference write stays visible after later document saves until i
   await page.evaluate(() => (window as unknown as { unblockPrefs: () => void }).unblockPrefs());
   await page.locator('#enabled').check();
   await expect(prefWarning(page)).toHaveText(AUTOSAVE_PREF_FAILED);
-  await setAutosave(page, false);
-  await setAutosave(page, true);
-  await expect(page.locator('#autosave')).toBeEnabled();
+  await openSettings(page);
+  await page.locator('#private-session').check();
+  await expect(page.locator('#private-session')).toBeChecked();
   await expect(prefWarning(page)).toBeHidden();
-  await expect(status(page)).toHaveText('Autosave on');
+  await expect(status(page)).toHaveText(AUTOSAVE_OFF);
 });

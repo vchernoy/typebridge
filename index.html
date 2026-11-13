@@ -9,33 +9,33 @@
       (() => {
         // A share link (#39): the document is in the #doc= fragment, which never reaches a server.
         // Pasting one into an open TypeBridge tab changes only the fragment, so listen as well.
-        window.addEventListener('hashchange', () => {
-          if (location.hash.startsWith('#doc=')) location.assign('/read.html' + location.hash);
+        window.addEventListener("hashchange", () => {
+          if (location.hash.startsWith("#doc=")) location.assign("/read.html" + location.hash);
         });
-        if (location.hash.startsWith('#doc=')) {
-          document.documentElement.dataset.forwarding = '1';
-          location.replace('/read.html' + location.hash);
+        if (location.hash.startsWith("#doc=")) {
+          document.documentElement.dataset.forwarding = "1";
+          location.replace("/read.html" + location.hash);
           return;
         }
         const params = new URLSearchParams(location.search);
-        if (['mode', 'doc', 'window', 'embed'].some(name => params.has(name))) {
+        if (["mode", "doc", "window", "embed"].some((name) => params.has(name))) {
           // src/host/entry.ts checks this and does not start the host while leaving.
-          document.documentElement.dataset.forwarding = '1';
-          location.replace('/editor.html' + location.search + location.hash);
+          document.documentElement.dataset.forwarding = "1";
+          location.replace("/editor.html" + location.search + location.hash);
         }
       })();
     </script>
     <script>
       (() => {
-        let choice = 'system';
+        let choice = "system";
         try {
-          const saved = localStorage.getItem('typebridge.appearance.v1');
-          if (saved === 'light' || saved === 'dark') choice = saved;
+          const saved = localStorage.getItem("typebridge.appearance.v1");
+          if (saved === "light" || saved === "dark") choice = saved;
         } catch {
           /* System remains usable when storage is blocked. */
         }
         document.documentElement.dataset.colorScheme =
-          choice === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : choice;
+          choice === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : choice;
       })();
     </script>
     <title>TypeBridge</title>
@@ -65,11 +65,13 @@
         ><span class="btn-text">New window</span>
       </button>
       <button type="button" data-host-action="tile-side" title="Tile side by side">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4zM12 5v14" /></svg
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 5h16v14H4zM12 5v14" /></svg
         ><span class="btn-text">Tile side by side</span>
       </button>
       <button type="button" data-host-action="tile-stack" title="Tile stacked">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4zM4 12h16" /></svg
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 5h16v14H4zM4 12h16" /></svg
         ><span class="btn-text">Tile stacked</span>
       </button>
       <div class="mode-switch">
@@ -125,8 +127,8 @@
       <div class="settings-group rules-panel" role="group" aria-labelledby="settings-rules-title">
         <h3 id="settings-rules-title">Transliteration rules</h3>
         <p>
-          One rule per line: Latin = Cyrillic. Edit defaults or add rules. Changes affect future typing, not
-          existing text.
+          One rule per line: Latin = Cyrillic. Edit defaults or add rules. Changes affect future typing, not existing
+          text.
         </p>
         <label for="rules-text">Mappings</label
         ><textarea id="rules-text" spellcheck="false" aria-label="Transliteration mappings"></textarea>
@@ -141,13 +143,12 @@
       <div class="settings-group" role="group" aria-labelledby="settings-saving-title">
         <h3 id="settings-saving-title">Saving</h3>
         <label class="toggle"
-          ><input id="autosave" type="checkbox" checked aria-describedby="autosave-hint" /> Autosave</label
+          ><input id="private-session" type="checkbox" aria-describedby="private-session-hint" /> Private session: don't
+          save anything</label
         >
-        <p id="autosave-hint" class="setting-note">
-          On: saves text in this browser as you type. Off: privacy mode — text and title are not saved and will be
-          lost on reload (including when a phone browser discards a background tab). This choice applies to every
-          window; turning it off here does not offer to delete a saved copy (use Settings on the standalone editor
-          for that).
+        <p id="private-session-hint" class="setting-note">
+          When on, every document in every window is private — text and title are not saved and will be lost on reload.
+          Each window's Autosave checkbox is per document and stays off while a private session is on.
         </p>
       </div>
       <div class="settings-group" role="group" aria-labelledby="settings-editor-title">
@@ -156,8 +157,8 @@
           ><input id="tab-indent" type="checkbox" checked aria-describedby="tab-indent-note" /> Tab indents</label
         >
         <p id="tab-indent-note" class="setting-note">
-          When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this
-          off, moves focus as usual.
+          When on, Tab and Shift+Tab indent lines in the editor. Shift+Tab on an unindented line, or turning this off,
+          moves focus as usual.
         </p>
       </div>
       <div class="settings-group" role="group" aria-labelledby="settings-appearance-title">

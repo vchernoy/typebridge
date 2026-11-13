@@ -40,7 +40,10 @@ test('confirmed reset keeps private text, title, Undo and Autosave (#137 U11)', 
   await expect(page.locator('#tab-indent')).toBeChecked();
   await expect(page.locator('#regex-mode')).not.toBeChecked();
   await expect(page.locator('#match-case')).not.toBeChecked();
+  // Reset keeps the private-session preference (typebridge.autosave.v1); chrome Autosave stays locked off.
+  await expect(page.locator('#private-session')).toBeChecked();
   await expect(page.locator('#autosave')).not.toBeChecked();
+  await expect(page.locator('#autosave')).toBeDisabled();
   await expect(page.locator('#editor')).toHaveValue('Unsaved private text');
   await expect(page.locator('#draft-title')).toHaveValue('Private title');
   await expect(page.locator('#undo')).toBeEnabled();
@@ -79,5 +82,6 @@ test('partial reset failure is reported without deleting text (#137 U11)', async
   await page.getByRole('dialog', { name: 'Reset settings to defaults?', exact: true }).getByRole('button', { name: 'Reset settings', exact: true }).click();
   await expect(page.locator('#status')).toContainText('Reset incomplete — could not save custom rules');
   await expect(page.locator('#editor')).toHaveValue('Unsaved private text');
+  await expect(page.locator('#private-session')).toBeChecked();
   await expect(page.locator('#autosave')).not.toBeChecked();
 });
