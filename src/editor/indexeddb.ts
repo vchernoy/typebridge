@@ -114,7 +114,7 @@ function finished(tx: IDBTransaction): Promise<void> {
   });
 }
 
-export function openDraftDatabase(onVersionChange?: () => void): Promise<IDBDatabase> {
+export function openDraftDatabase(onVersionChange?: (cleared?: boolean) => void): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     let blocked = false;
     const open = indexedDB.open(DATABASE, DATABASE_VERSION);
@@ -129,7 +129,7 @@ export function openDraftDatabase(onVersionChange?: () => void): Promise<IDBData
     open.onsuccess = () => {
       const db = open.result;
       if (blocked) { db.close(); return; }
-      db.onversionchange = () => { db.close(); onVersionChange?.(); };
+      db.onversionchange = event => { db.close(); onVersionChange?.(event.newVersion === null); };
       resolve(db);
     };
     open.onerror = () => reject(open.error ?? new Error('Cannot open IndexedDB'));
