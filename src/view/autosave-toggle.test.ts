@@ -491,4 +491,32 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     await toggle.applySessionChange(true);
     expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
   });
+
+  it('cancels a stale queued session-off when session-on is reasserted in flight (#260 P1)', async () => {
+    let releaseGate!: () => void;
+    const persistGate = new Promise<void>(resolve => { releaseGate = resolve; });
+    const { toggle, persistLastBeforePrivate } = harness({
+      sessionDirty: true,
+      persistGate,
+    });
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'off',
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    const first = toggle.applySessionChange(true);
+    await vi.waitFor(() => expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1));
+    // on → off → on while the first last-save awaits: the third event must cancel queued false.
+    void toggle.applySessionChange(false);
+    void toggle.applySessionChange(true);
+    releaseGate();
+    await first;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
+    // appliedSessionOn must remain true (not flipped by a stale queued off), so a further
+    // session-on is an echo and must not start another last-save.
+    await toggle.applySessionChange(true);
+    expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1);
+  });
 });

@@ -188,7 +188,15 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
       }
       // Same-tab host fan-out + storage can both arrive while the first last-save awaits.
       // Do not queue a replay of the same target — that would re-snapshot post-session typing (#260 P1).
-      if (sessionApplyTarget === sessionOn || pendingSession === sessionOn) return;
+      // A same-target reassertion after an opposite queue must cancel that stale pending first
+      // (on → off → on while in flight), or finish() would apply the stale value (#260 P1).
+      if (sessionApplyTarget === sessionOn) {
+        if (pendingSession !== undefined && pendingSession !== sessionOn) {
+          pendingSession = undefined;
+        }
+        return;
+      }
+      if (pendingSession === sessionOn) return;
       pendingSession = sessionOn;
       return;
     }
