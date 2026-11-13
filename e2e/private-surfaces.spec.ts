@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { confirmPrivateSavedCopy, fillHostEditor, setHostAutosave } from './settings-helpers';
+import { confirmPrivateSavedCopy, fillHostEditor, openFind, setHostAutosave, setPrivateSession } from './settings-helpers';
 
 for (const session of [false, true]) {
   test(`private ${session ? 'session' : 'document'} keeps title/search text out of storage across reload (#257 step 2)`, async ({ page }) => {
@@ -48,6 +48,91 @@ for (const session of [false, true]) {
     await expect.poll(() => page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('resumed query');
   });
 }
+
+test('held-save private-session reversal restores public Find text before persistence (#264 P0)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Public body');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openFind(page);
+  await page.locator('#find-text').fill('public query');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+
+  // Hold the session last-save so Find can flip private→public before finish().
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 8_000;
+  });
+  await page.locator('#editor').fill('Public body DIRTY');
+  await expect(page.locator('#save-indicator')).toHaveText('Saving…');
+  const enabling = setPrivateSession(page, true);
+  await expect(page.locator('#private-session')).toBeChecked();
+  await page.locator('#find-text').fill('SECRET FIND');
+  // Reverse while last-save is still in flight — scope must restore, not skip.
+  await setPrivateSession(page, false);
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+  void enabling;
+
+  await expect(page.locator('#find-text')).toHaveValue('public query');
+  await page.locator('#find-text').dispatchEvent('input');
+  await page.locator('#find-text').dispatchEvent('compositionend');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+  await page.locator('#find-text').fill('resumed after reversal');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('resumed after reversal');
+});
+
+test('IME composition after Find restore does not reintroduce private query via Undo (#264 P0)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await openFind(page);
+  await page.locator('#find-text').fill('public query');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+  await setPrivateSession(page, true);
+  await page.locator('#find-text').evaluate(el => {
+    const input = el as HTMLInputElement;
+    input.focus();
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    input.value = 'SECRET FIND';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertCompositionText', data: 'SECRET FIND', isComposing: true }));
+  });
+  await setPrivateSession(page, false);
+  await expect(page.locator('#find-text')).toHaveValue('public query');
+  await page.locator('#find-text').evaluate(el => {
+    el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+  });
+  await page.locator('#find-text').press('Control+z');
+  await expect(page.locator('#find-text')).toHaveValue('public query');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).not.toContain('SECRET');
+});
+
+test('finishing entry into private keeps an in-memory Find query typed during last-save (#264 P2)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Keep body');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await openFind(page);
+  await page.locator('#find-text').fill('public query');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayPersistMs: number }).__typebridgeDelayPersistMs = 2_000;
+  });
+  await page.locator('#editor').fill('Keep body DIRTY');
+  await expect(page.locator('#save-indicator')).toHaveText('Saving…');
+  const enabling = setPrivateSession(page, true);
+  await expect(page.locator('#private-session')).toBeChecked();
+  await page.locator('#find-text').fill('private only');
+  await page.evaluate(() => {
+    delete (window as unknown as { __typebridgeDelayPersistMs?: number }).__typebridgeDelayPersistMs;
+  });
+  await enabling;
+  // After finish(), the private query must still be in memory (not wiped by a late restore).
+  await expect(page.locator('#autosave')).toBeDisabled({ timeout: 15_000 });
+  await expect(page.locator('#find-text')).toHaveValue('private only');
+  expect(await page.evaluate(() => sessionStorage.getItem('typebridge.find.query.v1'))).toBe('public query');
+});
 
 test('a missing comparison viewer follows same-id revision-one recreation (#261)', async ({ page, context }) => {
   await page.goto('/editor.html');

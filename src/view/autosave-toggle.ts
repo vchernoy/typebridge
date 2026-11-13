@@ -205,6 +205,9 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
 
   /** Global private-session preference changed (Settings / host prefs sync). */
   async function applySessionChange(sessionOn: boolean): Promise<void> {
+    // Observe Find/Replace privacy against the live preference even while a prior
+    // last-save awaits — otherwise on→off (or on→off→on) can skip restore (#264 P0).
+    deps.syncAutosaveControl();
     if (active) {
       if (sessionOn) {
         deps.autosave.checked = false;
@@ -341,6 +344,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     deps.autosave.checked = false;
     deps.saver.cancel();
     syncPrivateMarker();
+    // Observe search privacy as soon as mayWrite flips; do not wait for finish (#264 P0).
+    deps.syncAutosaveControl();
     deps.renderDrafts();
     // Drop stale conflict/action chrome; an in-flight save may re-announce after await.
     status.clearNotices();
@@ -426,6 +431,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
     state.active = { ...state.active, private: false };
     deps.autosave.checked = true;
     syncPrivateMarker();
+    // Restore public Find/Replace before persistence is allowed again (#264 P0).
+    deps.syncAutosaveControl();
 
     const canSave = !deps.viewMode && !deps.transferFrozen() && state.editBlock === '';
     if (!canSave) {

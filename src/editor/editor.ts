@@ -318,14 +318,18 @@ export class Editor {
   setEnabled(value: boolean): void { this.enabled = value; this.pending = null; this.lastEditAt = 0; }
   /**
    * Adopt the field's current value after an external write (shared Find query, host
-   * title sync, …). Clears pending transliteration and drops local undo/redo so a
-   * sibling's query cannot be undone with stale deltas (#175 step 9).
+   * title sync, privacy restore, …). Clears pending transliteration, drops local
+   * undo/redo, and invalidates any in-flight IME composition snapshot so a later
+   * compositionend cannot rebuild history that reintroduces pre-restore text
+   * (#175 step 9 / #264 P0).
    */
   syncFromField(): void {
     this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
     this.before = null;
+    this.compositionStart = null;
+    this.imeComposing = false;
     this.known = this.capture();
     this.lastEditAt = 0;
     this.notifyHistory();

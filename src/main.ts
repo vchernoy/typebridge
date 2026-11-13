@@ -57,6 +57,7 @@ import { clearRecovery, listRecovery, writeRecovery } from './editor/recovery';
 import { lineColumnAtOffset } from './editor/goto-line';
 import { setupLayout } from './ui/layout';
 import { setupSearch } from './ui/search';
+import { planSearchPrivacyTransition } from './ui/search-privacy';
 import { setupRules } from './ui/rules';
 import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
@@ -439,6 +440,8 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', a
 
 
 const primarySearch: { field: HTMLTextAreaElement; editor: Editor } = { field, editor };
+/** False until search privacy has restored (or observed private) for the current scope (#264 P0). */
+let searchPersistReady = false;
 const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount, resetOptions, restoreText } = setupSearch(
   primarySearch,
   enabled,
@@ -446,18 +449,25 @@ const { findInput, findEditor, replaceEditor, syncSearchEditors, showMatchCount,
     canMutate: canMutatePrimary,
     getFindTarget: () => primarySearch,
     matchSurfaces: [field],
-    mayPersistText: () => mayWrite(),
+    // Block Find/Replace persistence until scope restore has run after leaving private.
+    mayPersistText: () => mayWrite() && searchPersistReady,
     findTextKey: findSessionKey,
     replaceTextKey: replaceSessionKey,
   },
 );
 let searchScope = '';
 syncSearchPrivacy = () => {
-  const next = `${state.active.id}:${mayWrite()}`;
-  if (next === searchScope) return;
-  searchScope = next;
-  // Never carry a private query into the next document or a newly writable session.
-  restoreText();
+  const writable = mayWrite();
+  const plan = planSearchPrivacyTransition(searchScope, state.active.id, writable);
+  if (!plan.changed) return;
+  searchScope = plan.scope;
+  // Hold persistence for the whole transition (including restore) before allowing writes.
+  searchPersistReady = false;
+  if (plan.restore) {
+    // Never carry a private query into the next document or a newly writable session.
+    restoreText();
+  }
+  searchPersistReady = plan.allowPersist;
 };
 const { openFind } = setupFindGotoBars({
   field,
@@ -844,6 +854,8 @@ privateSession?.addEventListener('change', () => {
     preferenceSaved('private session', false);
     return;
   }
+  // Observe search privacy as soon as the preference flips (before last-save awaits).
+  syncAutosaveControl();
   void autosaveToggle?.applySessionChange(on);
   notifyPrefsChanged({ name: 'autosave', origin: prefsOrigin });
 });

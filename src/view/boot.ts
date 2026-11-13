@@ -32,6 +32,19 @@ export type BootChoiceInput = {
 export type BootChoice = { chosen: StoredDraft; restorePending: boolean; clearPendingCopy: boolean };
 
 /**
+ * After a pending-draft restore: mark dirty, bump content revision, then refresh the
+ * may-write snapshot cache so it is not left at a pre-bump revision (#263).
+ */
+export function applyRestoredPendingWritable(
+  workspace: Pick<Workspace, 'setDirty' | 'bumpContentRevision'>,
+  noteWritableSnapshot?: () => void,
+): void {
+  workspace.setDirty(true);
+  workspace.bumpContentRevision();
+  noteWritableSnapshot?.();
+}
+
+/**
  * Which document a window opens at startup:
  * - a reload backup that differs from its saved row wins (restore unsaved text);
  * - else the remembered/linked document when it is saved;
@@ -146,8 +159,9 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
     deps.installOwnership(bootAccess);
     bootAccess = undefined;
     if (restorePending) {
-      deps.workspace.setDirty(true); deps.workspace.bumpContentRevision();
-      deps.noteWritableSnapshot?.();
+      // Dirty + bump first, then refresh lastWritable so a delayed session last-save
+      // pairs recovered content with the post-bump revision (#263).
+      applyRestoredPendingWritable(deps.workspace, deps.noteWritableSnapshot);
       deps.applyEditAccess();
       // Another window owns the document: keep the recovered text here (and its reload backup) for copy/export.
       if (state.editBlock) status.setSaveStatus('Recovered unsaved text, but another window is editing this document, so it was not saved. Copy or export it.', 'failure');
