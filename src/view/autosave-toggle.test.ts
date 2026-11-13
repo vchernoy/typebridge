@@ -465,7 +465,7 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     await vi.waitFor(() => expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1));
     // Typing after Private session is already on — must not enter a replayed last-save.
     frozenSnapshot.text = 'POST SESSION SECRET';
-    void toggle.applySessionChange(true);
+    toggle.syncFromStorage();
     releaseGate();
     await first;
     // Allow a queued microtask replay if one were scheduled.
@@ -508,7 +508,7 @@ describe('createAutosaveToggle private session (#257 follow-up)', () => {
     await vi.waitFor(() => expect(persistLastBeforePrivate).toHaveBeenCalledTimes(1));
     // on → off → on while the first last-save awaits: the third event must cancel queued false.
     void toggle.applySessionChange(false);
-    void toggle.applySessionChange(true);
+    toggle.syncFromStorage();
     releaseGate();
     await first;
     await Promise.resolve();

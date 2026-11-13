@@ -97,6 +97,8 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     // Keep the hash: it is reserved for portable share links (#39).
     try { history.replaceState(null, '', href + window.location.hash); } catch { /* The address bar is optional. */ }
   }
+  // Keep the requested identity while the missing screen clears the displayed snapshot.
+  let requestedId = deps.requestedViewId;
   let viewerLoad = 0;
   async function viewerOpen(id: string): Promise<void> {
     const load = ++viewerLoad;
@@ -105,6 +107,8 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
       if (!state.db) throw new Error('Storage unavailable');
       const next = await getStoredDraft(state.db, id);
       if (load !== viewerLoad) return;
+      // Commit identity only after the read succeeds; a failed navigation still represents the old view.
+      requestedId = id;
       if (!next || next.revision < 1) {
         showViewerMissing(VIEWER_MISSING);
         // Keep the address on the requested id so a reload shows the same missing state.
@@ -144,6 +148,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     }
   }
   return {
+    documentId: (): string | undefined => requestedId,
     /** Show another saved document (Documents picker). */
     open: viewerOpen,
     initialize: initializeViewer,

@@ -1076,6 +1076,7 @@ if (!viewMode) {
 // Without BroadcastChannel, focus/visibility reread is the baseline; a slow poll only runs for a visible viewer.
 if (viewMode && !sync.hasChannel) setInterval(reconcileSignals, SIGNAL_POLL_INTERVAL_MS);
 void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
+  noteWritableSnapshot: () => autosaveToggle?.noteWritableSnapshot(),
   embedded,
   windowId: windowId ?? undefined,
   mayWrite, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,

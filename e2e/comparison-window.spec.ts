@@ -487,3 +487,37 @@ test('comparison open fails closed when inherited session cleanup throws', async
     if (!opened.isClosed()) await opened.close();
   }
 });
+
+test('failed viewer navigation keeps represented identity for focus and saved/deleted signals (#267)', async ({ page, context }) => {
+  await page.goto('/editor.html');
+  const first = await saveDocument(page, 'Document A');
+  await documentAction(page, '#new-draft');
+  const second = await saveDocument(page, 'Document B');
+  await selectDocument(page, first.id);
+  const viewer = await context.newPage();
+  await viewer.goto(`/editor.html?mode=view&doc=${first.id}`);
+  await expectViewerReady(viewer, 'Document A');
+  await viewer.evaluate(id => {
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (key: IDBValidKey | IDBKeyRange) {
+      if (this.name === 'documents' && key === id) {
+        IDBObjectStore.prototype.get = get;
+        throw new DOMException('Injected navigation read failure', 'UnknownError');
+      }
+      return get.call(this, key);
+    };
+  }, second.id);
+  await selectDocument(viewer, second.id);
+  await expect(viewer.locator('#status')).toContainText('Could not open that document');
+  await expectViewerReady(viewer, 'Document A');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(first.id);
+  await viewer.evaluate(() => window.dispatchEvent(new Event('focus')));
+  // An authoritative owner save exercises both focus reconciliation and the signal target.
+  await saveDocument(page, 'Document A updated');
+  await expectViewerReady(viewer, 'Document A updated');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(first.id);
+  await setAutosave(page, false, 'delete');
+  await expect(viewer.locator('#viewer-notice')).toBeVisible();
+  await expect(viewer.locator('#editor')).toHaveValue('');
+  expect(new URL(viewer.url()).searchParams.get('doc')).toBe(first.id);
+});

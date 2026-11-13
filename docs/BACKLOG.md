@@ -22,8 +22,12 @@ Current follow-ups and priorities are listed once, in [ROADMAP.md](ROADMAP.md); 
 
 ## #257 private mode: step 2a model/log
 
-The four-field model/log foundation shipped in #265 (`c0f9be4`), Refs #257, #255, #37. Step 2b below binds its UI. Residuals (2c), new-private-document traces (3), and clear local data (4) remain later PRs.
+The four-field model/log foundation shipped in #265 (`c0f9be4`), Refs #257, #255, #37. Step 2b shipped in #266 (`1a749b0`). New-private-document traces (3) and clear local data (4) remain later PRs.
 
 ## #257 step 2b: document search UI
 
-Implemented in this change, pending review/CI: Find/Replace bound to document fields and independent histories; title history captured/restored; viewer queries in memory only; privacy toggles preserve fields; old search-content keys removed. Host layout stores ids/geometry with no live title strings. Refs #257, #255. Step 2c residuals and steps 3–4 are later PRs.
+Shipped in #266: Find/Replace bound to document fields and independent histories; title history captured/restored; viewer queries in memory only; privacy toggles preserve fields; old search-content keys removed. Host layout stores ids/geometry with no live title strings. Refs #257, #255. Steps 3–4 are later PRs.
+
+### Private mode step 2c — carried residuals
+
+Implemented in this change, pending review/CI: missing comparison viewers retain the requested document ID and accept recreation at revision 1 (#261), including missed-signal reconciliation on focus; pending startup restore refreshes the writable boundary after its revision bump (#263); storage preference sync uses the same-target/reversal guard. Refs #257. Steps 3–4 remain separate.
