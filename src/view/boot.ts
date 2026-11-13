@@ -114,7 +114,8 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
       drafts: state.drafts,
       selected,
       pending,
-      hostWindow: deps.embedded && !!deps.windowId,
+      // The first window in an empty workspace already has a fresh placeholder (and its default title).
+      hostWindow: deps.embedded && !!deps.windowId && (deps.windowId !== 'main' || state.drafts.length > 0),
       allocateNew: deps.allocateNewDraft,
       fallback: state.active,
     });
