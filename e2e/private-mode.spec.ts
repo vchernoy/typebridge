@@ -5,6 +5,13 @@ import { readStoredDocs } from './storage-helpers';
 
 const status = (page: Page) => page.locator('#status-line');
 
+async function waitForEditorReady(page: Page): Promise<void> {
+  // HTML starts enabled before main.ts disables it for boot. Ownership sets data-role,
+  // then boot enables the field after handlers are wired: wait for both, in that order.
+  await expect(page.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(page.locator('#editor')).toBeEnabled();
+}
+
 async function storageSnapshot(page: Page): Promise<{
   docs: Array<{ text: string; title: string; private?: boolean }>;
   changeTexts: string[];
@@ -35,8 +42,12 @@ async function storageSnapshot(page: Page): Promise<{
         const req = db.transaction('changes').objectStore('changes').getAll();
         req.onsuccess = () => {
           db.close();
-          const rows = req.result as Array<{ text?: string; title?: string }>;
-          resolve(rows.flatMap(row => [row.text ?? '', row.title ?? '']).filter(Boolean));
+          const rows = req.result as Array<{ text?: string; title?: string; change?: [number, string, string] }>;
+          // Real change-log records store deleted/inserted text in change, not row.text.
+          // Inspect both sides plus title so the privacy assertion actually checks the log.
+          resolve(rows.flatMap(row => [
+            row.text ?? '', row.title ?? '', row.change?.[1] ?? '', row.change?.[2] ?? '',
+          ]).filter(Boolean));
         };
         req.onerror = () => { db.close(); reject(req.error); };
       };
@@ -62,7 +73,7 @@ async function storageSnapshot(page: Page): Promise<{
 
 test('typing while private leaves no post-switch storage trace after reload (#257)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Before private');
   await page.getByRole('textbox', { name: 'Document title' }).fill('Switch title');
   await expect(status(page)).toHaveText('Saved locally');
@@ -85,7 +96,7 @@ test('typing while private leaves no post-switch storage trace after reload (#25
   expect(before.docs.some(doc => doc.private === true && doc.text === 'Before private')).toBe(true);
 
   await page.reload();
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await expect(page.locator('#editor')).toHaveValue('Before private');
   await expect(page.getByRole('textbox', { name: 'Document title' })).toHaveValue('Switch title');
   await expect(page.locator('#autosave')).not.toBeChecked();
@@ -97,7 +108,7 @@ test('typing while private leaves no post-switch storage trace after reload (#25
 
 test('private typing during goPrivate keeps the document dirty (#257 P0)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Freeze base');
   await expect(status(page)).toHaveText('Saved locally');
 
@@ -129,7 +140,7 @@ test('private typing during goPrivate keeps the document dirty (#257 P0)', async
 
 test('going private mid-save does not store text typed after the switch (#257)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Pre switch base');
   await expect(status(page)).toHaveText('Saved locally');
 
@@ -157,7 +168,7 @@ test('going private mid-save does not store text typed after the switch (#257)',
 
 test('global private session blocks writes for a normal document (#257)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Session base');
   await expect(status(page)).toHaveText('Saved locally');
   await setPrivateSession(page, true);
@@ -173,7 +184,7 @@ test('global private session blocks writes for a normal document (#257)', async 
 
 test('global private session last-saves dirty text without private:true (#257 follow-up)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Session keep');
   await expect(status(page)).toHaveText('Saved locally');
   // Hold the ordinary Autosave so DIRTY is still unsaved when the session turns on.
@@ -203,7 +214,7 @@ test('global private session last-saves dirty text without private:true (#257 fo
 
 test('Private session in another tab last-saves this tab’s dirty text (#260 P1)', async ({ page, context }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Cross tab keep');
   await expect(status(page)).toHaveText('Saved locally');
   await page.evaluate(() => {
@@ -236,7 +247,7 @@ test('Private session in another tab last-saves this tab’s dirty text (#260 P1
 
 test('Delete saved copy removes the row and leaves the document private in memory (#257 follow-up)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Keep or delete');
   await page.getByRole('textbox', { name: 'Document title' }).fill('Delete me');
   await expect(status(page)).toHaveText('Saved locally');
@@ -256,7 +267,7 @@ test('Delete saved copy removes the row and leaves the document private in memor
 
 test('last-save failure then flag-only success warns when the change log did not cover (#257 follow-up)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Flag only base');
   await expect(status(page)).toHaveText('Saved locally');
   // Fail the first documents put (full last save), allow the flag-only put, and block change-log writes
@@ -287,7 +298,7 @@ test('last-save failure then flag-only success warns when the change log did not
 
 test('last-save and flag-only both failing warn that the document may not reopen private (#257 follow-up)', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page.locator('#editor')).toBeEnabled();
+  await waitForEditorReady(page);
   await page.locator('#editor').fill('Both fail base');
   await expect(status(page)).toHaveText('Saved locally');
   await page.evaluate(() => {
