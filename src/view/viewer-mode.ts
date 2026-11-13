@@ -102,12 +102,13 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
   let viewerLoad = 0;
   async function viewerOpen(id: string): Promise<void> {
     const load = ++viewerLoad;
-    requestedId = id;
     deps.workspace.bumpSessionGeneration();
     try {
       if (!state.db) throw new Error('Storage unavailable');
       const next = await getStoredDraft(state.db, id);
       if (load !== viewerLoad) return;
+      // Commit identity only after the read succeeds; a failed navigation still represents the old view.
+      requestedId = id;
       if (!next || next.revision < 1) {
         showViewerMissing(VIEWER_MISSING);
         // Keep the address on the requested id so a reload shows the same missing state.
