@@ -93,8 +93,6 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
     };
     try {
       if (!await deps.prepareReload()) {
-        // Drop discard markers/intent from windows that already consented (#255).
-        deps.cancelReload();
         message.textContent = 'Update is waiting. Keep editing, or copy/export your work before reloading.';
         return;
       }

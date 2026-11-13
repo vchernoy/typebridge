@@ -81,19 +81,6 @@ export function createReloadBackup(deps: ReloadBackupDeps) {
     remove(): void {
       try { sessionStorage.removeItem(deps.key); } catch { /* Optional backup. */ }
     },
-    /** Read then remove (update-reload discard consent: stash for cancel restore). */
-    take(): StoredDraft | undefined {
-      const pending = read();
-      try { sessionStorage.removeItem(deps.key); } catch { /* Optional backup. */ }
-      return pending;
-    },
-    /** Write a previously taken backup without mayBackUp (cancel after discard prepare). */
-    put(draft: StoredDraft): void {
-      if (suppressed) return;
-      try {
-        sessionStorage.setItem(deps.key, JSON.stringify({ ...draft, reloadBackupToken: crypto.randomUUID() }));
-      } catch { deps.onFailed(); }
-    },
     suppressed: (): boolean => suppressed,
     setSuppressed(next: boolean): void { suppressed = next; },
   };
