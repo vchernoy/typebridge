@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { setAutosave } from './settings-helpers';
+import { openFind, setAutosave } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 
 const source = `# Active document
@@ -31,7 +31,8 @@ async function markdown(page: Page, text = source): Promise<void> {
   await page.locator('#editor').fill(text);
   await page.locator('#doc-menu-open').click();
   await page.locator('#document-format').selectOption('markdown');
-  await page.locator('#document-format').press('Escape');
+  await page.locator('#doc-menu-open').click();
+  await expect(page.locator('#doc-menu')).toBeHidden();
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
 }
 async function rendered(page: Page): Promise<void> {
@@ -86,7 +87,8 @@ test('private format changes remain only in memory', async ({ page }) => {
   const before = await readStoredDocs(page, true);
   await page.locator('#doc-menu-open').click();
   await page.locator('#document-format').selectOption('markdown');
-  await page.locator('#document-format').press('Escape');
+  await page.locator('#doc-menu-open').click();
+  await expect(page.locator('#doc-menu')).toBeHidden();
   await rendered(page);
   expect(await readStoredDocs(page, true)).toEqual(before);
   expect(before.every(row => row.format !== 'markdown')).toBe(true);
@@ -173,4 +175,33 @@ test('Format cannot edit a provisional document while storage is still opening',
   await page.evaluate(() => (window as unknown as { releaseMarkdownBoot: () => void }).releaseMarkdownBoot());
   await expect(page.locator('#editor')).toBeEnabled();
   await expect(page.locator('#document-format')).toBeEnabled();
+});
+
+test('entering Rendered preserves pending Find and Replace edits', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await markdown(page);
+  await openFind(page);
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+  await page.locator('#find-text').fill('pending find');
+  await page.locator('#replace-text').fill('pending replacement');
+  await page.locator('#document-view-choice').selectOption('rendered');
+  await page.clock.runFor(400);
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const fields = await page.evaluate(() => new Promise<{ find: string; replace: string }>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const get = db.transaction('documents').objectStore('documents').getAll();
+      get.onsuccess = () => { db.close(); resolve(get.result[0]); };
+      get.onerror = () => reject(get.error);
+    };
+  }));
+  expect(fields).toMatchObject({ find: 'pending find', replace: 'pending replacement' });
+  await page.clock.resume();
+  await page.reload();
+  await page.locator('#document-view-choice').selectOption('edit');
+  await openFind(page);
+  await expect(page.locator('#find-text')).toHaveValue('pending find');
+  await expect(page.locator('#replace-text')).toHaveValue('pending replacement');
 });

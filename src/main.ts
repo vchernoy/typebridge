@@ -186,7 +186,8 @@ const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'f
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
 let renderedMode = false;
 let markdownView: ReturnType<typeof setupMarkdownView> | undefined = undefined;
-const readOnlyNow = (): boolean => renderedMode || viewMode || state.editBlock !== '' || state.transferFrozen;
+const ownershipReadOnly = (): boolean => viewMode || state.editBlock !== '' || state.transferFrozen;
+const readOnlyNow = (): boolean => renderedMode || ownershipReadOnly();
 /** Replays keys held while a deleted document is kept as a new one (set up with the input handlers). */
 let drainDeletedInput: (() => void) | undefined;
 const deletedBarElement = (): HTMLElement => document.querySelector<HTMLElement>('#deleted-bar')!;
@@ -489,7 +490,7 @@ enabled.addEventListener('change', () => {
 });
 const documentSearch = createDocumentSearch({
   find: findEditor, replace: replaceEditor, shown: () => state.active,
-  canEdit: () => !readOnlyNow(),
+  canEdit: () => !ownershipReadOnly(),
   ignored: () => state.loadingDraft || state.suppressEditTracking || state.transferFrozen,
   changed: () => { scheduleSave(); autosaveToggle?.noteWritableSnapshot(); },
   refresh: showMatchCount,
@@ -799,7 +800,7 @@ const saver = createSaver(state, statusLine, {
   snapshot: () => snapshot(),
   currentJournal: () => recovery.currentJournal(),
   suppressEditTracking: () => state.suppressEditTracking,
-  readOnlyNow: () => viewMode || state.editBlock !== '' || state.transferFrozen,
+  readOnlyNow: ownershipReadOnly,
   preparePendingClear: saved => reloadBackup.prepareClear(saved),
   clearVersionNotice: () => { clearVersionNotice(); },
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
