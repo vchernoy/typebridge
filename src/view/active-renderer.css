@@ -70,3 +70,25 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* KaTeX's two-column aligned output uses legacy mtable columnalign. Native
+   MathML Core engines need CSS text-align on the cells to honor those columns.
+   Direct children keep nested matrices and other table layouts unchanged. */
+.active-reading mtable[columnalign="right left"] > mtr > mtd:first-child {
+  text-align: right;
+}
+.active-reading mtable[columnalign="right left"] > mtr > mtd:nth-child(2) {
+  text-align: left;
+}
+
+/* Scroll the HTML math wrapper, not the native MathML element: overflow on
+   <math> itself is not consistently scrollable in Firefox/WebKit. Let the
+   inner equation keep its intrinsic width so the wrapper owns all overflow. */
+.active-reading .active-math-display > .katex {
+  display: inline-block;
+  min-width: 100%;
+}
+.active-reading .active-math-display > .katex > math {
+  max-width: none;
+  overflow: visible;
+}
