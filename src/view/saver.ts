@@ -113,7 +113,12 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
     deps.changes.saved(keepRun, !result.conflict);
     clearPendingAfterCommit();
     if (journal) { try { clearRecovery(localStorage, journal); } catch { /* Retain a recoverable entry on storage errors. */ } }
+    // Format is an in-memory document edit, like the text/title controls. A commit
+    // captured before a later format action must not reset that newer selection.
+    const liveFormat = state.active.format;
+    const newerEdit = deps.workspace.contentRevision() !== options.contentRevision;
     state.active = options.resolveActive(result.draft);
+    if (newerEdit) state.active.format = liveFormat;
     deps.clearVersionNotice();
     deps.postSignal(options.signal(result.conflict), result.draft.id, result.draft.revision);
     if (result.recovered) deps.onRecovered(result.recovered, result.draft.id);

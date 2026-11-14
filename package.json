@@ -27,5 +27,11 @@
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@vchernoy/active-runtime": "0.1.1",
+    "@vchernoy/calc": "0.1.1",
+    "@vchernoy/remark-active": "0.1.1",
+    "katex": "0.19.1"
+  }
 }

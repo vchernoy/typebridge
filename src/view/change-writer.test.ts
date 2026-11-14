@@ -387,3 +387,18 @@ it('the privacy gate blocks every field, while captured pre-private records can 
   expect(await recovered()).toMatchObject({ text: 'Сохранено', title: 'Заметка', find: 'public find', replace: 'public replace', lastSeq: 2 });
   expect(writer.protects()).toBe(false);
 });
+
+it('logs format in the shared sequence and never logs private format edits', async () => {
+  const records: ChangeRecord[] = [];
+  const fields = { text: '# text', title: 'T', format: 'plain' };
+  let writable = true;
+  const writer = createChangeWriter({ mayRecord: () => writable, shown: () => ({ id: 'doc', generation: 1 }),
+    fields: () => fields, append: async record => { records.push(record); }, newRunId: () => 'run' });
+  const anchor = writer.upToForSave('doc', fields);
+  writer.saved(anchor.keepRun, true);
+  fields.format = 'markdown'; writer.edit(); await writer.idle();
+  expect(records).toEqual([{ documentId: 'doc', seq: 1, run: 'run', field: 'format', value: 'markdown', previous: 'plain' }]);
+  expect(replayDocument('doc', { text: '# text', title: 'T' }, 0, records).format).toBe('markdown');
+  writable = false; fields.format = 'plain'; writer.edit(); await writer.idle();
+  expect(records).toHaveLength(1);
+});

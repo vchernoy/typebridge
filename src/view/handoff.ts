@@ -17,7 +17,7 @@ export const HANDOFF_YIELD_TIMEOUT_MS = 2_000;
 /** How long a parked owner waits for takeover confirmation before recovering its text. */
 export const HANDOFF_CONFIRM_TIMEOUT_MS = 5_000;
 
-export type HandoffSnapshot = Pick<import('../editor/indexeddb').StoredDraft, 'find' | 'replace' | 'titleHistory' | 'findHistory' | 'replaceHistory'> & {
+export type HandoffSnapshot = Pick<import('../editor/indexeddb').StoredDraft, 'format' | 'find' | 'replace' | 'titleHistory' | 'findHistory' | 'replaceHistory'> & {
   text: string;
   title: string;
   history?: unknown;

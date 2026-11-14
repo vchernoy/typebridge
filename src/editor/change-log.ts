@@ -47,6 +47,7 @@ function validRecord(value: unknown, documentId: string): value is ChangeRecord 
   const r = value as Record<string, unknown>;
   if (r.documentId !== documentId || !Number.isSafeInteger(r.seq) || (r.seq as number) <= 0 ||
       typeof r.run !== 'string' || !r.run || !DOCUMENT_FIELDS.includes(r.field as DocumentField)) return false;
+  if (r.field === 'format' && (!('value' in r) || !['plain', 'markdown'].includes(r.value as string) || !['plain', 'markdown'].includes(r.previous as string))) return false;
   if ('value' in r) return typeof r.value === 'string' && r.value.length < SHORT_VALUE_LIMIT &&
     typeof r.previous === 'string' && r.previous.length < SHORT_VALUE_LIMIT && !('change' in r) && !('length' in r);
   return !('previous' in r) && Number.isSafeInteger(r.length) && (r.length as number) >= 0 &&
@@ -78,7 +79,8 @@ export function replayDocument(documentId: string, snapshot: DocumentFieldsInput
     if (record.value !== undefined && current[record.field] !== record.previous) return result('mismatch');
     const next = record.value !== undefined ? record.value : applyChange(current[record.field], record.change);
     if (next === undefined || (record.change !== undefined && next.length !== record.length)) return result('mismatch');
-    current[record.field] = next;
+    if (record.field === 'format') current.format = next === 'markdown' ? 'markdown' : 'plain';
+    else current[record.field] = next;
     lastSeq = record.seq;
     applied++;
   }

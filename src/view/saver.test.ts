@@ -293,3 +293,37 @@ it.each([
   expect(await saver.persist()).toEqual({ saved: true, conflict: true });
   expect(setConflict).toHaveBeenCalledTimes(transitioning ? 0 : 1);
 });
+
+it('retains a newer format action across an older commit, including going private', async () => {
+  const state = createEditorState();
+  state.db = {} as IDBDatabase;
+  state.active = { id: 'doc', title: 'T', text: '# body', revision: 1, updatedAt: 1, format: 'plain' };
+  state.ownership = { documentId: 'doc', writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
+  let version = 1;
+  let writable = true;
+  let dirty = true;
+  const writes: StoredDraft[] = [];
+  vi.mocked(commitOrCreateConflictCopy).mockImplementation(async (_db, saved) => {
+    writes.push({ ...saved, revision: 2 });
+    // A second document action happened after the transaction captured its row.
+    state.active.format = 'markdown'; version++; writable = false;
+    return { draft: { ...saved, revision: 2 }, conflict: false };
+  });
+  const saver = createSaver(state, {
+    showSaving: () => {}, kind: () => 'action', riskText: () => '', shouldAttachDraftListRefreshFailure: () => false,
+  } as unknown as StatusLine, {
+    viewMode: false, mayWrite: () => writable, draftTitle: { value: 'T' } as HTMLInputElement,
+    workspace: { ...makeWorkspace(), contentRevision: () => version, dirty: () => dirty, setDirty: v => { dirty = v; } },
+    writingPosition: { save: () => {} }, snapshot: () => ({ ...state.active }), currentJournal: () => undefined,
+    suppressEditTracking: () => false, readOnlyNow: () => false, preparePendingClear: () => () => {},
+    clearVersionNotice: () => {}, postSignal: () => {}, journalEdit: () => {},
+    changes: { edit: () => {}, idle: async () => {}, upToForSave: () => ({ upTo: 0, keepRun: 'run' }), saved: () => {} },
+    onRecovered: () => {}, rememberActive: () => {}, updateSaveIndicator: () => {}, syncTitleTooltip: () => {},
+    takeOwnership: async () => {}, loseOwnership: () => {}, refreshDrafts: async () => {}, renderDrafts: () => {},
+  });
+  await saver.persist();
+  expect(writes).toHaveLength(1);
+  expect(writes[0].format).toBe('plain');
+  expect(state.active.format).toBe('markdown');
+  expect(dirty).toBe(true);
+});

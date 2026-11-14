@@ -99,8 +99,8 @@ export function createChangeWriter(deps: ChangeWriterDeps) {
         if (fields[field] === w.base[field]) continue;
         w.seq += 1;
         enqueue(w, fieldRecord({ documentId: w.documentId, seq: w.seq, run: w.run, field }, w.base[field], fields[field]));
-        w.base[field] = fields[field];
       }
+      w.base = fields;
     },
     /**
      * Called as a full save takes all four saved fields of `documentId` (after `idle()`):

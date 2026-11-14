@@ -8,6 +8,7 @@ export type StoredDraft = {
   title: string;
   text: string;
   /** Missing on pre-v6 rows means empty; UI binding is step 2b. */
+  format?: 'plain' | 'markdown';
   find?: string;
   replace?: string;
   /** Reserved per-field histories; existing Undo/Redo behavior is unchanged in 2a. */

@@ -20,6 +20,7 @@ export const OWNER_ONLY_CONTROLS = ['delete-draft', 'convert-cyrillic', 'convert
 
 export type EditAccessDeps = {
   viewMode: boolean;
+  rendered?: () => boolean;
   instanceId: string;
   webLocks: LockManager | undefined;
   workspace: ReturnType<typeof createSinglePaneWorkspace>;
@@ -59,12 +60,12 @@ export function createEditAccess(state: EditorState, statusLine: StatusLine, dep
     for (const search of deps.searchEditors ?? []) search.setReadOnly(state.transferFrozen);
     // Must match readOnlyNow: stay frozen for the whole switch/delete interval even if
     // installOwnership runs before the handler finishes (e.g. refreshDrafts after delete).
-    const blocked = state.editBlock !== '' || state.transferFrozen;
+    const blocked = !!deps.rendered?.() || state.editBlock !== '' || state.transferFrozen;
     workspace.setPaneRole(blocked ? 'readonly' : 'editable');
     if (editor.readOnly !== blocked) editor.setReadOnly(blocked);
     if (titleEditor.readOnly !== blocked) titleEditor.setReadOnly(blocked);
     // A quiet reader keeps its controls enabled; a click takes over editing first (below).
-    const controlsBlocked = blocked && !(quietReader() && !state.transferFrozen);
+    const controlsBlocked = !!deps.rendered?.() || blocked && !(quietReader() && !state.transferFrozen);
     for (const id of OWNER_ONLY_CONTROLS) document.querySelector<HTMLButtonElement>('#' + id)!.disabled = controlsBlocked;
     document.documentElement.dataset.role = state.editBlock !== '' ? 'reader' : 'editor';
     // Temporary transfer freeze must not announce "another window is editing".

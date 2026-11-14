@@ -6,9 +6,33 @@ import { createHash } from 'node:crypto';
 const BASE = '/';
 
 function offlineServiceWorker(): Plugin {
+  let lazyAssets = new Set<string>();
   return {
+    enforce: 'post',
     name: 'typebridge-offline',
     apply: 'build',
+    generateBundle(options, bundle) {
+      void options;
+      const visit = (file: string, found: Set<string>, dynamic: boolean): void => {
+        if (found.has(file)) return;
+        found.add(file);
+        const chunk = bundle[file];
+        if (!chunk || chunk.type !== 'chunk') return;
+        const metadata = chunk as typeof chunk & { viteMetadata?: { importedCss?: Set<string> } };
+        for (const css of metadata.viteMetadata?.importedCss ?? []) found.add(css);
+        for (const imported of chunk.imports) visit(imported, found, dynamic);
+        if (dynamic) for (const imported of chunk.dynamicImports) visit(imported, found, true);
+      };
+      const shell = new Set<string>();
+      const renderer = new Set<string>();
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== 'chunk') continue;
+        if (chunk.isEntry) visit(chunk.fileName, shell, false);
+        if (chunk.facadeModuleId?.endsWith('/src/view/active-renderer.ts')) visit(chunk.fileName, renderer, true);
+      }
+      // Shared shell dependencies stay eager; renderer-only modules and CSS load on demand.
+      lazyAssets = new Set([...renderer].filter(file => !shell.has(file)));
+    },
     async closeBundle() {
       const root = 'dist';
       const assets: string[] = [];
@@ -30,7 +54,8 @@ function offlineServiceWorker(): Plugin {
       }
       const version = hash.digest('hex').slice(0, 16);
       const worker = `const CACHE = 'typebridge-${version}';
-const ASSETS = ${JSON.stringify(assets)};
+const ASSETS = ${JSON.stringify(assets.filter(path => !lazyAssets.has(path.slice(BASE.length))))};
+const LAZY = new Set(${JSON.stringify([...lazyAssets].map(file => BASE + file))});
 const HOME = ${JSON.stringify(BASE)};
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));
@@ -64,7 +89,17 @@ self.addEventListener('fetch', event => {
     }));
     return;
   }
-  event.respondWith(caches.open(CACHE).then(cache => cache.match(url.href)).then(cached => cached || fetch(request)));
+  event.respondWith(caches.open(CACHE).then(async cache => {
+    // Runtime module requests can carry Origin and the server can Vary on it.
+    // Keep that request identity for on-demand entries; shell entries were added by URL.
+    const cached = await cache.match(LAZY.has(url.pathname) ? request : url.href);
+    if (cached) return cached;
+    const response = await fetch(request);
+    if (response.ok && LAZY.has(url.pathname)) {
+      try { await cache.put(request, response.clone()); } catch { /* Rendering still works if the optional asset cache is full. */ }
+    }
+    return response;
+  }));
 });`;
       await writeFile(join(root, 'sw.js'), worker);
     },

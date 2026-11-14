@@ -100,3 +100,20 @@ A successful global clear stops each editor’s saver/change writer, closes its 
 The content-free one-shot session flag `typebridge.clearedNotice.v1` is `here` in the clearing page and `elsewhere` in peers. Boot consumes/removes it and shows “All local data was cleared” or “Storage was cleared in another tab”. The host consumes its shared flag before creating its default main iframe and passes the notice in memory. A partial failure does not reload and propagates “Some local data could not be cleared”, allowing retry.
 
 Only known TypeBridge content keys are removed from local/session storage: journals, reload backups (including retired namespaces), active hints, positions, legacy drafts/search text and host layout. Settings, Private session, other applications’ storage and offline app assets are kept. A metadata-only channel plus transient storage event notifies other tabs; each tab removes its own session data. Host caches suppress cleared identities until the full host reload replaces them. No entered text is transmitted or logged.
+
+### Markdown rendering (#244)
+
+`StoredDraft.format` is optional (`plain` when absent; `markdown` enables active-md 0.1.1).
+It shares the gap-free content change sequence with text/title/find/replace, and is included
+in conflict/recovery copies, reload backups and same-tab handoff. No IndexedDB version bump or
+migration is needed for the optional row field. Format actions use the existing privacy gate.
+`view/markdown-view.ts` owns the per-window Edit/Rendered choice and invalidates pending work
+when its document or source changes. It destroys the previous runtime before re-rendering.
+`view/active-renderer.ts` is the dynamic-import boundary for remark-active, active-runtime,
+calc and KaTeX. Only `renderActive`'s sanitized HTML enters `innerHTML`; raw document text is
+never interpreted as HTML by TypeBridge. Math uses MathML, with no KaTeX font/CSS download.
+Calc reader values live in the mounted runtime, not document persistence. Runtime teardown also
+occurs on pagehide. The service worker precaches the app shell, and caches renderer-only chunks/CSS on demand.
+The build graph excludes eager shared dependencies from the lazy set. First-time rendering
+needs connectivity; after its first online use the renderer works offline, including live math.
+This implements the explicit plain-document no-renderer-request requirement in #244.

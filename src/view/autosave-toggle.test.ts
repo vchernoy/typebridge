@@ -668,3 +668,20 @@ it('document clearing abandons and drains queued records before deletion and own
   expect(drainChanges.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(deleteStoredDraft).mock.invocationCallOrder[0]);
   expect(vi.mocked(deleteStoredDraft).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(held.release).mock.invocationCallOrder[0]);
 });
+
+it.each(['before', 'last-save', 'flag-write'] as const)('keeps the live format through flag-only privacy fallback: %s', async phase => {
+  const h = harness({ dirty: true, persistSaved: false, flagOk: true, changeLogProtects: false });
+  const stored = { ...h.state.active, format: 'plain' as const };
+  if (phase === 'before') h.state.active.format = 'markdown';
+  if (phase === 'last-save') h.persistLastBeforePrivate.mockImplementation(async () => {
+    h.state.active.format = 'markdown'; h.revision.value++;
+    return { saved: false, conflict: false, markPrivate: true };
+  });
+  vi.mocked(updateDocumentPrivateFlag).mockImplementation(async () => {
+    if (phase === 'flag-write') { h.state.active.format = 'markdown'; h.revision.value++; }
+    return { ok: true, draft: { ...stored, private: true, revision: 2 } };
+  });
+  await h.toggle.applyDocumentChange(false);
+  expect(h.state.active).toMatchObject({ format: 'markdown', private: true, revision: 2 });
+  expect(h.autosave.checked).toBe(false);
+});

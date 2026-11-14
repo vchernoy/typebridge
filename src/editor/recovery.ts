@@ -8,6 +8,7 @@ export type RecoverySnapshot = {
   timestamp: number;
   title: string;
   text: string;
+  format?: 'plain' | 'markdown';
   find?: string;
   replace?: string;
 };
@@ -29,7 +30,7 @@ export function listRecovery(storage: Storage): RecoverySnapshot[] {
       const item = raw as Partial<RecoverySnapshot>;
       if (typeof item.token !== 'string' || !item.token || typeof item.tab !== 'string' || !item.tab ||
           typeof item.documentId !== 'string' || !item.documentId || typeof item.title !== 'string' ||
-          typeof item.text !== 'string' || (item.find !== undefined && typeof item.find !== 'string') ||
+          typeof item.text !== 'string' || (item.format !== undefined && item.format !== 'plain' && item.format !== 'markdown') || (item.find !== undefined && typeof item.find !== 'string') ||
           (item.replace !== undefined && typeof item.replace !== 'string') || typeof item.timestamp !== 'number' || !Number.isFinite(item.timestamp) ||
           !Number.isSafeInteger(item.revision) || (item.revision ?? -1) < 0 ||
           recoveryKey(item.tab, item.documentId) !== key) continue;

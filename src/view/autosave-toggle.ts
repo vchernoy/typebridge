@@ -397,7 +397,8 @@ export function createAutosaveToggle(state: EditorState, status: StatusLine, dep
             state.db, state.active.id, true, state.active.revision, fence,
           );
           if (flag.ok) {
-            state.active = flag.draft;
+            // A flag-only commit carries the old stored content, not newer private format actions.
+            state.active = { ...flag.draft, format: state.active.format };
             flagOk = true;
           }
         }

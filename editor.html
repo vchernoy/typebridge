@@ -90,6 +90,11 @@
                 >
                   Open in another window
                 </button>
+                <label for="document-format">Format</label>
+                <select id="document-format" disabled>
+                  <option value="plain">Plain text</option>
+                  <option value="markdown">Markdown</option>
+                </select>
                 <button id="rename-draft" type="button">Rename…</button>
                 <button id="new-draft" type="button">New document</button>
                 <button id="import-draft" type="button">Import…</button>
@@ -382,6 +387,15 @@
           <button id="keep-deleted" type="button">Keep as new document</button>
           <button id="close-deleted" type="button">Close</button>
         </div>
+        <label id="document-view" hidden
+          >View
+          <select id="document-view-choice">
+            <option value="edit">Edit</option>
+            <option value="rendered">Rendered</option>
+          </select></label
+        >
+        <section id="rendered-document" class="active-reading" aria-label="Rendered document" hidden></section>
+        <div id="render-problems" hidden><ul id="render-problem-list"></ul></div>
         <div class="editor-shell">
           <label for="editor">Your text</label>
           <textarea id="editor" spellcheck="false" placeholder="Type privet to write привет"></textarea>
