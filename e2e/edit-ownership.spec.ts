@@ -574,3 +574,63 @@ test('Undo/Convert/Replace during ownership transfer do not mutate or leak into 
   await expect(page.locator('#editor')).toHaveValue(afterConvert);
   expect(await page.locator('#editor').inputValue()).not.toContain('leaked');
 });
+
+/** A rejected fenced save leaves a dirty former owner, without changing its visible text. */
+async function dirtyFormerOwner(page: Page): Promise<string> {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await openOrdinary(page);
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+  const field = page.locator('#editor');
+  await field.fill('Committed handoff base');
+  await page.clock.runFor(400);
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const id = (await readStoredDocs(page))[0].id;
+  await claimFenceElsewhere(page, id);
+  await field.fill('Unsaved former owner');
+  await page.clock.runFor(400);
+  await expect(role(page)).toHaveAttribute('data-role', 'reader');
+  await expect(field).toHaveValue('Unsaved former owner');
+  return id;
+}
+
+test('Edit-here discard replaces unchanged former-owner text with the committed row (#284)', async ({ page }) => {
+  const id = await dirtyFormerOwner(page);
+  await page.locator('#editor').click();
+  const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.locator('#editor')).toHaveValue('Committed handoff base');
+  expect((await readStoredDocs(page)).find(row => row.id === id)?.text).toBe('Committed handoff base');
+});
+
+test('Edit-here cleanup cannot discard a replacement document (#284)', async ({ page }) => {
+  await dirtyFormerOwner(page);
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayDiscardMs: number }).__typebridgeDelayDiscardMs = 2_000;
+  });
+  await page.locator('#editor').click();
+  const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes' }).click();
+  // A separate document action may finish while the original handoff is awaiting cleanup.
+  await page.evaluate(() => {
+    (window as unknown as { __typebridgeDelayDiscardMs: number }).__typebridgeDelayDiscardMs = 0;
+  });
+  await documentAction(page, '#new-draft');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.locator('#editor')).toHaveValue('');
+  await page.locator('#editor').fill('Replacement saved');
+  await page.clock.runFor(400);
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const replacementId = (await readStoredDocs(page)).find(row => row.text === 'Replacement saved')!.id;
+  await setAutosave(page, false);
+  await page.locator('#editor').fill('Replacement private edits');
+  await page.clock.runFor(2_000);
+  await expect(page.locator('#drafts')).toHaveValue(replacementId);
+  await expect(page.locator('#editor')).toHaveValue('Replacement private edits');
+  await expect(page.locator('#save-indicator')).toHaveText('Not saved');
+  const rows = await readStoredDocs(page);
+  expect(rows.find(row => row.id === replacementId)?.text).toBe('Replacement saved');
+  expect(rows.some(row => row.text === 'Replacement private edits')).toBe(false);
+});
