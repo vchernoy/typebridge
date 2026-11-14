@@ -65,3 +65,8 @@ surface; its calc input values are temporary and never change the source, saved 
 Source changes refresh it after a short debounce. A collapsible Problems list links errors to
 source line/column. Plain documents have no view switch. Rendering dependencies load through a
 separate dynamic import. Shared pages honor the sender’s source/rendered view choice, without a reading toolbar. A quiet **Edit** hyperlink beside the title appears only when the sender allowed editing; it saves a new local copy and opens the full editor, where source viewing belongs. The muted **Written with TypeBridge** footer remains below the document. Rendering failures show the source with a notice.
+
+
+### Share dialog on small screens
+
+The generated Link and Copy link action follow the privacy explanation, before reader options and the secondary document preview. The source preview is limited to four displayed lines; the document and generated link remain complete. The dialog body scrolls independently while Close stays available, and the link/Copy row wraps in narrow windows.

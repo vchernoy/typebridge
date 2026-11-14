@@ -109,7 +109,7 @@ test('Copy link copies or explains, and every control is reachable with Tab', as
     await page.keyboard.press('Tab');
     order.push(await page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent || ''));
   }
-  expect(order).toEqual(['share-edit', 'share-url', 'share-copy', 'Close']);
+  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'Close']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 });
@@ -165,4 +165,63 @@ test('a slow regenerate never leaves a link that disagrees with the checkbox (#2
   const { decoded } = await decodeShown(page);
   expect(decoded.ok && decoded.document.edit).toBe(true);
   await expect(checkbox).toBeChecked();
+});
+
+for (const viewport of [{ width: 390, height: 640 }, { width: 320, height: 480 }]) {
+  test(`mobile share link stays reachable before a multiline preview at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const text = '```calc\n' + Array.from({ length: 60 }, (_, i) => `v${i} = ${i}\n`).join('') + '```';
+    await setText(page, 'Compound interest', text);
+    await page.locator('#doc-menu-open').click();
+    await page.locator('#document-format').selectOption('markdown');
+    await page.locator('#share-link').click();
+    await expect(dialog(page)).toBeVisible();
+    const link = linkField(page);
+    const copy = dialog(page).getByRole('button', { name: 'Copy link' });
+    await expect(copy).toBeEnabled();
+    // The primary action must be above the secondary preview, not buried after it.
+    const rowBox = await dialog(page).locator('.share-link-row').boundingBox();
+    const previewBox = await dialog(page).locator('.share-preview').boundingBox();
+    expect(rowBox!.y + rowBox!.height).toBeLessThanOrEqual(previewBox!.y);
+    const bounds = await dialog(page).evaluate(element => ({ width: element.clientWidth, scrollWidth: element.scrollWidth }));
+    expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width + 1);
+    await copy.scrollIntoViewIfNeeded();
+    const box = await copy.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    const value = await link.inputValue();
+    const decoded = await decodeSharePayload(sharePayloadFromHash(new URL(value).hash));
+    expect(decoded).toMatchObject({ ok: true, document: { text, format: 'markdown', view: 'rendered' } });
+    await copy.click();
+    await expect(dialog(page).locator('.share-status')).toHaveText(/^(Link copied\.|Copy unavailable\. The link is selected; use your device’s copy command\.)$/);
+    await dialog(page).getByRole('button', { name: 'Close' }).click();
+    await expect(page.locator('#doc-menu-open')).toBeFocused();
+  });
+}
+
+test('mobile host window can reach and copy the generated link', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 640 });
+  await page.goto('/');
+  const editor = page.frameLocator('.host-window iframe').first();
+  await editor.locator('#editor').fill(('line\n').repeat(80));
+  await editor.locator('#doc-menu-open').click();
+  await editor.locator('#document-format').selectOption('markdown');
+  await editor.locator('#share-link').click();
+  const sheet = editor.getByRole('dialog', { name: 'Share link' });
+  const copy = sheet.getByRole('button', { name: 'Copy link' });
+  await expect(copy).toBeEnabled();
+  await expect(sheet.locator('#share-url')).not.toHaveValue('');
+  await copy.scrollIntoViewIfNeeded();
+  const fits = await copy.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const message = element.closest('.confirm-dialog-message')!.getBoundingClientRect();
+    return rect.top >= message.top && rect.bottom <= message.bottom && rect.left >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+  });
+  expect(fits).toBe(true);
+  await copy.click();
+  await expect(sheet.locator('.share-status')).toHaveText(/^(Link copied\.|Copy unavailable\. The link is selected; use your device’s copy command\.)$/);
+  await sheet.getByRole('button', { name: 'Close' }).click();
+  await expect(editor.locator('#doc-menu-open')).toBeFocused();
 });
