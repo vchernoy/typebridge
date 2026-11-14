@@ -43,6 +43,27 @@ describe('status line', () => {
     expect(line.kind()).toBe('failure');
   });
 
+  it('keeps a list-refresh warning through save progress until the list refresh succeeds (#97)', () => {
+    const { line, inputs, status } = setup();
+    line.showSaveState();
+    line.markDraftListRefreshFailed();
+    inputs.dirty = true;
+    line.showSaving();
+    expect(status.textContent).toBe('Saving… — document list could not be refreshed');
+    expect(status.classList.contains('status--announced-only')).toBe(false);
+    inputs.saveFailed = true;
+    line.showSaveState();
+    expect(status.textContent).toBe(SAVE_FAILED.slice(0, -1) + ' — document list could not be refreshed');
+    inputs.dirty = false;
+    inputs.saveFailed = false;
+    line.showSaveState();
+    expect(status.textContent).toBe('Saved locally — document list could not be refreshed');
+    // The successful refresh path explicitly clears only the list warning.
+    line.updateStatus({ draftListRefreshFailed: false });
+    expect(status.textContent).toBe('Saved locally');
+    expect(status.classList.contains('status--announced-only')).toBe(true);
+  });
+
   it('re-announces an identical conflict after a real delay, not a microtask (#97)', () => {
     vi.useFakeTimers();
     try {
