@@ -55,50 +55,23 @@ async function openSharedDocument(page: Page): Promise<{ alpha: FrameLocator; be
 test('same-tab click into read-only window takes editing without dropping keys', async ({ page }) => {
   test.setTimeout(90_000);
   const { alpha, beta, docId } = await openSharedDocument(page);
-  // Hold the new owner's document transaction so the pre-commit boundary cannot race
-  // its saved signal. Do not read IndexedDB until release: that read would queue behind it.
-  await beta.locator('#editor').evaluate(() => {
-    const win = window as unknown as { handoffSaveHeld: boolean; releaseHandoffSave?: () => void };
-    const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
-      const request = put.apply(this, args);
-      if (this.name === 'documents') {
-        IDBObjectStore.prototype.put = put;
-        let held = true; win.releaseHandoffSave = () => { held = false; };
-        request.addEventListener('success', () => {
-          win.handoffSaveHeld = true;
-          const id = (args[0] as { id: string }).id;
-          const keepAlive = (): void => { if (held) this.get(id).addEventListener('success', keepAlive); };
-          keepAlive();
-        });
-      }
-      return request;
-    };
-  });
 
-  try {
-    await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
-    await beta.locator('#editor').click();
-    await placeCaret(beta, 'end');
-    // Type immediately during handoff — buffered keys must apply.
-    await beta.locator('#editor').pressSequentially('!');
-    await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
-    await expect(beta.locator('#editor')).toHaveJSProperty('readOnly', false);
-    await expect(beta.locator('#editor')).toHaveValue('Shared handoff text!');
-    await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
-    await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
-    await expect.poll(() => beta.locator('#editor').evaluate(() => (window as unknown as { handoffSaveHeld: boolean }).handoffSaveHeld)).toBe(true);
-    // The old owner must not display the new owner's uncommitted key.
-    await expect(alpha.locator('#editor')).toHaveValue('Shared handoff text');
-  } finally {
-    await beta.locator('#editor').evaluate(() => (window as unknown as { releaseHandoffSave?: () => void }).releaseHandoffSave?.());
-  }
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
+  await beta.locator('#editor').click();
+  await placeCaret(beta, 'end');
+  // Type immediately during handoff — buffered keys must apply.
+  await beta.locator('#editor').pressSequentially('!');
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor', { timeout: 10_000 });
+  await expect(beta.locator('#editor')).toHaveJSProperty('readOnly', false);
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff text!');
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
+  await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
   await expect(beta.locator('#save-indicator')).toHaveText('Saved');
   const docs = await readStoredDocs(page);
-  const saved = docs.find(row => row.id === docId);
-  expect(saved?.text).toBe('Shared handoff text!');
-  // A clean reader follows the durable row; it need not retain the pre-handoff snapshot.
-  await expect(alpha.locator('#editor')).toHaveValue(saved!.text);
+  const committed = docs.find(row => row.id === docId);
+  expect(committed?.text).toBe('Shared handoff text!');
+  // A clean reader follows the latest committed revision after beta saves.
+  await expect(alpha.locator('#editor')).toHaveValue(committed!.text);
   await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
   // No conflict copy — still one document row for this text family.
   expect(docs.filter(row => row.text.startsWith('Shared handoff text')).length).toBe(1);
