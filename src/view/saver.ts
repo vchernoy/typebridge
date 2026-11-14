@@ -141,9 +141,13 @@ export function createSaver(state: EditorState, status: StatusLine, deps: SaverD
       // the success path each announce once (avoids CONFLICT_COPY then LEFT).
       if (!state.transitioning) status.setConflict(CONFLICT_COPY, true);
       if (options.conflictSavingStatus) {
+        const risk = status.riskText();
         status.updateStatus({
-          primary: deps.workspace.dirty() && !state.storageProblem ? 'Saving…' : '',
-          risk: status.riskText(),
+          // The conflict notice is deferred until a switch/delete finishes. Keep the
+          // committed save state visible while its ownership transfer is pending (#97).
+          primary: deps.workspace.dirty() && !state.storageProblem ? 'Saving…'
+            : state.transitioning && !risk ? 'Saved locally' : '',
+          risk,
         }, state.transitioning ? status.kind() : 'conflict');
       }
       // The copy is a new document; later saves in this loop need its fence.

@@ -912,6 +912,39 @@ test('switch-time conflict is announced after the selected draft loads', async (
   await expect(status(page)).toHaveText('Saved locally');
 });
 
+for (const action of ['switch', 'delete'] as const) {
+  test(`a committed conflict stays visible during slow ${action} ownership transfer (#97)`, async ({ page, context }) => {
+    const { field, targetId } = await prepareConflict(page, context, action === 'switch');
+    await page.evaluate(() => {
+      (window as unknown as { __typebridgeDelayAcquireMs: number }).__typebridgeDelayAcquireMs = 1_000;
+    });
+    await field.press('End');
+    await field.pressSequentially('!');
+    if (action === 'switch') {
+      await selectDocument(page, targetId);
+    } else {
+      const confirmation = answerNextConfirmation(page, true);
+      await documentAction(page, '#delete-draft');
+      await confirmation;
+    }
+    await expect.poll(() => storedTexts(page)).toContain('Исходный!');
+    // Commit completed, but fake time holds ownership transfer and the final notice.
+    await expect(page.locator('#conflict-notice')).toHaveText('');
+    await expect(status(page)).toHaveText('Saved locally');
+    await page.evaluate(() => {
+      (window as unknown as { __typebridgeDelayAcquireMs: number }).__typebridgeDelayAcquireMs = 0;
+    });
+    await page.clock.runFor(1_000);
+    if (action === 'switch') {
+      await expect(field).toHaveValue('Целевой черновик');
+      await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' Saved locally');
+    } else {
+      await expect(field).toHaveValue('Исходный!');
+      await expect(status(page)).toHaveText('Could not delete original — your changes were saved as a conflict copy.');
+    }
+  });
+}
+
 test('import after a conflict flush keeps the left-draft conflict notice', async ({ page, context }) => {
   const { field } = await prepareConflict(page, context);
   await field.press('End');
