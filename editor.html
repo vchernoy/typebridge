@@ -52,6 +52,12 @@
             >
               ▾
             </button>
+            <label class="toggle autosave-doc-toggle"
+              ><input id="autosave" type="checkbox" checked aria-describedby="autosave-doc-hint" /> Autosave</label
+            >
+            <span id="autosave-doc-hint" class="visually-hidden"
+              >Per document. Off marks this document private so text typed while private is not saved.</span
+            >
             <span
               id="save-indicator"
               class="save-indicator"
@@ -62,12 +68,6 @@
               ><span class="save-indicator-label">Not saved</span></span
             >
             <span id="private-marker" class="private-marker" hidden>Private</span>
-            <label class="toggle autosave-doc-toggle"
-              ><input id="autosave" type="checkbox" checked aria-describedby="autosave-doc-hint" /> Autosave</label
-            >
-            <span id="autosave-doc-hint" class="visually-hidden"
-              >Per document. Off marks this document private so text typed while private is not saved.</span
-            >
             <span id="viewer-badge" class="viewer-badge" hidden>Saved version · Read-only</span>
             <div id="doc-menu" class="doc-menu" role="dialog" aria-label="Documents" hidden>
               <label for="doc-search" class="menu-label">Documents</label>

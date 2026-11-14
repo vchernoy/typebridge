@@ -19,15 +19,18 @@
 .doc {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   flex: 1 1 260px;
   min-width: 0;
 }
+/* The title doesn't give up width to the save state: when "Not saved" or "Private" doesn't fit, it
+   wraps to the next line, so ▾ and the Autosave checkbox never move when Autosave is switched. */
 #draft-title {
   width: min(36ch, 100%);
   min-width: 0;
-  flex-shrink: 1;
+  flex-shrink: 0;
   min-height: 44px;
   padding: 6px 8px;
   border: 1px solid transparent;
@@ -50,6 +53,16 @@
   }
 }
 @media (max-width: 640px) {
+  /* Phones: the title gets its own line, and ▾, Autosave and the save state share the next one.
+     A longer state ("Not saved", "Private") then grows into free space or wraps, instead of shrinking
+     the title and moving the Autosave checkbox the reader just used. */
+  .doc {
+    row-gap: 2px;
+  }
+  #draft-title {
+    flex: 1 0 100%;
+    width: 100%;
+  }
   .brand {
     position: absolute;
     width: 1px;

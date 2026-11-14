@@ -80,6 +80,34 @@ for (const width of [320, 1280]) {
   });
 }
 
+for (const width of [320, 390, 1280]) {
+  test(`turning Autosave off and on never moves the checkbox at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/editor.html');
+    await expect(page.locator('#editor')).toBeEnabled();
+    const indicator = page.locator('#save-indicator');
+    await expect(indicator).toHaveAccessibleName('Saved');
+    const checkbox = page.locator('#autosave');
+    const at = async () => {
+      const box = (await checkbox.boundingBox())!;
+      return { x: Math.round(box.x), y: Math.round(box.y) };
+    };
+    const saved = await at();
+    await checkbox.uncheck();
+    await expect(indicator).toHaveAccessibleName('Not saved');
+    await expect(page.locator('#private-marker')).toBeVisible();
+    // The reader's pointer stays on the control they just used.
+    expect(await at()).toEqual(saved);
+    await checkbox.check();
+    await expect(indicator).toHaveAccessibleName('Saved');
+    expect(await at()).toEqual(saved);
+    // The state reads after the control it describes.
+    const toggleRight = (await page.locator('.autosave-doc-toggle').boundingBox())!;
+    const status = (await indicator.boundingBox())!;
+    expect(status.x >= toggleRight.x + toggleRight.width - 1 || status.y > toggleRight.y).toBe(true);
+  });
+}
+
 test('save icons expose a dismissible focus tooltip and respect reduced motion (#281)', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
@@ -87,7 +115,8 @@ test('save icons expose a dismissible focus tooltip and respect reduced motion (
   await expect(page.locator('#editor')).toBeEnabled();
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   const indicator = page.locator('#save-indicator');
-  await page.locator('#doc-menu-open').focus();
+  // The status follows the Autosave toggle: Documents ▾, Autosave, then the indicator.
+  await page.locator('#autosave').focus();
   await page.keyboard.press('Tab');
   await expect(indicator).toBeFocused();
   expect(await indicator.evaluate(el => getComputedStyle(el, '::after').display)).toBe('block');
