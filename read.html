@@ -26,13 +26,11 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   </head>
   <body class="read-page">
-    <header class="read-bar">
-      <span class="read-label">Shared document · read-only</span>
-      <button id="read-view" type="button" hidden>Show source</button>
-      <button id="edit-copy" class="read-edit" type="button" hidden>Edit a copy</button>
-    </header>
     <main class="read-main">
-      <h1 id="read-title" class="read-title">Opening shared document…</h1>
+      <header class="read-heading">
+        <h1 id="read-title" class="read-title">Opening shared document…</h1>
+        <a id="edit-copy" class="read-edit" href="#" hidden>Edit</a>
+      </header>
       <p id="read-notice" class="read-notice" hidden></p>
       <div id="read-text" class="read-text"></div>
       <p id="read-status" class="read-status" role="status" aria-live="polite"></p>

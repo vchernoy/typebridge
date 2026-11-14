@@ -64,4 +64,4 @@ Each window independently remembers Edit or Rendered in sessionStorage. Rendered
 surface; its calc input values are temporary and never change the source, saved row or journal.
 Source changes refresh it after a short debounce. A collapsible Problems list links errors to
 source line/column. Plain documents have no view switch. Rendering dependencies load through a
-separate dynamic import. The separate sharing PR adds the reader view choice and Show source / Show page on shared Markdown pages.
+separate dynamic import. Shared pages honor the sender’s source/rendered view choice, without a reading toolbar. A quiet **Edit** hyperlink beside the title appears only when the sender allowed editing; it saves a new local copy and opens the full editor, where source viewing belongs. The muted **Written with TypeBridge** footer remains below the document. Rendering failures show the source with a notice.

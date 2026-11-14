@@ -1,6 +1,6 @@
 /**
  * Reading page for share links (#39): `/#doc=…` forwards here (inline script in index.html).
- * It looks like a plain read-only web page: the title, the text and a quiet label. Nothing is
+ * It looks like a plain read-only web page: the title, the text and a quiet Edit link. Nothing is
  * stored until the reader chooses Edit a copy, which saves a new document and opens it in the
  * full editor. Source text is never parsed as HTML; only the lazy renderer’s sanitized output is inserted.
  */
@@ -13,7 +13,6 @@ import { commitOrCreateConflictCopy, openDraftDatabase } from '../editor/indexed
 import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type SharedDocument } from '../editor/share-link';
 import { createDocumentSignal, DOCUMENT_SIGNAL_CHANNEL } from '../view/signals';
 
-const viewToggle = document.querySelector<HTMLButtonElement>('#read-view')!;
 let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
 let viewGeneration = 0;
 function stopLive(): void { viewGeneration++; live?.destroy(); live = undefined; }
@@ -22,7 +21,7 @@ const title = document.querySelector<HTMLElement>('#read-title')!;
 const notice = document.querySelector<HTMLElement>('#read-notice')!;
 const body = document.querySelector<HTMLElement>('#read-text')!;
 const status = document.querySelector<HTMLElement>('#read-status')!;
-const editCopy = document.querySelector<HTMLButtonElement>('#edit-copy')!;
+const editCopy = document.querySelector<HTMLAnchorElement>('#edit-copy')!;
 
 /** What to tell the reader when a link cannot be opened. */
 const FAILURE_MESSAGES: Record<DecodeFailure, string> = {
@@ -33,7 +32,7 @@ const FAILURE_MESSAGES: Record<DecodeFailure, string> = {
 };
 
 function showFailure(reason: DecodeFailure): void {
-  stopLive(); viewToggle.hidden = true;
+  stopLive();
   document.title = 'Shared document · TypeBridge';
   title.textContent = 'This shared document cannot be opened';
   body.textContent = FAILURE_MESSAGES[reason];
@@ -48,12 +47,11 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
   const heading = shared.title.trim() || 'Untitled document';
   document.title = `${heading} · TypeBridge`;
   title.textContent = heading;
-  let view = readingView(shared);
+  const view = readingView(shared);
   const setView = async (): Promise<void> => {
     stopLive();
     const generation = viewGeneration;
     const rendered = view === 'rendered';
-    viewToggle.textContent = rendered ? 'Show source' : 'Show page';
     body.className = rendered ? 'active-reading' : 'read-text';
     if (!rendered) { body.textContent = shared.text; return; }
     body.textContent = 'Rendering…';
@@ -62,11 +60,14 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
       if (generation !== viewGeneration) return;
       live = renderDocument(body, shared.text, navigator.language);
     } catch {
-      if (generation === viewGeneration) body.textContent = 'Could not render this document. Choose Show source to read it.';
+      if (generation === viewGeneration) {
+        body.className = 'read-text';
+        body.textContent = shared.text;
+        notice.textContent = 'Could not render this document. Showing its text as written.';
+        notice.hidden = false;
+      }
     }
   };
-  viewToggle.hidden = shared.format !== 'markdown';
-  viewToggle.onclick = () => { view = view === 'rendered' ? 'source' : 'rendered'; void setView(); };
   void setView();
   body.classList.remove('read-text--message');
   if (!knownFormat) {
@@ -76,7 +77,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
     notice.hidden = true;
   }
   editCopy.hidden = !shared.edit;
-  editCopy.onclick = () => { void saveCopy(shared); };
+  editCopy.onclick = event => { event.preventDefault(); void saveCopy(shared); };
 }
 
 // Local Markdown anchors must not replace the fragment carrying the share payload.
@@ -100,7 +101,7 @@ let saving = false;
 async function saveCopy(shared: SharedDocument): Promise<void> {
   if (saving) return;
   saving = true;
-  editCopy.disabled = true;
+  editCopy.setAttribute('aria-disabled', 'true');
   status.textContent = 'Saving a copy…';
   try {
     const db = await openDraftDatabase();
@@ -118,7 +119,7 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
     }
   } catch {
     status.textContent = 'Could not save a copy: browser storage is unavailable here. You can still select and copy the text.';
-    editCopy.disabled = false;
+    editCopy.removeAttribute('aria-disabled');
     saving = false;
   }
 }
@@ -126,7 +127,7 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
 /** Bumped on every render: a slow decode of an earlier link must not replace a newer one. */
 let renderGeneration = 0;
 async function render(): Promise<void> {
-  stopLive(); viewToggle.hidden = true;
+  stopLive();
   const generation = ++renderGeneration;
   const hash = location.hash;
   // Never leave the previous document's Edit a copy armed while another link decodes.
@@ -143,7 +144,7 @@ async function render(): Promise<void> {
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
   saving = false;
-  editCopy.disabled = false;
+  editCopy.removeAttribute('aria-disabled');
   status.textContent = '';
   void render();
 });

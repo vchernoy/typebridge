@@ -25,8 +25,9 @@ test('a share link opens as a read-only page and stores nothing', async ({ page 
   await expect(page).toHaveURL(/\/read\.html#doc=1\./);
   await expect(page.locator('#read-title')).toHaveText(document.title);
   await expect(page.locator('#read-text')).toHaveText(document.text, { useInnerText: false });
-  await expect(page.locator('.read-label')).toHaveText('Shared document · read-only');
-  await expect(page.getByRole('button', { name: 'Edit a copy' })).toBeVisible();
+  await expect(page.locator('.read-label, #read-view')).toHaveCount(0);
+  await expect(page.locator('.read-footer')).toHaveText('Written with TypeBridge');
+  await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'TypeBridge' })).toHaveAttribute('href', '/');
   await expect(page).toHaveTitle(`${document.title} · TypeBridge`);
   // No editor chrome, and no storage opened just by reading.
@@ -78,7 +79,7 @@ test('Edit a copy saves a new document and opens it in an editor window', async 
   const before = await readStoredDocs(page);
   const document = shared();
   await page.goto(await linkFor(document));
-  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
   const copyId = (await readStoredDocs(page)).find(row => row.text === document.text)?.id;
@@ -100,7 +101,7 @@ test('with every window open, Edit a copy still saves and says how to open it', 
   }
   const document = shared({ text: 'Копия при полном наборе окон' });
   await page.goto(await linkFor(document));
-  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(page.locator('.host-status')).toContainText('Close a window, then open it from ▾ Documents.');
   await expect(page.locator('.host-window')).toHaveCount(4);
   await expect.poll(async () => (await readStoredDocs(page)).some(row => row.text === document.text)).toBe(true);
@@ -134,7 +135,7 @@ test('Edit a copy leaves a restored host Focus and opens the copy in a window (#
   await expect(page.locator('body')).toHaveClass(/host-focus-mode/);
   const document = shared({ text: 'Копия из режима фокуса' });
   await page.goto(await linkFor(document));
-  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(page.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
   await expect(page.locator('body')).not.toHaveClass(/host-focus-mode/);
   const copyId = (await readStoredDocs(page)).find(row => row.text === document.text)?.id;
@@ -178,7 +179,7 @@ test('on a first visit Edit a copy opens the copy once, in the main window (#246
   });
   const document = shared({ text: 'Первый визит' });
   await page.goto(await linkFor(document));
-  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(page.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
   const copyId = (await readStoredDocs(page)).find(row => row.text === document.text)?.id;
   const editor = page.frameLocator(`.host-window iframe[src*="doc=${copyId}"]`).locator('#editor');
@@ -197,7 +198,7 @@ test('returning to the reading page from the back-forward cache makes Edit a cop
     indexedDB.open = (() => ({}) as IDBOpenDBRequest) as typeof indexedDB.open;
   });
   await page.goto(await linkFor(shared()));
-  await page.getByRole('button', { name: 'Edit a copy' }).click();
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(page.locator('#edit-copy')).toBeDisabled();
   await expect(page.locator('#read-status')).toHaveText('Saving a copy…');
   await page.evaluate(() => { window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });

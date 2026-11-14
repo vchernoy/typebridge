@@ -44,7 +44,7 @@ test('Share link explains sharing, previews and makes a link the reading page op
   await reader.goto(url.pathname + url.hash);
   await expect(reader.locator('#read-title')).toHaveText('Письмо');
   await expect(reader.locator('#read-text')).toHaveText(text, { useInnerText: false });
-  await expect(reader.getByRole('button', { name: 'Edit a copy' })).toBeVisible();
+  await expect(reader.getByRole('link', { name: 'Edit', exact: true })).toBeVisible();
   // Close returns to the document menu button.
   await dialog(page).getByRole('button', { name: 'Close' }).click();
   await expect(dialog(page)).toHaveCount(0);
