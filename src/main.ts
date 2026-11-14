@@ -68,7 +68,7 @@ import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
 import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
-import { installEscapeLayers } from './ui/escape-layers';
+import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 import { parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
@@ -495,12 +495,9 @@ const saveIndicatorLabel = saveIndicator.querySelector<HTMLElement>('.save-indic
 for (const event of ['pointerenter', 'focus']) {
   saveIndicator.addEventListener(event, () => { delete saveIndicator.dataset.tooltipDismissed; });
 }
-saveIndicator.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || saveIndicator.dataset.tooltipDismissed) return;
-  saveIndicator.dataset.tooltipDismissed = 'true';
-  event.preventDefault();
-  event.stopPropagation();
-});
+registerEscapeLayer(saveIndicator, 40,
+  () => { saveIndicator.dataset.tooltipDismissed = 'true'; },
+  () => !saveIndicator.dataset.tooltipDismissed && saveIndicator.matches(':hover, :focus-visible'));
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
   const clearButton = document.querySelector<HTMLButtonElement>('#clear-document-data');

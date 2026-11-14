@@ -101,6 +101,14 @@ test('save icons expose a dismissible focus tooltip and respect reduced motion (
   await expect(indicator).toHaveAccessibleName('Saved');
   await indicator.hover();
   expect(await indicator.evaluate(el => getComputedStyle(el, '::after').display)).toBe('block');
+  // Hover alone must also be dismissible while keyboard focus stays in the editor.
+  await page.locator('#editor').focus();
+  await expect(page.locator('#editor')).toBeFocused();
+  await page.keyboard.press('Escape');
+  expect(await indicator.evaluate(el => getComputedStyle(el, '::after').display)).toBe('none');
+  await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
 });
 
 for (const width of [320, 390, 1280]) {
