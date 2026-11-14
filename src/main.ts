@@ -31,6 +31,7 @@ import { createTakeover } from './view/takeover';
 import { createTitleEditing } from './ui/title-edits';
 import { setupDeletedInput } from './view/deleted-input';
 import { createHeldEdits } from './view/held-edits';
+import { discardForHandoff } from './view/handoff-discard';
 import { installEmbedHooks } from './view/embed-hooks';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
 import {
@@ -897,10 +898,11 @@ privateSession?.addEventListener('change', () => {
   notifyPrefsChanged({ name: 'autosave', origin: prefsOrigin });
 });
 /** Explicit discard: drop the journal and every change-log record for this document (#37 R2c 2d-2 / #254). */
-async function discardUnsavedRecovery(): Promise<void> {
+async function discardUnsavedRecovery(stillCurrent: () => boolean = () => true): Promise<void> {
   // E2E: widen the post-confirm window so typing during cleanup can be asserted (#254).
   const delayMs = testKnob('__typebridgeDelayDiscardMs');
   if (typeof delayMs === 'number' && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  if (!stillCurrent()) return;
   const discardedJournal = recovery.takeCurrentJournal();
   if (discardedJournal) {
     try { clearRecovery(localStorage, discardedJournal); } catch { /* Optional backup. */ }
@@ -909,6 +911,7 @@ async function discardUnsavedRecovery(): Promise<void> {
   changeWriter.abandon();
   // Drain after abandon so a late append rejection cannot recreate a journal (#254 Codex P2).
   try { await saver.drainChanges(); } catch { /* Leaving anyway. */ }
+  if (!stillCurrent()) return;
   const lateJournal = recovery.takeCurrentJournal();
   if (lateJournal) {
     try { clearRecovery(localStorage, lateJournal); } catch { /* Optional backup. */ }
@@ -919,7 +922,9 @@ async function discardUnsavedRecovery(): Promise<void> {
   const ownership = state.ownership;
   if (!state.db || !ownership || ownership.documentId !== documentId) return;
   try {
-    await clearDocumentChanges(state.db, documentId, await ownership.writeFence());
+    const fence = await ownership.writeFence();
+    if (!stillCurrent()) return;
+    await clearDocumentChanges(state.db, documentId, fence);
   } catch { /* Leaving anyway; a later owner may still see records if the clear failed. */ }
 }
 const documents = createDocumentActions(state, statusLine, {
@@ -1051,34 +1056,23 @@ if (!viewMode) {
     isDirty: () => workspace.dirty(),
     autosaveOn: () => mayWrite(),
     confirmDiscardDirtyForHandoff: async () => {
-      const discard = await askConfirmChoice({
-        title: 'Discard unsaved changes?',
-        message: state.editBlock
-          ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).'
-          : 'Copy or export unsaved changes first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).',
-        confirmLabel: 'Discard changes',
-        cancelLabel: 'Keep editing',
-        returnFocus: field,
+      const discarded = await discardForHandoff(state, workspace, {
+        confirm: () => askConfirmChoice({
+          title: 'Discard unsaved changes?',
+          message: state.editBlock
+            ? 'Another window is editing this document, so this window cannot save these changes. Copy or export them first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).'
+            : 'Copy or export unsaved changes first to keep them. Taking over editing replaces them with the other window’s text (or the last saved copy).',
+          confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', returnFocus: field,
+        }),
+        discardRecovery: discardUnsavedRecovery,
+        restoreRecovery: journalEdit,
+        applyDraft: fresh => {
+          writingPosition.save(); state.active = fresh; showDraft(); workspace.setDirty(false);
+        },
+        announceCancelled: () => statusLine.announceAction('Discard cancelled — the document changed while the dialog was open.'),
       });
-      if (!discard) return false;
-      // Same consent as switch/close: clear journal/change-log while a fence may still be live.
-      await discardUnsavedRecovery();
-      // Apply the discard immediately (same as the switch path) so a failed takeover
-      // cannot resurrect the private text the user already agreed to drop.
-      if (state.db) {
-        try {
-          const fresh = await getStoredDraft(state.db, state.active.id);
-          if (fresh) {
-            writingPosition.save();
-            state.active = fresh;
-            showDraft();
-            workspace.setDirty(false);
-          }
-        } catch { /* Keep editing; takeover will reread under the new fence. */ }
-      }
-      applyEditAccess();
-      showSaveState();
-      return true;
+      if (discarded) { applyEditAccess(); showSaveState(); }
+      return discarded;
     },
     flushSave: async () => { await persist(); },
     captureSnapshot: captureHandoffSnapshot,
