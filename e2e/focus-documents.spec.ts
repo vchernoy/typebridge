@@ -32,14 +32,16 @@ for (const width of [390, 1280]) {
     }
     for (const id of ['.brand', '#focus-mode', '#settings-open']) await expect(page.locator(id)).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    if (width >= 1000) {
-      // One line above the editor on wide screens.
-      const rows = await Promise.all(['#draft-title', '#doc-menu-open', '#enabled', '#exit-focus'].map(async id => {
+    // One line above the editor on wide screens: title, ▾, Autosave, the save icon, the switch and Exit.
+    const oneRow = async () => {
+      if (width < 1000) return;
+      const rows = await Promise.all(['#draft-title', '#doc-menu-open', '#autosave', '#save-indicator', '#enabled', '#exit-focus'].map(async id => {
         const box = (await page.locator(id).boundingBox())!;
         return box.y + box.height / 2;
       }));
       expect(Math.max(...rows) - Math.min(...rows)).toBeLessThanOrEqual(4);
-    }
+    };
+    await oneRow();
     // Rename in place.
     await title.fill('Новое имя');
     await expect(page.locator('#save-indicator')).toHaveText('Saved');
@@ -48,6 +50,9 @@ for (const width of [390, 1280]) {
     await selectDocument(page, first);
     await expect(page.locator('#editor')).toHaveValue('Первый текст');
     await expect(page.locator('body')).toHaveClass(/focus-mode/);
+    // The long title ellipsizes; it never pushes ▾ or Autosave onto another line.
+    await expect(title).toHaveValue(/^Длинное название/);
+    await oneRow();
     // Escape inside the menu closes it but keeps Focus mode.
     await openDocuments(page);
     await page.keyboard.press('Escape');

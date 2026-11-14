@@ -45,6 +45,11 @@ html[data-embed="1"] .topbar {
 html[data-embed="1"] .topbar > .doc {
   flex: 0 0 auto;
 }
+/* Host windows hide the title, so .doc is sized by its content; a percentage cap on
+   .doc-main would be circular there (WebKit wrapped the save icon onto a second line). */
+html[data-embed="1"] .doc-main {
+  max-width: none;
+}
 html[data-embed="1"] .topbar > .toolbar {
   flex: 1 1 auto;
   justify-content: flex-start;
