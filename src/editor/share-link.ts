@@ -14,7 +14,7 @@ export const SHARE_LINK_VERSION = 1;
 /** Fragment parameter name: `#doc=1.…`. */
 export const SHARE_FRAGMENT_KEY = 'doc';
 /** Formats this build can render. Others are shown as raw text. */
-export const KNOWN_SHARE_FORMATS = ['plain'] as const;
+export const KNOWN_SHARE_FORMATS = ['plain', 'markdown'] as const;
 /** Longer links may be cut or refused by messengers, mail and social sites. */
 export const SHARE_LINK_WARN_CHARS = 2_000;
 /** Longest payload (base64url characters after `1.`) this build creates or accepts. */

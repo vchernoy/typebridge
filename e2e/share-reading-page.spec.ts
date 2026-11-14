@@ -47,8 +47,8 @@ test('the sender can hide Edit a copy; an unknown format shows its raw text with
   await page.goto(await linkFor(shared({ edit: false })));
   await expect(page.locator('#read-title')).toHaveText('Письмо другу 🙂');
   await expect(page.locator('#edit-copy')).toBeHidden();
-  await page.goto(await linkFor(shared({ format: 'markdown', text: '# Заголовок\n**жирный**' })));
-  await expect(page.locator('#read-notice')).toContainText('cannot show yet (“markdown”)');
+  await page.goto(await linkFor(shared({ format: 'future-markdown', text: '# Заголовок\n**жирный**' })));
+  await expect(page.locator('#read-notice')).toContainText('cannot show yet (“future-markdown”)');
   await expect(page.locator('#read-text')).toHaveText('# Заголовок\n**жирный**', { useInnerText: false });
 });
 
@@ -61,7 +61,7 @@ test('a damaged or cut link explains itself', async ({ page }) => {
   await page.goto('/read.html#doc=9.abc');
   await expect(page.locator('#read-text')).toContainText('newer version of TypeBridge');
   // An unknown-format notice from an earlier link does not stay with a later failure.
-  await page.goto(await linkFor(shared({ format: 'markdown' })));
+  await page.goto(await linkFor(shared({ format: 'future-markdown' })));
   await expect(page.locator('#read-notice')).toBeVisible();
   await page.evaluate(() => { location.hash = '#doc=9.abc'; });
   await expect(page.locator('#read-text')).toContainText('newer version of TypeBridge');

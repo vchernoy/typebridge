@@ -64,4 +64,4 @@ Each window independently remembers Edit or Rendered in sessionStorage. Rendered
 surface; its calc input values are temporary and never change the source, saved row or journal.
 Source changes refresh it after a short debounce. A collapsible Problems list links errors to
 source line/column. Plain documents have no view switch. Rendering dependencies load through a
-separate dynamic import. Shared-page support is the separate second #244 PR.
+separate dynamic import. The separate sharing PR adds the reader view choice and Show source / Show page on shared Markdown pages.

@@ -138,3 +138,8 @@ describe('encoding refuses what decoding would refuse', () => {
     if (result.ok) expect((await decodeSharePayload(result.payload)).ok).toBe(true);
   });
 });
+
+it.each(['source', 'rendered'] as const)('round-trips known Markdown with %s view', async view => {
+  const shared = doc('# heading', { format: 'markdown', view });
+  expect(await decodeSharePayload(await encodeSharePayloadOk(shared))).toEqual({ ok: true, document: shared, knownFormat: true });
+});

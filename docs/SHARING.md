@@ -1,6 +1,6 @@
 # Share links
 
-Status: #39 v1 is built: the **link format** (`src/editor/share-link.ts`), the **reading page** (`read.html`, `src/read/main.ts`) and **Documents → Share link…** (`src/ui/share-dialog.ts`). Plain text only. Design for later formats, rendered views, images and active documents is in [#244](https://github.com/vchernoy/typebridge/issues/244).
+Status: #39 v1 is built: the **link format** (`src/editor/share-link.ts`), the **reading page** (`read.html`, `src/read/main.ts`) and **Documents → Share link…** (`src/ui/share-dialog.ts`). Plain and Markdown documents are supported, with source or rendered presentation. The design is in [#244](https://github.com/vchernoy/typebridge/issues/244).
 
 ## What a link carries
 
@@ -10,7 +10,7 @@ A shared document travels inside the link's fragment, `https://typebridge.vchern
 |---|---|
 | `title` | Document title, at most 150 characters |
 | `text` | Document text, exactly as written |
-| `format` | Document format; `plain` is the only one this version renders |
+| `format` | Document format; `plain` or `markdown` (active-md 0.1.1: GFM, callouts, math and calc) |
 | `view` | How the reading page first shows it: `source` or `rendered` (presentation only) |
 | `edit` | Whether the reading page offers **Edit a copy** (presentation only; it does not protect the text) |
 
@@ -27,7 +27,7 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 - Payloads over 48,000 characters are refused before decompression.
 - Decompression stops at 2 MB of output, so a small link cannot expand into a huge document.
 - JSON must have a string `title` and `text` and a format matching `[a-z0-9][a-z0-9+.-]{0,31}`. Unknown `view` falls back to `source`; a missing `edit` means allowed.
-- A format this build does not know (e.g. a future `markdown`) is still decoded, so the reading page can show its raw text with a notice instead of failing.
+- A format this build does not know (e.g. `future-markdown`) is still decoded, so the reading page can show its raw text with a notice instead of failing.
 - **Encoding refuses what decoding would refuse:** a document whose JSON exceeds 2 MB (even when very repetitive text would compress into a short link), or whose payload exceeds 48,000 characters, gets `too-large` instead of a link, and a format name decoding would reject gets `format`, so nobody is offered a link that cannot be opened.
 - Links longer than 2,000 characters are allowed but should be flagged to the sender: messengers, mail clients and social sites often cut or refuse long links.
 
@@ -39,6 +39,7 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 
 - says plainly: "Anyone with the link can read this document. The text travels inside the link itself; nothing is uploaded. The link also stays in your browser history and wherever you paste it."
 - previews what the reader sees first (title and the start of the text);
+- for Markdown, has **Readers see: Rendered page / Source**, defaulting to Rendered; plain documents keep source presentation;
 - has **Readers can edit a copy** (on by default; off hides Edit a copy on the reading page, which is presentation only);
 - shows the link in a read-only field and **Copy link** (if the browser refuses clipboard access, the link is selected for the device's copy command);
 - warns when the link is longer than 2,000 characters, and refuses a document too large for a link, suggesting Export instead.
@@ -47,14 +48,16 @@ Every control in the dialog is reachable with Tab; Escape or Close returns to �
 
 ## Reading page
 
-`/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page looks like a plain read-only web page: the title, the text exactly as written (line breaks and spaces kept), a quiet **Shared document · read-only** label and **Written with TypeBridge**. The text is always written as text, never parsed as HTML. It opens offline once TypeBridge itself (`/` or the editor) has been opened in that browser, which installs offline support; the reading page does not install it, so opening only share links does not.
+`/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page looks like a plain read-only web page: the title, the text exactly as written (line breaks and spaces kept), a quiet **Shared document · read-only** label and **Written with TypeBridge**. Source view writes text exactly as written. Rendered Markdown dynamically loads active-md and inserts only its sanitized output, with KaTeX `trust: false` and MathML output. Raw HTML is dropped, dangerous links are filtered, and remote images are links that require a click. Show source / Show page switches presentation without changing the document or link. Calc input values are temporary; they are never saved, journaled or shared. It opens offline once TypeBridge itself (`/` or the editor) has been opened in that browser, which installs offline support; the reading page does not install it, so opening only share links does not.
 
 - **Nothing is stored while reading.** No database is opened and no history or settings are written.
-- **Edit a copy** (shown unless the sender turned it off) saves the text as a **new** document and never overwrites an existing one. It then opens `/?open=<id>`: the host shows the copy in a new editor window, or activates the window that already shows it, and confirms "Saved as a new document in your Documents." When every window is open (the cap is 4), the copy is still saved, and the confirmation says to close a window and open it from ▾ Documents.
+- **Edit a copy** (shown unless the sender turned it off) saves source text and its format as a **new** document and never overwrites an existing one. It then opens `/?open=<id>`: the host shows the copy in a new editor window, or activates the window that already shows it, and confirms "Saved as a new document in your Documents." When every window is open (the cap is 4), the copy is still saved, and the confirmation says to close a window and open it from ▾ Documents.
 - **A link that cannot be opened explains why:** it has no document, it was made by a newer version, it is too large, or it is incomplete or damaged (messengers sometimes cut long links). A format this version cannot show yet is displayed as its raw text with a notice.
 
 
-The editor's #244 format/Rendered-view work is separate from the shared reading page: until
-its follow-up PR, the sender still creates plain/source links and the reading page treats
-Markdown links as unknown formats, showing source. The editor's JSON export/import already
-retains the document format; old files default to plain.
+Markdown support delivers #244 proposed steps 2–4 through the editor-format/view and
+sharing/reading PRs. No author code runs, and no local-image, rich-editor or print/PDF support
+is included. Unknown formats still show source with a notice. Reading alone does not open
+IndexedDB or write localStorage/sessionStorage; Edit a copy remains the only storage action.
+The app shell is precached; renderer assets cache on demand. A first Markdown render needs
+connectivity, and later rendering works offline after those assets have been used online.
