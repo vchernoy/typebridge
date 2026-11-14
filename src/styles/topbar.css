@@ -25,12 +25,22 @@
   flex: 1 1 260px;
   min-width: 0;
 }
-/* The title doesn't give up width to the save state: when "Not saved" or "Private" doesn't fit, it
-   wraps to the next line, so ▾ and the Autosave checkbox never move when Autosave is switched. */
-#draft-title {
-  width: min(36ch, 100%);
+/* Title, ▾ and Autosave share one line that never wraps; only the title shrinks inside it.
+   The save state follows this group and wraps when it doesn't fit, so switching Autosave
+   ("Not saved", "Private") never squeezes the group or moves the checkbox. The group leaves
+   room for the 24 px Saved/Saving… icon, so routine saves stay on the title's row. */
+.doc-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
   min-width: 0;
-  flex-shrink: 0;
+  max-width: calc(100% - 28px);
+}
+#draft-title {
+  width: 36ch;
+  min-width: 0;
+  flex-shrink: 1;
   min-height: 44px;
   padding: 6px 8px;
   border: 1px solid transparent;
@@ -58,6 +68,10 @@
      the title and moving the Autosave checkbox the reader just used. */
   .doc {
     row-gap: 2px;
+  }
+  /* Phones: the title takes its own line; ▾, Autosave and the save state share the next. */
+  .doc-main {
+    display: contents;
   }
   #draft-title {
     flex: 1 0 100%;

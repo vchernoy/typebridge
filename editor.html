@@ -40,24 +40,26 @@
         <header class="topbar">
           <h1 class="brand">TypeBridge</h1>
           <div class="doc">
-            <input id="draft-title" type="text" aria-label="Document title" />
-            <button
-              id="doc-menu-open"
-              type="button"
-              aria-haspopup="dialog"
-              aria-expanded="false"
-              aria-controls="doc-menu"
-              aria-label="Documents"
-              title="Documents"
-            >
-              ▾
-            </button>
-            <label class="toggle autosave-doc-toggle"
-              ><input id="autosave" type="checkbox" checked aria-describedby="autosave-doc-hint" /> Autosave</label
-            >
-            <span id="autosave-doc-hint" class="visually-hidden"
-              >Per document. Off marks this document private so text typed while private is not saved.</span
-            >
+            <div class="doc-main">
+              <input id="draft-title" type="text" aria-label="Document title" />
+              <button
+                id="doc-menu-open"
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="doc-menu"
+                aria-label="Documents"
+                title="Documents"
+              >
+                ▾
+              </button>
+              <label class="toggle autosave-doc-toggle"
+                ><input id="autosave" type="checkbox" checked aria-describedby="autosave-doc-hint" /> Autosave</label
+              >
+              <span id="autosave-doc-hint" class="visually-hidden"
+                >Per document. Off marks this document private so text typed while private is not saved.</span
+              >
+            </div>
             <span
               id="save-indicator"
               class="save-indicator"
