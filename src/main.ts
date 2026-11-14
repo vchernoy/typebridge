@@ -30,6 +30,8 @@ import { createEditAccess } from './view/edit-access';
 import { createTakeover } from './view/takeover';
 import { createTitleEditing } from './ui/title-edits';
 import { setupDeletedInput } from './view/deleted-input';
+import { setupMarkdownView } from './view/markdown-view';
+import { documentFormat } from './editor/document-fields';
 import { createHeldEdits } from './view/held-edits';
 import { installEmbedHooks } from './view/embed-hooks';
 import { draftMatchesQuery, draftPickerLabel } from './editor/draft-list';
@@ -181,7 +183,9 @@ let autosaveToggle: AutosaveToggle | undefined;
 const webLocks: LockManager | undefined = typeof navigator.locks?.request === 'function' ? navigator.locks : undefined;
 /** True while this window must not change the displayed document. */
 /** True when the UI must refuse mutations (viewer, non-owner, or frozen for ownership transfer). */
-const readOnlyNow = (): boolean => viewMode || state.editBlock !== '' || state.transferFrozen;
+let renderedMode = false;
+let markdownView: ReturnType<typeof setupMarkdownView> | undefined = undefined;
+const readOnlyNow = (): boolean => renderedMode || viewMode || state.editBlock !== '' || state.transferFrozen;
 /** Replays keys held while a deleted document is kept as a new one (set up with the input handlers). */
 let drainDeletedInput: (() => void) | undefined;
 const deletedBarElement = (): HTMLElement => document.querySelector<HTMLElement>('#deleted-bar')!;
@@ -491,6 +495,7 @@ const documentSearch = createDocumentSearch({
 });
 /** Document-identity counter lives on the workspace as sessionGeneration (formerly viewGeneration). */
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
+const documentFormatSelect = document.querySelector<HTMLSelectElement>('#document-format')!;
 const saveIndicatorLabel = saveIndicator.querySelector<HTMLElement>('.save-indicator-label')!;
 for (const event of ['pointerenter', 'focus']) {
   saveIndicator.addEventListener(event, () => { delete saveIndicator.dataset.tooltipDismissed; });
@@ -512,6 +517,9 @@ function updateSaveIndicator(): void {
   if (saveIndicatorLabel.textContent !== label) saveIndicatorLabel.textContent = label;
   if (saveIndicator.getAttribute('aria-label') !== label) saveIndicator.setAttribute('aria-label', label);
   saveIndicator.dataset.state = indicator;
+  documentFormatSelect.value = documentFormat(state.active);
+  documentFormatSelect.disabled = viewMode || state.editBlock !== '' || state.transferFrozen || state.transitioning;
+  markdownView?.sync();
 }
 // Viewers use their own key namespace so they never overwrite an editor's saved offsets.
 // Window id scopes positions when multiple instances share one tab's sessionStorage (#175).
@@ -707,7 +715,7 @@ const heldEdits = createHeldEdits(state, statusLine, {
 });
 const { onEditableHere } = heldEdits;
 const editAccess = createEditAccess(state, statusLine, {
-  viewMode, instanceId, webLocks, workspace, editor, titleEditor, searchEditors: [findEditor, replaceEditor], ownershipNotice, undo, redo, autosave,
+  viewMode, rendered: () => renderedMode, instanceId, webLocks, workspace, editor, titleEditor, searchEditors: [findEditor, replaceEditor], ownershipNotice, undo, redo, autosave,
   mayWrite, writingPosition, quietReader,
   syncHistory: () => { syncHistory(); },
   syncMutationControls: () => { syncMutationControls(); },
@@ -727,7 +735,7 @@ const {
 const takeover = createTakeover(state, {
   viewMode, field, draftTitle, editor, workspace, autosave, mayWrite, privateMarker, writingPosition, editHereBar, editHereWarning, editAccess,
   searchOwned: intent => documentSearch.owned(intent),
-  captureFields: () => ({ ...documentSearch.capture(), titleHistory: titleEditor.exportHistory() }),
+  captureFields: () => ({ format: state.active.format, ...documentSearch.capture(), titleHistory: titleEditor.exportHistory() }),
   restoreFields: () => {
     restoreDocumentTitle(titleEditor, state.active, UNTITLED_TITLE);
     documentSearch.restore(state.active, true);
@@ -747,7 +755,7 @@ const { captureHandoffSnapshot, hideEditHereBar, showEditHereBar, takeOverFromHa
 const changeWriter = createChangeWriter({
   mayRecord: () => !viewMode && mayWrite() && !state.suppressEditTracking && !state.loadingDraft,
   shown: () => ({ id: state.active.id, generation: workspace.sessionGeneration() }),
-  fields: () => ({ text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, ...documentSearch.values() }),
+  fields: () => ({ format: state.active.format, text: field.value, title: draftTitle.value.trim() || UNTITLED_TITLE, ...documentSearch.values() }),
   append: async record => {
     if (!state.db || state.ownership?.documentId !== record.documentId) throw new Error('Not editing this document');
     const delayMs = testKnob('__typebridgeDelayChangeAppendMs');
@@ -781,7 +789,7 @@ async function salvageOnOwn(documentId: string): Promise<void> {
   try {
     if (!await getStoredDraft(state.db, documentId)) return;
     const shownTitle = draftTitle.value.trim() || UNTITLED_TITLE;
-    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), { text: field.value, title: shownTitle, ...documentSearch.values() });
+    const copy = await salvageChanges(state.db, documentId, await ownership.writeFence(), crypto.randomUUID(), changeWriter.runOf(documentId), Date.now(), { format: state.active.format, text: field.value, title: shownTitle, ...documentSearch.values() });
     if (copy) await announceRecovered(copy, documentId);
   } catch { /* Ownership moved on or storage failed: the records stay for the next owner. */ }
 }
@@ -790,7 +798,7 @@ const saver = createSaver(state, statusLine, {
   snapshot: () => snapshot(),
   currentJournal: () => recovery.currentJournal(),
   suppressEditTracking: () => state.suppressEditTracking,
-  readOnlyNow: () => readOnlyNow(),
+  readOnlyNow: () => viewMode || state.editBlock !== '' || state.transferFrozen,
   preparePendingClear: saved => reloadBackup.prepareClear(saved),
   clearVersionNotice: () => { clearVersionNotice(); },
   postSignal: (type, documentId, revision) => { postSignal(type, documentId, revision); },
@@ -1011,7 +1019,7 @@ const viewer = createViewerMode(state, {
   clearSearch: () => documentSearch.restore(state.active, true),
 });
 const sync = createDocumentSync(state, statusLine, {
-  captureFields: () => ({ ...documentSearch.capture(), titleHistory: titleEditor.exportHistory() }),
+  captureFields: () => ({ format: state.active.format, ...documentSearch.capture(), titleHistory: titleEditor.exportHistory() }),
   viewMode, field, draftTitle, editor, workspace, mayWrite, writingPosition, saver, viewer,
   focusHandoff: () => focusHandoff,
   hideEditHereBar: () => { hideEditHereBar(); },
@@ -1153,16 +1161,38 @@ setupComparisonOpen({
   announce: announceAction,
 });
 
+markdownView = setupMarkdownView({
+  key: scopeSessionKey('typebridge.documentView.v1', windowId),
+  shown: () => state.active, text: () => field.value,
+  changedView: rendered => {
+    if (renderedMode === rendered) return;
+    renderedMode = rendered;
+    applyEditAccess();
+  },
+});
+documentFormatSelect.addEventListener('change', () => {
+  if (viewMode || state.editBlock || state.transferFrozen || state.transitioning || [editor, titleEditor, findEditor, replaceEditor].some(input => input.composing)) {
+    documentFormatSelect.value = documentFormat(state.active); return;
+  }
+  const format = documentFormat({ format: documentFormatSelect.value });
+  if (format === documentFormat(state.active)) return;
+  if (format === 'plain') markdownView?.edit();
+  state.active.format = format;
+  scheduleSave();
+  autosaveToggle?.noteWritableSnapshot();
+  markdownView?.sync();
+});
+
 setupExportImport({
   exportSurface: () => ({
     title: draftTitle.value.trim() || UNTITLED_TITLE,
-    text: field.value,
+    text: field.value, format: state.active.format,
   }),
   announce: announceAction,
   isViewMode: () => viewMode,
   confirmImport: () => askConfirmChoice({ title: 'Import document?', message: 'Import as a new document? Your current document will be kept.', confirmLabel: 'Import document', cancelLabel: 'Cancel import', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! }),
-  importDocument: async ({ title, text }) => {
-    const imported = { ...newDraft(text), title };
+  importDocument: async ({ title, text, format }) => {
+    const imported = { ...newDraft(text), title, format };
     // Save even when autosave is off: importing is an explicit save action.
     if (!state.db) throw new Error('browser storage cannot be used');
     const result = await commitOrCreateConflictCopy(state.db, imported, 0, crypto.randomUUID());

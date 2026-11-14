@@ -53,3 +53,8 @@ Every control in the dialog is reachable with Tab; Escape or Close returns to â–
 - **Edit a copy** (shown unless the sender turned it off) saves the text as a **new** document and never overwrites an existing one. It then opens `/?open=<id>`: the host shows the copy in a new editor window, or activates the window that already shows it, and confirms "Saved as a new document in your Documents." When every window is open (the cap is 4), the copy is still saved, and the confirmation says to close a window and open it from â–¾ Documents.
 - **A link that cannot be opened explains why:** it has no document, it was made by a newer version, it is too large, or it is incomplete or damaged (messengers sometimes cut long links). A format this version cannot show yet is displayed as its raw text with a notice.
 
+
+The editor's #244 format/Rendered-view work is separate from the shared reading page: until
+its follow-up PR, the sender still creates plain/source links and the reading page treats
+Markdown links as unknown formats, showing source. The editor's JSON export/import already
+retains the document format; old files default to plain.

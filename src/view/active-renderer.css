@@ -1,0 +1,72 @@
+.active-reading {
+  color: var(--text);
+  background: var(--surface);
+  padding: 1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.active-reading .active-doc {
+  min-width: 0;
+}
+.active-reading table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.active-reading th,
+.active-reading td {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+}
+.active-reading pre,
+.active-reading math[display="block"],
+.active-reading .katex-display {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.active-reading aside,
+.active-reading .callout,
+.active-reading details {
+  border-inline-start: 3px solid var(--accent);
+  padding: 0.5rem 1rem;
+  margin-block: 0.75rem;
+}
+.active-reading .active-input {
+  max-width: 10rem;
+  color: inherit;
+  background: var(--surface);
+}
+.active-reading .active-value {
+  font-variant-numeric: tabular-nums;
+}
+.active-reading .active-error {
+  color: var(--danger, #b42318);
+}
+.active-reading .active-image {
+  overflow-wrap: anywhere;
+}
+.active-reading a {
+  color: var(--accent);
+}
+
+.active-reading {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.active-reading .active-math {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  vertical-align: middle;
+}
+.active-reading .active-math-display {
+  display: block;
+}
+#render-problem-list button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

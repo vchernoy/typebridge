@@ -51,7 +51,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
   function captureHandoffSnapshot(): HandoffSnapshot {
     return {
       ...deps.captureFields?.(),
-      text: field.value,
+      text: field.value, format: state.active.format,
       title: draftTitle.value.trim() || UNTITLED_TITLE,
       history: editor.exportHistory(),
       dirty: workspace.dirty(),
@@ -113,7 +113,7 @@ export function createTakeover(state: EditorState, deps: TakeoverDeps) {
         writingPosition.save();
         state.active = {
           ...state.active,
-          find: input.snapshot.find ?? '', replace: input.snapshot.replace ?? '',
+          format: input.snapshot.format, find: input.snapshot.find ?? '', replace: input.snapshot.replace ?? '',
           titleHistory: input.snapshot.titleHistory, findHistory: input.snapshot.findHistory, replaceHistory: input.snapshot.replaceHistory,
           text: input.snapshot.text,
           title: input.snapshot.title,

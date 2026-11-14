@@ -53,3 +53,15 @@ A new private document that has never saved appears only in its window’s Docum
 **Documents → Clear this document’s saved data…** removes the shown saved document’s local data after a confirmation naming the saved copy, change records, backups and view metadata. Its text stays privately in the clearing window as an unsaved scratch document. Other copies show the existing deleted-elsewhere state. The action is disabled when there is no saved copy or this window cannot clear it.
 
 **Settings → Clear local data…** removes all saved documents, records, backups, saved window layout and search/view metadata in this browser. It is separate from **Reset settings**: settings, Private session and offline access are kept. Confirmation says the operation cannot be undone and **every open TypeBridge window and tab will start with an empty document**. On success every page reloads (the host reloads all its iframes). The initiating window says **All local data was cleared**; others say **Storage was cleared in another tab**. The notice is consumed once on boot. Text, title, Find/Replace and their histories are discarded. Partial failure leaves pages open for retry. Blocked deletion stays pending, and partial erasure reports **Some local data could not be cleared** across open windows.
+
+### Markdown document view (#244)
+
+Documents → Format chooses Plain text (the default for new and old documents) or Markdown.
+The format belongs to the document and follows ownership, Autosave/private state, recovery,
+JSON export/import and the document change sequence. A private format change stays in memory.
+Markdown uses active-md 0.1.1: GFM, callouts/details, MathML math and calc bindings.
+Each window independently remembers Edit or Rendered in sessionStorage. Rendered is a reading
+surface; its calc input values are temporary and never change the source, saved row or journal.
+Source changes refresh it after a short debounce. A collapsible Problems list links errors to
+source line/column. Plain documents have no view switch. Rendering dependencies load through a
+separate dynamic import. Shared-page support is the separate second #244 PR.

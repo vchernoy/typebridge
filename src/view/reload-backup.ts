@@ -15,7 +15,7 @@ export function parsePendingDraft(raw: string | null): StoredDraft | undefined {
     // Private write identity is not document content and must never reach IndexedDB.
     delete draft.reloadBackupToken;
     if (typeof draft.id !== 'string' || !draft.id || typeof draft.title !== 'string' ||
-        typeof draft.text !== 'string' || (draft.find !== undefined && typeof draft.find !== 'string') ||
+        typeof draft.text !== 'string' || (draft.format !== undefined && draft.format !== 'plain' && draft.format !== 'markdown') || (draft.find !== undefined && typeof draft.find !== 'string') ||
         (draft.replace !== undefined && typeof draft.replace !== 'string') || typeof draft.updatedAt !== 'number' ||
         !Number.isSafeInteger(draft.revision) || (draft.revision ?? -1) < 0) return undefined;
     return draft as StoredDraft;

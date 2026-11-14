@@ -1,24 +1,24 @@
 import type { Page } from '@playwright/test';
 
-export type StoredRow = { id: string; title: string; text: string; revision: number; updatedAt: number };
+export type StoredRow = { format?: 'plain' | 'markdown'; id: string; title: string; text: string; revision: number; updatedAt: number };
 export type OwnershipRow = { documentId: string; ownerInstanceId: string; fence: number; updatedAt: number };
 
 /** Every stored document, sorted by id; text fields only (no history). */
-export async function readStoredDocs(page: Page): Promise<StoredRow[]> {
-  return page.evaluate(() => new Promise<StoredRow[]>((resolve, reject) => {
+export async function readStoredDocs(page: Page, includeFormat = false): Promise<StoredRow[]> {
+  return page.evaluate(includeFormat => new Promise<StoredRow[]>((resolve, reject) => {
     const open = indexedDB.open('typebridge');
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
       const request = db.transaction('documents', 'readonly').objectStore('documents').getAll();
       request.onsuccess = () => {
-        const rows = (request.result as StoredRow[]).map(({ id, title, text, revision, updatedAt }) => ({ id, title, text, revision, updatedAt }));
+        const rows = (request.result as StoredRow[]).map(({ id, title, text, revision, updatedAt, format }) => ({ id, title, text, revision, updatedAt, ...(includeFormat ? { format } : {}) }));
         db.close();
         resolve(rows.sort((a, b) => a.id.localeCompare(b.id)));
       };
       request.onerror = () => reject(request.error);
     };
-  }));
+  }), includeFormat);
 }
 
 export async function readOwnership(page: Page, documentId: string): Promise<OwnershipRow | undefined> {

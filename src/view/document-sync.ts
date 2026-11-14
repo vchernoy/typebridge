@@ -14,7 +14,7 @@ import { DOCUMENT_SIGNAL_CHANNEL, createDocumentSignal, decideReread, parseDocum
 import type { Workspace } from './workspace';
 
 export type DocumentSyncDeps = {
-  captureFields?: () => Pick<StoredDraft, 'find' | 'replace' | 'titleHistory' | 'findHistory' | 'replaceHistory'>;
+  captureFields?: () => Pick<StoredDraft, 'format' | 'find' | 'replace' | 'titleHistory' | 'findHistory' | 'replaceHistory'>;
   viewMode: boolean;
   field: HTMLTextAreaElement;
   draftTitle: HTMLInputElement;

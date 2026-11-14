@@ -3,7 +3,7 @@ import { applyChange, changeBetween, fieldRecord, replayDocument, type ChangeRec
 import { DOCUMENT_FIELDS, documentFields, type DocumentFields } from './document-fields';
 
 const DOC = 'doc-1';
-const initial = { text: 'Начало\n', title: 'Заметка', find: '', replace: '' };
+const initial = { text: 'Начало\n', title: 'Заметка', find: '', replace: '', format: 'plain' as const };
 function rng(seed: number) {
   let state = seed;
   return (n: number) => { state = (state * 48271) % 2147483647; return state % n; };
@@ -20,7 +20,7 @@ function simulate(seed: number) {
   const states = [{ ...fields }];
   const records: ChangeRecord[] = [];
   for (let seq = 1; seq <= 80; seq++) {
-    const field = DOCUMENT_FIELDS[next(4)];
+    const field = (['text', 'title', 'find', 'replace'] as const)[next(4)];
     const after = randomEdit(fields[field], next);
     records.push(fieldRecord({ documentId: DOC, seq, run: 'run-a', field }, fields[field], after));
     fields[field] = after;
@@ -49,7 +49,7 @@ describe('changeBetween / applyChange', () => {
 });
 
 describe('four-field records and consistent replay (#257 2a)', () => {
-  it.each(DOCUMENT_FIELDS)('%s uses values below 256 UTF-16 units and deltas at/above 256', field => {
+  it.each(DOCUMENT_FIELDS.filter((field): field is Exclude<typeof field, 'format'> => field !== 'format'))('%s uses values below 256 UTF-16 units and deltas at/above 256', field => {
     const id = { documentId: DOC, seq: 1, run: 'r', field };
     expect(fieldRecord(id, 'old', '')).toEqual({ ...id, value: '', previous: 'old' });
     expect(fieldRecord(id, '', 'x'.repeat(255))).toEqual({ ...id, value: 'x'.repeat(255), previous: '' });
@@ -73,7 +73,7 @@ describe('four-field records and consistent replay (#257 2a)', () => {
   });
 
   it('missing find/replace mean empty; a snapshot newer than the log replays nothing', () => {
-    expect(documentFields({ text: 'a', title: 'T' })).toEqual({ text: 'a', title: 'T', find: '', replace: '' });
+    expect(documentFields({ text: 'a', title: 'T' })).toEqual({ text: 'a', title: 'T', find: '', replace: '', format: 'plain' });
     const { records, states } = simulate(4);
     expect(replayDocument(DOC, states[80], 80, records.slice(0, 70))).toEqual({ ...states[80], lastSeq: 80, applied: 0 });
   });
@@ -116,11 +116,11 @@ describe('four-field records and consistent replay (#257 2a)', () => {
     }
   });
   it('ignores other documents and unrelated malformed data', () => {
-    expect(replayDocument(DOC, initial, 0, [null, 'junk', ...interleaved, { ...interleaved[0], documentId: 'other' }])).toEqual({ text: 'a', title: 'New', find: 'query', replace: 'replacement', lastSeq: 4, applied: 4 });
+    expect(replayDocument(DOC, initial, 0, [null, 'junk', ...interleaved, { ...interleaved[0], documentId: 'other' }])).toEqual({ text: 'a', title: 'New', find: 'query', replace: 'replacement', format: 'plain', lastSeq: 4, applied: 4 });
   });
 });
 
-it.each(DOCUMENT_FIELDS)('a mismatching %s predecessor stops every later field', field => {
+it.each(DOCUMENT_FIELDS.filter((field): field is Exclude<typeof field, 'format'> => field !== 'format'))('a mismatching %s predecessor stops every later field', field => {
   const record = fieldRecord({ documentId: DOC, seq: 1, run: 'r', field }, 'prior', 'next');
   const later = fieldRecord({ documentId: DOC, seq: 2, run: 'r', field: 'title' }, initial.title, 'later');
   expect(replayDocument(DOC, { ...initial, [field]: 'foreign' }, 0, [record, later])).toEqual({
@@ -128,7 +128,7 @@ it.each(DOCUMENT_FIELDS)('a mismatching %s predecessor stops every later field',
   });
 });
 
-it.each(DOCUMENT_FIELDS)('%s long-to-short and long-to-empty deltas still fit-check and replay', field => {
+it.each(DOCUMENT_FIELDS.filter((field): field is Exclude<typeof field, 'format'> => field !== 'format'))('%s long-to-short and long-to-empty deltas still fit-check and replay', field => {
   const before = 'x'.repeat(256);
   for (const after of ['x'.repeat(255), '']) {
     const record = fieldRecord({ documentId: DOC, seq: 1, run: 'r', field }, before, after);
@@ -139,4 +139,11 @@ it.each(DOCUMENT_FIELDS)('%s long-to-short and long-to-empty deltas still fit-ch
     });
     expect(replayDocument(DOC, { ...initial, [field]: 'foreign' }, 0, [record])).toMatchObject({ applied: 0, stopped: 'mismatch' });
   }
+});
+
+it('format shares the sequence and refuses unknown format records', () => {
+  const record = fieldRecord({ documentId: DOC, seq: 1, run: 'r', field: 'format' }, 'plain', 'markdown');
+  expect(replayDocument(DOC, { text: 'x', title: 'T' }, 0, [record])).toEqual({ text: 'x', title: 'T', find: '', replace: '', format: 'markdown', lastSeq: 1, applied: 1 });
+  expect(replayDocument(DOC, initial, 0, [{ ...record, value: 'html' }])).toMatchObject({ format: 'plain', applied: 0, stopped: 'gap' });
+  expect(documentFields({ text: '', title: '', format: 'markdown' }).format).toBe('markdown');
 });
