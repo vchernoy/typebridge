@@ -171,6 +171,11 @@ test('a slow decode of an earlier link never replaces a newer one (#246 review)'
 
 test('on a first visit Edit a copy opens the copy once, in the main window (#246 review)', async ({ page }) => {
   // No saved layout and no remembered document: the host's first window is still starting.
+  const editorNavigations: URL[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (request.isNavigationRequest() && url.pathname === '/editor.html') editorNavigations.push(url);
+  });
   const document = shared({ text: 'Первый визит' });
   await page.goto(await linkFor(document));
   await page.getByRole('button', { name: 'Edit a copy' }).click();
@@ -180,6 +185,9 @@ test('on a first visit Edit a copy opens the copy once, in the main window (#246
   await expect(editor).toHaveValue(document.text);
   await expect(editor).toBeEditable();
   await expect(page.locator('.host-window')).toHaveCount(1);
+  expect(editorNavigations).toHaveLength(1);
+  expect(editorNavigations[0]!.searchParams.get('doc')).toBe(copyId);
+  expect(editorNavigations[0]!.searchParams.get('window')).toBe('main');
 });
 
 test('returning to the reading page from the back-forward cache makes Edit a copy usable again (#246 review)', async ({ page }) => {
