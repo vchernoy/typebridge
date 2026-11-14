@@ -1,3 +1,6 @@
+import { clearedNoticeText, installStorageClearReload, takeClearedNotice } from './ui/storage-clear-reload';
+import { clearDocumentMetadata, notifyStorageClear, onStorageClear } from './editor/clear-data';
+import { setupClearLocalData } from './ui/clear-local-data';
 import { createDocumentSearch, restoreDocumentTitle } from './view/document-search';
 import { sameFields } from './editor/document-fields';
 import { setupAppearance } from './ui/appearance';
@@ -231,7 +234,7 @@ const privateMarker = document.querySelector<HTMLElement>('#private-marker')!;
 const privateSession = document.querySelector<HTMLInputElement>('#private-session');
 /** Write gate: false while privateNow (#257). */
 function mayWrite(): boolean {
-  return !privateNow(state.active);
+  return !state.storageCleared && !privateNow(state.active);
 }
 
 if (viewMode) {
@@ -311,10 +314,12 @@ function canMutatePrimary(): boolean {
 /** Autosave is blocked for viewers and non-owners. */
 function autosaveControlBlocked(): boolean {
   // Viewers never own the preference; keep the change handler gated too.
-  if (viewMode || state.transferFrozen) return true;
+  if (viewMode || state.transferFrozen || state.storageCleared) return true;
   return state.editBlock !== '';
 }
 function syncAutosaveControl(): void {
+  const clearButton = document.querySelector<HTMLButtonElement>('#clear-document-data');
+  if (clearButton) clearButton.disabled = state.active.revision < 1 || autosaveControlBlocked() || field.disabled;
   if (viewMode || autosaveToggle?.isActive()) return;
   // Global private session locks the per-document checkbox off (#257).
   const session = privateSessionOn();
@@ -488,6 +493,8 @@ const documentSearch = createDocumentSearch({
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
+  const clearButton = document.querySelector<HTMLButtonElement>('#clear-document-data');
+  if (clearButton) clearButton.disabled = state.active.revision < 1 || autosaveControlBlocked() || field.disabled;
   const writing = mayWrite();
   const indicator = state.storageProblem || state.saveFailed ? 'failed'
     : state.deletedElsewhere ? 'unsaved'
@@ -502,7 +509,7 @@ function updateSaveIndicator(): void {
 // Window id scopes positions when multiple instances share one tab's sessionStorage (#175).
 const writingPosition = setupWritingPosition(
   field,
-  () => state.loadingDraft || field.disabled || state.viewMissing || newPrivateDocument(state.active) ? undefined : state.active.id,
+  () => state.loadingDraft || field.disabled || state.viewMissing || state.storageCleared || newPrivateDocument(state.active) ? undefined : state.active.id,
   writingPositionNamespace(windowId, viewMode),
 );
 /** Filled once the change-log writer exists; until then the journal treats the log as unprotected. */
@@ -547,7 +554,7 @@ const readPending = reloadBackup.read;
 const clearPending = reloadBackup.clear;
 function rememberActive(): void {
   if (viewMode) return;
-  const hidden = newPrivateDocument(state.active);
+  const hidden = state.storageCleared || newPrivateDocument(state.active);
   if (hidden) {
     // A private revision-zero document is edited only here; no shared ownership is needed.
     if (state.ownership?.documentId === state.active.id && !saver.inFlight()) {
@@ -628,7 +635,7 @@ function renderDrafts(): void {
         updatedAt: isCurrent ? (workspace.dirty() ? Date.now() : draft.updatedAt) : draft.updatedAt,
         openElsewhere: elsewhere.has(draft.id),
       });
-      if (isCurrent && newPrivateDocument(state.active)) option.textContent += ' · Private · Not saved';
+      if (isCurrent && (state.storageCleared || newPrivateDocument(state.active))) option.textContent += ' · Private · Not saved';
       picker.append(option);
     }
     picker.value = state.viewMissing ? '' : state.active.id;
@@ -822,6 +829,14 @@ autosaveToggle = createAutosaveToggle(state, statusLine, {
   autosave, privateMarker, workspace, viewMode, embedded,
   // Boot still needs its prior hint; its explicit rememberActive runs after selection.
   syncIdentity: () => { if (!field.disabled) rememberActive(); },
+  documentCleared: id => {
+    try { clearDocumentMetadata(localStorage, id); clearDocumentMetadata(sessionStorage, id); }
+    catch {
+      announceAction('Saved data was deleted, but some view metadata could not be cleared.', { kind: 'failure' });
+      notifyStorageClear(id, true); return;
+    }
+    notifyStorageClear(id);
+  },
   transferFrozen: () => state.transferFrozen,
   controlBlocked: () => autosaveControlBlocked(),
   journalEdit: () => { journalEdit(); },
@@ -947,7 +962,8 @@ const recoveryNotice = document.createElement('div');
 recoveryNotice.setAttribute('role', 'alert');
 recoveryNotice.hidden = true;
 status.parentElement?.before(recoveryNotice);
-function handleDatabaseUpgrade(): void {
+function handleDatabaseUpgrade(cleared = false): void {
+  if (cleared) { handleStorageClear(); return; }
   // Invalidate in-flight acquires, then free any installed Web Lock so an upgraded tab can own.
   state.storageGeneration++;
   const previous = state.ownership;
@@ -983,7 +999,7 @@ const viewer = createViewerMode(state, {
   setSaveStatus: (text, kind) => { setSaveStatus(text, kind); },
   restoreFocusMode: () => { restoreFocusMode(); },
   finishInitialization: () => { findInput.disabled = false; replaceInput.disabled = false; finishInitialization(); },
-  onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
+  onDatabaseUpgrade: cleared => { handleDatabaseUpgrade(cleared); },
   clearSearch: () => documentSearch.restore(state.active, true),
 });
 const sync = createDocumentSync(state, statusLine, {
@@ -1072,7 +1088,7 @@ if (!viewMode) {
   // Host title bar (#175 step 8) edits this window's title: let it start a takeover too,
   // and hold what was typed there the same way.
   exposeEditorWindowApi({
-    __typebridgeStoredDocumentId: () => field.disabled ? undefined : newPrivateDocument(state.active) ? '' : state.active.id,
+    __typebridgeStoredDocumentId: () => field.disabled ? undefined : state.storageCleared || newPrivateDocument(state.active) ? '' : state.active.id,
     __typebridgeRequestEdit: requestEditHere,
     __typebridgeBufferTitleEdit: (op, start, end) => {
       // Deleted elsewhere: typing in the title keeps the text as a new document, then applies.
@@ -1103,7 +1119,7 @@ void (viewMode ? viewer.initialize() : initializeDrafts(state, statusLine, {
   embedded,
   windowId: windowId ?? undefined,
   mayWrite, field, draftSelect, draftTitle, workspace, writingPosition, ownerReady,
-  onDatabaseUpgrade: () => { handleDatabaseUpgrade(); },
+  onDatabaseUpgrade: cleared => { handleDatabaseUpgrade(cleared); },
   readPending: () => readPending(),
   clearPending: saved => { clearPending(saved); },
   allocateNewDraft: () => allocateNewDraft(),
@@ -1238,3 +1254,51 @@ if (embedded) {
   // session/?doc= selection. Publishing the temporary blank id early would
   // overwrite it and leave secondary host windows blank after reload (#175 s8).
 }
+
+
+/** Invalidate old writers immediately; success is separate from deletion/versionchange. */
+function handleStorageClear(): void {
+  workspace.bumpSessionGeneration();
+  focusHandoff?.cancel(); saver.cancel(); changeWriter.abandon();
+  state.storageCleared = true; state.storageGeneration++;
+  state.db?.close(); state.db = undefined;
+  const held = state.ownership; state.ownership = undefined; void held?.release();
+  state.storageProblem = 'Storage is being cleared.';
+  recoveryNotice.hidden = false; recoveryNotice.textContent = state.storageProblem;
+  syncAutosaveControl();
+}
+function finishStorageClear(detail: { documentId?: string; failed?: true }): void {
+  if (detail.documentId) {
+    // Ordinary copies retain their revision/identity and use the normal deleted signal.
+    try { clearDocumentMetadata(sessionStorage, detail.documentId); }
+    catch { if (!detail.failed) notifyStorageClear(detail.documentId, true); }
+    if (detail.failed) { recoveryNotice.hidden = false; recoveryNotice.textContent = 'Some local data could not be cleared.'; }
+    void refreshDrafts().catch(() => {});
+  } else if (detail.failed) {
+    if (!state.storageCleared) handleStorageClear();
+    state.storageProblem = 'Some local data could not be cleared. Retry before leaving this device.';
+    recoveryNotice.hidden = false; recoveryNotice.textContent = state.storageProblem;
+  }
+}
+function stopForClearReload(): void {
+  handleStorageClear();
+  reloadBackup.setSuppressed(true); // Suppress beforeunload, pagehide backup and visibility saves.
+}
+// The host calls this on every child before reloading itself (including a still-booting editor).
+exposeEditorWindowApi({ __typebridgeStopForStorageClear: stopForClearReload });
+onStorageClear(finishStorageClear);
+installStorageClearReload({
+  stop: stopForClearReload,
+  delegate: here => {
+    const reloadHost = embedded ? hostPageApi()?.__typebridgeReloadAfterStorageClear : undefined;
+    if (!reloadHost) return false;
+    reloadHost(here); return true;
+  },
+});
+try {
+  const parentNotice = embedded && windowId === 'main' ? window.parent.document.documentElement.dataset.clearedNotice : undefined;
+  const notice = parentNotice === 'here' || parentNotice === 'elsewhere' ? 'elsewhere' : takeClearedNotice(sessionStorage);
+  if (notice) { recoveryNotice.hidden = false; recoveryNotice.textContent = clearedNoticeText(notice); }
+} catch { /* Optional one-shot notice when session storage is unavailable. */ }
+setupClearLocalData();
+document.querySelector<HTMLButtonElement>('#clear-document-data')?.addEventListener('click', () => { void autosaveToggle?.clearSavedData(); });

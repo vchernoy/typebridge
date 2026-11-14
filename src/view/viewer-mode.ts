@@ -32,7 +32,7 @@ export type ViewerDeps = {
   setSaveStatus: (text: string, kind?: Exclude<StatusKind, 'action'>) => void;
   restoreFocusMode: () => void;
   finishInitialization: () => void;
-  onDatabaseUpgrade: () => void;
+  onDatabaseUpgrade: (cleared?: boolean) => void;
 };
 
 export function createViewerMode(state: EditorState, deps: ViewerDeps) {
@@ -41,7 +41,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
   const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
   const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
   const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
-  const VIEWER_DISABLED_CONTROLS = ['rename-draft', 'new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
+  const VIEWER_DISABLED_CONTROLS = ['clear-document-data', 'rename-draft', 'new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
     'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
   /** Controls that only make sense while a saved document is shown. */
   const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];
@@ -102,11 +102,12 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
   let viewerLoad = 0;
   async function viewerOpen(id: string): Promise<void> {
     const load = ++viewerLoad;
+    const storageGeneration = state.storageGeneration;
     deps.workspace.bumpSessionGeneration();
     try {
       if (!state.db) throw new Error('Storage unavailable');
       const next = await getStoredDraft(state.db, id);
-      if (load !== viewerLoad) return;
+      if (load !== viewerLoad || storageGeneration !== state.storageGeneration) return;
       // Commit identity only after the read succeeds; a failed navigation still represents the old view.
       requestedId = id;
       if (!next || next.revision < 1) {
@@ -119,7 +120,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
         syncViewerUrl(next.id);
       }
     } catch {
-      if (load !== viewerLoad) return;
+      if (load !== viewerLoad || storageGeneration !== state.storageGeneration) return;
       deps.renderDrafts();
       deps.setSaveStatus('Could not open that document. The document shown is unchanged.', 'failure');
       return;
@@ -127,24 +128,36 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
     void deps.refreshDrafts().catch(() => { /* The list is advisory in a read-only view. */ });
   }
   async function initializeViewer(): Promise<void> {
+    const generation = state.storageGeneration;
+    const current = (): boolean => generation === state.storageGeneration;
+    const requireCurrent = (): void => { if (!current()) throw new Error('Storage invalidated'); };
+    let bootDb: IDBDatabase | undefined;
     applyViewerChrome();
     try {
-      state.db = await openDraftDatabase(deps.onDatabaseUpgrade);
+      bootDb = await openDraftDatabase(deps.onDatabaseUpgrade);
+      requireCurrent();
+      state.db = bootDb;
       // Only the requested id is loaded for display; the list feeds the Documents menu.
       const requested = deps.requestedViewId ? await getStoredDraft(state.db, deps.requestedViewId) : undefined;
-      state.drafts = await listStoredDrafts(state.db);
+      requireCurrent();
+      const drafts = await listStoredDrafts(state.db);
+      requireCurrent();
+      state.drafts = drafts;
       if (requested && requested.revision >= 1) showViewerDocument(requested, false);
       else showViewerMissing(VIEWER_MISSING);
       deps.writingPosition.prune(state.drafts.map(draft => draft.id));
     } catch (error) {
+      if (!current()) { bootDb?.close(); return; }
       state.db?.close(); state.db = undefined;
       state.storageProblem = error instanceof Error && error.message.startsWith('Database upgrade blocked.') ? error.message : STORAGE_UNAVAILABLE;
       showViewerMissing(VIEWER_STORAGE);
     } finally {
-      deps.field.disabled = false; deps.draftSelect.disabled = false; deps.draftTitle.disabled = false;
-      deps.restoreFocusMode();
-      if (!state.viewMissing) deps.writingPosition.restore(state.active.id);
-      deps.finishInitialization();
+      if (current()) {
+        deps.field.disabled = false; deps.draftSelect.disabled = false; deps.draftTitle.disabled = false;
+        deps.restoreFocusMode();
+        if (!state.viewMissing) deps.writingPosition.restore(state.active.id);
+        deps.finishInitialization();
+      }
     }
   }
   return {

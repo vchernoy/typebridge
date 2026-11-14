@@ -36,3 +36,8 @@ Implemented in this change, pending review/CI: missing comparison viewers retain
 ### Private mode step 3 — new private documents leave no trace
 
 Implemented in this change, pending independent review and CI: private revision-zero documents omit rows/logs/ownership records, active hints, positions, backups, and host-layout IDs. Their local picker labels them Private / Not saved; other windows learn no new document. Saving opts into normal ownership and metadata. New tests inspect IndexedDB, session/local storage, BroadcastChannel messages, host layout, second-tab pickers, reload/close, and resuming saving. Step 4 remains later work. Refs #257, #255.
+
+
+### Private mode step 4 — clear local data
+
+Implemented in this change, pending independent review and CI, Refs #257/#255: separately confirmed per-document and all-content clearing; settings/private preference retained; old connections and in-flight writes invalidated; cross-tab notices and session cleanup; successful global clear reloads all pages (including the host), consuming a content-free one-shot notice; per-document clear retains only the initiating private scratch copy. Clearing uses existing document deletion and database versionchange mechanisms. Unit and browser checks inspect data/metadata, cancel/failure behavior, second tabs/viewers, host layout, resaving a kept scratch document, delayed appends before per-document deletion, partial metadata failures/retry, held recovery/startup/switch, two successive clears and a held transaction during clear-all. Old pages never reopen cleared storage; existing per-path guards remain defence in depth.

@@ -1,3 +1,4 @@
+import { setupClearLocalData } from '../ui/clear-local-data';
 /**
  * #175 step 7: one Settings panel on the host page.
  * Preference writes use the shared UI modules; iframes apply via prefs-sync.
@@ -40,6 +41,7 @@ export function installHostSettings(deps: {
   exitHostFocus?: () => void;
 }): HostSettingsApi {
   setupSettings();
+  setupClearLocalData();
 
   const appearance = setupAppearance(preferenceSaved, { prefsOrigin: PREFS_ORIGIN });
   const layout = setupWindowLayoutSetting(preferenceSaved, { prefsOrigin: PREFS_ORIGIN });

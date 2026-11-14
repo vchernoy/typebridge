@@ -87,3 +87,16 @@ If the first documents transaction has already started when Autosave is unchecke
 
 
 Private session also waits for a revision-zero first save to settle before its final identity synchronization. Cancellation or abort releases the unsaved document’s shared reservation/fence; a successful commit keeps normal saved-document ownership and metadata without setting the per-document private flag. The session still blocks all later content writes, and turning it off resumes normal Autosave. No replacement final save is made for a document that remained unsaved.
+
+
+### Clear local data (#257 step 4)
+
+Documents offers a separately confirmed **Clear this document’s saved data…** action. It cancels the debounce, waits for any save, abandons and drains the change writer, then deletes the saved row/log under the ownership fence. After metadata/backup cleanup it releases ownership and retains text/history as a fresh private scratch identity. Other ordinary copies retain the normal deleted-elsewhere state and can use Keep as new document. Cancel is nondestructive. Existing Autosave → Keep/Delete behavior is unchanged apart from the same queued-record drain protection.
+
+Settings offers **Clear local data…**, separate from Reset settings. It deletes the content-only IndexedDB database; versionchange closes existing connections and invalidates pending access before deletion completes. Already-started transactions drain before the database is erased. Success is published only after local/session metadata cleanup succeeds; backup parsing never masks a failed storage removal.
+
+A successful global clear stops each editor’s saver/change writer, closes its connection and sets `state.db = undefined`, suppresses its unload prompt/reload backup, and reloads the page. A host disables layout persistence, stops every child and reloads the host itself, discarding its old iframes and erased layout. **The old page never reopens storage.** Only the next normal boot opens the empty database. Existing switch/startup/viewer/Recover generation guards remain defence in depth; there is no replacement-editor bootstrap, replacement acquire/install, or readiness gate.
+
+The content-free one-shot session flag `typebridge.clearedNotice.v1` is `here` in the clearing page and `elsewhere` in peers. Boot consumes/removes it and shows “All local data was cleared” or “Storage was cleared in another tab”. The host consumes its shared flag before creating its default main iframe and passes the notice in memory. A partial failure does not reload and propagates “Some local data could not be cleared”, allowing retry.
+
+Only known TypeBridge content keys are removed from local/session storage: journals, reload backups (including retired namespaces), active hints, positions, legacy drafts/search text and host layout. Settings, Private session, other applications’ storage and offline app assets are kept. A metadata-only channel plus transient storage event notifies other tabs; each tab removes its own session data. Host caches suppress cleared identities until the full host reload replaces them. No entered text is transmitted or logged.

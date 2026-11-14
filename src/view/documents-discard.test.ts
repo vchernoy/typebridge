@@ -16,6 +16,7 @@ vi.mock('../editor/indexeddb', async importOriginal => {
 });
 
 import { askConfirmChoice } from '../ui/confirm-dialog';
+import { getStoredDraft } from '../editor/indexeddb';
 
 beforeEach(() => {
   vi.stubGlobal('document', {
@@ -124,4 +125,42 @@ describe('switchDraft discard cleanup (#254 Codex P1)', () => {
       'Discard cancelled — the document changed while the dialog was open.',
     );
   });
+});
+
+it.each([false, true])('storage invalidation cancels a switch awaiting ownership (acquired=%s)', async acquired => {
+  const state = createEditorState();
+  state.active = { id: 'old', title: 'Old', text: 'old', revision: 1, updatedAt: 1 };
+  state.db = {} as IDBDatabase;
+  const target = { id: 'target', title: 'Target', text: 'erased target', revision: 1, updatedAt: 1 };
+  vi.mocked(getStoredDraft).mockResolvedValueOnce(target);
+  const workspace = makeWorkspace(); workspace.setDirty(false);
+  let finishAcquire!: () => void;
+  const acquiring = new Promise<void>(resolve => { finishAcquire = resolve; });
+  const release = vi.fn(async () => undefined);
+  const acquireFor = vi.fn(async () => {
+    await acquiring;
+    return { block: acquired ? '' as const : 'error' as const, generation: 0,
+      ...(acquired ? { ownership: { documentId: target.id, release } as never } : {}) };
+  });
+  const installOwnership = vi.fn(), showDraft = vi.fn(), unfreeze = vi.fn();
+  const noop = () => undefined;
+  const deps = {
+    viewMode: false, workspace, mayWrite: () => true,
+    autosaveGate: noop, clearHeldEdits: noop, focusHandoff: noop, syncAutosaveControl: noop,
+    saver: { cancel: noop }, freezeEditorsForTransition: noop, acquireFor,
+    writingPosition: { save: noop }, rememberActive: noop, showDraft, installOwnership,
+    refreshDrafts: async () => undefined, renderDrafts: noop, unfreezeEditorsAfterTransition: unfreeze,
+  } as unknown as DocumentActionsDeps;
+  const status = { showSaveState: noop, setConflict: noop, announceAction: vi.fn() } as unknown as StatusLine;
+  const switching = createDocumentActions(state, status, deps).switchDraft(target.id);
+  await vi.waitFor(() => expect(acquireFor).toHaveBeenCalledOnce());
+  state.storageGeneration++;
+  state.active = { id: 'fresh', title: 'Empty', text: '', revision: 0, updatedAt: 2 };
+  state.transitioning = false;
+  finishAcquire();
+  await expect(switching).resolves.toEqual({ opened: false, conflict: false });
+  expect(state.active.id).toBe('fresh'); expect(state.active.text).toBe('');
+  expect(showDraft).not.toHaveBeenCalled(); expect(installOwnership).not.toHaveBeenCalled();
+  expect(unfreeze).not.toHaveBeenCalled();
+  expect(release).toHaveBeenCalledTimes(acquired ? 1 : 0);
 });

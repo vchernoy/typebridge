@@ -48,3 +48,8 @@ Settings → Reset settings to defaults asks explicitly before resetting appeara
 
 
 A new private document that has never saved appears only in its window’s Documents list, marked **Private · Not saved**. It disappears on reload/close; its ID is omitted from restored host layout. Checking Autosave with Private session off saves it and starts normal metadata recording. Explicit Import remains an explicit save. Previously saved private documents continue reopening their last stored version.
+
+
+**Documents → Clear this document’s saved data…** removes the shown saved document’s local data after a confirmation naming the saved copy, change records, backups and view metadata. Its text stays privately in the clearing window as an unsaved scratch document. Other copies show the existing deleted-elsewhere state. The action is disabled when there is no saved copy or this window cannot clear it.
+
+**Settings → Clear local data…** removes all saved documents, records, backups, saved window layout and search/view metadata in this browser. It is separate from **Reset settings**: settings, Private session and offline access are kept. Confirmation says the operation cannot be undone and **every open TypeBridge window and tab will start with an empty document**. On success every page reloads (the host reloads all its iframes). The initiating window says **All local data was cleared**; others say **Storage was cleared in another tab**. The notice is consumed once on boot. Text, title, Find/Replace and their histories are discarded. Partial failure leaves pages open for retry. Blocked deletion stays pending, and partial erasure reports **Some local data could not be cleared** across open windows.

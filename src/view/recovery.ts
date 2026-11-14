@@ -8,7 +8,7 @@
 import { documentFields, sameFields } from '../editor/document-fields';
 import { UNTITLED_TITLE } from '../editor/drafts';
 import { commitDraft, getStoredDraft } from '../editor/indexeddb';
-import { clearRecovery, listRecovery, RECOVERY_PREFIX, writeRecovery, type RecoverySnapshot } from '../editor/recovery';
+import { clearRecovery, listRecovery, recoveryKey, RECOVERY_PREFIX, writeRecovery, type RecoverySnapshot } from '../editor/recovery';
 import { askConfirmChoice } from '../ui/confirm-dialog';
 import type { StatusLine } from '../ui/status-line';
 import type { EditorState } from './editor-state';
@@ -121,6 +121,8 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
   }
   async function renderRecovery(): Promise<void> {
     const version = ++recoveryRenderVersion;
+    const generation = state.storageGeneration;
+    const storageCurrent = (): boolean => generation === state.storageGeneration;
     let entries: RecoverySnapshot[];
     try { entries = listRecovery(localStorage).filter(item => item.tab !== journalTab); }
     catch {
@@ -137,6 +139,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
     const candidates: { item: RecoverySnapshot; unknown: boolean }[] = [];
     for (const item of entries) {
       const activeOwner = await ownerIsActive(item.tab);
+      if (!storageCurrent()) return;
       if (activeOwner === true) continue;
       // A committed exact document or idempotent recovery copy makes only this
       // precise journal version redundant; newer revisions are never overwritten.
@@ -144,6 +147,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
         if (state.db) {
           const original = await getStoredDraft(state.db, item.documentId);
           const recovered = await getStoredDraft(state.db, 'recovery-' + item.token);
+          if (!storageCurrent()) return;
           if ((original && sameFields(original, item)) ||
               (recovered && sameFields(recovered, { ...item, title: item.title + ' (recovered)' }))) {
             clearRecovery(localStorage, item);
@@ -153,7 +157,7 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
       } catch { /* A failed check must never discard a potentially unsaved snapshot. */ }
       candidates.push({ item, unknown: activeOwner === undefined });
     }
-    if (version !== recoveryRenderVersion) return;
+    if (version !== recoveryRenderVersion || !storageCurrent()) return;
     const signature = JSON.stringify({ candidates, inspectUnknownOwners });
     if (signature === panelSignature) return;
     panelSignature = signature;
@@ -175,25 +179,36 @@ export function createRecovery(state: EditorState, status: StatusLine, deps: Rec
       button.textContent = `Recover ${item.title} (${new Date(item.timestamp).toLocaleString()})`;
       if (unknown) button.title = 'Tab ownership could not be verified; the original tab may still be open.';
       button.addEventListener('click', async () => {
+        const db = state.db;
+        const current = (): boolean => storageCurrent() && db === state.db;
         button.disabled = true;
         try {
-          if (await ownerIsActive(item.tab) === true) throw new Error('The original tab is still open');
-          if (!state.db) throw new Error('Storage unavailable');
+          const active = await ownerIsActive(item.tab);
+          if (!current()) return;
+          // A document-only clear may remove the backup without changing the DB generation.
+          if (localStorage.getItem(recoveryKey(item.tab, item.documentId)) !== JSON.stringify(item)) return;
+          if (active === true) throw new Error('The original tab is still open');
+          if (!db) throw new Error('Storage unavailable');
           const copy = { ...documentFields(item), id: 'recovery-' + item.token, title: item.title + ' (recovered)', updatedAt: item.timestamp };
-          const result = await commitDraft(state.db, copy, 0);
+          const result = await commitDraft(db, copy, 0);
+          if (!current()) return;
           if (!result.ok && (!result.current || !sameFields(result.current, copy))) throw new Error('Recovery copy already changed');
           if (result.ok) deps.postSignal('saved', result.draft.id, result.draft.revision);
           clearRecovery(localStorage, item);
           await deps.refreshDrafts();
+          if (!current()) return;
           status.announceAction('Recovered a copy in Documents. Your current document was kept.');
           panelSignature = ''; await renderRecovery();
-        } catch { status.announceAction('Recovery failed. The emergency backup was kept; retry or copy your text.'); button.disabled = false; }
+        } catch { if (!current()) return; status.announceAction('Recovery failed. The emergency backup was kept; retry or copy your text.'); button.disabled = false; }
       });
       const discard = document.createElement('button');
       discard.type = 'button'; discard.textContent = `Discard backup for ${item.title}`;
       discard.addEventListener('click', async () => {
-        if (await ownerIsActive(item.tab) === true) { status.announceAction('The original tab is still open; backup kept.'); queueRecovery(); return; }
+        const active = await ownerIsActive(item.tab);
+        if (!storageCurrent()) return;
+        if (active === true) { status.announceAction('The original tab is still open; backup kept.'); queueRecovery(); return; }
         if (!await askConfirmChoice({ title: 'Discard emergency backup?', message: 'Unsaved text in this backup will be lost.', confirmLabel: 'Discard backup', cancelLabel: 'Keep backup', returnFocus: accepted => accepted ? deps.field : discard })) return;
+        if (!storageCurrent()) return;
         try { clearRecovery(localStorage, item); panelSignature = ''; await renderRecovery(); }
         catch { status.announceAction('Could not discard backup; it was kept.'); }
       });

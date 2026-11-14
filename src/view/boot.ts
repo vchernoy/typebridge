@@ -71,7 +71,7 @@ export type BootDeps = {
   workspace: Workspace;
   writingPosition: { restore: (id: string) => void; prune: (ids: Iterable<string>) => void };
   ownerReady: Promise<void>;
-  onDatabaseUpgrade: () => void;
+  onDatabaseUpgrade: (cleared?: boolean) => void;
   noteWritableSnapshot: () => void;
   readPending: () => StoredDraft | undefined;
   clearPending: (saved: StoredDraft) => void;
@@ -90,12 +90,21 @@ export type BootDeps = {
 };
 
 export async function initializeDrafts(state: EditorState, status: StatusLine, deps: BootDeps): Promise<void> {
+  const storageGeneration = state.storageGeneration;
+  const storageCurrent = (): boolean => storageGeneration === state.storageGeneration;
+  const requireCurrentStorage = (): void => { if (!storageCurrent()) throw new Error('Storage invalidated'); };
   await deps.ownerReady;
+  if (!storageCurrent()) return;
+  let bootDb: IDBDatabase | undefined;
   let shown = false;
   let bootAccess: EditAccess | undefined;
   try {
-    state.db = await openDraftDatabase(deps.onDatabaseUpgrade);
-    state.drafts = await listStoredDrafts(state.db);
+    bootDb = await openDraftDatabase(deps.onDatabaseUpgrade);
+    requireCurrentStorage();
+    state.db = bootDb;
+    const drafts = await listStoredDrafts(bootDb);
+    requireCurrentStorage();
+    state.drafts = drafts;
     let selected: string | null = null;
     try { selected = readActiveDraftId(); } catch { /* Optional hint. */ }
     // #175 host restores each window with ?doc= when session hints are cold (fresh tab).
@@ -126,15 +135,18 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
     const chosenWasStored = state.drafts.some(draft => draft.id === chosen.id);
     // First acquirer among cooperating windows edits; the others open this document read-only.
     bootAccess = await deps.acquireFor(chosen.id);
+    requireCurrentStorage();
     // The list was read before this window owned the document; reread under the fence.
     if (bootAccess.ownership && !restorePending) {
       const fresh = await getStoredDraft(state.db, chosen.id);
+      requireCurrentStorage();
       if (!fresh && chosenWasStored) {
         // Deleted while we acquired — do not install ownership over the stale list snapshot.
         void bootAccess.ownership.release();
         bootAccess = undefined;
         chosen = deps.allocateNewDraft();
         bootAccess = await deps.acquireFor(chosen.id);
+        requireCurrentStorage();
       } else if (fresh) {
         chosen = fresh;
       }
@@ -152,11 +164,12 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
       deps.applyEditAccess();
       // Another window owns the document: keep the recovered text here (and its reload backup) for copy/export.
       if (state.editBlock) status.setSaveStatus('Recovered unsaved text, but another window is editing this document, so it was not saved. Copy or export it.', 'failure');
-      else if (deps.mayWrite()) { status.setSaveStatus('Recovered unsaved text; saving…'); await deps.persist(); }
+      else if (deps.mayWrite()) { status.setSaveStatus('Recovered unsaved text; saving…'); await deps.persist(); requireCurrentStorage(); }
       else status.setSaveStatus('Recovered unsaved text; autosave is off');
     } else if (state.editBlock) status.showSaveState();
   } catch (error) {
     void bootAccess?.ownership?.release();
+    if (!storageCurrent()) { bootDb?.close(); return; }
     state.db?.close(); state.db = undefined;
     const pending = deps.readPending();
     if (pending) { state.active = pending; deps.showDraft({ restorePosition: false }); shown = true; deps.workspace.setDirty(true); deps.workspace.bumpContentRevision(); state.saveFailed = true; }
@@ -164,8 +177,9 @@ export async function initializeDrafts(state: EditorState, status: StatusLine, d
     status.setSaveStatus(state.storageProblem, 'failure');
     deps.renderDrafts();
   } finally {
-    if (!shown) deps.updateStats();
+    if (storageCurrent() && !shown) deps.updateStats();
   }
+  if (!storageCurrent()) return;
   deps.field.disabled = false;
   deps.draftSelect.disabled = false;
   deps.draftTitle.disabled = false;
