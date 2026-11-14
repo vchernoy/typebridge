@@ -124,3 +124,30 @@ test('rendered Markdown and changing math work offline after first online use', 
   await expect(page.locator('#rendered-document output')).toHaveText('21');
   await expect(page.locator('#rendered-document math').first()).toContainText('21');
 });
+
+test('format changes follow the document across windows', async ({ page, context }) => {
+  await page.goto('/editor.html');
+  await page.locator('#editor').fill('# Shared format');
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const other = await context.newPage(); await other.goto('/editor.html');
+  await expect(other.locator('#editor')).toHaveValue('# Shared format');
+  await expect(other.locator('#document-view')).toBeHidden();
+  await page.locator('#doc-menu-open').click();
+  await page.locator('#document-format').selectOption('markdown');
+  await expect(other.locator('#document-view')).toBeVisible();
+  await rendered(other);
+  await expect(other.locator('#rendered-document h1')).toHaveText('Shared format');
+  await page.locator('#document-format').selectOption('plain');
+  await expect(other.locator('#document-view')).toBeHidden();
+  await expect(other.locator('#editor')).toHaveValue('# Shared format');
+});
+
+test('switching to Rendered waits for composition to finish', async ({ page }) => {
+  await markdown(page);
+  await page.locator('#editor').dispatchEvent('compositionstart');
+  await page.locator('#document-view-choice').selectOption('rendered');
+  await expect(page.locator('#document-view-choice')).toHaveValue('edit');
+  await expect(page.locator('#editor')).toBeVisible();
+  await page.locator('#editor').dispatchEvent('compositionend', { data: '' });
+  await rendered(page);
+});
