@@ -90,7 +90,9 @@ self.addEventListener('fetch', event => {
     return;
   }
   event.respondWith(caches.open(CACHE).then(async cache => {
-    const cached = await cache.match(url.href);
+    // Runtime module requests can carry Origin and the server can Vary on it.
+    // Keep that request identity for on-demand entries; shell entries were added by URL.
+    const cached = await cache.match(LAZY.has(url.pathname) ? request : url.href);
     if (cached) return cached;
     const response = await fetch(request);
     if (response.ok && LAZY.has(url.pathname)) {

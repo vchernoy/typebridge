@@ -30,7 +30,7 @@ export function setupMarkdownView(deps: {
   async function render(text: string): Promise<void> {
     const started = generation;
     root.textContent = 'Rendering…';
-    problems.hidden = true; list.replaceChildren();
+    problems.hidden = true; problems.replaceChildren(list); list.replaceChildren();
     try {
       const { renderDocument } = await import('./active-renderer');
       if (generation !== started) return;
@@ -49,6 +49,11 @@ export function setupMarkdownView(deps: {
         });
         li.append(button); list.append(li);
       }
+      if (live.messages.length) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary'); summary.textContent = 'Rendering problems';
+        details.append(summary, list); problems.replaceChildren(details);
+      }
       problems.hidden = !live.messages.length;
     } catch {
       if (generation === started) root.textContent = 'Could not render this document. Switch to Edit to read the source.';
@@ -66,7 +71,7 @@ export function setupMarkdownView(deps: {
     if (key === previous) return;
     previous = key; stop(); problems.hidden = true;
     if (rendered) timer = setTimeout(() => { void render(text); }, 120);
-    else { root.replaceChildren(); list.replaceChildren(); }
+    else { root.replaceChildren(); problems.replaceChildren(list); list.replaceChildren(); }
   }
   select.addEventListener('change', () => {
     if (!deps.canChangeView()) { select.value = preferred; return; }
