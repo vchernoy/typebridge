@@ -117,3 +117,8 @@ occurs on pagehide. The service worker precaches the app shell, and caches rende
 The build graph excludes eager shared dependencies from the lazy set. First-time rendering
 needs connectivity; after its first online use the renderer works offline, including live math.
 This implements the explicit plain-document no-renderer-request requirement in #244.
+
+The reading page uses the same dynamic renderer boundary. Source/unknown-format paths only
+use textContent; changing the link, presentation or page lifecycle destroys the old mount and
+invalidates an outstanding import. Share payloads carry the actual document format and chosen
+view, and Edit a copy stores source plus format. Reader inputs stay entirely inside the runtime.

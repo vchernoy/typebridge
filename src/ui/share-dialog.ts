@@ -3,7 +3,8 @@
  * text, says plainly what sharing means, and copies the link. The link format and its limits
  * are in editor/share-link.ts; links open on the reading page (read.html).
  */
-import { encodeSharePayload, shareLinkLength, shareUrl } from '../editor/share-link';
+import { documentFormat, type DocumentFormat } from '../editor/document-fields';
+import { type ShareView, encodeSharePayload, shareLinkLength, shareUrl } from '../editor/share-link';
 import { askConfirmChoice } from './confirm-dialog';
 
 export const SHARE_PRIVACY_TEXT = 'Anyone with the link can read this document. The text travels inside the link itself; nothing is uploaded. The link also stays in your browser history and wherever you paste it.';
@@ -13,7 +14,7 @@ const PREVIEW_CHARS = 280;
 
 export type ShareDialogDeps = {
   /** Title (or the Untitled default) and text currently shown, like Export. */
-  surface: () => { title: string; text: string };
+  surface: () => { title: string; text: string; format?: DocumentFormat };
   /** The site root links point to. */
   base: () => string;
   returnFocus: () => HTMLElement;
@@ -26,9 +27,12 @@ export function sharePreview(text: string): string {
 }
 
 export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
-  const { title, text } = deps.surface();
+  const surface = deps.surface();
+  const { title, text } = surface;
+  const format = documentFormat(surface);
+  let view: ShareView = format === 'markdown' ? 'rendered' : 'source';
   const make = async (edit: boolean): Promise<string | undefined> => {
-    const encoded = await encodeSharePayload({ title, text, format: 'plain', view: 'source', edit });
+    const encoded = await encodeSharePayload({ title, text, format, view, edit });
     return encoded.ok ? shareUrl(deps.base(), encoded.payload) : undefined;
   };
   const first = await make(true);
@@ -45,7 +49,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
 
   const preview = document.createElement('div');
   preview.className = 'share-preview';
-  preview.setAttribute('aria-label', 'What the reader sees');
+  preview.setAttribute('aria-label', format === 'markdown' ? 'Document source preview' : 'What the reader sees');
   const previewTitle = document.createElement('strong');
   previewTitle.textContent = title;
   const previewText = document.createElement('p');
@@ -60,6 +64,17 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   edit.id = 'share-edit';
   edit.checked = true;
   editLabel.append(edit, ' Readers can edit a copy');
+
+  const viewLabel = document.createElement('label');
+  viewLabel.className = 'share-option'; viewLabel.hidden = format !== 'markdown';
+  viewLabel.textContent = 'Readers see: ';
+  const viewSelect = document.createElement('select');
+  viewSelect.id = 'share-view';
+  for (const [value, text] of [['rendered', 'Rendered page'], ['source', 'Source']]) {
+    const option = document.createElement('option'); option.value = value; option.textContent = text; viewSelect.append(option);
+  }
+  viewSelect.value = view;
+  viewLabel.append(viewSelect);
 
   const linkLabel = document.createElement('label');
   linkLabel.htmlFor = 'share-url';
@@ -87,7 +102,8 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   // it, so a copied link always matches the checkbox (#247 review).
   // The field is emptied meanwhile, so no stale link can be copied by hand either.
   let generation = 0;
-  edit.addEventListener('change', () => {
+  const regenerate = (): void => {
+    view = format === 'markdown' && viewSelect.value === 'rendered' ? 'rendered' : 'source';
     const current = ++generation;
     copy.disabled = true;
     link.value = '';
@@ -103,7 +119,9 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
       copy.disabled = false;
       status.textContent = lengthNote();
     });
-  });
+  };
+  edit.addEventListener('change', regenerate);
+  viewSelect.addEventListener('change', regenerate);
   copy.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(link.value);
@@ -118,6 +136,8 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const row = document.createElement('div');
   row.className = 'share-link-row';
   row.append(link, copy);
-  content.append(privacy, preview, editLabel, linkLabel, row, status);
+  content.append(privacy, preview, editLabel);
+  if (format === 'markdown') content.append(viewLabel);
+  content.append(linkLabel, row, status);
   await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', returnFocus: deps.returnFocus() });
 }

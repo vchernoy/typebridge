@@ -1201,7 +1201,7 @@ document.querySelector<HTMLButtonElement>('#share-link')!.addEventListener('clic
   void openShareDialog({
     surface: () => ({
     title: draftTitle.value.trim() || UNTITLED_TITLE,
-    text: field.value,
+    text: field.value, format: state.active.format,
   }),
     base: () => new URL('/', location.href).toString(),
     returnFocus: () => document.querySelector<HTMLButtonElement>('#doc-menu-open')!,

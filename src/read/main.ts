@@ -2,14 +2,21 @@
  * Reading page for share links (#39): `/#doc=…` forwards here (inline script in index.html).
  * It looks like a plain read-only web page: the title, the text and a quiet label. Nothing is
  * stored until the reader chooses Edit a copy, which saves a new document and opens it in the
- * full editor. The shared text is always written with textContent, never parsed as HTML.
+ * full editor. Source text is never parsed as HTML; only the lazy renderer’s sanitized output is inserted.
  */
 import '../style.css';
 import '../styles/read.css';
+import { documentFormat } from '../editor/document-fields';
+import { readingView } from './view';
 import { newDraft } from '../editor/drafts';
 import { commitOrCreateConflictCopy, openDraftDatabase } from '../editor/indexeddb';
 import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type SharedDocument } from '../editor/share-link';
 import { createDocumentSignal, DOCUMENT_SIGNAL_CHANNEL } from '../view/signals';
+
+const viewToggle = document.querySelector<HTMLButtonElement>('#read-view')!;
+let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
+let viewGeneration = 0;
+function stopLive(): void { viewGeneration++; live?.destroy(); live = undefined; }
 
 const title = document.querySelector<HTMLElement>('#read-title')!;
 const notice = document.querySelector<HTMLElement>('#read-notice')!;
@@ -26,10 +33,11 @@ const FAILURE_MESSAGES: Record<DecodeFailure, string> = {
 };
 
 function showFailure(reason: DecodeFailure): void {
+  stopLive(); viewToggle.hidden = true;
   document.title = 'Shared document · TypeBridge';
   title.textContent = 'This shared document cannot be opened';
   body.textContent = FAILURE_MESSAGES[reason];
-  body.classList.add('read-text--message');
+  body.className = 'read-text read-text--message';
   // A notice from an earlier link (e.g. an unknown format) must not stay with this failure.
   notice.hidden = true;
   notice.textContent = '';
@@ -40,8 +48,26 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
   const heading = shared.title.trim() || 'Untitled document';
   document.title = `${heading} · TypeBridge`;
   title.textContent = heading;
-  // Plain text is shown exactly as written; v1 renders no other format (#244).
-  body.textContent = shared.text;
+  let view = readingView(shared);
+  const setView = async (): Promise<void> => {
+    stopLive();
+    const generation = viewGeneration;
+    const rendered = view === 'rendered';
+    viewToggle.textContent = rendered ? 'Show source' : 'Show page';
+    body.className = rendered ? 'active-reading' : 'read-text';
+    if (!rendered) { body.textContent = shared.text; return; }
+    body.textContent = 'Rendering…';
+    try {
+      const { renderDocument } = await import('../view/active-renderer');
+      if (generation !== viewGeneration) return;
+      live = renderDocument(body, shared.text, navigator.language);
+    } catch {
+      if (generation === viewGeneration) body.textContent = 'Could not render this document. Choose Show source to read it.';
+    }
+  };
+  viewToggle.hidden = shared.format !== 'markdown';
+  viewToggle.onclick = () => { view = view === 'rendered' ? 'source' : 'rendered'; void setView(); };
+  void setView();
   body.classList.remove('read-text--message');
   if (!knownFormat) {
     notice.textContent = `This document uses a format this version of TypeBridge cannot show yet (“${shared.format}”). Showing its text as written.`;
@@ -63,7 +89,7 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
   try {
     const db = await openDraftDatabase();
     try {
-      const copy = { ...newDraft(shared.text), title: shared.title.trim() || newDraft().title };
+      const copy = { ...newDraft(shared.text), format: documentFormat(shared), title: shared.title.trim() || newDraft().title };
       const result = await commitOrCreateConflictCopy(db, copy, 0, crypto.randomUUID());
       try {
         const channel = new BroadcastChannel(DOCUMENT_SIGNAL_CHANNEL);
@@ -84,6 +110,7 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
 /** Bumped on every render: a slow decode of an earlier link must not replace a newer one. */
 let renderGeneration = 0;
 async function render(): Promise<void> {
+  stopLive(); viewToggle.hidden = true;
   const generation = ++renderGeneration;
   const hash = location.hash;
   // Never leave the previous document's Edit a copy armed while another link decodes.
@@ -102,7 +129,9 @@ window.addEventListener('pageshow', event => {
   saving = false;
   editCopy.disabled = false;
   status.textContent = '';
+  void render();
 });
 // Pasting another share link into the address bar only changes the fragment.
+window.addEventListener('pagehide', stopLive);
 window.addEventListener('hashchange', () => { status.textContent = ''; void render(); });
 void render();
