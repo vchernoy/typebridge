@@ -1,5 +1,5 @@
 import { SHORTCUTS } from '../editor/keyboard-shortcuts';
-type EscapeLayer = { element: HTMLElement; priority: number; close: () => void };
+type EscapeLayer = { element: HTMLElement; priority: number; close: () => void; visible?: () => boolean };
 const layers: EscapeLayer[] = [];
 let installed = false;
 
@@ -14,16 +14,16 @@ export function installEscapeLayers(): void {
   document.addEventListener('keydown', onEscape);
 }
 
-export function registerEscapeLayer(element: HTMLElement, priority: number, close: () => void): void {
+export function registerEscapeLayer(element: HTMLElement, priority: number, close: () => void, visible?: () => boolean): void {
   installEscapeLayers();
-  layers.push({ element, priority, close });
+  layers.push({ element, priority, close, visible });
 }
 
 function onEscape(event: KeyboardEvent): void {
   if (event.key !== SHORTCUTS.escape.key || event.isComposing || event.keyCode === 229 || event.repeat || event.defaultPrevented) return;
   // Collapsed native selects own Escape for their popup; multi-row listboxes do not.
   if (event.target instanceof HTMLSelectElement && event.target.size <= 1) return;
-  const layer = layers.filter(item => !item.element.hidden && item.element.getClientRects().length > 0)
+  const layer = layers.filter(item => !item.element.hidden && item.element.getClientRects().length > 0 && (item.visible?.() ?? true))
     .sort((a, b) => b.priority - a.priority)[0];
   if (!layer) return;
   event.preventDefault();

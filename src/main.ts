@@ -68,7 +68,7 @@ import { setupTransliteration } from './ui/transliteration';
 import { setupSettings } from './ui/settings';
 import { setupDocumentMenu } from './ui/document-menu';
 import { setupMoreMenu } from './ui/more-menu';
-import { installEscapeLayers } from './ui/escape-layers';
+import { installEscapeLayers, registerEscapeLayer } from './ui/escape-layers';
 import { setupWritingPosition } from './editor/writing-position';
 import { parseComparisonRoute } from './view/route';
 import { parseWindowId, scopeSessionKey, writingPositionNamespace } from './view/window-id';
@@ -491,6 +491,13 @@ const documentSearch = createDocumentSearch({
 });
 /** Document-identity counter lives on the workspace as sessionGeneration (formerly viewGeneration). */
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
+const saveIndicatorLabel = saveIndicator.querySelector<HTMLElement>('.save-indicator-label')!;
+for (const event of ['pointerenter', 'focus']) {
+  saveIndicator.addEventListener(event, () => { delete saveIndicator.dataset.tooltipDismissed; });
+}
+registerEscapeLayer(saveIndicator, 40,
+  () => { saveIndicator.dataset.tooltipDismissed = 'true'; },
+  () => !saveIndicator.dataset.tooltipDismissed && saveIndicator.matches(':hover, :focus-visible'));
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
   const clearButton = document.querySelector<HTMLButtonElement>('#clear-document-data');
@@ -502,7 +509,8 @@ function updateSaveIndicator(): void {
     : state.editBlock ? (workspace.dirty() ? 'unsaved' : 'readonly')
     : !writing || !state.db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
   const label = { failed: 'Save failed', readonly: 'Read-only', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[indicator];
-  if (saveIndicator.textContent !== label) saveIndicator.textContent = label;
+  if (saveIndicatorLabel.textContent !== label) saveIndicatorLabel.textContent = label;
+  if (saveIndicator.getAttribute('aria-label') !== label) saveIndicator.setAttribute('aria-label', label);
   saveIndicator.dataset.state = indicator;
 }
 // Viewers use their own key namespace so they never overwrite an editor's saved offsets.
