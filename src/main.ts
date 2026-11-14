@@ -519,7 +519,7 @@ function updateSaveIndicator(): void {
   if (saveIndicator.getAttribute('aria-label') !== label) saveIndicator.setAttribute('aria-label', label);
   saveIndicator.dataset.state = indicator;
   documentFormatSelect.value = documentFormat(state.active);
-  documentFormatSelect.disabled = viewMode || state.editBlock !== '' || state.transferFrozen || state.transitioning;
+  documentFormatSelect.disabled = field.disabled || viewMode || state.editBlock !== '' || state.transferFrozen || state.transitioning;
   markdownView?.sync();
 }
 // Viewers use their own key namespace so they never overwrite an editor's saved offsets.
@@ -1166,7 +1166,7 @@ markdownView = setupMarkdownView({
   },
 });
 documentFormatSelect.addEventListener('change', () => {
-  if (viewMode || state.editBlock || state.transferFrozen || state.transitioning || [editor, titleEditor, findEditor, replaceEditor].some(input => input.composing)) {
+  if (field.disabled || viewMode || state.editBlock || state.transferFrozen || state.transitioning || [editor, titleEditor, findEditor, replaceEditor].some(input => input.composing)) {
     documentFormatSelect.value = documentFormat(state.active); return;
   }
   const format = documentFormat({ format: documentFormatSelect.value });

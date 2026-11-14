@@ -151,3 +151,26 @@ test('switching to Rendered waits for composition to finish', async ({ page }) =
   await page.locator('#editor').dispatchEvent('compositionend', { data: '' });
   await rendered(page);
 });
+
+test('Format cannot edit a provisional document while storage is still opening', async ({ page }) => {
+  await page.addInitScript(() => {
+    const open = IDBFactory.prototype.open;
+    IDBFactory.prototype.open = function (...args: Parameters<IDBFactory['open']>) {
+      IDBFactory.prototype.open = open;
+      const request = open.apply(this, args);
+      let handler: ((event: Event) => void) | undefined;
+      Object.defineProperty(request, 'onsuccess', { configurable: true, set(value: typeof handler) { handler = value; } });
+      request.addEventListener('success', event => {
+        (window as unknown as { releaseMarkdownBoot: () => void }).releaseMarkdownBoot = () => handler?.call(request, event);
+      });
+      return request;
+    };
+  });
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeDisabled();
+  await expect(page.locator('#document-format')).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => typeof (window as unknown as { releaseMarkdownBoot?: unknown }).releaseMarkdownBoot)).toBe('function');
+  await page.evaluate(() => (window as unknown as { releaseMarkdownBoot: () => void }).releaseMarkdownBoot());
+  await expect(page.locator('#editor')).toBeEnabled();
+  await expect(page.locator('#document-format')).toBeEnabled();
+});
