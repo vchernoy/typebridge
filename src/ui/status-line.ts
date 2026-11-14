@@ -116,8 +116,8 @@ export function createStatusLine(deps: StatusLineDeps) {
     updateStatus({ conflict: '', draftListRefreshFailed: false });
   }
   function setSaveStatus(text: string, nextKind: Exclude<StatusKind, 'action'> = 'progress'): void {
-    // Save-state updates drop a stale list-refresh suffix; conflict is preserved.
-    updateStatus({ primary: text, risk: '', draftListRefreshFailed: false }, nextKind);
+    // Saving does not prove the document list refreshed; refreshDrafts clears its warning.
+    updateStatus({ primary: text, risk: '' }, nextKind);
   }
   function setRiskStatus(primary: string, nextKind: StatusKind, risk = currentRisk()): void {
     updateStatus({ primary, risk }, nextKind);

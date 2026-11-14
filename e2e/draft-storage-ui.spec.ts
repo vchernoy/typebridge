@@ -159,6 +159,33 @@ test('a committed save stays successful if refreshing the draft list fails', asy
   await expect(field).toHaveValue('Текст ещё');
 });
 
+test('list refresh failure stays visible while editing until a successful refresh (#97)', async ({ page }) => {
+  await page.goto('/editor.html');
+  const field = page.locator('#editor');
+  await field.fill('Текст');
+  await expect(page.locator('#status')).toContainText('Saved locally');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.getAll;
+    (window as unknown as { restoreGetAll: () => void }).restoreGetAll = () => { IDBObjectStore.prototype.getAll = original; };
+    IDBObjectStore.prototype.getAll = function (...args: Parameters<IDBObjectStore['getAll']>) {
+      if (this.name === 'documents') throw new Error('list unavailable');
+      return original.apply(this, args);
+    };
+  });
+  await field.fill('Текст ещё');
+  await expect(page.locator('#status')).toContainText('Saved locally — document list could not be refreshed');
+  await page.clock.install();
+  await field.fill('Текст ещё!');
+  await expect(page.locator('#status')).toContainText('Saving… — document list could not be refreshed');
+  await page.clock.runFor(400);
+  await expect(page.locator('#status')).toContainText('Saved locally — document list could not be refreshed');
+  await page.evaluate(() => (window as unknown as { restoreGetAll: () => void }).restoreGetAll());
+  await field.fill('Текст ещё!!');
+  await expect(page.locator('#status')).toContainText('Saving… — document list could not be refreshed');
+  await page.clock.runFor(400);
+  await expect(page.locator('#status')).toHaveText('Saved locally');
+});
+
 test('JSON export and import round trip preserves Cyrillic, newlines and emoji', async ({ page }) => {
   await page.goto('/editor.html');
   const field = page.locator('#editor');
