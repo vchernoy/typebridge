@@ -67,6 +67,8 @@ test('same-tab click into read-only window takes editing without dropping keys',
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
   await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
   await expect(beta.locator('#save-indicator')).toHaveText('Saved');
+  await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === docId)?.text)
+    .toBe('Shared handoff text!');
   const docs = await readStoredDocs(page);
   const committed = docs.find(row => row.id === docId);
   expect(committed?.text).toBe('Shared handoff text!');
@@ -75,6 +77,35 @@ test('same-tab click into read-only window takes editing without dropping keys',
   await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
   // No conflict copy — still one document row for this text family.
   expect(docs.filter(row => row.text.startsWith('Shared handoff text')).length).toBe(1);
+});
+
+test('same-tab reader keeps committed text while the editor has Autosave off', async ({ page }) => {
+  const { alpha, beta, docId } = await openSharedDocument(page);
+
+  await beta.locator('#editor').click();
+  await expect(beta.locator('html')).toHaveAttribute('data-role', 'editor');
+  await expect(beta.locator('#editor')).toHaveJSProperty('readOnly', false);
+  await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
+  await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
+  await setAutosave(beta as unknown as Page, false);
+
+  await placeCaret(beta, 'end');
+  await beta.locator('#editor').pressSequentially('!');
+  await expect(beta.locator('#editor')).toHaveValue('Shared handoff text!');
+  await expect(beta.locator('#save-indicator')).toHaveText('Not saved');
+  const docs = await readStoredDocs(page);
+  expect(docs.find(row => row.id === docId)?.text).toBe('Shared handoff text');
+  expect(docs.filter(row => row.text.startsWith('Shared handoff text')).length).toBe(1);
+  await expect(alpha.locator('#editor')).toHaveValue('Shared handoff text');
+  await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
+
+  // Once the owner explicitly enables saving, the reader follows that commit.
+  await setAutosave(beta as unknown as Page, true);
+  await expect(beta.locator('#save-indicator')).toHaveText('Saved');
+  await expect.poll(async () => (await readStoredDocs(page)).find(row => row.id === docId)?.text)
+    .toBe('Shared handoff text!');
+  await expect(alpha.locator('#editor')).toHaveValue('Shared handoff text!');
+  await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
 });
 
 test('failed takeover keeps the owner private text (two-phase park)', async ({ page, context }) => {
