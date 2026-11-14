@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { decodeSharePayload, sharePayloadFromHash } from '../src/editor/share-link';
+import { decodeSharePayload, SHARE_PAYLOAD_MAX_CHARS, sharePayloadFromHash } from '../src/editor/share-link';
 import { documentAction } from './settings-helpers';
 
 // Documents → Share link… (#39): explains sharing, previews, and makes a link the reading
@@ -60,6 +60,40 @@ test('the sender can turn off Edit a copy for readers', async ({ page }) => {
   await expect(linkField(page)).not.toHaveValue('');
   const { decoded } = await decodeShown(page);
   expect(decoded.ok && decoded.document.edit).toBe(false);
+});
+
+test('a too-large regeneration cannot copy the previous link and a later toggle recovers (#242)', async ({ page }) => {
+  // Exercise the encoded-size failure without relying on browser-specific compression ratios.
+  await page.addInitScript(maxChars => {
+    const Native = CompressionStream;
+    const w = window as unknown as { oversizeNextCompress?: boolean; CompressionStream: unknown };
+    w.CompressionStream = class extends Native {
+      constructor(format: CompressionFormat) {
+        super(format);
+        if (!w.oversizeNextCompress) return;
+        w.oversizeNextCompress = false;
+        const readable = this.readable.pipeThrough(new TransformStream({
+          transform() { /* Consume native output; replace just this result with oversized bytes. */ },
+          flush(controller) { controller.enqueue(new Uint8Array(maxChars)); },
+        }));
+        Object.defineProperty(this, 'readable', { value: readable });
+      }
+    };
+  }, SHARE_PAYLOAD_MAX_CHARS);
+  await setText(page, 'Граница', 'Текст');
+  await documentAction(page, '#share-link');
+  const { decoded: initial } = await decodeShown(page);
+  expect(initial.ok && initial.document.edit).toBe(true);
+  const checkbox = dialog(page).getByLabel('Readers can edit a copy');
+  await page.evaluate(() => { (window as unknown as { oversizeNextCompress: boolean }).oversizeNextCompress = true; });
+  await checkbox.uncheck();
+  await expect(dialog(page).locator('.share-status')).toContainText('too large to share as a link');
+  await expect(linkField(page)).toHaveValue('');
+  await expect(dialog(page).getByRole('button', { name: 'Copy link' })).toBeDisabled();
+  await checkbox.check();
+  const { decoded } = await decodeShown(page);
+  expect(decoded.ok && decoded.document.edit).toBe(true);
+  await expect(dialog(page).locator('.share-status')).not.toContainText('too large');
 });
 
 test('Copy link copies or explains, and every control is reachable with Tab', async ({ page }) => {
