@@ -258,3 +258,38 @@ it.each([false, true, 'released'])('claims a new document before its first save,
   expect(await saver.persist()).toEqual({ saved: !cancel, conflict: false });
   expect(order).toEqual(cancel ? ['claim'] : ['claim', 'commit', 'identity']);
 });
+
+it.each([
+  { transitioning: false, risk: '', primary: '' },
+  { transitioning: true, risk: '', primary: 'Saved locally' },
+  { transitioning: true, risk: 'Storage unavailable.', primary: '' },
+])('keeps committed conflict progress visible only during a risk-free transition: %j', async ({ transitioning, risk, primary }) => {
+  const state = createEditorState();
+  state.db = {} as IDBDatabase;
+  state.active = { id: 'doc', title: 'T', text: 'body', revision: 1, updatedAt: 1 };
+  state.transitioning = transitioning;
+  state.ownership = { documentId: 'doc', writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
+  let dirty = true;
+  const updateStatus = vi.fn();
+  const setConflict = vi.fn();
+  vi.mocked(commitOrCreateConflictCopy).mockResolvedValue({ draft: { ...state.active, id: 'copy' }, conflict: true });
+  const saver = createSaver(state, {
+    showSaving: () => {}, kind: () => 'progress', riskText: () => risk, updateStatus, setConflict,
+    shouldAttachDraftListRefreshFailure: () => false,
+  } as unknown as StatusLine, {
+    viewMode: false, mayWrite: () => true, draftTitle: { value: 'T' } as HTMLInputElement,
+    workspace: { ...makeWorkspace(), dirty: () => dirty, setDirty: (value: boolean) => { dirty = value; } },
+    writingPosition: { save: () => {} }, snapshot: () => state.active, currentJournal: () => undefined,
+    suppressEditTracking: () => false, readOnlyNow: () => false, preparePendingClear: () => () => {},
+    clearVersionNotice: () => {}, postSignal: () => {}, journalEdit: () => {},
+    changes: { edit: () => {}, idle: async () => {}, upToForSave: () => ({ upTo: 0, keepRun: 'run' }), saved: () => {} },
+    onRecovered: () => {}, rememberActive: () => {}, updateSaveIndicator: () => {}, syncTitleTooltip: () => {},
+    takeOwnership: async () => {
+      // This callback may await: the status must already describe the durable commit.
+      expect(updateStatus).toHaveBeenLastCalledWith({ primary, risk }, transitioning ? 'progress' : 'conflict');
+    },
+    loseOwnership: () => {}, refreshDrafts: async () => {}, renderDrafts: () => {},
+  });
+  expect(await saver.persist()).toEqual({ saved: true, conflict: true });
+  expect(setConflict).toHaveBeenCalledTimes(transitioning ? 0 : 1);
+});
