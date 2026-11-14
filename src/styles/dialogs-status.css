@@ -98,6 +98,7 @@
 /* Documents → Share link… (#39). */
 .share-dialog {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 .share-dialog p {
@@ -111,6 +112,11 @@
   overflow-wrap: anywhere;
 }
 .share-preview-text {
+  /* Preview is secondary: multiline source must not bury the sharing controls. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
   color: var(--muted);
   white-space: pre-wrap;
 }
@@ -121,10 +127,12 @@
 }
 .share-link-row {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .share-link-row input {
-  flex: 1;
+  flex: 1 1 120px;
   min-width: 0;
   min-height: 44px;
   font: inherit;
