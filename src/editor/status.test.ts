@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTOSAVE_OFF, NOT_OWNER_UNSAVED, READ_ONLY_ERROR, READ_ONLY_HERE, READ_ONLY_UNSUPPORTED, SAVE_FAILED,
   SAVE_FAILED_NO_STORAGE, STORAGE_UNAVAILABLE, readOnlyStatus, renderStatusMessage, riskText, statusKindForRisk,
-  withDraftListRefreshFailure,
+  statusLineParts, withDraftListRefreshFailure,
 } from './status';
 
 const calm = { storageProblem: '', dirty: false, blocked: false, saveFailed: false, autosaveOn: true };
@@ -37,5 +37,15 @@ describe('status rules', () => {
     const message = { conflict: '', primary: SAVE_FAILED, risk: '', draftListRefreshFailed: false };
     expect(withDraftListRefreshFailure(message, SAVE_FAILED)).toEqual({ conflict: '', primary: '', risk: SAVE_FAILED, draftListRefreshFailed: true });
     expect(renderStatusMessage({ conflict: 'C.', primary: 'Saving…', risk: '', draftListRefreshFailed: true })).toBe('C. Saving… — document list could not be refreshed');
+  });
+
+  it('uses one displayed conflict snapshot for both text and separator (#97)', () => {
+    const message = { conflict: 'Pending conflict.', primary: 'Saving…', risk: '', draftListRefreshFailed: false };
+    expect(statusLineParts(message, '')).toEqual({ conflict: '', sep: '', body: 'Saving…' });
+    expect(renderStatusMessage(message, '')).toBe('Saving…');
+    expect(statusLineParts(message, 'Shown conflict.')).toEqual({ conflict: 'Shown conflict.', sep: ' ', body: 'Saving…' });
+    expect(renderStatusMessage(message, 'Shown conflict.')).toBe('Shown conflict. Saving…');
+    expect(renderStatusMessage(message)).toBe('Pending conflict. Saving…');
+    expect(renderStatusMessage({ ...message, primary: '' }, 'Shown conflict.')).toBe('Shown conflict.');
   });
 });

@@ -40,12 +40,12 @@ export function statusLineParts(
   displayedConflict: string = message.conflict,
 ): { conflict: string; sep: string; body: string } {
   const body = renderStatusBody(message);
-  return { conflict: message.conflict, sep: displayedConflict && body ? ' ' : '', body };
+  return { conflict: displayedConflict, sep: displayedConflict && body ? ' ' : '', body };
 }
 
-/** Full status line for tests and documentation expectations (matches `#status-line` textContent). */
-export function renderStatusMessage(message: StatusMessage): string {
-  const { conflict, sep, body } = statusLineParts(message);
+/** Full status line; pass the live region's displayed text during a deferred re-announce. */
+export function renderStatusMessage(message: StatusMessage, displayedConflict: string = message.conflict): string {
+  const { conflict, sep, body } = statusLineParts(message, displayedConflict);
   return conflict + sep + body;
 }
 

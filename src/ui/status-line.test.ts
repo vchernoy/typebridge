@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, SAVE_FAILED, type RiskInputs } from '../editor/status';
+import { AUTOSAVE_OFF, CONFLICT_COPY, CONFLICT_COPY_LEFT, SAVE_FAILED, renderStatusMessage, type RiskInputs } from '../editor/status';
 import { CONFLICT_REANNOUNCE_DELAY_MS, createStatusLine } from './status-line';
 
 function fakeElement(): HTMLElement {
@@ -14,11 +14,12 @@ function setup(risk: Partial<RiskInputs> = {}) {
   const inputs: RiskInputs = { storageProblem: '', dirty: false, blocked: false, saveFailed: false, autosaveOn: true, ...risk };
   const conflictNotice = fakeElement();
   const status = fakeElement();
+  const statusSep = fakeElement();
   const line = createStatusLine({
-    conflictNotice, statusSep: fakeElement(), status,
+    conflictNotice, statusSep, status,
     afterRender: () => {}, risk: () => inputs, editBlock: () => '', quietReader: () => false,
   });
-  return { line, inputs, conflictNotice, status };
+  return { line, inputs, conflictNotice, status, statusSep };
 }
 
 describe('status line', () => {
@@ -94,6 +95,31 @@ describe('status line', () => {
       line.setConflict(CONFLICT_COPY);
       line.setConflict(CONFLICT_COPY_LEFT, true);
       expect(conflictNotice.textContent).toBe(CONFLICT_COPY_LEFT);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('matches the displayed status through delayed re-announcement and cancellation (#97)', () => {
+    vi.useFakeTimers();
+    try {
+      const { line, conflictNotice, status, statusSep } = setup();
+      const expectDisplayed = (text: string) => {
+        expect(conflictNotice.textContent! + statusSep.textContent! + status.textContent!).toBe(text);
+        expect(renderStatusMessage(line.message(), conflictNotice.textContent ?? '')).toBe(text);
+      };
+      line.showSaving();
+      line.setConflict(CONFLICT_COPY);
+      expectDisplayed(CONFLICT_COPY + ' Saving…');
+      line.setConflict(CONFLICT_COPY, true);
+      expect(line.message().conflict).toBe(CONFLICT_COPY);
+      expectDisplayed('Saving…');
+      vi.advanceTimersByTime(CONFLICT_REANNOUNCE_DELAY_MS);
+      expectDisplayed(CONFLICT_COPY + ' Saving…');
+      line.setConflict(CONFLICT_COPY, true);
+      line.setConflict('');
+      vi.advanceTimersByTime(CONFLICT_REANNOUNCE_DELAY_MS);
+      expectDisplayed('Saving…');
     } finally {
       vi.useRealTimers();
     }
