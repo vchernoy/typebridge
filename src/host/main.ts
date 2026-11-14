@@ -64,9 +64,17 @@ try {
   migrateStandaloneSession(sessionStorage, (focusId && ids.includes(focusId) ? focusId : ids[0]) ?? 'main');
 } catch { /* Blocked storage: windows start without the old session hints. */ }
 
+const requestedDocument = new URLSearchParams(location.search).get('open');
+let initialDocumentId: string | undefined;
+try {
+  // A remembered document (or its pending recovery) retains the existing startup path.
+  if (requestedDocument !== null && isDocumentId(requestedDocument)
+    && !sessionStorage.getItem(scopeSessionKey(ACTIVE_DRAFT_KEY_BASE, 'main'))) initialDocumentId = requestedDocument;
+} catch { /* Optional first-visit optimization; openDocument still handles the request below. */ }
 const manager = installWindowManager({
   root,
   toolbar,
+  initialDocumentId,
   editorSrc: (windowId, documentId) => {
     const params = new URLSearchParams({ window: windowId, embed: '1' });
     if (documentId) params.set('doc', documentId);

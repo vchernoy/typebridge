@@ -41,6 +41,8 @@ export type WindowManagerDeps = {
   toolbar: HTMLElement;
   /** Build the iframe src for a window id (embed mode; may include saved document id). */
   editorSrc: (windowId: string, documentId?: string) => string;
+  /** Validated ?open= target for the primary window only when no saved layout exists. */
+  initialDocumentId?: string;
   storage?: Storage;
   /** Ask the iframe whether it is safe to close (unsaved/private prompts). */
   prepareClose: (frame: HTMLIFrameElement) => Promise<boolean>;
@@ -741,6 +743,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     }
     const primary: HostWindowLayout = {
       id: 'main',
+      ...(deps.initialDocumentId ? { documentId: deps.initialDocumentId } : {}),
       ...defaultRectForIndex(0, view),
       z: 1,
     };
