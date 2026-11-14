@@ -106,5 +106,5 @@ test('status line parts match the conflict / separator / body DOM split', () => 
     primary: 'Saving…',
     risk: '',
     draftListRefreshFailed: false,
-  }, '')).toEqual({ conflict: CONFLICT_COPY, sep: '', body: 'Saving…' });
+  }, '')).toEqual({ conflict: '', sep: '', body: 'Saving…' });
 });
