@@ -54,7 +54,7 @@ async function openSharedDocument(page: Page): Promise<{ alpha: FrameLocator; be
 
 test('same-tab click into read-only window takes editing without dropping keys', async ({ page }) => {
   test.setTimeout(90_000);
-  const { alpha, beta } = await openSharedDocument(page);
+  const { alpha, beta, docId } = await openSharedDocument(page);
 
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'editor');
   await beta.locator('#editor').click();
@@ -66,11 +66,14 @@ test('same-tab click into read-only window takes editing without dropping keys',
   await expect(beta.locator('#editor')).toHaveValue('Shared handoff text!');
   await expect(alpha.locator('html')).toHaveAttribute('data-role', 'reader');
   await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
-  // Owner shows last saved text (pre-handoff save), not the new keystroke.
-  await expect(alpha.locator('#editor')).toHaveValue('Shared handoff text');
   await expect(beta.locator('#save-indicator')).toHaveText('Saved');
-  // No conflict copy — still one document row for this text family.
   const docs = await readStoredDocs(page);
+  const committed = docs.find(row => row.id === docId);
+  expect(committed?.text).toBe('Shared handoff text!');
+  // A clean reader follows the latest committed revision after beta saves.
+  await expect(alpha.locator('#editor')).toHaveValue(committed!.text);
+  await expect(alpha.locator('#editor')).toHaveJSProperty('readOnly', true);
+  // No conflict copy — still one document row for this text family.
   expect(docs.filter(row => row.text.startsWith('Shared handoff text')).length).toBe(1);
 });
 
