@@ -39,7 +39,7 @@ async function assertAligned(root: Locator): Promise<void> {
     return Math.abs((cell.left + cell.right) / 2 - (value.left + value.right) / 2);
   });
   expect(centered).toBeLessThan(1);
-  const wide = root.locator('math[display="block"]').last();
+  const wide = root.locator('.active-math-display').last();
   expect(await wide.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
   await wide.evaluate(element => { element.scrollLeft = element.scrollWidth; });
   expect(await wide.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);

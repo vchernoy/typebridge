@@ -80,3 +80,15 @@
 .active-reading mtable[columnalign="right left"] > mtr > mtd:nth-child(2) {
   text-align: left;
 }
+
+/* Scroll the HTML math wrapper, not the native MathML element: overflow on
+   <math> itself is not consistently scrollable in Firefox/WebKit. Let the
+   inner equation keep its intrinsic width so the wrapper owns all overflow. */
+.active-reading .active-math-display > .katex {
+  display: inline-block;
+  min-width: 100%;
+}
+.active-reading .active-math-display > .katex > math {
+  max-width: none;
+  overflow: visible;
+}
