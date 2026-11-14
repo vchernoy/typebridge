@@ -22,6 +22,8 @@ test('compact save state follows commits without replacing action feedback (#131
   await expect(indicator).toHaveText('Saved');
   await setAutosave(page, false);
   await expect(indicator).toHaveText('Not saved');
+  await expect(indicator).toHaveAccessibleName('Not saved');
+  expect((await indicator.locator('.save-indicator-label').boundingBox())!.width).toBeGreaterThan(10);
   await expect(page.locator('#status')).toContainText('text and title are not saved and will be lost on reload');
   await setAutosave(page, true);
   await expect(indicator).toHaveText('Saved');
@@ -44,11 +46,61 @@ test('compact failure stays until a retry commits (#131)', async ({ page }) => {
   await page.locator('#editor').fill('Текст');
   await page.clock.runFor(400);
   await expect(page.locator('#save-indicator')).toHaveText('Save failed');
+  await expect(page.locator('#save-indicator')).toHaveAccessibleName('Save failed');
+  expect((await page.locator('.save-indicator-label').boundingBox())!.width).toBeGreaterThan(10);
   await page.evaluate(() => (window as unknown as { restorePut: () => void }).restorePut());
   await page.locator('#editor').fill('Правка');
   await expect(page.locator('#save-indicator')).toHaveText('Save failed');
   await page.clock.runFor(400);
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
+});
+
+for (const width of [320, 1280]) {
+  test(`routine save icons keep the toolbar still at ${width}px (#281)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+    await page.goto('/editor.html');
+    await expect(page.locator('#editor')).toBeEnabled();
+    await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+    const indicator = page.locator('#save-indicator');
+    await expect(indicator).toHaveAccessibleName('Saved');
+    const measure = async () => ({
+      indicator: await indicator.boundingBox(),
+      autosave: await page.locator('#autosave').boundingBox(),
+    });
+    const saved = await measure();
+    expect(saved.indicator!.width).toBe(24);
+    expect(saved.indicator!.height).toBe(24);
+    await page.locator('#editor').fill('Текст');
+    await expect(indicator).toHaveAccessibleName('Saving…');
+    expect(await measure()).toEqual(saved);
+    await page.clock.runFor(400);
+    await expect(indicator).toHaveAccessibleName('Saved');
+    expect(await measure()).toEqual(saved);
+  });
+}
+
+test('save icons expose a dismissible focus tooltip and respect reduced motion (#281)', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
+  const indicator = page.locator('#save-indicator');
+  await page.locator('#doc-menu-open').focus();
+  await page.keyboard.press('Tab');
+  await expect(indicator).toBeFocused();
+  expect(await indicator.evaluate(el => getComputedStyle(el, '::after').display)).toBe('block');
+  expect(await indicator.evaluate(el => getComputedStyle(el, '::after').content)).toBe('"Saved"');
+  await page.keyboard.press('Escape');
+  expect(await indicator.evaluate(el => getComputedStyle(el, '::after').display)).toBe('none');
+  await page.locator('#editor').fill('Текст');
+  await expect(indicator).toHaveAccessibleName('Saving…');
+  expect(await indicator.evaluate(el => getComputedStyle(el, '::before').animationName)).toBe('none');
+  await page.clock.runFor(400);
+  await expect(indicator).toHaveAccessibleName('Saved');
+  await indicator.hover();
+  expect(await indicator.evaluate(el => getComputedStyle(el, '::after').display)).toBe('block');
 });
 
 for (const width of [320, 390, 1280]) {

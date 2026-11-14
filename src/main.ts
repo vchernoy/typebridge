@@ -491,6 +491,16 @@ const documentSearch = createDocumentSearch({
 });
 /** Document-identity counter lives on the workspace as sessionGeneration (formerly viewGeneration). */
 const saveIndicator = document.querySelector<HTMLElement>('#save-indicator')!;
+const saveIndicatorLabel = saveIndicator.querySelector<HTMLElement>('.save-indicator-label')!;
+for (const event of ['pointerenter', 'focus']) {
+  saveIndicator.addEventListener(event, () => { delete saveIndicator.dataset.tooltipDismissed; });
+}
+saveIndicator.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || saveIndicator.dataset.tooltipDismissed) return;
+  saveIndicator.dataset.tooltipDismissed = 'true';
+  event.preventDefault();
+  event.stopPropagation();
+});
 /** Persistence state, independent of action feedback retained in the live status line. */
 function updateSaveIndicator(): void {
   const clearButton = document.querySelector<HTMLButtonElement>('#clear-document-data');
@@ -502,7 +512,8 @@ function updateSaveIndicator(): void {
     : state.editBlock ? (workspace.dirty() ? 'unsaved' : 'readonly')
     : !writing || !state.db ? 'unsaved' : workspace.dirty() ? 'saving' : 'saved';
   const label = { failed: 'Save failed', readonly: 'Read-only', unsaved: 'Not saved', saving: 'Saving…', saved: 'Saved' }[indicator];
-  if (saveIndicator.textContent !== label) saveIndicator.textContent = label;
+  if (saveIndicatorLabel.textContent !== label) saveIndicatorLabel.textContent = label;
+  if (saveIndicator.getAttribute('aria-label') !== label) saveIndicator.setAttribute('aria-label', label);
   saveIndicator.dataset.state = indicator;
 }
 // Viewers use their own key namespace so they never overwrite an editor's saved offsets.
