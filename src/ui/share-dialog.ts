@@ -136,8 +136,8 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const row = document.createElement('div');
   row.className = 'share-link-row';
   row.append(link, copy);
-  content.append(privacy, preview, editLabel);
+  content.append(privacy, linkLabel, row, status, editLabel);
   if (format === 'markdown') content.append(viewLabel);
-  content.append(linkLabel, row, status);
+  content.append(preview);
   await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', returnFocus: deps.returnFocus() });
 }
