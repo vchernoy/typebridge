@@ -1,3 +1,4 @@
+import { polishedMarkdown, assertPolishedMarkdown } from './markdown-polish-helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { openFind, setAutosave } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
@@ -204,4 +205,11 @@ test('entering Rendered preserves pending Find and Replace edits', async ({ page
   await openFind(page);
   await expect(page.locator('#find-text')).toHaveValue('pending find');
   await expect(page.locator('#replace-text')).toHaveValue('pending replacement');
+});
+
+test('published renderer keeps compact controls on one line and formatted math live', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await markdown(page, polishedMarkdown);
+  await rendered(page);
+  await assertPolishedMarkdown(page.locator('#rendered-document'));
 });
