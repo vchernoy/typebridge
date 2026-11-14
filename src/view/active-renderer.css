@@ -70,3 +70,13 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* KaTeX's two-column aligned output uses legacy mtable columnalign. Native
+   MathML Core engines need CSS text-align on the cells to honor those columns.
+   Direct children keep nested matrices and other table layouts unchanged. */
+.active-reading mtable[columnalign="right left"] > mtr > mtd:first-child {
+  text-align: right;
+}
+.active-reading mtable[columnalign="right left"] > mtr > mtd:nth-child(2) {
+  text-align: left;
+}

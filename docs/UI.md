@@ -65,3 +65,5 @@ surface; its calc input values are temporary and never change the source, saved 
 Source changes refresh it after a short debounce. A collapsible Problems list links errors to
 source line/column. Plain documents have no view switch. Rendering dependencies load through a
 separate dynamic import. Shared pages honor the sender’s source/rendered view choice, without a reading toolbar. A quiet **Edit** hyperlink beside the title appears only when the sender allowed editing; it saves a new local copy and opens the full editor, where source viewing belongs. The muted **Written with TypeBridge** footer remains below the document. Rendering failures show the source with a notice.
+
+Display math supports explicit multiline LaTeX such as `aligned`: two-column relation alignment is applied to native MathML cells in both Rendered editor and shared reading pages. Long display equations scroll horizontally within their math region; line breaks are authored, not generated automatically.
