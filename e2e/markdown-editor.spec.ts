@@ -110,3 +110,17 @@ test('plain documents never request active-md chunks, including offline installa
   await expect(page.locator('#document-view')).toBeHidden();
   expect(active).toEqual([]);
 });
+
+test('rendered Markdown and changing math work offline after first online use', async ({ page, context }) => {
+  await page.goto('/editor.html');
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  // The next navigation is controlled; renderer-only assets are cached by actual use.
+  await markdown(page);
+  await rendered(page);
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('#rendered-document input')).toHaveValue('2');
+  await page.locator('#rendered-document input').fill('7');
+  await expect(page.locator('#rendered-document output')).toHaveText('21');
+  await expect(page.locator('#rendered-document math').first()).toContainText('21');
+});

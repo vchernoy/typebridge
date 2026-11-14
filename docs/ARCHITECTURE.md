@@ -113,6 +113,7 @@ when its document or source changes. It destroys the previous runtime before re-
 calc and KaTeX. Only `renderActive`'s sanitized HTML enters `innerHTML`; raw document text is
 never interpreted as HTML by TypeBridge. Math uses MathML, with no KaTeX font/CSS download.
 Calc reader values live in the mounted runtime, not document persistence. Runtime teardown also
-occurs on pagehide. The existing service worker still precaches every build asset; its conflict
-with the plain-document no-renderer-request requirement awaits the maintainer decision in
-[#244](https://github.com/vchernoy/typebridge/issues/244#issuecomment-6874009761).
+occurs on pagehide. The service worker precaches the app shell, and caches renderer-only chunks/CSS on demand.
+The build graph excludes eager shared dependencies from the lazy set. First-time rendering
+needs connectivity; after its first online use the renderer works offline, including live math.
+This implements the explicit plain-document no-renderer-request requirement in #244.

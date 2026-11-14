@@ -1164,6 +1164,7 @@ setupComparisonOpen({
 markdownView = setupMarkdownView({
   key: scopeSessionKey('typebridge.documentView.v1', windowId),
   shown: () => state.active, text: () => field.value,
+  canChangeView: () => ![editor, titleEditor, findEditor, replaceEditor].some(input => input.composing),
   changedView: rendered => {
     if (renderedMode === rendered) return;
     renderedMode = rendered;

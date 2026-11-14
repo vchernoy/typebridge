@@ -6,6 +6,7 @@ export function setupMarkdownView(deps: {
   shown: () => StoredDraft;
   text: () => string;
   changedView: (rendered: boolean) => void;
+  canChangeView: () => boolean;
 }) {
   const switcher = document.querySelector<HTMLElement>('#document-view')!;
   const select = document.querySelector<HTMLSelectElement>('#document-view-choice')!;
@@ -68,6 +69,7 @@ export function setupMarkdownView(deps: {
     else { root.replaceChildren(); list.replaceChildren(); }
   }
   select.addEventListener('change', () => {
+    if (!deps.canChangeView()) { select.value = preferred; return; }
     preferred = select.value;
     try { sessionStorage.setItem(deps.key, preferred); } catch { /* Optional. */ }
     sync();

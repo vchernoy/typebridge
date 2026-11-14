@@ -220,7 +220,7 @@ for (const operation of ['direct', 'save'] as const) {
     }, operation);
     expect(result.requestSucceeded).toBe(true);
     expect(result.rejected).toBe(true);
-    expect(result.stored).toEqual({ ...result.base, revision: 1 });
+    expect(result.stored).toEqual({ ...result.base, format: 'plain', revision: 1 });
   });
 }
 
