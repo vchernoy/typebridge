@@ -89,6 +89,7 @@ test('a too-large regeneration cannot copy the previous link and a later toggle 
   await checkbox.uncheck();
   await expect(dialog(page).locator('.share-status')).toContainText('too large to share as a link');
   await expect(linkField(page)).toHaveValue('');
+  await expect(linkField(page)).toHaveAttribute('placeholder', '');
   await expect(dialog(page).getByRole('button', { name: 'Copy link' })).toBeDisabled();
   await checkbox.check();
   const { decoded } = await decodeShown(page);

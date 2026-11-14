@@ -95,6 +95,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     void make(edit.checked).then(url => {
       if (current !== generation) return;
       if (!url) {
+        link.placeholder = '';
         status.textContent = TOO_LARGE_TEXT;
         return;
       }
