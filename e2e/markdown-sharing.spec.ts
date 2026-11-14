@@ -9,16 +9,14 @@ async function link(text = markdown, view: 'source' | 'rendered' = 'rendered'): 
   return '/read.html#doc=' + result.payload;
 }
 
-test('Markdown link is live, toggles source, stores nothing and copies its format', async ({ page }) => {
+test('Markdown link is live, has minimal chrome, stores nothing and copies its format', async ({ page }) => {
   await page.goto(await link());
   await expect(page.locator('#read-text .active-doc')).toBeVisible();
   await page.locator('#read-text input').fill('5');
   await expect(page.locator('#read-text output')).toHaveText('15');
   await expect(page.locator('#read-text math')).toContainText('15');
-  await page.locator('#read-view').click();
-  await expect(page.locator('#read-text')).toHaveText(markdown);
-  await page.locator('#read-view').click();
-  await expect(page.locator('#read-text input')).toHaveValue('2');
+  await expect(page.locator('#read-view, .read-label')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeVisible();
   expect(await page.evaluate(async () => ({ local: localStorage.length, session: sessionStorage.length, db: await indexedDB.databases() })))
     .toEqual({ local: 0, session: 0, db: [] });
   await page.reload();
@@ -32,12 +30,13 @@ test('Markdown link is live, toggles source, stores nothing and copies its forma
   await expect(editor.locator('#document-view')).toBeVisible();
 });
 
-test('source hint shows source first and can show its page', async ({ page }) => {
+test('source hint delivers source without a reading toolbar', async ({ page }) => {
   await page.goto(await link(markdown, 'source'));
   await expect(page.locator('#read-text')).toHaveText(markdown);
-  await expect(page.locator('#read-view')).toHaveText('Show page');
-  await page.locator('#read-view').click();
-  await expect(page.locator('#read-text output')).toHaveText('6');
+  await expect(page.locator('#read-view')).toHaveCount(0);
+  await page.getByRole('link', { name: 'Edit', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.host-status')).toContainText('Saved as a new document');
 });
 
 for (const [name, payload] of [
@@ -91,4 +90,22 @@ test("local Markdown links preserve the share payload and live reader state", as
   await expect(page.locator("#read-title")).toHaveText("Shared Markdown");
   await page.reload();
   await expect(page.locator("#read-text output")).toHaveText("6");
+});
+
+test('rendering failure falls back to source without requiring a source control', async ({ page }) => {
+  await page.route('**/assets/active-renderer-*.js', route => route.abort());
+  await page.goto(await link());
+  await expect(page.locator('#read-notice')).toHaveText('Could not render this document. Showing its text as written.');
+  await expect(page.locator('#read-text')).toHaveText(markdown);
+  await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeVisible();
+});
+
+test('rendered links with editing disabled offer only the attribution link outside the content', async ({ page }) => {
+  const result = await encodeSharePayload({ title: 'Calculator', text: markdown, format: 'markdown', view: 'rendered', edit: false });
+  if (!result.ok) throw new Error('Could not make test link');
+  await page.goto('/read.html#doc=' + result.payload);
+  await expect(page.locator('#read-text output')).toHaveText('6');
+  await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeHidden();
+  await expect(page.locator('.read-heading a:visible, .read-footer a:visible')).toHaveCount(1);
+  await expect(page.locator('.read-footer')).toHaveText('Written with TypeBridge');
 });

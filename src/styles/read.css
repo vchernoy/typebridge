@@ -8,30 +8,35 @@ body.read-page {
   background: var(--background);
   color: var(--text);
 }
-.read-bar {
+.read-heading {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 8px 16px;
-  width: min(100%, 760px);
-  margin: 0 auto;
-  padding: 16px 20px 0;
-  box-sizing: border-box;
+  gap: 16px;
 }
-.read-label {
-  color: var(--muted);
-  font-size: 0.9rem;
+.read-heading .read-title {
+  min-width: 0;
 }
 .read-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
-  padding: 0 14px;
+  min-width: 44px;
+  flex-shrink: 0;
+}
+.read-edit[hidden] {
+  display: none;
+}
+.read-edit[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: progress;
 }
 .read-main {
   flex: 1;
   width: min(100%, 760px);
   margin: 0 auto;
-  padding: 8px 20px 32px;
+  padding: 16px 20px 32px;
   box-sizing: border-box;
 }
 .read-title {
