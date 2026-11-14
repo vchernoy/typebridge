@@ -79,6 +79,22 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
   editCopy.onclick = () => { void saveCopy(shared); };
 }
 
+// Local Markdown anchors must not replace the fragment carrying the share payload.
+body.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const anchor = event.target.closest<HTMLAnchorElement>('a[href^="#"]');
+  if (!anchor || !body.contains(anchor)) return;
+  event.preventDefault();
+  let id: string;
+  try {
+    id = decodeURIComponent(anchor.hash.slice(1));
+  } catch {
+    return;
+  }
+  const target = Array.from(body.querySelectorAll("[id]")).find((element) => element.id === id);
+  target?.scrollIntoView();
+});
+
 let saving = false;
 /** Save the shared text as a new document (never overwriting one), then open it in the editor. */
 async function saveCopy(shared: SharedDocument): Promise<void> {

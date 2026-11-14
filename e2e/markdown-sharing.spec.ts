@@ -79,3 +79,16 @@ test('share dialog sends real format and selected reader view', async ({ page })
   await expect(dialog.locator('#share-copy')).toBeEnabled();
   await expect.poll(decode).toMatchObject({ ok: true, document: { format: 'markdown', view: 'source' } });
 });
+
+test("local Markdown links preserve the share payload and live reader state", async ({ page }) => {
+  await page.goto(await link(markdown + "\n\n[Section](#section)\n\n## Section"));
+  await expect(page.locator("#read-text output")).toHaveText("6");
+  const url = page.url();
+  await page.locator("#read-text input").fill("5");
+  await page.getByRole("link", { name: "Section", exact: true }).click();
+  expect(page.url()).toBe(url);
+  await expect(page.locator("#read-text output")).toHaveText("15");
+  await expect(page.locator("#read-title")).toHaveText("Shared Markdown");
+  await page.reload();
+  await expect(page.locator("#read-text output")).toHaveText("6");
+});
