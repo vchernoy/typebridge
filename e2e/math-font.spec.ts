@@ -1,5 +1,6 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { encodeSharePayload } from '../src/editor/share-link';
+import { fitFractionFences } from '../src/view/math-fences';
 
 const formula = String.raw`$$\left(1+\frac{r}{100}\right)^n$$`;
 const source = formula + '\n\n$$\\sqrt{\\frac{1}{1+x}}$$';
@@ -15,31 +16,48 @@ test('bundled math font native delimiter sizing without the app cascade', async 
   await math.evaluate(async element => {
     await document.fonts.load(`${getComputedStyle(element).fontSize} "Fira Math"`, '(r100)');
   });
-  const markup = await math.evaluate(element => element.outerHTML);
+  const markup = await math.evaluate(element => {
+    const copy = element.cloneNode(true) as Element;
+    // This fixture has no authored sizes: remove renderer-generated minima so
+    // the isolated document actually exercises the production correction.
+    for (const fence of copy.querySelectorAll('mo[minsize]')) fence.removeAttribute('minsize');
+    return copy.outerHTML;
+  });
   const fontURL = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name).find(name => /\/FiraMath-Regular-[\w-]+\.woff2/.test(name)));
   expect(fontURL).toBeTruthy();
   // A new, empty document removes both application and upstream styles. Load the
   // very same shipped font, rather than substituting another font or renderer.
   await page.setContent('<!doctype html><html><head></head><body></body></html>');
-  const results = await page.evaluate(async ({ markup, fontURL }) => {
+  await page.evaluate(async ({ markup, fontURL }) => {
     const face = new FontFace('Isolated math', `url("${fontURL}")`);
     document.fonts.add(await face.load());
-    return ['native', 'block', 'explicit-stretchy'].map(mode => {
+    for (const mode of ['native', 'block', 'explicit-stretchy', 'authored']) {
       const host = document.createElement('div');
       host.innerHTML = markup;
       document.body.append(host);
+      host.dataset.mode = mode;
       const element = host.querySelector('math')!;
       element.style.fontFamily = '"Isolated math"';
       element.style.fontSize = '16px';
       if (mode === 'block') element.style.display = 'block';
       if (mode === 'explicit-stretchy') for (const node of element.querySelectorAll('mo[fence]')) node.setAttribute('stretchy', 'true');
-      const parenthesis = Array.from(element.querySelectorAll('mo')).find(node => node.textContent === '(')!;
-      const fraction = element.querySelector('mfrac')!;
+      if (mode === 'authored') for (const node of element.querySelectorAll('mo[fence]')) {
+        node.setAttribute('minsize', '50px');
+        node.setAttribute('maxsize', '50px');
+      }
+    }
+  }, { markup, fontURL: fontURL! });
+  // Exercise the same layout correction as the renderer, without its CSS.
+  await page.evaluate(fitFractionFences, undefined);
+  await expect(page.locator('[data-mode="authored"] mo').first()).toHaveAttribute('minsize', '50px');
+  await expect(page.locator('[data-mode="authored"] mo').first()).toHaveAttribute('maxsize', '50px');
+  const results = await page.evaluate(() => Array.from(document.body.children).map(host => {
+      const parenthesis = Array.from(host.querySelectorAll('mo')).find(node => node.textContent === '(')!;
+      const fraction = host.querySelector('mfrac')!;
       const parenthesisHeight = parenthesis.getBoundingClientRect().height;
       const fractionHeight = fraction.getBoundingClientRect().height;
-      return { mode, parenthesisHeight, fractionHeight, stretched: fractionHeight > 0 && parenthesisHeight >= fractionHeight };
-    });
-  }, { markup, fontURL: fontURL! });
+      return { mode: (host as HTMLElement).dataset.mode, parenthesisHeight, fractionHeight, stretched: fractionHeight > 0 && parenthesisHeight >= fractionHeight };
+    }));
   await testInfo.attach('native-math-geometry.json', { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
   expect(results).toEqual(results.map(result => ({ ...result, stretched: true })));
 });
@@ -100,6 +118,21 @@ for (const surface of ['reader', 'editor'] as const) {
     }
     const root = page.locator(surface === 'reader' ? '#read-text' : '#rendered-document');
     await assertStretch(root);
+    // Live math replaces native markup. Exercise the same mutation path with a
+    // taller nested fraction, then restore it and require the fence to shrink.
+    const original = await root.locator('math').first().evaluate(element => {
+      const fraction = element.querySelector('mfrac')!;
+      const previous = fraction.innerHTML;
+      const row = document.createElementNS('http://www.w3.org/1998/Math/MathML', 'mrow');
+      row.append(fraction.firstElementChild!.cloneNode(true), fraction.cloneNode(true));
+      fraction.replaceChild(row, fraction.firstElementChild!);
+      return previous;
+    });
+    await assertStretch(root);
+    const tallMinimum = await root.locator('math').first().locator('mo').first().getAttribute('minsize');
+    await root.locator('math').first().evaluate((element, original) => { element.querySelector('mfrac')!.innerHTML = original; }, original);
+    await assertStretch(root);
+    await expect.poll(() => root.locator('math').first().locator('mo').first().getAttribute('minsize')).not.toBe(tallMinimum);
     expect(fonts).toHaveLength(1);
     const font = new URL(fonts[0]);
     expect(font.origin).toBe(new URL(page.url()).origin);
