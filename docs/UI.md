@@ -59,7 +59,7 @@ A new private document that has never saved appears only in its window’s Docum
 Documents → Format chooses Plain text (the default for new and old documents) or Markdown.
 The format belongs to the document and follows ownership, Autosave/private state, recovery,
 JSON export/import and the document change sequence. A private format change stays in memory.
-Markdown uses active-md 0.1.2: GFM, callouts/details, MathML math and calc bindings.
+Markdown uses active-md 0.2.0: GFM, callouts/details, MathML math and calc bindings.
 Each window independently remembers Edit or Rendered in sessionStorage. Rendered is a reading
 surface; its calc input values are temporary and never change the source, saved row or journal.
 Only `{{…}}` placeholders inside math and `:value[…]` bindings update when calc inputs change;
@@ -76,3 +76,8 @@ Display math supports explicit multiline LaTeX such as `aligned`: two-column rel
 The generated Link and Copy link action follow the privacy explanation, before reader options and the secondary document preview. The source preview is limited to four displayed lines; the document and generated link remain complete. The dialog body scrolls independently while Close stays available, and the link/Copy row wraps in narrow windows.
 
 The Share link dialog previews the selected reader view (Rendered page or Source). Rendered previews use the same local renderer as the reading page, with source fallback if loading fails. An upper-right × button named Close dismisses the dialog; Escape and focus return to the opener remain available.
+
+
+Rendered reading uses compact number controls sized from their declared ranges, with sentence-sized, normal-weight input text. Math prefers locally installed STIX Two Math, Cambria Math or Latin Modern Math, with the browser's math fallback; TypeBridge does not download math fonts. Long display formulas scroll in their HTML wrapper, with a fading edge only where more content remains. Short formulas have no fade.
+
+The six callout kinds have distinct theme-aware borders, tinted backgrounds and title colours; details keep a neutral border. Shared-page Edit and TypeBridge attribution links use the theme accent, hover emphasis and keyboard focus outline. These presentation changes do not save reader input values or change the shared source.
