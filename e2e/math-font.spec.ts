@@ -4,6 +4,46 @@ import { encodeSharePayload } from '../src/editor/share-link';
 const formula = String.raw`$$\left(1+\frac{r}{100}\right)^n$$`;
 const source = formula + '\n\n$$\\sqrt{\\frac{1}{1+x}}$$';
 
+// Isolate the native engine from the app cascade while investigating #308.
+// Keep the application regressions below independent of these fixture mutations.
+test('bundled math font native delimiter sizing without the app cascade', async ({ page }, testInfo) => {
+  const encoded = await encodeSharePayload({ title: 'Native math isolation', text: source, format: 'markdown', view: 'rendered', edit: true });
+  if (!encoded.ok) throw new Error('Cannot encode fixture');
+  await page.goto('/read.html#doc=' + encoded.payload);
+  const math = page.locator('#read-text math').first();
+  await expect(math).toBeVisible();
+  await math.evaluate(async element => {
+    await document.fonts.load(`${getComputedStyle(element).fontSize} "STIX Two Math"`, '(r100)');
+  });
+  const markup = await math.evaluate(element => element.outerHTML);
+  const fontURL = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name).find(name => /\/STIX2Math-[\w-]+\.woff2/.test(name)));
+  expect(fontURL).toBeTruthy();
+  // A new, empty document removes both application and upstream styles. Load the
+  // very same shipped font, rather than substituting another font or renderer.
+  await page.setContent('<!doctype html><html><head></head><body></body></html>');
+  const results = await page.evaluate(async ({ markup, fontURL }) => {
+    const face = new FontFace('Isolated STIX', `url("${fontURL}")`);
+    document.fonts.add(await face.load());
+    return ['native', 'block', 'explicit-stretchy'].map(mode => {
+      const host = document.createElement('div');
+      host.innerHTML = markup;
+      document.body.append(host);
+      const element = host.querySelector('math')!;
+      element.style.fontFamily = '"Isolated STIX"';
+      element.style.fontSize = '16px';
+      if (mode === 'block') element.style.display = 'block';
+      if (mode === 'explicit-stretchy') for (const node of element.querySelectorAll('mo[fence]')) node.setAttribute('stretchy', 'true');
+      const parenthesis = Array.from(element.querySelectorAll('mo')).find(node => node.textContent === '(')!;
+      const fraction = element.querySelector('mfrac')!;
+      const parenthesisHeight = parenthesis.getBoundingClientRect().height;
+      const fractionHeight = fraction.getBoundingClientRect().height;
+      return { mode, parenthesisHeight, fractionHeight, stretched: fractionHeight > 0 && parenthesisHeight >= fractionHeight };
+    });
+  }, { markup, fontURL: fontURL! });
+  await testInfo.attach('native-math-geometry.json', { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
+  expect(results).toEqual(results.map(result => ({ ...result, stretched: true })));
+});
+
 async function assertStretch(root: Locator): Promise<void> {
   const math = root.locator('math').first();
   await expect(math).toBeVisible();
