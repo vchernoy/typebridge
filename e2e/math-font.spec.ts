@@ -7,13 +7,21 @@ const source = formula + '\n\n$$\\sqrt{\\frac{1}{1+x}}$$';
 async function assertStretch(root: Locator): Promise<void> {
   const math = root.locator('math').first();
   await expect(math).toBeVisible();
-  await math.evaluate(async () => { await document.fonts.ready; });
-  const sizes = await math.evaluate(element => {
-    const parenthesis = Array.from(element.querySelectorAll('mo')).find(node => node.textContent === '(')!;
-    return { parenthesis: parenthesis.getBoundingClientRect().height, fraction: element.querySelector('mfrac')!.getBoundingClientRect().height };
+  // Explicitly request the face before observing its load cycle. fonts.ready alone
+  // may refer to the previous layout's cycle when a lazy stylesheet was just added.
+  const loaded = await math.evaluate(async element => {
+    const faces = await document.fonts.load(`${getComputedStyle(element).fontSize} "STIX Two Math"`, '(r100)');
+    await document.fonts.ready;
+    return faces.length > 0 && faces.every(face => face.status === 'loaded');
   });
-  expect(sizes.fraction).toBeGreaterThan(0);
-  expect(sizes.parenthesis).toBeGreaterThanOrEqual(sizes.fraction);
+  expect(loaded).toBe(true);
+  // MathML font substitution can invalidate layout after the font-load promise.
+  // Preserve the actual stretching requirement, waiting for that layout to settle.
+  await expect.poll(async () => math.evaluate(element => {
+    const parenthesis = Array.from(element.querySelectorAll('mo')).find(node => node.textContent === '(')!;
+    const fraction = element.querySelector('mfrac')!.getBoundingClientRect().height;
+    return fraction > 0 && parenthesis.getBoundingClientRect().height >= fraction;
+  })).toBe(true);
 }
 
 for (const surface of ['reader', 'editor'] as const) {
