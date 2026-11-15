@@ -35,7 +35,6 @@
   margin-block: 0.75rem;
 }
 .active-reading .active-input {
-  max-width: 10rem;
   color: inherit;
   background: var(--surface);
 }
@@ -71,16 +70,6 @@
   overflow-wrap: anywhere;
 }
 
-/* KaTeX's two-column aligned output uses legacy mtable columnalign. Native
-   MathML Core engines need CSS text-align on the cells to honor those columns.
-   Direct children keep nested matrices and other table layouts unchanged. */
-.active-reading mtable[columnalign="right left"] > mtr > mtd:first-child {
-  text-align: right;
-}
-.active-reading mtable[columnalign="right left"] > mtr > mtd:nth-child(2) {
-  text-align: left;
-}
-
 /* Scroll the HTML math wrapper, not the native MathML element: overflow on
    <math> itself is not consistently scrollable in Firefox/WebKit. Let the
    inner equation keep its intrinsic width so the wrapper owns all overflow. */
@@ -91,4 +80,11 @@
 .active-reading .active-math-display > .katex > math {
   max-width: none;
   overflow: visible;
+}
+
+/* Native MathML's UA centering also centers the anonymous math row. Chromium
+   text-align:center from the package only centers inline text, shifting short
+   matrix entries left. Restore native centering for center-column tables. */
+.active-reading .active-doc mtable[columnalign^="center"] > mtr > mtd {
+  text-align: revert;
 }

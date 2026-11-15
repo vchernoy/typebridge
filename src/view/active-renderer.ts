@@ -2,6 +2,7 @@
 import { renderActive } from '@vchernoy/remark-active';
 import katex from 'katex';
 import { mount } from '@vchernoy/active-runtime';
+import '@vchernoy/active-runtime/style.css';
 import './active-renderer.css';
 
 export function renderDocument(root: HTMLElement, text: string, locale: string) {

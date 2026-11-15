@@ -1,3 +1,4 @@
+import { polishedMarkdown, assertPolishedMarkdown } from './markdown-polish-helpers';
 import { expect, test } from '@playwright/test';
 import { encodeSharePayload, decodeSharePayload, sharePayloadFromHash } from '../src/editor/share-link';
 import { readStoredDocs } from './storage-helpers';
@@ -108,4 +109,11 @@ test('rendered links with editing disabled offer only the attribution link outsi
   await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeHidden();
   await expect(page.locator('.read-heading a:visible, .read-footer a:visible')).toHaveCount(1);
   await expect(page.locator('.read-footer')).toHaveText('Written with TypeBridge');
+});
+
+test('shared renderer keeps compact controls on one line and formatted math live', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.goto(await link(polishedMarkdown));
+  await expect(page.locator('#read-text .active-doc')).toBeVisible();
+  await assertPolishedMarkdown(page.locator('#read-text'));
 });
