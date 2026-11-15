@@ -37,7 +37,7 @@ async function markdown(page: Page, text = source): Promise<void> {
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
 }
 async function rendered(page: Page): Promise<void> {
-  await page.locator('#document-view-choice').selectOption('rendered');
+  await page.locator('#document-view-preview').click();
   await expect(page.locator('#rendered-document .active-doc')).toBeVisible();
 }
 
@@ -148,8 +148,8 @@ test('format changes follow the document across windows', async ({ page, context
 test('switching to Rendered waits for composition to finish', async ({ page }) => {
   await markdown(page);
   await page.locator('#editor').dispatchEvent('compositionstart');
-  await page.locator('#document-view-choice').selectOption('rendered');
-  await expect(page.locator('#document-view-choice')).toHaveValue('edit');
+  await page.locator('#document-view-preview').click();
+  await expect(page.locator('#document-view-edit')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#editor')).toBeVisible();
   await page.locator('#editor').dispatchEvent('compositionend', { data: '' });
   await rendered(page);
@@ -185,7 +185,7 @@ test('entering Rendered preserves pending Find and Replace edits', async ({ page
   await page.clock.pauseAt(new Date('2026-01-01T00:01:00Z'));
   await page.locator('#find-text').fill('pending find');
   await page.locator('#replace-text').fill('pending replacement');
-  await page.locator('#document-view-choice').selectOption('rendered');
+  await page.locator('#document-view-preview').click();
   await page.clock.runFor(400);
   await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const fields = await page.evaluate(() => new Promise<{ find: string; replace: string }>((resolve, reject) => {
@@ -201,7 +201,7 @@ test('entering Rendered preserves pending Find and Replace edits', async ({ page
   expect(fields).toMatchObject({ find: 'pending find', replace: 'pending replacement' });
   await page.clock.resume();
   await page.reload();
-  await page.locator('#document-view-choice').selectOption('edit');
+  await page.locator('#document-view-edit').click();
   await openFind(page);
   await expect(page.locator('#find-text')).toHaveValue('pending find');
   await expect(page.locator('#replace-text')).toHaveValue('pending replacement');
@@ -213,3 +213,44 @@ test('published renderer keeps compact controls on one line and formatted math l
   await rendered(page);
   await assertPolishedMarkdown(page.locator('#rendered-document'));
 });
+
+for (const width of [320, 390, 1280]) {
+  test(`Edit/Preview is one click on the title row at ${width}px, including Focus`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await markdown(page, '# Preview switch\n\nSame source.');
+    const group = page.getByRole('group', { name: 'View', exact: true });
+    const edit = group.getByRole('button', { name: 'Edit', exact: true });
+    const preview = group.getByRole('button', { name: 'Preview', exact: true });
+    await expect(edit).toHaveAttribute('aria-pressed', 'true');
+    await expect(preview).toHaveAttribute('aria-pressed', 'false');
+    const geometry = [];
+    for (const focus of [false, true]) {
+      if (focus) await page.locator('#focus-mode').click();
+      await expect(group).toBeVisible();
+      const boxes = await Promise.all(['#doc-menu-open', '#autosave', '#document-view', '#save-indicator'].map(id => page.locator(id).boundingBox()));
+      const centres = boxes.map(box => box!.y + box!.height / 2);
+      expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(4);
+      const editTop = (await page.locator('#editor').boundingBox())!.y;
+      await preview.click();
+      await expect(preview).toHaveAttribute('aria-pressed', 'true');
+      await expect(edit).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.locator('#editor')).toBeHidden();
+      await expect(page.locator('#rendered-document h1')).toHaveText('Preview switch');
+      const previewTop = (await page.locator('#rendered-document').boundingBox())!.y;
+      expect(previewTop).toBeLessThanOrEqual(editTop);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      if (width <= 640) for (const button of [edit, preview]) {
+        const box = (await button.boundingBox())!;
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+      await page.screenshot({ path: testInfo.outputPath(`preview-${width}-${focus ? 'focus' : 'normal'}.png`) });
+      // Native keyboard button behavior remains available with the icon-only UI.
+      await edit.focus(); await edit.press('Enter');
+      await expect(edit).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#editor')).toHaveValue('# Preview switch\n\nSame source.');
+      geometry.push({ width, focus, editTop, previewTop });
+    }
+    await testInfo.attach('view-switch-geometry.json', { body: JSON.stringify(geometry), contentType: 'application/json' });
+  });
+}

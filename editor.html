@@ -59,6 +59,20 @@
               <span id="autosave-doc-hint" class="visually-hidden"
                 >Per document. Off marks this document private so text typed while private is not saved.</span
               >
+              <div id="document-view" class="document-view" role="group" aria-label="View" hidden>
+                <button id="document-view-edit" type="button" aria-label="Edit" aria-pressed="true" title="Edit">
+                  <span aria-hidden="true" class="view-icon">✎</span><span class="view-label">Edit</span>
+                </button>
+                <button
+                  id="document-view-preview"
+                  type="button"
+                  aria-label="Preview"
+                  aria-pressed="false"
+                  title="Preview"
+                >
+                  <span aria-hidden="true" class="view-icon">👁</span><span class="view-label">Preview</span>
+                </button>
+              </div>
             </div>
             <span
               id="save-indicator"
@@ -387,13 +401,6 @@
           <button id="keep-deleted" type="button">Keep as new document</button>
           <button id="close-deleted" type="button">Close</button>
         </div>
-        <label id="document-view" hidden
-          >View
-          <select id="document-view-choice">
-            <option value="edit">Edit</option>
-            <option value="rendered">Rendered</option>
-          </select></label
-        >
         <section id="rendered-document" class="active-reading" aria-label="Rendered document" hidden></section>
         <div id="render-problems" hidden><ul id="render-problem-list"></ul></div>
         <div class="editor-shell">

@@ -9,7 +9,8 @@ export function setupMarkdownView(deps: {
   canChangeView: () => boolean;
 }) {
   const switcher = document.querySelector<HTMLElement>('#document-view')!;
-  const select = document.querySelector<HTMLSelectElement>('#document-view-choice')!;
+  const editButton = document.querySelector<HTMLButtonElement>('#document-view-edit')!;
+  const previewButton = document.querySelector<HTMLButtonElement>('#document-view-preview')!;
   const source = document.querySelector<HTMLElement>('.editor-shell')!;
   const root = document.querySelector<HTMLElement>('#rendered-document')!;
   const problems = document.querySelector<HTMLElement>('#render-problems')!;
@@ -23,7 +24,7 @@ export function setupMarkdownView(deps: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = (): void => { generation++; clearTimeout(timer); live?.destroy(); live = undefined; };
   function edit(): void {
-    preferred = 'edit'; select.value = preferred;
+    preferred = 'edit';
     try { sessionStorage.setItem(deps.key, preferred); } catch { /* Per-window preference is optional. */ }
     sync();
   }
@@ -63,7 +64,9 @@ export function setupMarkdownView(deps: {
     const draft = deps.shown();
     const markdown = documentFormat(draft) === 'markdown';
     const rendered = markdown && preferred === 'rendered';
-    switcher.hidden = !markdown; select.value = preferred;
+    switcher.hidden = !markdown;
+    editButton.setAttribute('aria-pressed', String(!rendered));
+    previewButton.setAttribute('aria-pressed', String(rendered));
     source.hidden = rendered; root.hidden = !rendered;
     deps.changedView(rendered);
     const text = deps.text();
@@ -73,12 +76,14 @@ export function setupMarkdownView(deps: {
     if (rendered) timer = setTimeout(() => { void render(text); }, 120);
     else { root.replaceChildren(); problems.replaceChildren(list); list.replaceChildren(); }
   }
-  select.addEventListener('change', () => {
-    if (!deps.canChangeView()) { select.value = preferred; return; }
-    preferred = select.value;
-    try { sessionStorage.setItem(deps.key, preferred); } catch { /* Optional. */ }
-    sync();
-  });
+  for (const [button, view] of [[editButton, 'edit'], [previewButton, 'rendered']] as const) {
+    button.addEventListener('click', () => {
+      if (!deps.canChangeView()) return;
+      preferred = view;
+      try { sessionStorage.setItem(deps.key, preferred); } catch { /* Optional. */ }
+      sync();
+    });
+  }
   for (const event of ['input', 'historychange']) field.addEventListener(event, sync);
   window.addEventListener('pagehide', stop);
   window.addEventListener('pageshow', event => { if (event.persisted) { previous = ''; sync(); } });
