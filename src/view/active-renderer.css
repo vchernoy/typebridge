@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "STIX Two Math";
+  src:
+    local("STIX Two Math"),
+    url("./fonts/STIX2Math.woff2") format("woff2");
+  font-display: swap;
+}
+
 .active-reading {
   color: var(--text);
   background: var(--surface);

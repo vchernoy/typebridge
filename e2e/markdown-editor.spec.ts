@@ -104,7 +104,7 @@ test('Markdown reading area fits 320px with formulas scrolling locally', async (
 
 test('plain documents never request active-md chunks, including offline installation', async ({ page, context }) => {
   const active: string[] = [];
-  context.on('request', request => { if (/\/assets\/(active-renderer|katex)-/.test(request.url())) active.push(request.url()); });
+  context.on('request', request => { if (/\/assets\/(active-renderer|katex)-/.test(request.url()) || request.resourceType() === 'font') active.push(request.url()); });
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#editor').fill('Plain text');

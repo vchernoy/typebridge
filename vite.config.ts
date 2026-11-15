@@ -18,8 +18,9 @@ function offlineServiceWorker(): Plugin {
         found.add(file);
         const chunk = bundle[file];
         if (!chunk || chunk.type !== 'chunk') return;
-        const metadata = chunk as typeof chunk & { viteMetadata?: { importedCss?: Set<string> } };
+        const metadata = chunk as typeof chunk & { viteMetadata?: { importedCss?: Set<string>; importedAssets?: Set<string> } };
         for (const css of metadata.viteMetadata?.importedCss ?? []) found.add(css);
+        for (const asset of metadata.viteMetadata?.importedAssets ?? []) found.add(asset);
         for (const imported of chunk.imports) visit(imported, found, dynamic);
         if (dynamic) for (const imported of chunk.dynamicImports) visit(imported, found, true);
       };
