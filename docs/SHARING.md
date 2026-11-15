@@ -10,7 +10,7 @@ A shared document travels inside the link's fragment, `https://typebridge.vchern
 |---|---|
 | `title` | Document title, at most 150 characters |
 | `text` | Document text, exactly as written |
-| `format` | Document format; `plain` or `markdown` (active-md 0.1.2: GFM, callouts, math and calc) |
+| `format` | Document format; `plain` or `markdown` (active-md 0.2.0: GFM, callouts, math and calc) |
 | `view` | How the reading page first shows it: `source` or `rendered` (presentation only) |
 | `edit` | Whether the reading page offers **Edit a copy** (presentation only; it does not protect the text) |
 
@@ -61,3 +61,8 @@ is included. Unknown formats still show source with a notice. Reading alone does
 IndexedDB or write localStorage/sessionStorage; Edit a copy remains the only storage action.
 The app shell is precached; renderer assets cache on demand. A first Markdown render needs
 connectivity, and later rendering works offline after those assets have been used online.
+
+
+Rendered reading uses compact number controls sized from their declared ranges, with sentence-sized, normal-weight input text. Math prefers locally installed STIX Two Math, Cambria Math or Latin Modern Math, with the browser's math fallback; TypeBridge does not download math fonts. Long display formulas scroll in their HTML wrapper, with a fading edge only where more content remains. Short formulas have no fade.
+
+The six callout kinds have distinct theme-aware borders, tinted backgrounds and title colours; details keep a neutral border. Shared-page Edit and TypeBridge attribution links use the theme accent, hover emphasis and keyboard focus outline. These presentation changes do not save reader input values or change the shared source.
