@@ -59,9 +59,12 @@ A new private document that has never saved appears only in its window’s Docum
 Documents → Format chooses Plain text (the default for new and old documents) or Markdown.
 The format belongs to the document and follows ownership, Autosave/private state, recovery,
 JSON export/import and the document change sequence. A private format change stays in memory.
-Markdown uses active-md 0.1.1: GFM, callouts/details, MathML math and calc bindings.
+Markdown uses active-md 0.1.2: GFM, callouts/details, MathML math and calc bindings.
 Each window independently remembers Edit or Rendered in sessionStorage. Rendered is a reading
 surface; its calc input values are temporary and never change the source, saved row or journal.
+Only `{{…}}` placeholders inside math and `:value[…]` bindings update when calc inputs change;
+typed-in numbers stay as written, even inside an `aligned` block. Use `{{final | fixed:2}}`
+for a formatted live math value matching `:value[final]{format=fixed:2}`.
 Source changes refresh it after a short debounce. A collapsible Problems list links errors to
 source line/column. Plain documents have no view switch. Rendering dependencies load through a
 separate dynamic import. Shared pages honor the sender’s source/rendered view choice, without a reading toolbar. A quiet **Edit** hyperlink beside the title appears only when the sender allowed editing; it saves a new local copy and opens the full editor, where source viewing belongs. The muted **Written with TypeBridge** footer remains below the document. Rendering failures show the source with a notice.
