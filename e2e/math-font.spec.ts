@@ -13,23 +13,23 @@ test('bundled math font native delimiter sizing without the app cascade', async 
   const math = page.locator('#read-text math').first();
   await expect(math).toBeVisible();
   await math.evaluate(async element => {
-    await document.fonts.load(`${getComputedStyle(element).fontSize} "STIX Two Math"`, '(r100)');
+    await document.fonts.load(`${getComputedStyle(element).fontSize} "Fira Math"`, '(r100)');
   });
   const markup = await math.evaluate(element => element.outerHTML);
-  const fontURL = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name).find(name => /\/STIX2Math-[\w-]+\.woff2/.test(name)));
+  const fontURL = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name).find(name => /\/FiraMath-Regular-[\w-]+\.woff2/.test(name)));
   expect(fontURL).toBeTruthy();
   // A new, empty document removes both application and upstream styles. Load the
   // very same shipped font, rather than substituting another font or renderer.
   await page.setContent('<!doctype html><html><head></head><body></body></html>');
   const results = await page.evaluate(async ({ markup, fontURL }) => {
-    const face = new FontFace('Isolated STIX', `url("${fontURL}")`);
+    const face = new FontFace('Isolated math', `url("${fontURL}")`);
     document.fonts.add(await face.load());
     return ['native', 'block', 'explicit-stretchy'].map(mode => {
       const host = document.createElement('div');
       host.innerHTML = markup;
       document.body.append(host);
       const element = host.querySelector('math')!;
-      element.style.fontFamily = '"Isolated STIX"';
+      element.style.fontFamily = '"Isolated math"';
       element.style.fontSize = '16px';
       if (mode === 'block') element.style.display = 'block';
       if (mode === 'explicit-stretchy') for (const node of element.querySelectorAll('mo[fence]')) node.setAttribute('stretchy', 'true');
@@ -50,7 +50,7 @@ async function assertStretch(root: Locator): Promise<void> {
   // Explicitly request the face before observing its load cycle. fonts.ready alone
   // may refer to the previous layout's cycle when a lazy stylesheet was just added.
   const loaded = await math.evaluate(async element => {
-    const faces = await document.fonts.load(`${getComputedStyle(element).fontSize} "STIX Two Math"`, '(r100)');
+    const faces = await document.fonts.load(`${getComputedStyle(element).fontSize} "Fira Math"`, '(r100)');
     await document.fonts.ready;
     return faces.length > 0 && faces.every(face => face.status === 'loaded');
   });
@@ -103,7 +103,7 @@ for (const surface of ['reader', 'editor'] as const) {
     expect(fonts).toHaveLength(1);
     const font = new URL(fonts[0]);
     expect(font.origin).toBe(new URL(page.url()).origin);
-    expect(font.pathname).toMatch(/^\/assets\/STIX2Math-[\w-]+\.woff2$/);
+    expect(font.pathname).toMatch(/^\/assets\/FiraMath-Regular-[\w-]+\.woff2$/);
     // Chromium on this font-free Linux setup reproduces the original defect with a text font.
     // Keep this negative control separate from the production family and restore it immediately.
     if (test.info().project.name === 'chromium') {
