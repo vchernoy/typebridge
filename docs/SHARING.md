@@ -10,9 +10,11 @@ A shared document travels inside the link's fragment, `https://typebridge.vchern
 |---|---|
 | `title` | Document title, at most 150 characters |
 | `text` | Document text, exactly as written |
-| `format` | Document format; `plain` or `markdown` (active-md 0.2.0: GFM, callouts, math and calc) |
+| `format` | Document format; `plain` or `markdown` (active-md 0.3.0: GFM, callouts, math and calc) |
 | `view` | How the reading page first shows it: `source` or `rendered` (presentation only) |
 | `edit` | Whether the reading page offers **Edit a copy** (presentation only; it does not protect the text) |
+
+Markdown calc supports ln, log, exp, trigonometric functions, pi and e.
 
 Undo history and settings (theme, transliteration rules, Find options) are always local and never travel.
 
