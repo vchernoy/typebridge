@@ -73,3 +73,13 @@ body.read-page {
   font-size: 0.9rem;
   text-align: center;
 }
+
+.read-edit,
+.read-footer a {
+  color: var(--accent);
+  text-underline-offset: 0.15em;
+}
+.read-edit:hover,
+.read-footer a:hover {
+  text-decoration-thickness: 2px;
+}
