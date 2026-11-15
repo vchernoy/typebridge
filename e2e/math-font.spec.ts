@@ -179,3 +179,44 @@ for (const surface of ['reader', 'editor'] as const) {
     await assertStretch(root);
   });
 }
+
+test('fraction updates measure only the changed formula once per frame', async ({ page }, testInfo) => {
+  const encoded = await encodeSharePayload({ title: 'Batched fences', text: formula + '\n\n' + formula, format: 'markdown', view: 'rendered', edit: true });
+  if (!encoded.ok) throw new Error('Cannot encode fixture');
+  await page.goto('/read.html#doc=' + encoded.payload);
+  await assertStretch(page.locator('#read-text'));
+  const result = await page.locator('#read-text').evaluate(async root => {
+    const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    await nextFrame(); await nextFrame();
+    const maths = Array.from(root.querySelectorAll('math'));
+    const counts = [0, 0];
+    const writes: string[] = [];
+    const originals = maths.map(math => math.querySelector('mfrac')!.getBoundingClientRect);
+    maths.forEach((math, index) => {
+      const fraction = math.querySelector('mfrac')!;
+      fraction.getBoundingClientRect = function () { counts[index]++; return originals[index].call(this); };
+    });
+    const observer = new MutationObserver(records => writes.push(...records.map(record => record.attributeName!)));
+    observer.observe(root, { attributes: true, attributeFilter: ['minsize'], subtree: true });
+    const numerator = maths[0].querySelector('mfrac')!.firstElementChild!;
+    const original = numerator.textContent!;
+    numerator.textContent = '2'; await Promise.resolve();
+    numerator.textContent = '3'; await Promise.resolve();
+    numerator.textContent = original;
+    await nextFrame(); await nextFrame();
+    observer.disconnect();
+    maths.forEach((math, index) => { math.querySelector('mfrac')!.getBoundingClientRect = originals[index]; });
+    const geometry = maths.map(math => ({
+      fence: Array.from(math.querySelectorAll('mo')).find(node => node.textContent === '(')!.getBoundingClientRect().height,
+      fraction: math.querySelector('mfrac')!.getBoundingClientRect().height,
+    }));
+    return { counts, writes, geometry };
+  });
+  await testInfo.attach('batched-fence-measurements.json', { body: JSON.stringify(result, null, 2), contentType: 'application/json' });
+  expect(result.counts).toEqual([1, 0]);
+  expect(result.writes).toEqual([]);
+  for (const geometry of result.geometry) {
+    expect(geometry.fraction).toBeGreaterThan(0);
+    expect(geometry.fence).toBeGreaterThanOrEqual(geometry.fraction);
+  }
+});
