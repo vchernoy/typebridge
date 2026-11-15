@@ -48,12 +48,30 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   let dismissed = false;
   try { dismissed = sessionStorage.getItem(DISMISSED) === 'yes'; } catch { /* Current-page choice still works. */ }
   let waiting: ServiceWorker | null = null;
+  const watched = new Set<ServiceWorker>();
+  function reconcile(): void {
+    // Keep the explicit reload flow's progress/error messages and captured worker.
+    if (reload.disabled) return;
+    const candidate = registration.waiting;
+    if (!candidate || candidate.state !== 'installed' || !workerContainer.controller) {
+      waiting = null;
+      notice.hidden = true;
+      return;
+    }
+    show(candidate);
+  }
+  function watch(worker: ServiceWorker): void {
+    if (watched.has(worker)) return;
+    watched.add(worker);
+    worker.addEventListener('statechange', reconcile);
+  }
   function show(worker: ServiceWorker | null): void {
     if (dismissed || !worker || !workerContainer.controller) return;
     // Only a worker that is still waiting is an update. WebKit can deliver the
     // "installed" statechange after a first-visit worker already activated and
     // claimed this page, which showed a spurious notice (#175 / #180).
     if (worker.state !== 'installed' || registration.waiting !== worker) return;
+    watch(worker);
     waiting = worker;
     message.textContent = 'New version available';
     notice.hidden = false;
@@ -61,11 +79,10 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   function watchInstalling(): void {
     const installing = registration.installing;
     if (!installing) return;
-    installing.addEventListener('statechange', () => {
-      if (installing.state === 'installed') show(registration.waiting ?? installing);
-    });
+    watch(installing);
   }
-  show(registration.waiting);
+  reconcile();
+  workerContainer.addEventListener('controllerchange', reconcile);
   watchInstalling();
   registration.addEventListener('updatefound', watchInstalling);
   dismiss.addEventListener('click', () => {

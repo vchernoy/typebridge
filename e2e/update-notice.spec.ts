@@ -20,7 +20,13 @@ async function waitingUpdate(page: Page, options = { late: false, failActivation
     Object.assign(registration, { waiting: !active && !late ? worker : null, installing: null, active: {} });
     Object.assign(container, { controller: {}, ready: Promise.resolve(registration), register: () => Promise.resolve(registration) });
     Object.defineProperty(navigator, 'serviceWorker', { value: container });
-    Object.assign(window, { installTestUpdate: () => {
+    Object.assign(window, { retireTestUpdate: (event: string) => {
+      Object.assign(worker, { state: 'activated' });
+      Object.assign(registration, { waiting: null, active: worker });
+      Object.assign(container, { controller: worker });
+      if (event === 'statechange') worker.dispatchEvent(new Event(event));
+      else container.dispatchEvent(new Event(event));
+    }, installTestUpdate: () => {
       Object.assign(registration, { installing: worker });
       registration.dispatchEvent(new Event('updatefound'));
       Object.assign(worker, { state: 'installed' });
@@ -167,3 +173,25 @@ test('an "installed" event for a worker that is already active and not waiting s
   await page.waitForTimeout(300);
   await expect(page.locator('#update-notice')).toBeHidden();
 });
+
+
+for (const late of [false, true]) for (const event of ['statechange', 'controllerchange']) {
+  test(`externally activated ${late ? 'later' : 'initial'} update retires notice on ${event}`, async ({ page }) => {
+    await waitingUpdate(page, { late, failActivation: false });
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto('/editor.html');
+    await expect(page.locator('#editor')).toBeEnabled();
+    if (late) await page.evaluate(() => (window as unknown as { installTestUpdate: () => void }).installTestUpdate());
+    await expect(page.locator('#update-notice')).toBeVisible();
+    await page.locator('#editor').fill('Retained after external activation');
+    const navigations: string[] = [];
+    page.on('framenavigated', frame => navigations.push(frame.url()));
+    await page.evaluate(event => (window as unknown as { retireTestUpdate: (event: string) => void }).retireTestUpdate(event), event);
+    await expect(page.locator('#update-notice')).toBeHidden();
+    await expect(page.locator('#editor')).toHaveValue('Retained after external activation');
+    await expect(page.locator('#save-indicator')).toHaveText('Saved');
+    expect(navigations).toEqual([]);
+    expect(await page.evaluate(() => sessionStorage.getItem('test.update.activated'))).toBeNull();
+    await expect.poll(async () => (await page.locator('#editor').boundingBox())!.y).toBeLessThan(300);
+  });
+}
