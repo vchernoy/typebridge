@@ -6,6 +6,8 @@ export type ConfirmChoiceOptions = {
   confirmLabel?: string;
   /** Label for the safe/cancel action (e.g. Keep saved copy). Escape chooses this. */
   cancelLabel: string;
+  /** Information-only sheets may place their close control beside the title. */
+  closeInHeader?: boolean;
   /**
    * Element that should receive focus after the dialog closes. Prefer this when the
    * opener may be disabled for the modal duration — capture it before disabling.
@@ -78,7 +80,17 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
 
     if (options.confirmLabel === undefined) actions.append(cancel);
     else actions.append(cancel, confirm);
-    dialog.append(title, message, actions);
+    const headerClose = options.closeInHeader && options.confirmLabel === undefined;
+    if (headerClose) {
+      const header = document.createElement('div');
+      header.className = 'confirm-dialog-header';
+      cancel.textContent = '×';
+      cancel.id = 'confirm-dialog-close';
+      cancel.className = 'confirm-dialog-close';
+      cancel.setAttribute('aria-label', options.cancelLabel);
+      header.append(title, cancel);
+      dialog.append(header, message);
+    } else dialog.append(title, message, actions);
     backdrop.append(dialog);
     // Native confirm blocked the whole page. Preserve that interaction boundary
     // for pointer, keyboard and assistive technology while the async choice is open.
@@ -95,7 +107,7 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
       'button, input, select, textarea, a[href]',
     )].filter(element => !(element as HTMLButtonElement).disabled && !element.hidden);
     const focusables = (): HTMLElement[] =>
-      [...(message.tabIndex >= 0 ? [message] : []), ...messageControls(), cancel, ...(options.confirmLabel === undefined ? [] : [confirm])];
+      [...(headerClose ? [cancel] : []), ...(message.tabIndex >= 0 ? [message] : []), ...messageControls(), ...(headerClose ? [] : [cancel]), ...(options.confirmLabel === undefined ? [] : [confirm])];
 
     const close = (accepted: boolean): void => {
       document.removeEventListener('keydown', onKeyDown, true);
