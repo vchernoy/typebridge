@@ -36,7 +36,7 @@ jobs:
           path: dist
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     # Official image with browsers and system dependencies preinstalled (#168): avoids the
     # per-run `playwright install --with-deps` apt downloads that exhausted the job budget.
     # The tag must match the locked @playwright/test version; the next step enforces it.
@@ -64,7 +64,9 @@ jobs:
             exit 1
           fi
       - name: Run Playwright tests
-        timeout-minutes: 12
+        # Full 641-case suites can exceed 12 minutes on a slower hosted runner (#168).
+        # Keep individual test timeouts and the full three-browser matrix unchanged.
+        timeout-minutes: 15
         run: npx playwright test --project=${{ matrix.browser }}
       - name: Upload Playwright traces on failure
         if: failure()
