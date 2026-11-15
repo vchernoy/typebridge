@@ -40,7 +40,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   content.className = 'share-dialog';
   if (!first) {
     content.textContent = TOO_LARGE_TEXT;
-    await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', returnFocus: deps.returnFocus() });
+    await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', closeInHeader: true, returnFocus: deps.returnFocus() });
     return;
   }
 
@@ -52,10 +52,46 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   preview.setAttribute('aria-label', format === 'markdown' ? 'Document source preview' : 'What the reader sees');
   const previewTitle = document.createElement('strong');
   previewTitle.textContent = title;
-  const previewText = document.createElement('p');
+  const previewText = document.createElement('div');
   previewText.className = 'share-preview-text';
   previewText.textContent = sharePreview(text) || '(empty)';
   preview.append(previewTitle, previewText);
+  // Preview anchors must not navigate away from the editor or replace its fragment.
+  previewText.addEventListener('click', event => {
+    if (!(event.target instanceof Element)) return;
+    const anchor = event.target.closest<HTMLAnchorElement>('a[href]');
+    if (!anchor) return;
+    event.preventDefault();
+    if (!anchor.getAttribute('href')?.startsWith('#')) return;
+    let id: string;
+    try { id = decodeURIComponent(anchor.hash.slice(1)); } catch { return; }
+    [...previewText.querySelectorAll('[id]')].find(element => element.id === id)?.scrollIntoView({ block: 'nearest' });
+  });
+  let previewGeneration = 0;
+  let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
+  const updatePreview = async (): Promise<void> => {
+    const current = ++previewGeneration;
+    live?.destroy();
+    live = undefined;
+    previewText.className = 'share-preview-text';
+    previewText.textContent = sharePreview(text) || '(empty)';
+    preview.setAttribute('aria-label', format === 'markdown' ? 'Document source preview' : 'What the reader sees');
+    if (view !== 'rendered') return;
+    try {
+      const { renderDocument } = await import('../view/active-renderer');
+      if (current !== previewGeneration) return;
+      previewText.className = 'share-preview-rendered active-reading';
+      live = renderDocument(previewText, text, navigator.language);
+      preview.setAttribute('aria-label', 'Rendered document preview');
+    } catch {
+      if (current !== previewGeneration) return;
+      live?.destroy();
+      live = undefined;
+      previewText.className = 'share-preview-text';
+      previewText.textContent = 'Rendered preview unavailable. Source: ' + (sharePreview(text) || '(empty)');
+    }
+  };
+  void updatePreview();
 
   const editLabel = document.createElement('label');
   editLabel.className = 'share-option';
@@ -121,7 +157,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     });
   };
   edit.addEventListener('change', regenerate);
-  viewSelect.addEventListener('change', regenerate);
+  viewSelect.addEventListener('change', () => { regenerate(); void updatePreview(); });
   copy.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(link.value);
@@ -139,5 +175,10 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   content.append(privacy, linkLabel, row, status, editLabel);
   if (format === 'markdown') content.append(viewLabel);
   content.append(preview);
-  await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', returnFocus: deps.returnFocus() });
+  try {
+    await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', closeInHeader: true, returnFocus: deps.returnFocus() });
+  } finally {
+    ++previewGeneration;
+    live?.destroy();
+  }
 }

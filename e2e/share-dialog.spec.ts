@@ -109,7 +109,7 @@ test('Copy link copies or explains, and every control is reachable with Tab', as
     await page.keyboard.press('Tab');
     order.push(await page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent || ''));
   }
-  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'Close']);
+  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'confirm-dialog-close']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 });
@@ -224,4 +224,58 @@ test('mobile host window can reach and copy the generated link', async ({ page }
   await expect(sheet.locator('.share-status')).toHaveText(/^(Link copied\.|Copy unavailable\. The link is selected; use your device’s copy command\.)$/);
   await sheet.getByRole('button', { name: 'Close' }).click();
   await expect(editor.locator('#doc-menu-open')).toBeFocused();
+});
+
+
+test('Markdown share preview follows the reader view and header X closes with focus restored', async ({ page }) => {
+  const text = '# Preview heading\n\n**Formatted preview**\n\n[Jump](#preview-heading)\n\n```calc\ninput x = 2\n```\n\nInput: :input[x] Result: :value[x]';
+  await setText(page, 'Preview', text);
+  await page.locator('#doc-menu-open').click();
+  await page.locator('#document-format').selectOption('markdown');
+  await page.locator('#share-link').click();
+  const sheet = dialog(page);
+  const rendered = sheet.getByLabel('Rendered document preview');
+  await expect(rendered.getByRole('heading', { name: 'Preview heading' })).toBeVisible();
+  await expect(rendered.locator('strong').filter({ hasText: 'Formatted preview' })).toBeVisible();
+  await expect(rendered.locator('[data-active-value="x"]')).toHaveText('2');
+  const editorUrl = page.url();
+  await rendered.getByRole('link', { name: 'Jump' }).click();
+  expect(page.url()).toBe(editorUrl);
+  expect((await decodeShown(page)).decoded).toMatchObject({ ok: true, document: { text, view: 'rendered' } });
+  await sheet.getByLabel('Readers see:').selectOption('source');
+  await expect(sheet.getByLabel('Document source preview')).toContainText('**Formatted preview**');
+  await expect(sheet.locator('.active-doc')).toHaveCount(0);
+  expect((await decodeShown(page)).decoded).toMatchObject({ ok: true, document: { text, view: 'source' } });
+  await sheet.getByLabel('Readers see:').selectOption('rendered');
+  await expect(rendered.getByRole('heading', { name: 'Preview heading' })).toBeVisible();
+  const close = sheet.getByRole('button', { name: 'Close', exact: true });
+  await expect(close).toHaveText('×');
+  const closeBox = await close.boundingBox();
+  const titleBox = await sheet.getByRole('heading', { name: 'Share link', exact: true }).boundingBox();
+  expect(closeBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width);
+  expect(Math.abs(closeBox!.y - titleBox!.y)).toBeLessThan(5);
+  await close.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(rendered.locator('input').last()).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(sheet).toHaveCount(0);
+  await expect(page.locator('#doc-menu-open')).toBeFocused();
+});
+
+test('a failed rendered preview shows source while leaving the generated reader link intact', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const page = await context.newPage();
+  await page.route('**/assets/active-renderer-*.js', route => route.abort());
+  await setText(page, 'Fallback', '**Source remains available**');
+  await page.locator('#doc-menu-open').click();
+  await page.locator('#document-format').selectOption('markdown');
+  await page.locator('#share-link').click();
+  await expect(dialog(page).getByLabel('Document source preview')).toContainText('Rendered preview unavailable. Source: **Source remains available**');
+  expect((await decodeShown(page)).decoded).toMatchObject({ ok: true, document: { view: 'rendered' } });
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.locator('#doc-menu-open')).toBeFocused();
+  await context.close();
 });

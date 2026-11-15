@@ -74,3 +74,5 @@ Display math supports explicit multiline LaTeX such as `aligned`: two-column rel
 ### Share dialog on small screens
 
 The generated Link and Copy link action follow the privacy explanation, before reader options and the secondary document preview. The source preview is limited to four displayed lines; the document and generated link remain complete. The dialog body scrolls independently while Close stays available, and the link/Copy row wraps in narrow windows.
+
+The Share link dialog previews the selected reader view (Rendered page or Source). Rendered previews use the same local renderer as the reading page, with source fallback if loading fails. An upper-right × button named Close dismisses the dialog; Escape and focus return to the opener remain available.
