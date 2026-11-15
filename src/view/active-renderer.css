@@ -27,14 +27,14 @@
   max-width: 100%;
   overflow-x: auto;
 }
-.active-reading aside,
-.active-reading .callout,
 .active-reading details {
-  border-inline-start: 3px solid var(--accent);
+  border-inline-start: 3px solid var(--border);
   padding: 0.5rem 1rem;
   margin-block: 0.75rem;
 }
 .active-reading .active-input {
+  font: inherit;
+  font-weight: 400;
   color: inherit;
   background: var(--surface);
 }
@@ -82,9 +82,22 @@
   overflow: visible;
 }
 
-/* Native MathML's UA centering also centers the anonymous math row. Chromium
-   text-align:center from the package only centers inline text, shifting short
-   matrix entries left. Restore native centering for center-column tables. */
-.active-reading .active-doc mtable[columnalign^="center"] > mtr > mtd {
-  text-align: revert;
+/* Use the app's selected color scheme, including explicit theme overrides. */
+.active-reading .active-doc {
+  --active-callout-note: light-dark(#2563eb, #6ea8ff);
+  --active-callout-tip: light-dark(#15803d, #4ade80);
+  --active-callout-warning: light-dark(#b45309, #fbbf24);
+  --active-callout-danger: light-dark(#c62828, #ff8a80);
+  --active-callout-important: light-dark(#7c3aed, #c4a5ff);
+  --active-callout-exercise: light-dark(#0e7490, #5ed3e6);
+}
+/* Fade only the edge with more content; the HTML wrapper remains the scroller. */
+.active-reading .active-math-display[data-overflow-end] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 1rem), transparent);
+}
+.active-reading .active-math-display[data-overflow-start] {
+  mask-image: linear-gradient(to right, transparent, #000 1rem);
+}
+.active-reading .active-math-display[data-overflow-start][data-overflow-end] {
+  mask-image: linear-gradient(to right, transparent, #000 1rem, #000 calc(100% - 1rem), transparent);
 }

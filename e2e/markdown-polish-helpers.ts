@@ -1,9 +1,9 @@
 import { expect, type Locator } from '@playwright/test';
 
 export const polishedMarkdown = `\`\`\`calc
-input deposit = 10000
+input deposit = 10000 in 0..10000000
 input rate = 8
-input years = 10
+input years = 10 in 1..50
 final = deposit * (1 + rate / 100) ^ years
 \`\`\`
 
