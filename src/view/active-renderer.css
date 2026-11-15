@@ -1,3 +1,15 @@
+@font-face {
+  font-family: "Fira Math";
+  src:
+    local("Fira Math"),
+    url("./fonts/FiraMath-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+
+.active-reading .active-doc math {
+  font-family: "Fira Math", "STIX Two Math", "Cambria Math", "Latin Modern Math", math;
+}
+
 .active-reading {
   color: var(--text);
   background: var(--surface);

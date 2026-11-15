@@ -32,3 +32,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the issue, review and merge workflow.
 - [Audit and AI handoff](https://github.com/vchernoy/typebridge/issues/71)
 
 The PRD includes historical design intent; the UI document describes the current workspace. Dual panels, portable document links, rich/Markdown preview, retained version snapshots and broader editing commands are not implemented just because they appear there. Current UX work and the audit fixes are tracked in issues; check PR merge and production verification separately.
+
+Rendered Markdown bundles [Fira Math 0.3.4](src/view/fonts/README.md), licensed under [SIL OFL 1.1](public/fonts/FiraMath-OFL.txt). The math font loads lazily from the same origin; plain documents do not load it.

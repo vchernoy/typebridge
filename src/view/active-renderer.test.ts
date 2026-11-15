@@ -24,7 +24,9 @@ it('repeated rendered views disconnect observers, remove scroll listeners and de
       scrollLeft: 0, scrollWidth: 300, clientWidth: 100, toggleAttribute: vi.fn(),
     });
     const remove = vi.spyOn(formula, 'removeEventListener');
-    const root = { innerHTML: '', querySelectorAll: () => [formula] } as unknown as HTMLElement;
+    const fonts = new EventTarget();
+    const removeFonts = vi.spyOn(fonts, 'removeEventListener');
+    const root = { innerHTML: '', ownerDocument: { fonts }, querySelectorAll: (selector: string) => selector === '.active-math-display' ? [formula] : [] } as unknown as HTMLElement;
     const view = renderDocument(root, 'source', 'en');
     expect(root.innerHTML).toBe('<sanitized-math>');
     expect(resizeObserve).toHaveBeenLastCalledWith(formula);
@@ -40,10 +42,13 @@ it('repeated rendered views disconnect observers, remove scroll listeners and de
     expect(mutationDisconnect).toHaveBeenCalledTimes(render);
     expect(runtimeDestroy).toHaveBeenCalledTimes(render);
     expect(remove).toHaveBeenCalledWith('scroll', expect.any(Function));
+    expect(removeFonts).toHaveBeenCalledWith('loadingdone', expect.any(Function));
     // A detached old formula must no longer receive updates from scroll events.
     formula.toggleAttribute.mockClear();
     formula.scrollLeft = 0;
     formula.dispatchEvent(new Event('scroll'));
+    expect(formula.toggleAttribute).not.toHaveBeenCalled();
+    fonts.dispatchEvent(new Event('loadingdone'));
     expect(formula.toggleAttribute).not.toHaveBeenCalled();
   }
 });
