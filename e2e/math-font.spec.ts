@@ -19,9 +19,21 @@ async function assertStretch(root: Locator): Promise<void> {
   // Preserve the actual stretching requirement, waiting for that layout to settle.
   await expect.poll(async () => math.evaluate(element => {
     const parenthesis = Array.from(element.querySelectorAll('mo')).find(node => node.textContent === '(')!;
-    const fraction = element.querySelector('mfrac')!.getBoundingClientRect().height;
-    return fraction > 0 && parenthesis.getBoundingClientRect().height >= fraction;
-  })).toBe(true);
+    const fraction = element.querySelector('mfrac')!;
+    const dimensions = () => ({ parenthesis: parenthesis.getBoundingClientRect().height, fraction: fraction.getBoundingClientRect().height });
+    const actual = dimensions();
+    if (actual.fraction > 0 && actual.parenthesis >= actual.fraction) return { stretched: true };
+    // Keep failure diagnostics read-only: inspecting styles must not trigger a
+    // corrective mutation/reflow that could hide a production rendering defect.
+    const metrics = (node: Element) => {
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return { tag: node.tagName, text: node.textContent, height: rect.height, top: rect.top, bottom: rect.bottom,
+        family: style.fontFamily, size: style.fontSize, lineHeight: style.lineHeight, display: style.display };
+    };
+    return { stretched: false, actual, metrics: [element, parenthesis, fraction, ...fraction.children].map(metrics), markup: element.outerHTML };
+
+  })).toEqual({ stretched: true });
 }
 
 for (const surface of ['reader', 'editor'] as const) {
