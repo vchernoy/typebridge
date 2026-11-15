@@ -59,7 +59,7 @@ for (const surface of ['reader', 'editor'] as const) {
       await page.locator('#doc-menu-open').click();
       await page.locator('#document-format').selectOption('markdown');
       await page.locator('#doc-menu-open').click();
-      await page.locator('#document-view-choice').selectOption('rendered');
+      await page.locator('#document-view-preview').click();
     }
     const root = page.locator(surface === 'reader' ? '#read-text' : '#rendered-document');
     await assertAligned(root);

@@ -63,7 +63,8 @@ Markdown uses active-md 0.3.0: GFM, callouts/details, MathML math and calc bindi
 
 Markdown calc supports ln, log, exp, trigonometric functions, pi and e.
 
-Each window independently remembers Edit or Rendered in sessionStorage. Rendered is a reading
+The title row has a one-click **Edit | Preview** button group for Markdown, after Autosave and before the save state, in both normal and Focus mode. Pressed state identifies the current view; Enter/Space operate either button. At 640 px and below, labelled text becomes pencil/eye icons with accessible names and 44 px touch targets. Plain documents have no switch.
+Each window independently remembers Edit or Preview in sessionStorage (the stored reading value remains `rendered`). Preview is a reading
 surface; its calc input values are temporary and never change the source, saved row or journal.
 Only `{{…}}` placeholders inside math and `:value[…]` bindings update when calc inputs change;
 typed-in numbers stay as written, even inside an `aligned` block. Use `{{final | fixed:2}}`

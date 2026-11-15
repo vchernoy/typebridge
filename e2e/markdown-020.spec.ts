@@ -34,7 +34,7 @@ for (const surface of ['editor', 'reader']) for (const theme of ['light', 'dark'
       await page.locator('#doc-menu-open').click();
       await page.locator('#document-format').selectOption('markdown');
       await page.locator('#doc-menu-open').click();
-      await page.locator('#document-view-choice').selectOption('rendered');
+      await page.locator('#document-view-preview').click();
     }
     await page.evaluate(theme => document.documentElement.dataset.colorScheme = theme, theme);
     const root = page.locator(surface === 'reader' ? '#read-text' : '#rendered-document');

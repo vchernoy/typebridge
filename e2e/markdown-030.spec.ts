@@ -9,7 +9,7 @@ test('0.3.0 logarithmic calc agrees in editor and shared reading', async ({ page
   await page.locator('#doc-menu-open').click();
   await page.locator('#document-format').selectOption('markdown');
   await page.locator('#doc-menu-open').click();
-  await page.locator('#document-view-choice').selectOption('rendered');
+  await page.locator('#document-view-preview').click();
   const editor = page.locator('#rendered-document');
   await expect(editor.locator('output[data-active-value="t"]')).toHaveText('9.01');
   await expect(editor.locator('.active-error, .katex-error')).toHaveCount(0);
