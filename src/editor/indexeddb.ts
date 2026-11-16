@@ -158,6 +158,55 @@ export async function getStoredDraft(db: IDBDatabase, id: string): Promise<Store
   return draft ? { ...draft, ...documentFields(draft) } : undefined;
 }
 
+/** Local-only evidence; never send source fields over the reuse channel. */
+export type OwnedSharedCopySnapshot = SharedCopyFields & {
+  documentId: string; revision: number; ownerInstanceId: string; fence: number;
+};
+
+/**
+ * One readonly transaction observes row, fence and unapplied change records together.
+ * Does not claim/release ownership, save, flush, prune recovery or open a connection.
+ * This is a point-in-time snapshot, not proof that a remote Web Lock is held.
+ */
+export async function inspectOwnedSharedCopy(
+  db: IDBDatabase,
+  expected: Pick<OwnedSharedCopySnapshot, 'documentId' | 'revision' | 'ownerInstanceId' | 'fence'>,
+  signal?: AbortSignal,
+): Promise<OwnedSharedCopySnapshot | undefined> {
+  const target = { documentId: expected.documentId, revision: expected.revision,
+    ownerInstanceId: expected.ownerInstanceId, fence: expected.fence };
+  if (signal?.aborted) throw new DOMException('Reuse inspection cancelled', 'AbortError');
+  if (!target.documentId || !target.ownerInstanceId || !Number.isSafeInteger(target.revision)
+      || target.revision < 1 || !Number.isSafeInteger(target.fence) || target.fence < 1) return undefined;
+  const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readonly');
+  const done = finished(tx);
+  const abort = (): void => { try { tx.abort(); } catch { /* Already finished. */ } };
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    const row = await request(tx.objectStore(STORE).get(target.documentId)) as StoredDraft | undefined;
+    const owner = await request(tx.objectStore(OWNERSHIP).get(target.documentId)) as EditOwnershipRecord | undefined;
+    const keys = await request(tx.objectStore(CHANGES).getAllKeys(changesOf(target.documentId)));
+    await done;
+    if (signal?.aborted) throw new DOMException('Reuse inspection cancelled', 'AbortError');
+    if (!row || row.id !== target.documentId || row.revision !== target.revision
+        || (row.private !== undefined && row.private !== false) || typeof row.text !== 'string'
+        || typeof row.title !== 'string' || (row.format !== undefined && row.format !== 'plain' && row.format !== 'markdown')
+        || !owner || owner.documentId !== target.documentId || owner.ownerInstanceId !== target.ownerInstanceId
+        || owner.fence !== target.fence) return undefined;
+    const upTo = row.upTo ?? 0;
+    if (!Number.isSafeInteger(upTo) || upTo < 0 || keys.some(key => !Array.isArray(key)
+        || typeof key[1] !== 'number' || !Number.isSafeInteger(key[1]) || key[1] < 0 || key[1] > upTo)) return undefined;
+    return { documentId: row.id, revision: row.revision, ownerInstanceId: owner.ownerInstanceId,
+      fence: owner.fence, title: row.title, text: row.text, format: documentFields(row).format };
+  } catch (error) {
+    abort();
+    void done.catch(() => undefined);
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
 /**
  * Shared Edit: atomic matching/create without touching any existing source/history.
  * Owner confirmation is not available yet: private/owned/recovery candidates are
