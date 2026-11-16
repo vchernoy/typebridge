@@ -47,6 +47,23 @@ private/blocked preference refusal, untracked live edits and post-offer cancella
 durable exactly-once execution across owner restart/outcome retirement.
 The safe fallback and observable-backup exclusions from #325 remain unchanged.
 
+Reader-side groundwork now includes `listOwnedSharedCopies` (readonly, exact public
+matches with observed recovery/pending-change exclusions, lexical identity ordering,
+at most 16 metadata candidates) and `ReaderOwnerReuse`. The transport requires an
+injected fresh verification before one commit, tries buffered offers serially when
+a candidate fails that verification within the shared selection budget, and bounds
+pre-commit and result waits. The caller passes the original Edit-click deadline so
+candidate lookup cannot renew that budget. Metadata probes use deterministic candidate order; the
+first freshly verified responder wins, without promising the lowest-ID owner always
+responds first. The transport keeps post-commit silence/transport errors unknown, permits only same-nonce explicit
+status reconciliation, and closes its listener after bounded retention. Cancellation
+is abandonment, never proof of remote non-activation; `hasCommitted` remains available
+so the future UI can preserve that warning. No candidate source/title is transported.
+These reader helpers are not called by the shared-page Edit UI yet. That integration
+must supply current privacy/source/recovery checks, invalidate on hash/navigation/clear
+or privacy changes, preserve unknown warnings on lifecycle restore, and permit a new
+copy after an unknown result only through a separate warned user action.
+
 ## Observed constraints
 
 - `reuseOrCreateSharedCopy` intentionally excludes every named owner, even one with

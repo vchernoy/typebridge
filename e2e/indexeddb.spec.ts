@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 import { DATABASE_VERSION } from '../src/editor/indexeddb';
 
 const transpile = (path: string): string => ts.transpileModule(readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-/** indexeddb.ts as a browser script exposing window.TypeBridgeDb; its one import is the ownership helpers. */
+/** indexeddb.ts as a browser script exposing window.TypeBridgeDb; with its local helper dependencies. */
 function compiledDatabaseModule(): string {
   return `{ const ownership = {}; ((exports) => { ${transpile('src/view/ownership.ts')} })(ownership);
     const fields = {}; ((exports) => { ${transpile('src/editor/document-fields.ts')} })(fields);
@@ -12,6 +12,10 @@ function compiledDatabaseModule(): string {
     const require = name => modules[name];
     const changeLog = {}; ((exports) => { ${transpile('src/editor/change-log.ts')} })(changeLog);
     modules['./change-log'] = changeLog;
+    const drafts = {}; ((exports) => { ${transpile('src/editor/drafts.ts')} })(drafts);
+    modules['./drafts'] = drafts;
+    const sharedCopy = {}; ((exports) => { ${transpile('src/editor/shared-copy.ts')} })(sharedCopy);
+    modules['./shared-copy'] = sharedCopy;
     const exports = {}; ${transpile('src/editor/indexeddb.ts')} window.TypeBridgeDb = exports; }`;
 }
 
@@ -716,4 +720,41 @@ test('owned shared-copy inspection aborts an in-flight readonly transaction', as
     return { aborted, unchanged: JSON.stringify(before) === JSON.stringify(after) };
   });
   expect(result).toEqual({ aborted: true, unchanged: true });
+});
+
+test('owned shared-copy candidates are readonly, exact, deterministic and bounded to sixteen', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const fields = { title: 'Candidate title', text: 'Candidate source', format: 'plain' as const };
+    const id = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+    const tx = db.transaction(['documents', 'editOwnership', 'changes'], 'readwrite');
+    for (let i = 29; i >= 0; i--) {
+      tx.objectStore('documents').put({ ...fields, id: id(i), revision: 7, upTo: 0, updatedAt: 100 - i,
+        ...(i === 0 ? { private: true } : {}), ...(i === 4 ? { title: 'Different title' } : {}),
+        ...(i === 5 ? { format: 'unsupported-format' } : {}) });
+      if (i !== 3) tx.objectStore('editOwnership').put({ documentId: id(i), ownerInstanceId: 'owner', fence: i + 1, updatedAt: 0 });
+    }
+    tx.objectStore('changes').put({ documentId: id(1), seq: 1, untouched: true });
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error); });
+    const readAll = async () => {
+      const tx = db.transaction(['documents', 'editOwnership', 'changes'], 'readonly');
+      return Promise.all(['documents', 'editOwnership', 'changes'].map(store => new Promise<unknown[]>((resolve, reject) => {
+        const get = tx.objectStore(store).getAll(); get.onsuccess = () => resolve(get.result); get.onerror = () => reject(get.error);
+      })));
+    };
+    const before = await readAll();
+    const unavailable = await api.listOwnedSharedCopies(db, fields, undefined);
+    const candidates = await api.listOwnedSharedCopies(db, fields, new Set([id(2)]));
+    const after = await readAll(); db.close();
+    return { unavailable, candidates, unchanged: JSON.stringify(before) === JSON.stringify(after),
+      expected: Array.from({ length: 16 }, (_, n) => ({ documentId: id(n + 6), revision: 7, ownerInstanceId: 'owner', fence: n + 7 })) };
+  });
+  expect(result.unavailable).toEqual([]);
+  expect(result.candidates).toEqual(result.expected);
+  expect(result.unchanged).toBe(true);
+  for (const row of result.candidates) expect(Object.keys(row).sort()).toEqual(['documentId', 'fence', 'ownerInstanceId', 'revision']);
 });
