@@ -812,6 +812,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     activateExistingEditor: (windowId, documentId, source) => {
       if (!hasExistingEditor(windowId, documentId, source)) return false;
       setActive(windowId);
+      if (hostFocus) maximizeActiveForFocus();
       return true;
     },
     openDocumentIds: (exceptWindowId?: string) => {

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { fillHostEditor } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
+import type { HostWindowLayout } from '../src/host/layout';
 import type { EditorWindow, HostPageApi } from '../src/view/embed-api';
 
 async function prepare(page: Page) {
@@ -91,4 +92,33 @@ test('modal guards refuse activation and Focus selects the existing window witho
   await expect(page.locator('.host-window')).toHaveCount(2);
   await expect(page.locator('.host-window[data-window-id="main"]')).toHaveClass(/is-active/);
   await expect(page.frameLocator('.host-window[data-window-id="main"] iframe').locator('#editor')).toHaveValue('First exact source');
+});
+
+test('activating an offset tiled editor in Focus maximizes it and restores both normal rectangles', async ({ page }) => {
+  await prepare(page);
+  await page.getByRole('button', { name: 'Tile side by side' }).click();
+  const beforeDocs = await readStoredDocs(page);
+  const result = await page.evaluate(() => {
+    const api = window as unknown as HostPageApi;
+    const rects = () => (api.__typebridgeHostWindows() as HostWindowLayout[]).map(({ id, x, y, w, h }) => ({ id, x, y, w, h })).sort((a, b) => a.id.localeCompare(b.id));
+    const before = rects();
+    const target = document.querySelector<HTMLIFrameElement>('.host-window[data-window-id="w2"] iframe')!.contentWindow! as EditorWindow;
+    const id = target.__typebridgeStoredDocumentId!()!;
+    const urls = [...document.querySelectorAll<HTMLIFrameElement>('.host-window iframe')].map(frame => frame.src);
+    api.__typebridgeHostFocusMode(true, 'main');
+    const activated = api.__typebridgeActivateExistingEditor('w2', id, target);
+    const focused = rects().find(win => win.id === 'w2')!;
+    const root = document.getElementById('host-root')!.getBoundingClientRect();
+    const retainedFocus = document.body.classList.contains('host-focus-mode');
+    api.__typebridgeHostFocusMode(false);
+    return { activated, before, focused, viewport: { w: Math.floor(root.width), h: Math.floor(root.height) }, retainedFocus, after: rects(),
+      urlsUnchanged: JSON.stringify(urls) === JSON.stringify([...document.querySelectorAll<HTMLIFrameElement>('.host-window iframe')].map(frame => frame.src)) };
+  });
+  expect(result.before.find(win => win.id === 'w2')!.x).toBeGreaterThan(0);
+  expect(result.activated).toBe(true); expect(result.retainedFocus).toBe(true);
+  expect(result.focused).toEqual({ id: 'w2', x: 0, y: 0, ...result.viewport });
+  expect(result.after).toEqual(result.before); expect(result.urlsUnchanged).toBe(true);
+  await expect(page.locator('.host-window')).toHaveCount(2);
+  await expect(page.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor')).toHaveValue('Second source');
+  expect(await readStoredDocs(page)).toEqual(beforeDocs);
 });

@@ -28,7 +28,8 @@ The host now exposes separate `hasExistingEditor` / `activateExistingEditor` hoo
 They require the exact live iframe Window, window ID and live document probe, refuse
 modal/closing/cleared/unavailable hosts, and never fall back to session/layout identity
 or open a new window. Activation only selects the existing host window (including in
-Focus and at the four-window cap); it does not promise browser foreground focus.
+Focus and at the four-window cap, maximizing the selected window while preserving
+its pre-Focus geometry for restoration); it does not promise browser foreground focus.
 These hooks are not yet invoked by the owner reuse controller.
 Reader transport/UI, editor adapters and cross-tab browser integration regressions
 remain #330 work. These modules do not provide
