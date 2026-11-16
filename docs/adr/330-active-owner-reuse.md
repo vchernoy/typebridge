@@ -6,9 +6,18 @@ The pure core validates metadata, bounds in-memory offers/outcomes, prevents dup
 activation within retained outcomes, and models indeterminate requester results with
 explicit status reconciliation. Unit tests cover expiry, cancellation, capacity,
 identity mismatch, partial failures and lost/late results.
-Transport, fresh storage/live-source/privacy/fence checks, host activation and browser
-regressions remain integration work for #330. The core does not perform these checks
-or provide durable exactly-once execution across owner restart/outcome retirement.
+`src/view/shared-copy-owner.ts` adds an opt-in owner-side controller and dedicated
+BroadcastChannel transport. It reserves bounded ledger entries before asynchronous
+inspection, reruns synchronous live eligibility before activation, invalidates work
+by lifecycle generation, aborts timed-out/cancelled inspections, and replays terminal
+outcomes for status/duplicate commits. The controller is not installed by the app.
+Its injected inspection/eligibility/activation hooks still need real editor adapters.
+At most 16 unsettled inspections are retained, including providers that ignore abort;
+a stuck provider can exhaust those slots until it settles or the page is destroyed.
+Invalidation never frees an unsettled slot early or lets its result activate later.
+Reader transport/UI, fresh storage/live-source/privacy/fence adapters, host activation
+and browser integration regressions remain #330 work. These modules do not provide
+durable exactly-once execution across owner restart/outcome retirement.
 The safe fallback and observable-backup exclusions from #325 remain unchanged.
 
 ## Observed constraints
@@ -144,10 +153,10 @@ saved copy. Sender-disabled Edit does not probe or create anything.
 
 ## Required implementation and tests
 
-Add a bounded parser/transport and cancellation state machine; connect owner readiness
+The bounded parser/state machine and opt-in owner transport exist; connect owner readiness
 to current model fields, privacy, IME, save and lifecycle gates; add a host activation
-hook that does not perform yield/steal; integrate reader fallback. None exist merely
-because this document describes them. Keep source writes and backup mutation out of
+hook that does not perform yield/steal; integrate reader fallback. Those editor/reader
+adapters are not implemented merely because this document describes them. Keep source writes and backup mutation out of
 this protocol. Reject unknown versions and malformed/oversized identity fields.
 
 Regression matrix:

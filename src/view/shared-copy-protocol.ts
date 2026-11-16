@@ -71,6 +71,10 @@ export class ReuseOwnerLedger {
     const entry = this.entries.get(requestKey(offer));
     return entry && sameOffer(entry.offer, offer) ? entry : undefined;
   }
+  /** Inspection only: unknown/terminal identities must not start asynchronous work. */
+  isOffered(offer: ReuseOffer, now: number): boolean {
+    return this.find(offer, now)?.state === 'offered';
+  }
   status(offer: ReuseOffer, now: number): ReuseOutcome {
     const state = this.find(offer, now)?.state;
     return state && state !== 'offered' && state !== 'executing' ? state : 'unknown';
