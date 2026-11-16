@@ -55,6 +55,16 @@ describe('reader owner transport', () => {
     f.channel.emit({ ...f.channel.offer(1), type: 'result', outcome: 'activated' });
     expect(await f.attempt.first).toBe('activated');
   });
+  it.each([false, true])('rechecks final context and honors cancellation inside the guard (reentrant=%s)', async reentrant => {
+    const channel = new Channel(); let nonce = 0;
+    const attempt = new ReaderOwnerReuse([candidate], { channel: channel as unknown as ReuseTransport,
+      nonce: () => `guard${++nonce}`, verify: async () => true,
+      canCommit: () => { if (reentrant) attempt.cancel(); return reentrant; } });
+    attempts.push(attempt);
+    channel.emit(channel.offer()); await settle();
+    expect(await attempt.first).toBe(reentrant ? 'cancelled' : 'fallback');
+    expect(channel.messages.some(message => message.type === 'commit')).toBe(false);
+  });
   it('bounds probes to sixteen and transmits metadata without source fields', () => {
     const f = fixture(undefined, 25);
     expect(f.channel.messages).toHaveLength(16);

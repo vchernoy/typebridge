@@ -194,15 +194,15 @@ test('on a first visit Edit a copy opens the copy once, in the main window (#246
 });
 
 test('returning to the reading page from the back-forward cache makes Edit a copy usable again (#246 review)', async ({ page }) => {
-  // Leave the page mid-save, the state a back-forward cache restore brings back after the copy
-  // was saved and opened: the database open never completes here.
+  // Leave the page before commit while database open never completes. A lifecycle
+  // restore must make a fresh Edit possible without preserving the old busy state.
   await page.addInitScript(() => {
     indexedDB.open = (() => ({}) as IDBOpenDBRequest) as typeof indexedDB.open;
   });
   await page.goto(await linkFor(shared()));
   await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(page.locator('#edit-copy')).toBeDisabled();
-  await expect(page.locator('#read-status')).toHaveText('Saving a copy…');
+  await expect(page.locator('#read-status')).toHaveText('Looking for an existing document…');
   await page.evaluate(() => { window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
   await expect(page.locator('#edit-copy')).toBeEnabled();
   await expect(page.locator('#read-status')).toBeEmpty();

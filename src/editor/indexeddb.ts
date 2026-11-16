@@ -243,37 +243,54 @@ export async function inspectOwnedSharedCopy(
 
 /**
  * Shared Edit: atomic matching/create without touching any existing source/history.
- * Owner confirmation is not available yet: private/owned/recovery candidates are
- * deliberately ineligible, including stale ownership records (never time out a fence).
+ * This is the unowned fallback; active-owner confirmation is a separate protocol.
+ * Private/owned/recovery candidates, including stale fences, stay ineligible here.
  */
 export async function reuseOrCreateSharedCopy(
   db: IDBDatabase,
   copy: Omit<StoredDraft, 'revision'> & SharedCopyFields,
   excludedRecoveryIds: ReadonlySet<string> | undefined,
+  signal?: AbortSignal,
+  allowed: () => boolean = () => true,
 ): Promise<{ draft: StoredDraft; reused: boolean }> {
+  const assertCurrent = (): void => {
+    if (signal?.aborted || !allowed()) throw new DOMException('Copy cancelled', 'AbortError');
+  };
+  assertCurrent();
   const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readwrite');
   const done = finished(tx);
+  const abort = (): void => { try { tx.abort(); } catch { /* Already completed. */ } };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
     const store = tx.objectStore(STORE);
     const candidates = (await request(store.getAll()) as StoredDraft[])
       .filter(row => excludedRecoveryIds && !excludedRecoveryIds.has(row.id) && !row.private && sameSharedCopy(row, copy))
       .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    assertCurrent();
     for (const candidate of candidates) {
       const owner = await request(tx.objectStore(OWNERSHIP).get(candidate.id)) as EditOwnershipRecord | undefined;
+      assertCurrent();
       if (owner?.ownerInstanceId) continue;
       const changes = await request(tx.objectStore(CHANGES).getAllKeys(changesOf(candidate.id)));
+      assertCurrent();
       if (changes.some(key => Array.isArray(key) && Number(key[1]) > (candidate.upTo ?? 0))) continue;
       await done;
+      assertCurrent();
       return { draft: { ...candidate, ...documentFields(candidate) }, reused: true };
     }
     const draft: StoredDraft = { ...copy, ...documentFields(copy), revision: 1, upTo: 0 };
+    assertCurrent();
     await request(store.add(draft));
+    assertCurrent();
     await done;
+    assertCurrent();
     return { draft, reused: false };
   } catch (error) {
     try { tx.abort(); } catch { /* Already completed. */ }
     void done.catch(() => undefined);
     throw error;
+  } finally {
+    signal?.removeEventListener('abort', abort);
   }
 }
 

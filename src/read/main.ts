@@ -1,3 +1,4 @@
+import { setupSharedEdit } from './edit-shared';
 import { setupRememberShared } from './remember-shared';
 /**
  * Reading page for share links (#39): `/#doc=…` forwards here (inline script in index.html).
@@ -7,13 +8,8 @@ import { setupRememberShared } from './remember-shared';
  */
 import '../style.css';
 import '../styles/read.css';
-import { sharedCopyRecoveryExclusions } from './shared-copy-recovery';
-import { sharedCopyFields } from '../editor/shared-copy';
 import { readingView } from './view';
-import { newDraft } from '../editor/drafts';
-import { reuseOrCreateSharedCopy, openDraftDatabase } from '../editor/indexeddb';
 import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type SharedDocument } from '../editor/share-link';
-import { createDocumentSignal, DOCUMENT_SIGNAL_CHANNEL } from '../view/signals';
 
 let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
 let viewGeneration = 0;
@@ -24,6 +20,11 @@ const notice = document.querySelector<HTMLElement>('#read-notice')!;
 const body = document.querySelector<HTMLElement>('#read-text')!;
 const status = document.querySelector<HTMLElement>('#read-status')!;
 const editCopy = document.querySelector<HTMLAnchorElement>('#edit-copy')!;
+const editActions = setupSharedEdit({ edit: editCopy, status,
+  actions: document.querySelector<HTMLElement>('#read-edit-actions')!,
+  check: document.querySelector<HTMLButtonElement>('#check-owner-status')!,
+  copy: document.querySelector<HTMLButtonElement>('#create-new-copy')!,
+});
 
 /** What to tell the reader when a link cannot be opened. */
 const FAILURE_MESSAGES: Record<DecodeFailure, string> = {
@@ -86,8 +87,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
   } else {
     notice.hidden = true;
   }
-  editCopy.hidden = !shared.edit;
-  editCopy.onclick = event => { event.preventDefault(); void saveCopy(shared); };
+  editActions.show(shared);
 }
 
 // Local Markdown anchors must not replace the fragment carrying the share payload.
@@ -106,35 +106,7 @@ body.addEventListener("click", (event) => {
   target?.scrollIntoView();
 });
 
-let saving = false;
-/** Reuse an unchanged safe copy, or save a new one; never overwrite existing content. */
-async function saveCopy(shared: SharedDocument): Promise<void> {
-  if (saving) return;
-  saving = true;
-  editCopy.setAttribute('aria-disabled', 'true');
-  status.textContent = 'Saving a copy…';
-  try {
-    const db = await openDraftDatabase();
-    try {
-      const copy = { ...newDraft(shared.text), ...sharedCopyFields(shared) };
-      const result = await reuseOrCreateSharedCopy(db, copy, sharedCopyRecoveryExclusions());
-      try {
-        const channel = new BroadcastChannel(DOCUMENT_SIGNAL_CHANNEL);
-        if (!result.reused) channel.postMessage(createDocumentSignal('saved', result.draft.id, result.draft.revision, Date.now()));
-        channel.close();
-      } catch { /* Open windows reread their list on focus anyway. */ }
-      location.assign('/?open=' + encodeURIComponent(result.draft.id) + (result.reused ? '&reused=1' : ''));
-    } finally {
-      db.close();
-    }
-  } catch {
-    status.textContent = 'Could not save a copy: browser storage is unavailable here. You can still select and copy the text.';
-    editCopy.removeAttribute('aria-disabled');
-    saving = false;
-  }
-}
-
-const remembered = setupRememberShared(stopLive);
+const remembered = setupRememberShared(() => { editActions.pause(); stopLive(); });
 
 /** Bumped on every render: a slow decode of an earlier link must not replace a newer one. */
 let renderGeneration = 0;
@@ -142,10 +114,11 @@ async function render(): Promise<void> {
   stopLive();
   const generation = ++renderGeneration;
   const hash = location.hash;
+  editActions.show(undefined, hash);
   remembered.show();
   // Never leave the previous document's Edit a copy armed while another link decodes.
   editCopy.hidden = true;
-  editCopy.onclick = null;
+
   const result = await decodeSharePayload(sharePayloadFromHash(hash));
   if (generation !== renderGeneration || location.hash !== hash) return;
   if (result.ok) { showDocument(result.document, result.knownFormat); remembered.show(sharePayloadFromHash(hash)); }
@@ -156,7 +129,6 @@ async function render(): Promise<void> {
 // the copy was saved and opened, so make the page usable again (#246 review).
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
-  saving = false;
   editCopy.removeAttribute('aria-disabled');
   status.textContent = '';
   void render();

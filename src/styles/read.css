@@ -83,3 +83,12 @@ body.read-page {
 .read-footer a:hover {
   text-decoration-thickness: 2px;
 }
+
+.read-edit-actions:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.read-edit-actions button {
+  min-height: 44px;
+}
