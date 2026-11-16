@@ -180,8 +180,10 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 {
   const params = new URLSearchParams(location.search);
   const requested = params.get('open');
+  const reused = params.get('reused') === '1';
   if (requested !== null) {
     params.delete('open');
+    params.delete('reused');
     const query = params.toString();
     history.replaceState(history.state, '', location.pathname + (query ? '?' + query : '') + location.hash);
     if (isDocumentId(requested)) {
@@ -190,9 +192,13 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       status.className = 'host-status';
       status.setAttribute('role', 'status');
       toolbar.after(status);
-      status.textContent = outcome === 'full'
-        ? 'Saved as a new document in your Documents. Close a window, then open it from ▾ Documents.'
-        : 'Saved as a new document in your Documents.';
+      status.textContent = reused
+        ? outcome === 'full'
+          ? 'An existing matching document is in your Documents. Close a window, then open it from ▾ Documents.'
+          : 'Opened an existing document from your Documents.'
+        : outcome === 'full'
+          ? 'Saved as a new document in your Documents. Close a window, then open it from ▾ Documents.'
+          : 'Saved as a new document in your Documents.';
       window.setTimeout(() => { status.remove(); }, 8000);
     }
   }

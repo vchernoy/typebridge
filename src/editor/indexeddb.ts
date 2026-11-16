@@ -1,3 +1,4 @@
+import { sameSharedCopy, type SharedCopyFields } from './shared-copy';
 import { documentFields, sameFields, type DocumentFields, type DocumentFieldsInput } from './document-fields';
 import { replayDocument, type ChangeRecord } from './change-log';
 import type { EditorHistory } from './editor';
@@ -155,6 +156,42 @@ export async function getStoredDraft(db: IDBDatabase, id: string): Promise<Store
   const draft = await request(tx.objectStore(STORE).get(id)) as StoredDraft | undefined;
   await done;
   return draft ? { ...draft, ...documentFields(draft) } : undefined;
+}
+
+/**
+ * Shared Edit: atomic matching/create without touching any existing source/history.
+ * Owner confirmation is not available yet: private/owned/recovery candidates are
+ * deliberately ineligible, including stale ownership records (never time out a fence).
+ */
+export async function reuseOrCreateSharedCopy(
+  db: IDBDatabase,
+  copy: Omit<StoredDraft, 'revision'> & SharedCopyFields,
+  excludedRecoveryIds: ReadonlySet<string> | undefined,
+): Promise<{ draft: StoredDraft; reused: boolean }> {
+  const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readwrite');
+  const done = finished(tx);
+  try {
+    const store = tx.objectStore(STORE);
+    const candidates = (await request(store.getAll()) as StoredDraft[])
+      .filter(row => excludedRecoveryIds && !excludedRecoveryIds.has(row.id) && !row.private && sameSharedCopy(row, copy))
+      .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    for (const candidate of candidates) {
+      const owner = await request(tx.objectStore(OWNERSHIP).get(candidate.id)) as EditOwnershipRecord | undefined;
+      if (owner?.ownerInstanceId) continue;
+      const changes = await request(tx.objectStore(CHANGES).getAllKeys(changesOf(candidate.id)));
+      if (changes.some(key => Array.isArray(key) && Number(key[1]) > (candidate.upTo ?? 0))) continue;
+      await done;
+      return { draft: { ...candidate, ...documentFields(candidate) }, reused: true };
+    }
+    const draft: StoredDraft = { ...copy, ...documentFields(copy), revision: 1, upTo: 0 };
+    await request(store.add(draft));
+    await done;
+    return { draft, reused: false };
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already completed. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Atomic compare-and-swap; expectedRevision=0 means a new document. */

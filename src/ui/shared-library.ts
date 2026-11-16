@@ -16,7 +16,7 @@ export function setupRememberSharedPreference(): void {
 export function setupSharedLibrary(database: () => IDBDatabase | undefined): { refresh: () => Promise<void> } {
   const section = document.createElement('details'); const summary = document.createElement('summary');
   summary.textContent = 'Shared with me'; section.id = 'shared-library';
-  const search = document.createElement('input'); search.type = 'search'; search.id = 'shared-search'; search.setAttribute('aria-label', 'Search shared documents');
+  const search = document.createElement('input'); search.type = 'search'; search.id = 'shared-search'; search.placeholder = 'Search shared documents'; search.setAttribute('aria-label', 'Search shared documents');
   const list = document.createElement('ul'); const status = document.createElement('p'); status.setAttribute('role', 'status');
   section.append(summary, search, status, list); document.querySelector('#doc-menu')!.append(section);
   let generation = 0;

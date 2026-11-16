@@ -341,6 +341,9 @@
   margin-block: 8px;
 }
 #shared-library a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -348,6 +351,13 @@
   flex-shrink: 0;
 }
 #shared-search {
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;

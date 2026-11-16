@@ -1,16 +1,17 @@
 import { setupRememberShared } from './remember-shared';
 /**
  * Reading page for share links (#39): `/#doc=…` forwards here (inline script in index.html).
- * It looks like a plain read-only web page: the title, the text and a quiet Edit link. Nothing is
- * stored until the reader chooses Edit a copy, which saves a new document and opens it in the
+ * It shows the title, text and a quiet Edit link. Valid links are remembered locally when permitted.
+ * Edit reuses a safe exact copy or saves a new document and opens it in the
  * full editor. Source text is never parsed as HTML; only the lazy renderer’s sanitized output is inserted.
  */
 import '../style.css';
 import '../styles/read.css';
-import { documentFormat } from '../editor/document-fields';
+import { sharedCopyRecoveryExclusions } from './shared-copy-recovery';
+import { sharedCopyFields } from '../editor/shared-copy';
 import { readingView } from './view';
 import { newDraft } from '../editor/drafts';
-import { commitOrCreateConflictCopy, openDraftDatabase } from '../editor/indexeddb';
+import { reuseOrCreateSharedCopy, openDraftDatabase } from '../editor/indexeddb';
 import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type SharedDocument } from '../editor/share-link';
 import { createDocumentSignal, DOCUMENT_SIGNAL_CHANNEL } from '../view/signals';
 
@@ -106,7 +107,7 @@ body.addEventListener("click", (event) => {
 });
 
 let saving = false;
-/** Save the shared text as a new document (never overwriting one), then open it in the editor. */
+/** Reuse an unchanged safe copy, or save a new one; never overwrite existing content. */
 async function saveCopy(shared: SharedDocument): Promise<void> {
   if (saving) return;
   saving = true;
@@ -115,14 +116,14 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
   try {
     const db = await openDraftDatabase();
     try {
-      const copy = { ...newDraft(shared.text), format: documentFormat(shared), title: shared.title.trim() || newDraft().title };
-      const result = await commitOrCreateConflictCopy(db, copy, 0, crypto.randomUUID());
+      const copy = { ...newDraft(shared.text), ...sharedCopyFields(shared) };
+      const result = await reuseOrCreateSharedCopy(db, copy, sharedCopyRecoveryExclusions());
       try {
         const channel = new BroadcastChannel(DOCUMENT_SIGNAL_CHANNEL);
-        channel.postMessage(createDocumentSignal('saved', result.draft.id, result.draft.revision, Date.now()));
+        if (!result.reused) channel.postMessage(createDocumentSignal('saved', result.draft.id, result.draft.revision, Date.now()));
         channel.close();
       } catch { /* Open windows reread their list on focus anyway. */ }
-      location.assign('/?open=' + encodeURIComponent(result.draft.id));
+      location.assign('/?open=' + encodeURIComponent(result.draft.id) + (result.reused ? '&reused=1' : ''));
     } finally {
       db.close();
     }
