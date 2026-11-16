@@ -122,3 +122,12 @@ The reading page uses the same dynamic renderer boundary. Source/unknown-format 
 use textContent; changing the link, presentation or page lifecycle destroys the old mount and
 invalidates an outstanding import. Share payloads carry the actual document format and chosen
 view, and Edit a copy stores source plus format. Reader inputs stay entirely inside the runtime.
+
+
+## Planned local shared library and reader state (#322)
+
+The [research design](adr/322-local-reader-state.md) proposes automatic local remembering,
+separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
+reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
+This is a proposal for review, not implemented behavior: reading currently writes no
+storage and calc inputs remain temporary. Quiz attempts wait for the upstream state API.
