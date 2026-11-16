@@ -1,7 +1,14 @@
 # Active-owner shared-copy reuse (#330)
 
-Status: proposed protocol; not implemented. Baseline: main `7c6cccc` (#329).
-This is the research prerequisite for #330, not evidence that owner reuse ships.
+Status: protocol core implemented in `src/view/shared-copy-protocol.ts`; active-owner
+reuse is not enabled. Research baseline: main `7c6cccc` (#329).
+The pure core validates metadata, bounds in-memory offers/outcomes, prevents duplicate
+activation within retained outcomes, and models indeterminate requester results with
+explicit status reconciliation. Unit tests cover expiry, cancellation, capacity,
+identity mismatch, partial failures and lost/late results.
+Transport, fresh storage/live-source/privacy/fence checks, host activation and browser
+regressions remain integration work for #330. The core does not perform these checks
+or provide durable exactly-once execution across owner restart/outcome retirement.
 The safe fallback and observable-backup exclusions from #325 remain unchanged.
 
 ## Observed constraints
