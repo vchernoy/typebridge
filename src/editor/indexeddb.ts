@@ -163,13 +163,14 @@ export async function getStoredDraft(db: IDBDatabase, id: string): Promise<Store
 export async function reuseOrCreateSharedCopy(
   db: IDBDatabase,
   copy: Omit<StoredDraft, 'revision'> & SharedCopyFields,
+  excludedRecoveryIds: ReadonlySet<string> | undefined,
 ): Promise<{ draft: StoredDraft; reused: boolean }> {
   const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readwrite');
   const done = finished(tx);
   try {
     const store = tx.objectStore(STORE);
     const candidates = (await request(store.getAll()) as StoredDraft[])
-      .filter(row => !row.private && sameSharedCopy(row, copy))
+      .filter(row => excludedRecoveryIds && !excludedRecoveryIds.has(row.id) && !row.private && sameSharedCopy(row, copy))
       .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     for (const candidate of candidates) {
       const owner = await request(tx.objectStore(OWNERSHIP).get(candidate.id)) as EditOwnershipRecord | undefined;

@@ -6,6 +6,7 @@
  */
 import '../style.css';
 import '../styles/read.css';
+import { sharedCopyRecoveryExclusions } from './shared-copy-recovery';
 import { sharedCopyFields } from '../editor/shared-copy';
 import { readingView } from './view';
 import { newDraft } from '../editor/drafts';
@@ -115,7 +116,7 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
     const db = await openDraftDatabase();
     try {
       const copy = { ...newDraft(shared.text), ...sharedCopyFields(shared) };
-      const result = await reuseOrCreateSharedCopy(db, copy);
+      const result = await reuseOrCreateSharedCopy(db, copy, sharedCopyRecoveryExclusions());
       try {
         const channel = new BroadcastChannel(DOCUMENT_SIGNAL_CHANNEL);
         if (!result.reused) channel.postMessage(createDocumentSignal('saved', result.draft.id, result.draft.revision, Date.now()));

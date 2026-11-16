@@ -2,6 +2,10 @@ import { expect, test, type Page } from '@playwright/test';
 import { encodeSharePayload } from '../src/editor/share-link';
 import { readStoredDocs } from './storage-helpers';
 
+// Recovery fixtures intercept the editor handoff before host recovery starts.
+// Keep requests observable; offline/SW behavior is covered by share-reading-page.
+test.use({ serviceWorkers: 'block' });
+
 const fields = { title: 'Reusable share', text: 'Exact original text\n', format: 'plain' as const };
 const id1 = '00000000-0000-4000-8000-000000000001';
 const id2 = '00000000-0000-4000-8000-000000000002';
@@ -81,3 +85,33 @@ test('concurrent Edit clicks reuse the atomically created copy', async ({ page, 
   expect(after).toHaveLength(before.length + 1);
   expect(after.filter(d => d.text === fields.text && d.title === fields.title)).toHaveLength(1);
 });
+
+for (const backupType of ['journal', 'reload'] as const) {
+  test(`Edit preserves a divergent ${backupType} backup and creates a new copy`, async ({ page }) => {
+    await prepare(page, [{ id: id1 }]);
+    const key = backupType === 'journal'
+      ? 'typebridge.recovery.v1.backup-tab.' + id1
+      : 'typebridge.pendingDraft.v1::w:backup-window';
+    const backup = JSON.stringify({ id: id1, documentId: id1, title: fields.title, text: 'Unsaved recovered content',
+      format: fields.format, revision: 1, updatedAt: 1, timestamp: 1, tab: 'backup-tab', token: 'backup-token' });
+    await page.evaluate(({ key, backup, backupType }) => {
+      (backupType === 'journal' ? localStorage : sessionStorage).setItem(key, backup);
+    }, { key, backup, backupType });
+    const before = await rawRow(page, id1);
+    // Inspect the Edit operation before host boot can independently offer/recover
+    // existing journals. Host recovery behavior is covered by its own specs.
+    let reached!: () => void;
+    const navigated = new Promise<void>(resolve => { reached = resolve; });
+    await page.route(url => url.pathname === '/' && url.searchParams.has('open'), async route => {
+      reached();
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<p>Editor handoff</p>' });
+    });
+    await page.locator('#edit-copy').click();
+    await navigated;
+    await expect(page.getByText('Editor handoff')).toBeVisible();
+    const rows = await readStoredDocs(page);
+    expect(rows.filter(d => d.title === fields.title && d.text === fields.text)).toHaveLength(2);
+    expect(await rawRow(page, id1)).toEqual(before);
+    expect(await page.evaluate(({ key, backupType }) => (backupType === 'journal' ? localStorage : sessionStorage).getItem(key), { key, backupType })).toBe(backup);
+  });
+}
