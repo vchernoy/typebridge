@@ -163,6 +163,40 @@ export type OwnedSharedCopySnapshot = SharedCopyFields & {
   documentId: string; revision: number; ownerInstanceId: string; fence: number;
 };
 
+export type OwnedSharedCopyCandidate = Pick<OwnedSharedCopySnapshot, 'documentId' | 'revision' | 'ownerInstanceId' | 'fence'>;
+
+/** Bounded, deterministic metadata candidates only; eligibility is rechecked before commit. */
+export async function listOwnedSharedCopies(
+  db: IDBDatabase, fields: SharedCopyFields, excludedRecoveryIds: ReadonlySet<string> | undefined,
+): Promise<OwnedSharedCopyCandidate[]> {
+  if (!excludedRecoveryIds) return [];
+  const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readonly');
+  const done = finished(tx);
+  try {
+    const rows = (await request(tx.objectStore(STORE).getAll()) as StoredDraft[])
+      .filter(row => !excludedRecoveryIds.has(row.id) && (row.private === undefined || row.private === false)
+        && (row.format === undefined || row.format === 'plain' || row.format === 'markdown') && sameSharedCopy(row, fields)
+        && Number.isSafeInteger(row.revision) && row.revision > 0)
+      .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const candidates: OwnedSharedCopyCandidate[] = [];
+    for (const row of rows) {
+      const owner = await request(tx.objectStore(OWNERSHIP).get(row.id)) as EditOwnershipRecord | undefined;
+      if (!owner?.ownerInstanceId || !Number.isSafeInteger(owner.fence) || owner.fence < 1) continue;
+      const keys = await request(tx.objectStore(CHANGES).getAllKeys(changesOf(row.id)));
+      const upTo = row.upTo ?? 0;
+      if (!Number.isSafeInteger(upTo) || upTo < 0 || keys.some(key => Array.isArray(key) && Number(key[1]) > upTo)) continue;
+      candidates.push({ documentId: row.id, revision: row.revision, ownerInstanceId: owner.ownerInstanceId, fence: owner.fence });
+      if (candidates.length === 16) break;
+    }
+    await done;
+    return candidates;
+  } catch (error) {
+    try { tx.abort(); } catch { /* Already finished. */ }
+    void done.catch(() => undefined);
+    throw error;
+  }
+}
+
 /**
  * One readonly transaction observes row, fence and unapplied change records together.
  * Does not claim/release ownership, save, flush, prune recovery or open a connection.
