@@ -23,3 +23,20 @@ TypeBridge stores everything locally in the browser profile. Browser privacy set
 | Page scroll, Find match selection, imported file picker | in memory/browser managed | Not promised across reload. Undo/redo history is part of the committed document. |
 
 Storage access can be blocked or exhausted. The editor remains usable, and a Find settings warning indicates when state cannot be saved or restored. If the transliteration or Private session preference cannot be saved, a separate warning beside the save status names it; a later successful document save does not clear it, and it clears only when that preference is saved. Search fields continue to work for the current page even when storage fails. Browser-provided form restoration is not treated as persistent configuration.
+
+
+## Received links (#323)
+
+The default-on rememberShared preference (`typebridge.rememberShared.v1`) is a separate
+localStorage privacy choice. It survives Reset settings and Clear local data, like Private
+session; either gate can prevent automatic remembering. Reader content writes require
+successful reads of both preferences, rather than the editor helper's cached fallback.
+Changing a gate off cancels pending remembering and retains existing saved items until
+explicit removal. Turning it on does not retroactively save the open reader; use Remember.
+
+Received payloads live in sharedItems in the existing IndexedDB database, bounded to 100
+items / 10 MiB with no automatic eviction. They survive reload/restart subject to ordinary
+browser storage loss and do not enter draft source/history/recovery. Removing an item
+removes its sidecar and invalidates pending remembers; global clear deletes these stores
+and suppresses automatic re-remembering of old reader URLs on the resulting reload.
+Reader input values remain memory-only until #324/#326; no saved quiz attempts are implied.
