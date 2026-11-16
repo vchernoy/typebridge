@@ -30,3 +30,12 @@ More language packs, formal standards, shareable rule files, PWA/offline install
 
 ## Open decisions
 Finalize mapping, shortcut and all mixed-case rules with user tests; resolve dual-panel transition semantics and undo behavior against actual browser APIs; assess supported browsers and data migration policy before release. Keep MVP intentionally limited while architecture remains extensible.
+
+
+## Planned local shared library and reader state (#322)
+
+The [research design](adr/322-local-reader-state.md) proposes automatic local remembering,
+separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
+reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
+This is a proposal for review, not implemented behavior: reading currently writes no
+storage and calc inputs remain temporary. Quiz attempts wait for the upstream state API.
