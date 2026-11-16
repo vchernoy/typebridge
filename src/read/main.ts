@@ -69,6 +69,12 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
     }
   };
   void setView();
+  if (knownFormat && shared.format === 'markdown' && heading.includes('$')) {
+    const generation = viewGeneration;
+    void import('../view/active-renderer').then(({ renderTitle }) => {
+      if (generation === viewGeneration) renderTitle(title, heading);
+    }).catch(() => { /* The plain title already provides the fallback. */ });
+  }
   body.classList.remove('read-text--message');
   if (!knownFormat) {
     notice.textContent = `This document uses a format this version of TypeBridge cannot show yet (“${shared.format}”). Showing its text as written.`;
