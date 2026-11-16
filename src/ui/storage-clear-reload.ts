@@ -23,10 +23,6 @@ export function installStorageClearReload(deps: {
     try {
       deps.stop();
       if (deps.delegate?.(here)) return;
-      // Another old host can persist layout after the initiating tab erased it
-      // but before this page received the notification. Stop our writers first,
-      // then remove that stale metadata again before restoring a fresh page.
-      clearContentMetadata(localStorage);
       clearContentMetadata(sessionStorage);
       sessionStorage.setItem(CLEARED_NOTICE_KEY, here ? 'here' : 'elsewhere');
       (deps.reload ?? (() => location.reload()))();

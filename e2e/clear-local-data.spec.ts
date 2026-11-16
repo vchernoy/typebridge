@@ -111,7 +111,7 @@ test('clear-all failure is reported without pretending the saved data was remove
   await expect(page.locator('#editor')).toHaveValue('Retained after failed clear');
 });
 
-for (const clearSource of ['host', 'tab', 'tab-late-layout'] as const) test(`host and two tabs reload after clearing two host windows; notices are one-shot and saving resumes (${clearSource})`, async ({ page, context }) => {
+for (const clearSource of ['host', 'tab'] as const) test(`host and two tabs reload after clearing two host windows; notices are one-shot and saving resumes (${clearSource})`, async ({ page, context }) => {
   await page.goto('/');
   const frame = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(frame.locator('#editor')).toBeEnabled();
@@ -128,22 +128,6 @@ for (const clearSource of ['host', 'tab', 'tab-late-layout'] as const) test(`hos
   const tabs = await Promise.all([context.newPage(), context.newPage()]);
   for (const tab of tabs) { await tab.goto(`/editor.html?doc=${id}`); await expect(tab.locator('#editor')).toHaveValue('CLEAR CANARY host'); }
   const before = await Promise.all(tabs.map(tab => tab.locator('html').getAttribute('data-instance-id')));
-  if (clearSource === 'tab-late-layout') {
-    const oldLayout = await page.evaluate(() => localStorage.getItem('typebridge.host.windows.v1'));
-    if (!oldLayout) throw new Error('Expected the old two-window layout');
-    await tabs[0].evaluate(oldLayout => {
-      const remove = Storage.prototype.removeItem; const set = Storage.prototype.setItem;
-      let replayed = false;
-      Storage.prototype.removeItem = function (key) {
-        remove.call(this, key);
-        // Model the observed ordering: another old host persist lands after the
-        // clearing tab erases layout but before the host receives the clear event.
-        if (this === localStorage && key === 'typebridge.host.windows.v1' && !replayed) {
-          replayed = true; set.call(this, key, oldLayout);
-        }
-      };
-    }, oldLayout);
-  }
   await clearAll(clearSource === 'host' ? page : tabs[0]);
   await expect(frame.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
   await expect(page.locator('iframe.host-editor')).toHaveCount(1);
@@ -157,7 +141,7 @@ for (const clearSource of ['host', 'tab', 'tab-late-layout'] as const) test(`hos
   await expect(frame.locator('#save-indicator')).toHaveText('Saved');
   for (const [i, tab] of tabs.entries()) {
     await ready(tab); await expect(tab.locator('html')).not.toHaveAttribute('data-instance-id', before[i]!);
-    await expect(tab.getByText(clearSource !== 'host' && i === 0 ? 'All local data was cleared' : 'Storage was cleared in another tab', { exact: true })).toBeVisible();
+    await expect(tab.getByText(clearSource === 'tab' && i === 0 ? 'All local data was cleared' : 'Storage was cleared in another tab', { exact: true })).toBeVisible();
     expect(await tab.evaluate(() => sessionStorage.getItem('typebridge.clearedNotice.v1'))).toBeNull();
     await save(tab, 'Fresh tab ' + i);
   }
@@ -423,4 +407,52 @@ test('two global clears in a row each reload into a fresh editable document', as
     expect(data.stores.documents).toEqual([]); expect(data.stores.changes).toEqual([]); expect(data.stores.editOwnership).toEqual([]);
   }
   await save(page, 'Fresh after two clears');
+});
+
+test('late old hosts cannot restore erased layout or sweep fresh failed-save recovery', async ({ page, context }) => {
+  await page.addInitScript(() => {
+    const dispatch = window.dispatchEvent.bind(window);
+    let held: Event | undefined;
+    window.dispatchEvent = event => {
+      if (event.type === 'typebridge-storage-cleared' && !(event as CustomEvent).detail?.failed) { held = event; return true; }
+      return dispatch(event);
+    };
+    (window as unknown as { releaseClear: () => void }).releaseClear = () => { if (held) dispatch(held); };
+  });
+  await page.goto('/');
+  await expect(page.frameLocator('.host-window[data-window-id="main"] iframe').locator('#editor')).toBeEnabled();
+  await page.getByRole('button', { name: 'New window', exact: true }).click();
+  await expect(page.locator('iframe.host-editor')).toHaveCount(2);
+  const source = await context.newPage(); await source.goto('/editor.html'); await ready(source);
+  await clearAll(source);
+  await expect(source.getByText('All local data was cleared', { exact: true })).toBeVisible();
+  // Force the real old manager's unload persist before delivering its clear notification.
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  expect(await source.evaluate(() => localStorage.getItem('typebridge.host.windows.v1'))).toBeNull();
+  const fresh = await context.newPage(); await fresh.goto('/');
+  const frame = fresh.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(frame.locator('#editor')).toBeEnabled();
+  await expect(fresh.locator('iframe.host-editor')).toHaveCount(1);
+  await frame.locator('#editor').fill('Fresh initially saved');
+  await expect(frame.locator('#save-indicator')).toHaveText('Saved');
+  await frame.locator('#editor').evaluate(() => {
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+    IDBObjectStore.prototype.add = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  });
+  await frame.locator('#editor').fill('Fresh failed save needs emergency recovery');
+  await expect.poll(() => fresh.evaluate(() => Object.entries(localStorage).some(([key, raw]) => key.startsWith('typebridge.recovery.v1.') && raw.includes('Fresh failed save needs emergency recovery')))).toBe(true);
+  await fresh.getByRole('button', { name: 'Tile side by side' }).click();
+  const snapshot = () => fresh.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('typebridge.recovery.v1.') || key.startsWith('typebridge.host.windows.v1'))));
+  await fresh.clock.install(); await fresh.clock.pauseAt(new Date());
+  const before = await snapshot();
+  expect(Object.keys(before).some(key => key.startsWith('typebridge.host.windows.v1.'))).toBe(true);
+  const atReload = await page.evaluate(() => new Promise<Record<string, string>>(resolve => {
+    window.addEventListener('beforeunload', () => resolve(Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('typebridge.recovery.v1.') || key.startsWith('typebridge.host.windows.v1')))), { once: true });
+    (window as unknown as { releaseClear: () => void }).releaseClear();
+  }));
+  expect(atReload).toEqual(before);
+  await expect(page.locator('iframe.host-editor')).toHaveCount(1);
+  await expect(page.frameLocator('.host-window[data-window-id="main"] iframe').getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+  // The late receiver preserved both byte-for-byte before the normal replacement boot.
+  expect(await fresh.evaluate(() => Object.values(localStorage).some(raw => raw.includes('Fresh failed save needs emergency recovery')))).toBe(true);
 });

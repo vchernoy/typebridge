@@ -342,7 +342,7 @@ function defaultStorage(): Storage | undefined {
   try { return localStorage; } catch { return undefined; }
 }
 
-export function readHostLayout(storage?: Storage): HostLayoutState | undefined {
+export function readHostLayout(storage?: Pick<Storage, 'getItem'>): HostLayoutState | undefined {
   const store = storage ?? defaultStorage();
   if (!store) return undefined;
   try {
@@ -353,7 +353,7 @@ export function readHostLayout(storage?: Storage): HostLayoutState | undefined {
 }
 
 /** Persist layout. Never writes document text. Returns false when storage rejects the write. */
-export function writeHostLayout(state: HostLayoutState, storage?: Storage): boolean {
+export function writeHostLayout(state: HostLayoutState, storage?: Pick<Storage, 'setItem'>): boolean {
   const store = storage ?? defaultStorage();
   if (!store) return false;
   try {

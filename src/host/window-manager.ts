@@ -1,3 +1,4 @@
+import { captureLayoutStorage } from './layout-storage';
 import { onStorageClear } from '../editor/clear-data';
 /**
  * #175 step 5–6: free/stacked window manager for the host page.
@@ -125,6 +126,8 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     try { storage = localStorage; } catch { storage = undefined; }
   }
 
+  const layoutStorage = storage ? captureLayoutStorage(storage) : undefined;
+
   let layouts: HostWindowLayout[] = [];
   /** Window ids reserved between last-window check and finished commitClose (async discard). */
   const closingIds = new Set<string>();
@@ -173,7 +176,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
       version: 1,
       windows: next,
       ...(hostFocus ? { focusWindowId: activeId } : {}),
-    }, storage);
+    }, layoutStorage);
   };
 
   const applyShellGeometry = (win: HostWindowLayout): void => {
@@ -732,7 +735,7 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
 
   const boot = (): void => {
     const view = viewportOf(deps.root);
-    const saved = readHostLayout(storage);
+    const saved = readHostLayout(layoutStorage);
     if (saved?.windows.length) {
       mountWindows(saved.windows.map((win, index) => ({
         ...win,
