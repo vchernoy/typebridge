@@ -99,7 +99,7 @@ calc inputs remain temporary. Reader-input persistence and quiz attempts remain 
 Documents → Shared with me lists received links separately from editable documents, with
 a search field, read-only links labelled as opening a new tab, and named Remove buttons.
 Settings and the reader's Local shared library disclosure expose “Remember shared documents
-and reader inputs on this device”; the explanation explicitly says inputs remain temporary
+on this device”; the explanation explicitly says inputs remain temporary
 until their separate implementation. Private session overrides remembering. Saved local
 items remain until removal; turning remembering back on requires explicit Remember for
 the current page. Failure/full/private status is honest and never blocks reading.

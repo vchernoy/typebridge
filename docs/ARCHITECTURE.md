@@ -147,3 +147,10 @@ connections in finally and close/invalidate on versionchange; editor collection 
 reuse the core lifecycle-owned connection and never independently reopen it, using existing successful
 global-clear reload behavior. ReaderStates currently contains only removal epoch metadata;
 no calc inputs or quiz state are persisted.
+
+Removal publishes a content-free localStorage cancellation token before opening its write
+transaction. Readers capture it before initial decoding (and explicit Remember captures a
+fresh token); validation/open/hash delays cannot adopt a later removal as their baseline.
+The transactional epoch still orders removals against final writes. An unreadable token
+denies remembering; an unwritable token refuses removal with an error. The marker contains
+no document identity or content and may survive content erasure.

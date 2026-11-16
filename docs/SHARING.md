@@ -105,3 +105,10 @@ library epoch; a later deliberate open may remember the link anew. Settings, inc
 remembering opt-out and Private session, remain separate from content erasure. Source/plain
 readers still download no renderer or font. Offline reopening requires the existing shell
 service worker to have been installed by opening TypeBridge; no new network service exists.
+
+Removal publishes a content-free localStorage cancellation token before opening its write
+transaction. Readers capture it before initial decoding (and explicit Remember captures a
+fresh token); validation/open/hash delays cannot adopt a later removal as their baseline.
+The transactional epoch still orders removals against final writes. An unreadable token
+denies remembering; an unwritable token refuses removal with an error. The marker contains
+no document identity or content and may survive content erasure.

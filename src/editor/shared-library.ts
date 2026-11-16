@@ -3,6 +3,11 @@ import { openDraftDatabase } from './indexeddb';
 import { decodeSharePayload, SHARE_PAYLOAD_MAX_CHARS } from './share-link';
 import { AUTOSAVE_PREF_KEY } from './drafts';
 export const REMEMBER_SHARED_KEY = 'typebridge.rememberShared.v1';
+// Content-free cancellation marker, captured before decoding or opening IndexedDB.
+export const SHARED_REMOVAL_KEY = 'typebridge.sharedRemoval.v1';
+export function sharedRemovalToken(): string | undefined {
+  try { return localStorage.getItem(SHARED_REMOVAL_KEY) ?? ''; } catch { return undefined; }
+}
 export const SHARED_ITEMS = 'sharedItems';
 export const SHARED_MAX_ITEMS = 100;
 export const SHARED_MAX_BYTES = 10 * 1024 * 1024;
@@ -32,24 +37,30 @@ function validItem(value: unknown): value is SharedItem {
     && Number.isFinite(v.createdAt) && Number.isFinite(v.lastOpenedAt);
 }
 export type RememberResult = 'remembered' | 'full' | 'disabled' | 'invalid' | 'cancelled';
-export async function rememberShared(payload: string, current: () => boolean, invalidated: () => void): Promise<RememberResult> {
-  if (!current() || !readerStorageAllowed()) return 'disabled';
+export async function rememberShared(payload: string, current: () => boolean, invalidated: () => void, removal = { token: sharedRemovalToken() }): Promise<RememberResult> {
+  const removalToken = removal.token;
+  if (!current() || !readerStorageAllowed() || removalToken === undefined) return 'disabled';
+  const cancelled = () => !current() || sharedRemovalToken() !== removalToken;
+  if (cancelled()) return 'cancelled';
   if (!(await decodeSharePayload(payload)).ok) return 'invalid';
   const bytes = new TextEncoder().encode(payload);
   if (!current() || !readerStorageAllowed()) return 'disabled';
+  if (cancelled()) return 'cancelled';
   const db = await openDraftDatabase(invalidated);
   try {
-    if (!current() || !readerStorageAllowed()) return 'disabled';
+    if (cancelled()) return 'cancelled';
+    if (!readerStorageAllowed()) return 'disabled';
     const initial = db.transaction('readerStates'); const initialDone = finished(initial); void initialDone.catch(() => undefined);
     const epoch = await request(initial.objectStore('readerStates').get('libraryEpoch')); await initialDone;
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
-    if (!current() || !readerStorageAllowed()) return 'disabled';
+    if (cancelled()) return 'cancelled';
+    if (!readerStorageAllowed()) return 'disabled';
     const tx = db.transaction([SHARED_ITEMS, 'readerStates'], 'readwrite'); const done = finished(tx);
     try {
       const store = tx.objectStore(SHARED_ITEMS);
       const all = await request(store.getAll()) as SharedItem[];
       const nowEpoch = await request(tx.objectStore('readerStates').get('libraryEpoch'));
-      if (!current() || epoch?.revision !== nowEpoch?.revision) { await done; return 'cancelled'; }
+      if (cancelled() || epoch?.revision !== nowEpoch?.revision) { await done; return 'cancelled'; }
       if (!readerStorageAllowed()) { await done; return 'disabled'; }
       const match = all.find(item => validItem(item) && item.digest === digest && item.payload === payload);
       if (match) store.put({ ...match, lastOpenedAt: Date.now() });
@@ -70,6 +81,9 @@ export async function listSharedItems(db: IDBDatabase): Promise<SharedItem[]> {
   return rows.filter(validItem).sort((a, b) => b.lastOpenedAt - a.lastOpenedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 export async function removeSharedItem(db: IDBDatabase, id: string): Promise<void> {
+  // Publish before any await: work still decoding/opening must not adopt the new epoch.
+  // If this write fails, refuse removal rather than promising invalidation we cannot enforce.
+  localStorage.setItem(SHARED_REMOVAL_KEY, crypto.randomUUID());
   const tx = db.transaction([SHARED_ITEMS, 'readerStates'], 'readwrite'); const done = finished(tx); void done.catch(() => undefined);
   try {
     const epochs = tx.objectStore('readerStates');

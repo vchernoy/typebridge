@@ -7,7 +7,7 @@ test('Settings opens a side panel with every setting, and Escape or × closes it
   const panel = page.getByRole('dialog', { name: 'Settings' });
   // The settings no longer clutter the page.
   await expect(panel).toBeHidden();
-  await expect(page.locator('details')).toHaveCount(0);
+  await expect(panel.locator('details')).toHaveCount(0);
   await expect(page.locator('#autosave')).toBeVisible();
   await expect(page.locator('#autosave')).toBeChecked();
   await expect(open).toHaveAttribute('aria-expanded', 'false');

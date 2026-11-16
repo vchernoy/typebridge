@@ -217,3 +217,58 @@ test('phone library links wrap and removal remains keyboard accessible', async (
   await remove.focus(); await page.keyboard.press('Enter'); await expect(page.locator('#shared-library')).toContainText('No remembered shared documents');
   await expect(summary).toBeFocused();
 });
+
+for (const phase of ['initial decode', 'remember validation', 'database open'] as const) {
+  test(`removal cancels a reader held during ${phase}, before its epoch snapshot`, async ({ page, context }) => {
+    const p = await payload(); await page.goto('/read.html#doc=' + p); await remembered(page);
+    const held = await context.newPage();
+    await held.addInitScript(phase => {
+      const hold = () => new Promise<void>(resolve => {
+        (window as unknown as { releaseRemember: () => void }).releaseRemember = resolve;
+      });
+      if (phase === 'database open') {
+        const open = indexedDB.open.bind(indexedDB);
+        indexedDB.open = (...args: Parameters<IDBFactory['open']>) => {
+          const request = open(...args);
+          let handler: ((event: Event) => void) | null = null;
+          Object.defineProperty(request, 'onsuccess', {
+            get: () => handler,
+            set: (value: typeof handler) => { handler = value; },
+          });
+          request.addEventListener('success', event => {
+            void hold().then(() => handler?.call(request, event));
+          }, { once: true });
+          return request;
+        };
+      } else {
+        const Native = DecompressionStream; let count = 0;
+        window.DecompressionStream = class extends Native {
+          constructor(format: CompressionFormat) {
+            super(format);
+            if (++count === (phase === 'initial decode' ? 1 : 2)) {
+              const pending = hold();
+              const gate = new TransformStream<Uint8Array, Uint8Array>({
+                async transform(chunk, controller) { await pending; controller.enqueue(chunk); },
+              });
+              const readable = this.readable.pipeThrough(gate);
+              Object.defineProperty(this, 'readable', { value: readable });
+            }
+          }
+        };
+      }
+    }, phase);
+    await held.goto('/read.html#doc=' + p);
+    await expect.poll(() => held.evaluate(() => typeof (window as unknown as { releaseRemember?: unknown }).releaseRemember)).toBe('function');
+    await page.goto('/editor.html'); await expect(page.locator('#editor')).toBeEnabled();
+    await page.locator('#doc-menu-open').click(); await page.getByText('Shared with me', { exact: true }).click();
+    await page.getByRole('button', { name: 'Remove shared document Received title', exact: true }).click();
+    await expect(page.locator('#shared-library')).toContainText('No remembered shared documents');
+    await held.evaluate(() => (window as unknown as { releaseRemember: () => void }).releaseRemember());
+    await expect(held.locator('#shared-memory-status')).toContainText('Remembering cancelled');
+    expect(await rows(page)).toEqual([]);
+    await held.close();
+    // A fresh deliberate open still remembers the source after removal.
+    const fresh = await context.newPage(); await fresh.goto('/read.html#doc=' + p); await remembered(fresh);
+    expect(await rows(fresh)).toHaveLength(1);
+  });
+}
