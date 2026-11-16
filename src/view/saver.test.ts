@@ -237,7 +237,7 @@ it.each([false, true, 'released'])('claims a new document before its first save,
     order.push('claim');
     if (cancel) writable = false;
     if (cancel === 'released') throw new EditOwnershipLostError();
-    state.ownership = { documentId: 'new', writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
+    state.ownership = { documentId: 'new', peekFence: () => undefined, writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
   });
   vi.mocked(commitOrCreateConflictCopy).mockImplementation(async () => {
     order.push('commit'); expect(state.ownership?.documentId).toBe('new');
@@ -268,7 +268,7 @@ it.each([
   state.db = {} as IDBDatabase;
   state.active = { id: 'doc', title: 'T', text: 'body', revision: 1, updatedAt: 1 };
   state.transitioning = transitioning;
-  state.ownership = { documentId: 'doc', writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
+  state.ownership = { documentId: 'doc', peekFence: () => undefined, writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
   let dirty = true;
   const updateStatus = vi.fn();
   const setConflict = vi.fn();
@@ -298,7 +298,7 @@ it('retains a newer format action across an older commit, including going privat
   const state = createEditorState();
   state.db = {} as IDBDatabase;
   state.active = { id: 'doc', title: 'T', text: '# body', revision: 1, updatedAt: 1, format: 'plain' };
-  state.ownership = { documentId: 'doc', writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
+  state.ownership = { documentId: 'doc', peekFence: () => undefined, writeFence: async () => ({ instanceId: 'i', fence: 1 }), release: async () => {} };
   let version = 1;
   let writable = true;
   let dirty = true;

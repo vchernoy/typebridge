@@ -1,5 +1,5 @@
 /**
- * #330 owner-side metadata transport. Not installed by the editor yet.
+ * #330 owner-side metadata transport, installed by editor-shared-reuse.ts.
  * No source writes, ownership transfers, automatic retries or reader persistence.
  */
 import {

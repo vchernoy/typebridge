@@ -1,3 +1,5 @@
+import { installEditorSharedReuse } from './view/editor-shared-reuse';
+import { sharedCopyRecoveryExclusions } from './read/shared-copy-recovery';
 import { setupSharedLibrary, setupRememberSharedPreference } from './ui/shared-library';
 import { clearedNoticeText, installStorageClearReload, takeClearedNotice } from './ui/storage-clear-reload';
 import { clearDocumentMetadata, notifyStorageClear, onStorageClear } from './editor/clear-data';
@@ -705,6 +707,7 @@ const editHereBar = document.querySelector<HTMLElement>('#edit-here-bar')!;
 const editHereWarning = document.querySelector<HTMLElement>('#edit-here-warning')!;
 const editHereButton = document.querySelector<HTMLButtonElement>('#edit-here')!;
 let focusHandoff: FocusHandoffController | undefined;
+let sharedReuse: ReturnType<typeof installEditorSharedReuse> | undefined;
 const { applyTitleEdit, applyHeldTitleOps, setTitle, commitTitle } = createTitleEditing({
   viewMode, draftTitle, titleEditor,
   syncTitleTooltip: () => { syncTitleTooltip(); },
@@ -1230,6 +1233,7 @@ if (!embedded) {
 }
 
 function applyPrivateSessionFromStorage(): void {
+  sharedReuse?.invalidate();
   let sessionOn: boolean;
   try { sessionOn = privateSessionOn(); }
   catch { return; }
@@ -1295,6 +1299,7 @@ if (embedded) {
 
 /** Invalidate old writers immediately; success is separate from deletion/versionchange. */
 function handleStorageClear(): void {
+  sharedReuse?.dispose();
   workspace.bumpSessionGeneration();
   focusHandoff?.cancel(); saver.cancel(); changeWriter.abandon();
   state.storageCleared = true; state.storageGeneration++;
@@ -1339,3 +1344,43 @@ try {
 } catch { /* Optional one-shot notice when session storage is unavailable. */ }
 setupClearLocalData();
 document.querySelector<HTMLButtonElement>('#clear-document-data')?.addEventListener('click', () => { void autosaveToggle?.clearSavedData(); });
+
+// Hosted owners can confirm exact saved-copy activation. Readers still use the
+// existing safe matching/create path until #330 requester integration ships.
+if (embedded && !viewMode && windowId && !state.storageCleared) {
+  sharedReuse = installEditorSharedReuse({
+    ownerInstanceId: instanceId,
+    capture: () => {
+      const fence = state.ownership?.peekFence();
+      let publicSession = false;
+      try { publicSession = localStorage.getItem(AUTOSAVE_PREF_KEY) !== 'off'; } catch { /* No cached fallback. */ }
+      const excluded = sharedCopyRecoveryExclusions();
+      const host = hostPageApi();
+      let canActivate = false;
+      try { canActivate = host?.__typebridgeHasExistingEditor?.(windowId, state.active.id, window) === true; } catch { /* Unavailable host. */ }
+      const journal = recovery.currentJournal();
+      const memoryRecoveryClear = !journal || journal.documentId !== state.active.id
+        || sameFields(journal, { ...state.active, title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value });
+      return {
+        db: state.db, ownership: state.ownership,
+        sessionGeneration: workspace.sessionGeneration(), storageGeneration: state.storageGeneration,
+        live: {
+          documentId: state.active.id, revision: state.active.revision,
+          ownerInstanceId: fence?.instanceId ?? '', fence: fence?.fence ?? 0,
+          fields: { title: draftTitle.value.trim() || UNTITLED_TITLE, text: field.value, format: documentFormat(state.active) },
+          storageReady: !!state.db && !state.storageProblem && !state.storageCleared && !state.viewMissing && !state.deletedElsewhere,
+          publicSession, autosaveOn: autosave.checked && !autosave.disabled,
+          ownsLock: !!fence && !!state.ownership && state.ownership.documentId === state.active.id && !state.editBlock,
+          canActivate, recoveryClear: !!excluded && !excluded.has(state.active.id) && memoryRecoveryClear,
+          documentPrivate: state.active.private === true,
+          composing: [editor, titleEditor, findEditor, replaceEditor].some(input => input.composing),
+          transitioning: state.transitioning || state.deleting || state.loadingDraft || state.transferFrozen || takeover.ownershipRetryPending()
+            || field.disabled || field.readOnly || reloadBackup.suppressed(),
+          saving: !!saver.inFlight(), saveFailed: state.saveFailed,
+          pendingChanges: workspace.dirty(), dirty: workspace.dirty(),
+        },
+      };
+    },
+    activate: request => hostPageApi()?.__typebridgeActivateExistingEditor?.(windowId, request.documentId, window) === true,
+  });
+}
