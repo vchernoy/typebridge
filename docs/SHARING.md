@@ -12,6 +12,7 @@ A shared document travels inside the link's fragment, `https://typebridge.vchern
 | `text` | Document text, exactly as written |
 | `format` | Document format; `plain` or `markdown` (active-md 0.4.0: GFM, callouts, math and calc) |
 | `view` | How the reading page first shows it: `source` or `rendered` (presentation only) |
+| `heading` | Optional `false` hides the visible page title; omitted or other values show it. The accessible heading, tab title and Edit copy name remain. Old readers ignore the hint. |
 | `edit` | Whether the reading page offers **Edit a copy** (presentation only; it does not protect the text) |
 
 Markdown calc supports ln, log, exp, trigonometric functions, pi and e.
@@ -42,6 +43,7 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 - says plainly: "Anyone with the link can read this document. The text travels inside the link itself; nothing is uploaded. The link also stays in your browser history and wherever you paste it."
 - previews what the reader sees first (title and the start of the text);
 - for Markdown, has **Readers see: Rendered page / Source**, defaulting to Rendered; plain documents keep source presentation;
+- has **Show title on the page** (on by default); turning it off hides the title in both the preview and reading page, while retaining a visually hidden accessible heading, the tab title and the Edit copy’s name;
 - has **Readers can edit a copy** (on by default; off hides Edit a copy on the reading page, which is presentation only);
 - shows the link in a read-only field and **Copy link** (if the browser refuses clipboard access, the link is selected for the device's copy command);
 - warns when the link is longer than 2,000 characters, and refuses a document too large for a link, suggesting Export instead.

@@ -34,6 +34,7 @@ const FAILURE_MESSAGES: Record<DecodeFailure, string> = {
 function showFailure(reason: DecodeFailure): void {
   stopLive();
   document.title = 'Shared document · TypeBridge';
+  title.classList.remove('visually-hidden');
   title.textContent = 'This shared document cannot be opened';
   body.textContent = FAILURE_MESSAGES[reason];
   body.className = 'read-text read-text--message';
@@ -47,6 +48,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
   const heading = shared.title.trim() || 'Untitled document';
   document.title = `${heading} · TypeBridge`;
   title.textContent = heading;
+  title.classList.toggle('visually-hidden', shared.heading === false);
   const view = readingView(shared);
   const setView = async (): Promise<void> => {
     stopLive();
@@ -69,7 +71,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
     }
   };
   void setView();
-  if (knownFormat && shared.format === 'markdown' && heading.includes('$')) {
+  if (shared.heading !== false && knownFormat && shared.format === 'markdown' && heading.includes('$')) {
     const generation = viewGeneration;
     void import('../view/active-renderer').then(({ renderTitle }) => {
       if (generation === viewGeneration) renderTitle(title, heading);
