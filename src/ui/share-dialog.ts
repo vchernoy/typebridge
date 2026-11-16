@@ -31,8 +31,9 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const { title, text } = surface;
   const format = documentFormat(surface);
   let view: ShareView = format === 'markdown' ? 'rendered' : 'source';
+  let showHeading = true;
   const make = async (edit: boolean): Promise<string | undefined> => {
-    const encoded = await encodeSharePayload({ title, text, format, view, edit });
+    const encoded = await encodeSharePayload({ title, text, format, view, edit, ...(showHeading ? {} : { heading: false } as const) });
     return encoded.ok ? shareUrl(deps.base(), encoded.payload) : undefined;
   };
   const first = await make(true);
@@ -101,6 +102,14 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   edit.checked = true;
   editLabel.append(edit, ' Readers can edit a copy');
 
+  const headingLabel = document.createElement('label');
+  headingLabel.className = 'share-option';
+  const heading = document.createElement('input');
+  heading.type = 'checkbox';
+  heading.id = 'share-heading';
+  heading.checked = true;
+  headingLabel.append(heading, ' Show title on the page');
+
   const viewLabel = document.createElement('label');
   viewLabel.className = 'share-option'; viewLabel.hidden = format !== 'markdown';
   viewLabel.textContent = 'Readers see: ';
@@ -157,6 +166,11 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     });
   };
   edit.addEventListener('change', regenerate);
+  heading.addEventListener('change', () => {
+    showHeading = heading.checked;
+    previewTitle.hidden = !showHeading;
+    regenerate();
+  });
   viewSelect.addEventListener('change', () => { regenerate(); void updatePreview(); });
   copy.addEventListener('click', async () => {
     try {
@@ -172,7 +186,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const row = document.createElement('div');
   row.className = 'share-link-row';
   row.append(link, copy);
-  content.append(privacy, linkLabel, row, status, editLabel);
+  content.append(privacy, linkLabel, row, status, editLabel, headingLabel);
   if (format === 'markdown') content.append(viewLabel);
   content.append(preview);
   try {

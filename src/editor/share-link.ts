@@ -3,7 +3,7 @@
  * nothing is uploaded and the fragment never reaches a server. The payload is versioned
  * (`1.` prefix), JSON, UTF-8, deflate-compressed and base64url-encoded.
  *
- * Only the title, the text, the document format and two presentation hints travel. Undo
+ * Only the title, the text, the document format and presentation hints travel. Undo
  * history and settings stay local. Decoding treats every link as untrusted input: it enforces
  * size limits before and during decompression and validates the shape. A format this build
  * does not know is still decoded, so the reader can show its raw text (see #244).
@@ -36,6 +36,8 @@ export type SharedDocument = {
   view: ShareView;
   /** Whether the reading page offers Edit a copy. Hiding it does not protect the text. */
   edit: boolean;
+  /** False hides the visible page title; omitted means shown (old-link default). */
+  heading?: false;
 };
 
 export type DecodeFailure = 'missing' | 'version' | 'too-large' | 'malformed';
@@ -109,6 +111,7 @@ export async function encodeSharePayload(document: SharedDocument): Promise<Enco
     format: document.format,
     view: document.view,
     edit: document.edit,
+    ...(document.heading === false ? { heading: false } : {}),
   });
   const bytes = new TextEncoder().encode(json);
   if (bytes.byteLength > SHARE_DECOMPRESSED_MAX_BYTES) return { ok: false, reason: 'too-large' };
@@ -150,6 +153,7 @@ export function parseSharedDocument(value: unknown): SharedDocument | undefined 
     // Unknown or missing presentation hints fall back to the safe, plain defaults.
     view: raw.view === 'rendered' ? 'rendered' : 'source',
     edit: raw.edit !== false,
+    ...(raw.heading === false ? { heading: false } as const : {}),
   };
 }
 

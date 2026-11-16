@@ -143,3 +143,16 @@ it.each(['source', 'rendered'] as const)('round-trips known Markdown with %s vie
   const shared = doc('# heading', { format: 'markdown', view });
   expect(await decodeSharePayload(await encodeSharePayloadOk(shared))).toEqual({ ok: true, document: shared, knownFormat: true });
 });
+
+describe('optional shared-page heading (#312)', () => {
+  it('round-trips an explicit false hint without changing source or title', async () => {
+    const shared = doc('# Own heading', { heading: false });
+    expect(await decodeSharePayload(await encodeSharePayloadOk(shared))).toEqual({ ok: true, document: shared, knownFormat: true });
+  });
+  it('keeps old links and unknown heading values on the visible-title default', () => {
+    const shared = doc('body');
+    for (const heading of [undefined, true, null, 0, 'false', {}]) {
+      expect(parseSharedDocument({ ...shared, heading })).toEqual(shared);
+    }
+  });
+});

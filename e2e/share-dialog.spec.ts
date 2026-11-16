@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { decodeSharePayload, SHARE_PAYLOAD_MAX_CHARS, sharePayloadFromHash } from '../src/editor/share-link';
 import { documentAction } from './settings-helpers';
+import { readStoredDocs } from './storage-helpers';
 
 // Documents → Share link… (#39): explains sharing, previews, and makes a link the reading
 // page opens.
@@ -105,11 +106,11 @@ test('Copy link copies or explains, and every control is reachable with Tab', as
   // Focus starts on Close; Tab cycles through the controls and wraps.
   await dialog(page).getByRole('button', { name: 'Close' }).focus();
   const order: string[] = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     await page.keyboard.press('Tab');
     order.push(await page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent || ''));
   }
-  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'confirm-dialog-close']);
+  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'share-heading', 'confirm-dialog-close']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 });
@@ -279,3 +280,68 @@ test('a failed rendered preview shows source while leaving the generated reader 
   await expect(page.locator('#doc-menu-open')).toBeFocused();
   await context.close();
 });
+
+for (const format of ['plain', 'markdown'] as const) {
+  test(`optional page title matches preview and preserves copy name (${format}, #312)`, async ({ page, context }) => {
+    const title = 'Письмо $x^2$';
+    const text = '# Own heading\n\nBody stays intact.';
+    await setText(page, title, text);
+    await expect(page.locator('#status')).toContainText('Saved locally');
+    if (format === 'markdown') {
+      await page.locator('#doc-menu-open').click();
+      await page.locator('#document-format').selectOption('markdown');
+      await page.locator('#share-link').click();
+    } else {
+      await documentAction(page, '#share-link');
+    }
+    const checkbox = dialog(page).getByRole('checkbox', { name: 'Show title on the page', exact: true });
+    await expect(checkbox).toBeChecked();
+    const previewTitle = dialog(page).locator('.share-preview > strong');
+    await expect(previewTitle).toBeVisible();
+    const before = await readStoredDocs(page);
+    const original = await decodeShown(page);
+    expect(original.decoded.ok && original.decoded.document.heading).toBeUndefined();
+    await checkbox.uncheck();
+    await expect(previewTitle).toBeHidden();
+    const hidden = await decodeShown(page);
+    expect(hidden.decoded.ok && hidden.decoded.document.heading).toBe(false);
+    const reader = await context.newPage();
+    await reader.goto(hidden.url.pathname + hidden.url.hash);
+    const heading = reader.locator('#read-title');
+    await expect(heading).toHaveText(title);
+    await expect(heading).toHaveClass(/visually-hidden/);
+    await expect(reader.getByRole('heading', { name: title, exact: true })).toHaveCount(1);
+    expect(await heading.evaluate(el => ({ width: el.getBoundingClientRect().width, clip: getComputedStyle(el).clip })))
+      .toEqual({ width: 1, clip: 'rect(0px, 0px, 0px, 0px)' });
+    await expect(reader).toHaveTitle(`${title} · TypeBridge`);
+    await expect(reader.locator('#read-text')).toContainText('Own heading');
+    if (format === 'markdown') {
+      await dialog(page).locator('#share-view').selectOption('source');
+      await expect(previewTitle).toBeHidden();
+      const source = await decodeShown(page);
+      expect(source.decoded).toMatchObject({ ok: true, document: { heading: false, view: 'source' } });
+    }
+    await checkbox.check();
+    await expect(previewTitle).toBeVisible();
+    const restored = await decodeShown(page);
+    expect(restored.decoded.ok && restored.decoded.document.heading).toBeUndefined();
+    await reader.goto(restored.url.pathname + restored.url.hash);
+    await expect(heading).not.toHaveClass(/visually-hidden/);
+    await reader.goto(hidden.url.pathname + hidden.url.hash);
+    await expect(heading).toHaveClass(/visually-hidden/);
+    await reader.evaluate(() => { location.hash = '#doc=9.abc'; });
+    await expect(heading).toHaveText('This shared document cannot be opened');
+    await expect(heading).not.toHaveClass(/visually-hidden/);
+    await reader.goto(hidden.url.pathname + hidden.url.hash);
+    await reader.getByRole('link', { name: 'Edit', exact: true }).click();
+    await expect(reader.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
+    const after = await readStoredDocs(reader, true);
+    const added = after.filter(row => !before.some(old => old.id === row.id));
+    expect(added).toHaveLength(1);
+    const copy = added[0];
+    expect(copy?.text).toBe(text);
+    expect(copy?.title).toBe(title);
+    expect(copy?.format ?? 'plain').toBe(format);
+    expect(copy).toBeDefined();
+  });
+}
