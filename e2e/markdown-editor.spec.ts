@@ -230,6 +230,13 @@ for (const width of [320, 390, 1280]) {
       const boxes = await Promise.all(['#doc-menu-open', '#autosave', '#document-view', '#save-indicator'].map(id => page.locator(id).boundingBox()));
       const centres = boxes.map(box => box!.y + box!.height / 2);
       expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(4);
+      // Autosave and its status stay adjacent; the view control follows both (#316).
+      const autosave = (await page.locator('.autosave-doc-toggle').boundingBox())!;
+      const saved = (await page.locator('#save-indicator').boundingBox())!;
+      const view = (await group.boundingBox())!;
+      expect(saved.x).toBeGreaterThanOrEqual(autosave.x + autosave.width);
+      expect(saved.x - (autosave.x + autosave.width)).toBeLessThanOrEqual(8);
+      expect(view.x).toBeGreaterThanOrEqual(saved.x + saved.width);
       const editTop = (await page.locator('#editor').boundingBox())!.y;
       await preview.click();
       await expect(preview).toHaveAttribute('aria-pressed', 'true');

@@ -59,20 +59,6 @@
               <span id="autosave-doc-hint" class="visually-hidden"
                 >Per document. Off marks this document private so text typed while private is not saved.</span
               >
-              <div id="document-view" class="document-view" role="group" aria-label="View" hidden>
-                <button id="document-view-edit" type="button" aria-label="Edit" aria-pressed="true" title="Edit">
-                  <span aria-hidden="true" class="view-icon">✎</span><span class="view-label">Edit</span>
-                </button>
-                <button
-                  id="document-view-preview"
-                  type="button"
-                  aria-label="Preview"
-                  aria-pressed="false"
-                  title="Preview"
-                >
-                  <span aria-hidden="true" class="view-icon">👁</span><span class="view-label">Preview</span>
-                </button>
-              </div>
             </div>
             <span
               id="save-indicator"
@@ -83,6 +69,20 @@
               tabindex="0"
               ><span class="save-indicator-label">Not saved</span></span
             >
+            <div id="document-view" class="document-view" role="group" aria-label="View" hidden>
+              <button id="document-view-edit" type="button" aria-label="Edit" aria-pressed="true" title="Edit">
+                <span aria-hidden="true" class="view-icon">✎</span><span class="view-label">Edit</span>
+              </button>
+              <button
+                id="document-view-preview"
+                type="button"
+                aria-label="Preview"
+                aria-pressed="false"
+                title="Preview"
+              >
+                <span aria-hidden="true" class="view-icon">👁</span><span class="view-label">Preview</span>
+              </button>
+            </div>
             <span id="private-marker" class="private-marker" hidden>Private</span>
             <span id="viewer-badge" class="viewer-badge" hidden>Saved version · Read-only</span>
             <div id="doc-menu" class="doc-menu" role="dialog" aria-label="Documents" hidden>
