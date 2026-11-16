@@ -92,5 +92,14 @@ The six callout kinds have distinct theme-aware borders, tinted backgrounds and 
 The [research design](adr/322-local-reader-state.md) proposes automatic local remembering,
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
-This is a proposal for review, not implemented behavior: reading currently writes no
-storage and calc inputs remain temporary. Quiz attempts wait for the upstream state API.
+The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
+calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+
+
+Documents → Shared with me lists received links separately from editable documents, with
+a search field, read-only links labelled as opening a new tab, and named Remove buttons.
+Settings and the reader's Local shared library disclosure expose “Remember shared documents
+on this device”; the explanation explicitly says inputs remain temporary
+until their separate implementation. Private session overrides remembering. Saved local
+items remain until removal; turning remembering back on requires explicit Remember for
+the current page. Failure/full/private status is honest and never blocks reading.

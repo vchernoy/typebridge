@@ -56,15 +56,15 @@ Every control in the dialog is reachable with Tab; Escape or Close returns to �
 
 Markdown titles typeset inline `$…$` in the visible page heading, including with a source body. Titles do not interpret Markdown or live `{{…}}` bindings; display fences and invalid TeX remain plain text. The browser tab, title input, Documents list, share preview and export names keep the original plain title, with the same 150-character limit. Plain documents are unchanged.
 
-- **Nothing is stored while reading.** No database is opened and no history or settings are written.
+- **Valid received links are remembered locally by default** in Documents → Shared with me, separately from editable drafts. The Local shared library disclosure on the reader explains this and offers the same remembering preference as Settings. Private session or opt-out prevents automatic content writes; failed preference reads deny writes. Existing items remain until removed. Re-enabling does not save this page retroactively: use Remember explicitly or reopen in a fresh page. Calc inputs are still temporary.
 - **Edit** (shown unless the sender turned it off) reuses an exact safe editable match by imported title, source text and format, or saves a **new** document. It never overwrites an existing one. Private documents, candidates with an ownership record naming an owner, and candidates with unapplied change records or an observed emergency/reload backup are ineligible; uncertain matches get a new copy. The reader snapshots recovery IDs from localStorage and its own sessionStorage before matching; this check is not an atomic cross-storage guarantee and cannot inspect other tabs’ sessionStorage. Unreadable/malformed recovery storage disables reuse for that click. Backup records are never deleted by Edit. Multiple safe matches use lexical document ID order. Active-owner confirmation is not implemented, so even an unchanged actively owned copy currently uses the safe new-copy fallback. It then opens `/?open=<id>`: the host shows the copy in a new editor window, or activates the window that already shows it, and confirms either "Opened an existing document from your Documents." or "Saved as a new document in your Documents." When every window is open (the cap is 4), the copy is still saved, and the confirmation says to close a window and open it from ▾ Documents.
 - **A link that cannot be opened explains why:** it has no document, it was made by a newer version, it is too large, or it is incomplete or damaged (messengers sometimes cut long links). A format this version cannot show yet is displayed as its raw text with a notice.
 
 
 Markdown support delivers #244 proposed steps 2–4 through the editor-format/view and
 sharing/reading PRs. No author code runs, and no local-image, rich-editor or print/PDF support
-is included. Unknown formats still show source with a notice. Reading alone does not open
-IndexedDB or write localStorage/sessionStorage; Edit a copy remains the only storage action.
+is included. Unknown formats still show source with a notice. Reading remembers the validated received payload in IndexedDB when permitted; it never
+creates an editable draft. Only Edit a copy creates or safely reuses an editable document.
 The app shell is precached; renderer assets cache on demand. A first Markdown render needs
 connectivity, and later rendering works offline after those assets have been used online.
 
@@ -79,5 +79,36 @@ The six callout kinds have distinct theme-aware borders, tinted backgrounds and 
 The [research design](adr/322-local-reader-state.md) proposes automatic local remembering,
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
-This is a proposal for review, not implemented behavior: reading currently writes no
-storage and calc inputs remain temporary. Quiz attempts wait for the upstream state API.
+The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
+calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+
+
+## Local Shared with me library (#323)
+
+The exact validated version-prefixed payload identifies a received item, independent of the
+root/read.html route. Different compressed payloads or hints remain distinct. SHA-256 is
+only a lookup value; full payload equality is checked in the write transaction. Reopening
+updates last-opened time without adding a row. Unknown formats retain source fallback.
+
+Documents has a separate searchable Shared with me collection with links opening the
+original read-only page in a new tab and Remove actions. Removing an item also removes its
+reserved reader sidecar, never an independent editable copy. No account, sender identity
+or cross-device sync is implied. A maximum of 100 items / 10 MiB of payloads is retained;
+capacity, quota or storage failure leaves the link readable but not remembered. No silent
+eviction. Browser storage may be cleared or evicted; this library is not a backup guarantee.
+
+Clear local data deletes received items along with the existing content stores, closes
+reader connections and reloads old pages. The one-load cleared notice suppresses automatic
+remembering of the erased link after that reload; explicit Remember can save it again.
+Removal invalidates remembers already computing their digest through a transactional
+library epoch; a later deliberate open may remember the link anew. Settings, including
+remembering opt-out and Private session, remain separate from content erasure. Source/plain
+readers still download no renderer or font. Offline reopening requires the existing shell
+service worker to have been installed by opening TypeBridge; no new network service exists.
+
+Removal and global Clear local data publish a content-free localStorage cancellation
+token before their write transaction or database deletion. Readers capture it before initial decoding (and explicit Remember captures a
+fresh token); validation/open/hash delays cannot adopt a later removal as their baseline.
+The transactional epoch still orders removals against final writes. An unreadable token
+denies remembering; an unwritable token refuses removal/erasure with an error. The marker contains
+no document identity or content and may survive content erasure.

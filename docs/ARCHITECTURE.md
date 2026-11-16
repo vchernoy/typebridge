@@ -129,5 +129,28 @@ view, and Edit a copy stores source plus format. Reader inputs stay entirely ins
 The [research design](adr/322-local-reader-state.md) proposes automatic local remembering,
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
-This is a proposal for review, not implemented behavior: reading currently writes no
-storage and calc inputs remain temporary. Quiz attempts wait for the upstream state API.
+The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
+calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+
+
+### Received-link storage (#323)
+
+IndexedDB v7 adds sharedItems (opaque ID, digest, exact payload, byte count, creation and
+last-opened times) and reserved readerStates. Upgrading v6 preserves documents, ownership
+fences and all change records; historical log clearing applies only before v6. Received
+links do not enter source/history/recovery stores. Decode limits precede remembering,
+then a short write transaction checks full equality and limits. Reader writes require
+successful reads of both Private session and rememberShared preferences, plus a current
+navigation/lifecycle generation. Hashing is outside transactions; removal advances a
+library epoch so pending remembers cannot restore removed content. Reader operations close
+connections in finally and close/invalidate on versionchange; editor collection actions
+reuse the core lifecycle-owned connection and never independently reopen it, using existing successful
+global-clear reload behavior. ReaderStates currently contains only removal epoch metadata;
+no calc inputs or quiz state are persisted.
+
+Removal and global Clear local data publish a content-free localStorage cancellation
+token before their write transaction or database deletion. Readers capture it before initial decoding (and explicit Remember captures a
+fresh token); validation/open/hash delays cannot adopt a later removal as their baseline.
+The transactional epoch still orders removals against final writes. An unreadable token
+denies remembering; an unwritable token refuses removal/erasure with an error. The marker contains
+no document identity or content and may survive content erasure.

@@ -1,3 +1,4 @@
+import { setupSharedLibrary, setupRememberSharedPreference } from './ui/shared-library';
 import { clearedNoticeText, installStorageClearReload, takeClearedNotice } from './ui/storage-clear-reload';
 import { clearDocumentMetadata, notifyStorageClear, onStorageClear } from './editor/clear-data';
 import { setupClearLocalData } from './ui/clear-local-data';
@@ -222,6 +223,8 @@ const { setFocusMode, restoreFocusMode, resetLayout, applyFocusModeOnly } = setu
 });
 setupSettings({ embedded });
 let docSearchQuery = '';
+setupSharedLibrary(() => state.db);
+setupRememberSharedPreference();
 setupDocumentMenu({
   onSearch: query => {
     docSearchQuery = query;

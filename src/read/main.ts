@@ -1,7 +1,8 @@
+import { setupRememberShared } from './remember-shared';
 /**
  * Reading page for share links (#39): `/#doc=…` forwards here (inline script in index.html).
- * It looks like a plain read-only web page: the title, the text and a quiet Edit link. Nothing is
- * stored until the reader chooses Edit a copy, which reuses a safe exact copy or saves a new document and opens it in the
+ * It shows the title, text and a quiet Edit link. Valid links are remembered locally when permitted.
+ * Edit reuses a safe exact copy or saves a new document and opens it in the
  * full editor. Source text is never parsed as HTML; only the lazy renderer’s sanitized output is inserted.
  */
 import '../style.css';
@@ -133,18 +134,21 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
   }
 }
 
+const remembered = setupRememberShared(stopLive);
+
 /** Bumped on every render: a slow decode of an earlier link must not replace a newer one. */
 let renderGeneration = 0;
 async function render(): Promise<void> {
   stopLive();
   const generation = ++renderGeneration;
   const hash = location.hash;
+  remembered.show();
   // Never leave the previous document's Edit a copy armed while another link decodes.
   editCopy.hidden = true;
   editCopy.onclick = null;
   const result = await decodeSharePayload(sharePayloadFromHash(hash));
   if (generation !== renderGeneration || location.hash !== hash) return;
-  if (result.ok) showDocument(result.document, result.knownFormat);
+  if (result.ok) { showDocument(result.document, result.knownFormat); remembered.show(sharePayloadFromHash(hash)); }
   else showFailure(result.reason);
 }
 

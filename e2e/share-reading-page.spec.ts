@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { encodeSharePayload, type SharedDocument } from '../src/editor/share-link';
 import { readStoredDocs } from './storage-helpers';
 
-// Share links open as a plain read-only page (#39). Nothing is stored until Edit a copy.
+// Share links stay read-only; #323 remembers received payloads separately from editable drafts.
 const shared = (overrides: Partial<SharedDocument> = {}): SharedDocument => ({
   title: 'Письмо другу 🙂',
   text: 'Привет!\n\n  Вторая строка с отступом.\nЁлка — é 👩‍💻',
@@ -19,7 +19,7 @@ const linkFor = async (document: SharedDocument): Promise<string> => {
 const databases = (page: Page) => page.evaluate(async () =>
   'databases' in indexedDB ? (await indexedDB.databases()).map(db => db.name) : undefined);
 
-test('a share link opens as a read-only page and stores nothing', async ({ page }) => {
+test('a share link opens read-only and remembers only its received payload', async ({ page }) => {
   const document = shared();
   await page.goto(await linkFor(document));
   await expect(page).toHaveURL(/\/read\.html#doc=1\./);
@@ -30,10 +30,12 @@ test('a share link opens as a read-only page and stores nothing', async ({ page 
   await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'TypeBridge' })).toHaveAttribute('href', '/');
   await expect(page).toHaveTitle(`${document.title} · TypeBridge`);
-  // No editor chrome, and no storage opened just by reading.
+  // No editor chrome or editable draft created merely by reading.
   await expect(page.locator('#editor, .host-window')).toHaveCount(0);
+  await expect(page.locator('#shared-memory-status')).toHaveText('Remembered in Shared with me on this device.');
   const names = await databases(page);
-  if (names) expect(names).not.toContain('typebridge');
+  if (names) expect(names).toContain('typebridge');
+  expect(await readStoredDocs(page)).toEqual([]);
 });
 
 test('shared text is shown as text, never as HTML', async ({ page }) => {

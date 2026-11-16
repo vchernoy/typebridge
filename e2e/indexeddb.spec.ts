@@ -1,6 +1,7 @@
 import ts from 'typescript';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { DATABASE_VERSION } from '../src/editor/indexeddb';
 
 const transpile = (path: string): string => ts.transpileModule(readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 /** indexeddb.ts as a browser script exposing window.TypeBridgeDb; its one import is the ownership helpers. */
@@ -53,19 +54,19 @@ test('a blocked upgrade reports the blocker and closes a late connection', async
   const message = await page.evaluate(async () => {
     const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
     const original = indexedDB.open.bind(indexedDB);
-    indexedDB.open = ((name: string) => original(name, 7)) as typeof indexedDB.open;
+    indexedDB.open = ((name: string) => original(name, api.DATABASE_VERSION + 1)) as typeof indexedDB.open;
     try { await api.openDraftDatabase(); return 'unexpected success'; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
     finally { indexedDB.open = original; }
   });
   expect(message).toContain('Close other TypeBridge tabs');
   await blocker.evaluate(() => (window as unknown as { held: IDBDatabase }).held.close());
-  const nextUpgrade = await page.evaluate(() => new Promise<boolean>((resolve, reject) => {
-    const open = indexedDB.open('typebridge', 8);
+  const nextUpgrade = await page.evaluate(version => new Promise<boolean>((resolve, reject) => {
+    const open = indexedDB.open('typebridge', version + 2);
     open.onblocked = () => resolve(false);
     open.onerror = () => reject(open.error);
     open.onsuccess = () => { open.result.close(); resolve(true); };
-  }));
+  }), DATABASE_VERSION);
   expect(nextUpgrade).toBe(true);
 });
 
@@ -111,7 +112,7 @@ test('the ownership fence gates commits and deletes in the same transaction (#15
     return { stores, first, second, saved: saved.draft.revision, staleCommit, wrongWindow, staleDelete, afterStale, copyCount: copies.length,
       conflict: { flag: conflict.conflict, id: conflict.draft.id }, notMine, released, afterRelease, deleted, droppedRecord, unsavedRecord };
   });
-  expect(result.stores).toEqual(['changes', 'documents', 'editOwnership']);
+  expect(result.stores).toEqual(['changes', 'documents', 'editOwnership', 'readerStates', 'sharedItems']);
   expect([result.first, result.second]).toEqual([1, 2]);
   expect(result.saved).toBe(1);
   expect(result.staleCommit).toBe('EditOwnershipLostError');
@@ -145,7 +146,7 @@ test('upgrading a version 1 database keeps documents and adds the ownership and 
     open.onsuccess = () => { const db = open.result; resolve({ version: db.version, names: [...db.objectStoreNames].sort() }); db.close(); };
     open.onerror = () => reject(open.error);
   }));
-  expect(stores).toEqual({ version: 6, names: ['changes', 'documents', 'editOwnership'] });
+  expect(stores).toEqual({ version: DATABASE_VERSION, names: ['changes', 'documents', 'editOwnership', 'readerStates', 'sharedItems'] });
 });
 
 
@@ -176,8 +177,8 @@ test('a version 4 database from #256 opens, keeps its documents, clears its old 
     };
     open.onerror = () => reject(open.error);
   }));
-  expect(stores.version).toBe(6);
-  expect(stores.names).toEqual(['changes', 'documents', 'editOwnership']);
+  expect(stores.version).toBe(DATABASE_VERSION);
+  expect(stores.names).toEqual(['changes', 'documents', 'editOwnership', 'readerStates', 'sharedItems']);
   expect(stores.documents).toBeGreaterThanOrEqual(1);
 });
 
@@ -446,7 +447,7 @@ test('v6 clears the incompatible log, keeps rows/ownership, and reads missing se
     db.close();
     return { row, changes, fence, version };
   });
-  expect(result.version).toBe(6);
+  expect(result.version).toBe(DATABASE_VERSION);
   expect(result.row).toMatchObject({ text: 'body', title: 'T', find: '', replace: '', revision: 4, upTo: 9, private: true, history: { current: 'body', undo: [], redo: [] } });
   expect(result.changes).toEqual([]);
   expect(result.fence).toBe(8);

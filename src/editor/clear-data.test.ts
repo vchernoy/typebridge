@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearContentMetadata, clearDocumentMetadata, parseStorageClear, deleteContentDatabase } from './clear-data';
+import { SHARED_REMOVAL_KEY } from './shared-invalidation';
 afterEach(() => vi.unstubAllGlobals());
 function storage(data: Record<string, string>, failingKey?: string): Storage {
   const value = { ...data };
@@ -43,8 +44,10 @@ describe('content erasure', () => {
 });
 
 it('database deletion waits through blocking and resolves only after actual deletion succeeds', async () => {
+  const data = storage({}); vi.stubGlobal('localStorage', data);
   const request = {} as IDBOpenDBRequest;
-  const remove = vi.fn(() => request); vi.stubGlobal('indexedDB', { deleteDatabase: remove });
+  const remove = vi.fn(() => { expect(data.getItem(SHARED_REMOVAL_KEY)).toBeTruthy(); return request; });
+  vi.stubGlobal('indexedDB', { deleteDatabase: remove });
   const blocked = vi.fn(); let done = false;
   const promise = deleteContentDatabase(blocked).then(() => { done = true; });
   request.onblocked!(new Event('blocked') as IDBVersionChangeEvent);
@@ -53,11 +56,26 @@ it('database deletion waits through blocking and resolves only after actual dele
   expect(done).toBe(true); expect(remove).toHaveBeenCalledWith('typebridge');
 });
 it('database deletion failures reject rather than claiming erasure', async () => {
+  vi.stubGlobal('localStorage', storage({}));
   const request = { error: new Error('blocked') } as unknown as IDBOpenDBRequest;
   vi.stubGlobal('indexedDB', { deleteDatabase: () => request });
   const promise = deleteContentDatabase(() => {});
   request.onerror!(new Event('error'));
   await expect(promise).rejects.toThrow('blocked');
+});
+
+it('does not delete the database if durable remember cancellation cannot be published', async () => {
+  vi.stubGlobal('localStorage', { setItem: () => { throw new Error('Marker denied'); } });
+  const remove = vi.fn(); vi.stubGlobal('indexedDB', { deleteDatabase: remove });
+  await expect(deleteContentDatabase(() => {})).rejects.toThrow('Marker denied');
+  expect(remove).not.toHaveBeenCalled();
+});
+
+it('retains the cancellation marker through content cleanup', () => {
+  const data = storage({ [SHARED_REMOVAL_KEY]: 'before-erasure', 'typebridge.pendingDraft.v1': 'content' });
+  clearContentMetadata(data);
+  expect(data.getItem(SHARED_REMOVAL_KEY)).toBe('before-erasure');
+  expect(data.getItem('typebridge.pendingDraft.v1')).toBeNull();
 });
 
 it.each(['typebridge.pendingDraft.v1', 'typebridge.recovery.v1.owner'])('propagates removal failure for matching backup %s', key => {

@@ -37,5 +37,11 @@ Finalize mapping, shortcut and all mixed-case rules with user tests; resolve dua
 The [research design](adr/322-local-reader-state.md) proposes automatic local remembering,
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
-This is a proposal for review, not implemented behavior: reading currently writes no
-storage and calc inputs remain temporary. Quiz attempts wait for the upstream state API.
+The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
+calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+
+
+Received share links are automatically remembered on this browser/device unless opted out
+or Private session is on. The collection is separate from editable drafts; it supports
+search, reopening read-only and removal without deleting an editable copy. Failures leave
+reading usable. No reader-input or quiz persistence is claimed by this library slice.

@@ -1,4 +1,5 @@
 /** Content-only erasure (#257 step 4). Preferences and offline app assets are retained. */
+import { invalidateSharedRemembering } from './shared-invalidation';
 export const STORAGE_CLEAR_KEY = 'typebridge.storageClear.v1';
 export const STORAGE_CLEAR_EVENT = 'typebridge-storage-cleared';
 export type StorageClear = { nonce: string; documentId?: string; failed?: true };
@@ -63,6 +64,9 @@ export function notifyStorageClear(documentId?: string, failed = false): void {
 /** Deletion invalidates old connections/fences; it waits for transactions that already started. */
 export function deleteContentDatabase(blocked: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Readers still decoding have no connection to receive versionchange. Cancel them
+    // durably before deletion, rather than relying on the later clear notification.
+    invalidateSharedRemembering();
     const request = indexedDB.deleteDatabase('typebridge');
     request.onblocked = blocked;
     request.onsuccess = () => resolve(); request.onerror = () => reject(request.error);
