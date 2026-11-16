@@ -59,7 +59,7 @@ A new private document that has never saved appears only in its window’s Docum
 Documents → Format chooses Plain text (the default for new and old documents) or Markdown.
 The format belongs to the document and follows ownership, Autosave/private state, recovery,
 JSON export/import and the document change sequence. A private format change stays in memory.
-Markdown uses active-md 0.4.0: GFM, callouts/details, MathML math and calc bindings.
+Markdown uses active-md 0.5.0: GFM, callouts/details, MathML math and calc bindings.
 
 Markdown calc supports ln, log, exp, trigonometric functions, pi and e.
 
