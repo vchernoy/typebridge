@@ -247,7 +247,12 @@ for (const width of [320, 390, 1280]) {
       expect(previewTop).toBeLessThanOrEqual(editTop);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       if (width <= 640) for (const button of [edit, preview]) {
-        const box = (await button.boundingBox())!;
+        // Firefox's protocol quad subtraction can turn an exact 44px border box
+        // into 43.9999847 at fractional positions. Read the DOMRect size directly.
+        const box = await button.evaluate(element => {
+          const rect = element.getBoundingClientRect();
+          return { width: rect.width, height: rect.height };
+        });
         expect(box.width).toBeGreaterThanOrEqual(44);
         expect(box.height).toBeGreaterThanOrEqual(44);
       }
@@ -261,3 +266,34 @@ for (const width of [320, 390, 1280]) {
     await testInfo.attach('view-switch-geometry.json', { body: JSON.stringify(geometry), contentType: 'application/json' });
   });
 }
+
+test('phone view targets retain exact DOM sizes at fractional positions (#168)', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await markdown(page, '# Fractional targets');
+  const sizes = await page.locator('#document-view').evaluate(group => {
+    const buttons = Array.from(group.querySelectorAll('button'));
+    const measure = () => buttons.map(button => {
+      const rect = button.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    });
+    // Exercise the fractional coordinates that expose Firefox protocol rounding.
+    const positions = [0, 0.01, 0.02, 0.03, 0.04, 0.05].map(offset => {
+      group.style.marginLeft = `${offset}px`;
+      return measure();
+    });
+    // Negative control: this measurement must still report a genuinely undersized target.
+    buttons[0].style.minWidth = '43px';
+    buttons[0].style.width = '43px';
+    const undersized = measure()[0].width;
+    buttons[0].style.removeProperty('min-width');
+    buttons[0].style.removeProperty('width');
+    group.style.removeProperty('margin-left');
+    return { positions, undersized };
+  });
+  for (const position of sizes.positions) for (const box of position) {
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  }
+  expect(sizes.undersized).toBe(43);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
