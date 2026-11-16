@@ -1375,7 +1375,8 @@ if (embedded && !viewMode && windowId && !state.storageCleared) {
           documentPrivate: state.active.private === true,
           composing: [editor, titleEditor, findEditor, replaceEditor].some(input => input.composing),
           transitioning: state.transitioning || state.deleting || state.loadingDraft || state.transferFrozen || takeover.ownershipRetryPending()
-            || field.disabled || field.readOnly || reloadBackup.suppressed(),
+            // Rendered presentation is read-only without freezing the held owner.
+            || field.disabled || (field.readOnly && !renderedMode) || reloadBackup.suppressed(),
           saving: !!saver.inFlight(), saveFailed: state.saveFailed,
           pendingChanges: workspace.dirty(), dirty: workspace.dirty(),
         },

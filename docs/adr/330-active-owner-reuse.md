@@ -1,7 +1,7 @@
 # Active-owner shared-copy reuse (#330)
 
-Status: hosted owner endpoint is installed; shared Edit requester integration is
-not enabled. Research baseline: main `7c6cccc` (#329).
+Status: hosted owner endpoint and shared Edit requester UI are implemented.
+Final review, exact-head CI and deployment are tracked in #330. Research baseline: main `7c6cccc` (#329).
 The pure core validates metadata, bounds in-memory offers/outcomes, prevents duplicate
 activation within retained outcomes, and models indeterminate requester results with
 explicit status reconciliation. Unit tests cover expiry, cancellation, capacity,
@@ -41,8 +41,9 @@ it permanently. Reuse probes never call writeFence or acquire/save/flush anythin
 journal snapshot left behind after durable cleanup is not pending recovery when its
 fields exactly match the current clean document; observable persisted backups still
 block reuse. No journal is removed or modified by the adapter.
-Reader transport/UI and full shared-Edit cross-tab acceptance regressions remain #330
-work. Browser protocol tests exercise real BroadcastChannel offer/commit/status traffic,
+Reader transport/UI and shared-Edit cross-tab regressions are integrated below;
+review, CI and deployment completion remain tracked in #330. Browser protocol tests
+exercise real BroadcastChannel offer/commit/status traffic,
 private/blocked preference refusal, untracked live edits and post-offer cancellation. These modules do not provide
 durable exactly-once execution across owner restart/outcome retirement.
 The safe fallback and observable-backup exclusions from #325 remain unchanged.
@@ -58,11 +59,25 @@ first freshly verified responder wins, without promising the lowest-ID owner alw
 responds first. The transport keeps post-commit silence/transport errors unknown, permits only same-nonce explicit
 status reconciliation, and closes its listener after bounded retention. Cancellation
 is abandonment, never proof of remote non-activation; `hasCommitted` remains available
-so the future UI can preserve that warning. No candidate source/title is transported.
-These reader helpers are not called by the shared-page Edit UI yet. That integration
-must supply current privacy/source/recovery checks, invalidate on hash/navigation/clear
-or privacy changes, preserve unknown warnings on lifecycle restore, and permit a new
-copy after an unknown result only through a separate warned user action.
+so the UI can preserve that warning. No candidate source/title is transported.
+`read/edit-shared.ts` now invokes these helpers with fresh current context, privacy,
+source and recovery checks, including a final synchronous pre-commit gate. It cancels
+on hash/navigation/clear or privacy changes. Owned success keeps the reader usable and
+reports internal host selection without promising foreground browser focus. Unknown
+results block repeated Edit; Check status sends only the old identity. Create new copy
+requires an in-page warning/confirmation and starts a separate action that bypasses
+reuse. Late old replies cannot navigate or complete that new action.
+In-memory unresolved warnings are retained for up to 16 shared keys across restored
+page/history contexts. If that bound is exhausted, the page conservatively requires
+a warned copy action instead of evicting uncertainty and silently allowing fallback. If
+navigation abandoned its transport, Check status is disabled and the warning explains
+that limitation. There is no protocol persistence across full reloads. Candidate and
+copy continuations are generation/hash guarded; unowned copy transactions accept an
+abort signal and current-context predicate, including a check after add request success
+before transaction completion. A transaction already committed before cancellation is
+not undone by later navigation. Rendered presentation read-only is not treated as a
+lifecycle freeze: clean held owners can be selected without remounting either renderer
+or resetting either surface's temporary calc inputs.
 
 ## Observed constraints
 
@@ -198,9 +213,9 @@ saved copy. Sender-disabled Edit does not probe or create anything.
 ## Required implementation and tests
 
 The bounded protocol, hosted owner adapter and exact host activation hook now exist.
-Finish reader candidate probing, result/indeterminate UI and safe fallback integration,
-then validate the complete shared-Edit regression matrix below. Owner protocol tests
-alone do not establish that shared Edit has shipped this behavior. Keep source writes and backup mutation out of
+Reader candidate probing, result/unknown UI and safe fallback are integrated.
+The regression matrix below covers the full flow plus the bounded protocol tests;
+closing #330 still requires independent review, green final-head CI and deployment. Keep source writes and backup mutation out of
 this protocol. Reject unknown versions and malformed/oversized identity fields.
 
 Regression matrix:

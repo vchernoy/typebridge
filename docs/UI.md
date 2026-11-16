@@ -71,7 +71,7 @@ typed-in numbers stay as written, even inside an `aligned` block. Use `{{final |
 for a formatted live math value matching `:value[final]{format=fixed:2}`.
 Source changes refresh it after a short debounce. A collapsible Problems list links errors to
 source line/column. Plain documents have no view switch. Rendering dependencies load through a
-separate dynamic import. Shared pages honor the sender’s source/rendered view choice, without a reading toolbar. A quiet **Edit** hyperlink beside the title appears only when the sender allowed editing; it saves a new local copy and opens the full editor, where source viewing belongs. The muted **Written with TypeBridge** footer remains below the document. Rendering failures show the source with a notice.
+separate dynamic import. Shared pages honor the sender’s source/rendered view choice, without a reading toolbar. A quiet **Edit** hyperlink beside the title appears only when the sender allowed editing; it selects a guarded exact existing editor or uses the safe local-copy fallback. Existing-owner success keeps the reader open and gives window-switch guidance. An unknown result shows Check status and a separately confirmed Create new copy action; it never silently creates a duplicate. Source viewing remains in the full editor. The muted **Written with TypeBridge** footer remains below the document. Rendering failures show the source with a notice.
 
 Display math supports explicit multiline LaTeX such as `aligned`: two-column relation alignment is applied to native MathML cells in both Rendered editor and shared reading pages. Long display equations scroll horizontally within their math region; line breaks are authored, not generated automatically.
 

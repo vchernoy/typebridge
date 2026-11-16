@@ -154,3 +154,9 @@ fresh token); validation/open/hash delays cannot adopt a later removal as their 
 The transactional epoch still orders removals against final writes. An unreadable token
 denies remembering; an unwritable token refuses removal/erasure with an error. The marker contains
 no document identity or content and may survive content erasure.
+
+Shared Edit uses `read/edit-shared.ts` for per-page action generations, current privacy/hash
+guards, result/unknown UI and abortable atomic-copy fallback. Owned candidates use the
+bounded metadata-only reuse transport and the editor's fresh owner/source/fence/lifecycle
+proof before exact host selection (ADR #330). Protocol outcomes/warnings stay in memory;
+source/history, recovery and temporary renderer inputs are not rewritten by activation.

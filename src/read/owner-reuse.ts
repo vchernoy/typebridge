@@ -1,4 +1,4 @@
-/** Reader transport only for #330; the Edit/result UI is not connected yet. */
+/** Bounded reader transport for #330, connected to Edit/result UI by edit-shared.ts. */
 import type { OwnedSharedCopyCandidate } from '../editor/indexeddb';
 import {
   parseReuseMessage, ReuseRequester, REUSE_OFFER_MS, REUSE_OUTCOME_MS,
@@ -12,6 +12,8 @@ export type ReaderReuseDeps = {
   /** Fresh row/source/fence, recovery and current privacy checks; never save/claim. */
   verify: (offer: ReuseOffer, signal: AbortSignal) => Promise<boolean>;
   onResult?: (result: OwnerReuseResult) => void;
+  /** Synchronous final context/privacy check after asynchronous verification. */
+  canCommit?: () => boolean;
   /** Original Edit-click deadline; candidate lookup must not renew the selection budget. */
   deadline?: number;
   channel?: ReuseTransport | null;
@@ -67,6 +69,7 @@ export class ReaderOwnerReuse {
   }
 
   get hasCommitted(): boolean { return this.committed; }
+  get canCheckStatus(): boolean { return !this.ended && this.selected?.requester.state === 'unknown'; }
   get result(): OwnerReuseResult | undefined { return this.lastResult; }
   private post(message: ReuseMessage): boolean {
     try { this.channel?.postMessage(message); return !!this.channel; } catch { return false; }
@@ -100,6 +103,8 @@ export class ReaderOwnerReuse {
     const selected = this.selected!;
     let valid = false;
     try { valid = await this.deps.verify({ ...selected.offer }, this.abort.signal); } catch { /* Pre-commit failure is safe fallback. */ }
+    if (this.ended || this.abort.signal.aborted) return;
+    try { valid = valid && this.deps.canCommit?.() !== false; } catch { valid = false; }
     if (this.ended || this.abort.signal.aborted) return;
     if (!valid) {
       selected.requester.cancel();

@@ -758,3 +758,35 @@ test('owned shared-copy candidates are readonly, exact, deterministic and bounde
   expect(result.unchanged).toBe(true);
   for (const row of result.candidates) expect(Object.keys(row).sort()).toEqual(['documentId', 'fence', 'ownerInstanceId', 'revision']);
 });
+
+for (const cancellation of ['signal', 'after-add-success'] as const) {
+  test(`shared fallback copy rolls back on ${cancellation} cancellation`, async ({ page }) => {
+    await page.goto('/editor.html');
+    await expect(page.locator('#editor')).toBeEnabled();
+    await page.addScriptTag({ content: compiledDatabaseModule() });
+    const result = await page.evaluate(async cancellation => {
+      const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+      const db = await api.openDraftDatabase();
+      const before = await api.listStoredDrafts(db);
+      let allowed = true;
+      const abort = new AbortController();
+      const original = IDBObjectStore.prototype.add;
+      IDBObjectStore.prototype.add = function (value, key) {
+        const request = original.call(this, value, key);
+        if (cancellation === 'after-add-success' && value?.id === 'cancelled-shared-copy') request.addEventListener('success', () => { allowed = false; });
+        return request;
+      };
+      let cancelled = false;
+      try {
+        const pending = api.reuseOrCreateSharedCopy(db, { id: 'cancelled-shared-copy', title: 'Cancelled', text: 'Never commit', format: 'plain', updatedAt: 1 },
+          undefined, abort.signal, () => allowed);
+        if (cancellation === 'signal') abort.abort();
+        await pending;
+      } catch (error) { cancelled = error instanceof DOMException && error.name === 'AbortError'; }
+      finally { IDBObjectStore.prototype.add = original; }
+      const after = await api.listStoredDrafts(db); db.close();
+      return { cancelled, unchanged: JSON.stringify(before) === JSON.stringify(after) };
+    }, cancellation);
+    expect(result).toEqual({ cancelled: true, unchanged: true });
+  });
+}
