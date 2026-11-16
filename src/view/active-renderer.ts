@@ -78,3 +78,35 @@ export function renderDocument(root: HTMLElement, text: string, locale: string) 
     live.destroy();
   }, messages: result.messages };
 }
+
+/** Inline title math only: no Markdown, HTML or live-value interpretation. */
+export function renderTitle(root: HTMLElement, source: string): void {
+  const fragment = document.createDocumentFragment();
+  let start = 0;
+  const escaped = (index: number) => {
+    let count = 0;
+    while (index > 0 && source[--index] === '\\') count++;
+    return count % 2 === 1;
+  };
+  try {
+    for (let index = 0; index < source.length; index++) {
+      if (source[index] !== '$' || escaped(index)) continue;
+      // Display fences and live bindings are deliberately literal in titles.
+      if (source[index + 1] === '$') return;
+      let end = index + 1;
+      while (end < source.length && (source[end] !== '$' || escaped(end))) end++;
+      if (end === source.length || end === index + 1) return;
+      const tex = source.slice(index + 1, end);
+      if (tex.includes('{{')) return;
+      fragment.append(document.createTextNode(source.slice(start, index)));
+      const span = document.createElement('span');
+      // KaTeX owns this boundary; source text is never inserted as HTML.
+      span.innerHTML = katex.renderToString(tex, { trust: false, throwOnError: true, output: 'mathml', displayMode: false });
+      fragment.append(span);
+      index = end;
+      start = end + 1;
+    }
+    fragment.append(document.createTextNode(source.slice(start)));
+    root.replaceChildren(fragment);
+  } catch { /* Keep the complete plain title on malformed TeX. */ }
+}

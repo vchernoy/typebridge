@@ -6,7 +6,8 @@
   font-display: swap;
 }
 
-.active-reading .active-doc math {
+.active-reading .active-doc math,
+.read-title math {
   font-family: "Fira Math", "STIX Two Math", "Cambria Math", "Latin Modern Math", math;
 }
 

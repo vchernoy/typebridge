@@ -117,3 +117,40 @@ test('shared renderer keeps compact controls on one line and formatted math live
   await expect(page.locator('#read-text .active-doc')).toBeVisible();
   await assertPolishedMarkdown(page.locator('#read-text'));
 });
+
+for (const [name, title, format, math] of [
+  ['inline math', 'Energy $E=mc^2$', 'markdown', true],
+  ['broken TeX', 'Broken $\\frac{$', 'markdown', false],
+  ['plain document', 'Energy $E=mc^2$', 'plain', false],
+  ['display fence', 'Energy $$E=mc^2$$', 'markdown', false],
+  ['live binding', 'Energy $E={{energy}}$', 'markdown', false],
+  ['escaped delimiter', 'Price \\$5', 'markdown', false],
+] as const) {
+  test(`shared title ${name} keeps tab title plain`, async ({ page }) => {
+    const result = await encodeSharePayload({ title, text: 'Body', format, view: 'rendered', edit: true });
+    if (!result.ok) throw new Error('Could not make test link');
+    await page.goto('/read.html#doc=' + result.payload);
+    await expect(page.locator('#read-text')).toHaveText('Body');
+    if (format === 'markdown') await expect(page.locator('#read-text .active-doc')).toBeVisible();
+    await expect(page).toHaveTitle(title + ' · TypeBridge');
+    await expect(page.locator('#read-title math')).toHaveCount(math ? 1 : 0);
+    await expect(page.locator('#read-title .katex-error, #read-title a, #read-title script')).toHaveCount(0);
+    if (!math) await expect(page.locator('#read-title')).toHaveText(title);
+    if (math) await page.screenshot({ path: `/tmp/312-title-${test.info().project.name}.png` });
+  });
+}
+
+test('source body still typesets a static title without interpreting title HTML', async ({ page }) => {
+  const title = '<img src=x onerror=alert(1)> $x^2$';
+  const result = await encodeSharePayload({ title, text: '$body$', format: 'markdown', view: 'source', edit: false });
+  if (!result.ok) throw new Error('Could not make test link');
+  const unexpected: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/x') unexpected.push(request.url()); });
+  await page.goto('/read.html#doc=' + result.payload);
+  await expect(page.locator('#read-title math')).toHaveCount(1);
+  await expect(page.locator('#read-title')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#read-title img')).toHaveCount(0);
+  await expect(page.locator('#read-text')).toHaveText('$body$');
+  await expect(page.locator('#read-text math')).toHaveCount(0);
+  expect(unexpected).toEqual([]);
+});
