@@ -41,8 +41,9 @@ it permanently. Reuse probes never call writeFence or acquire/save/flush anythin
 journal snapshot left behind after durable cleanup is not pending recovery when its
 fields exactly match the current clean document; observable persisted backups still
 block reuse. No journal is removed or modified by the adapter.
-Reader transport/UI and full shared-Edit cross-tab acceptance regressions remain #330
-work. Browser protocol tests exercise real BroadcastChannel offer/commit/status traffic,
+Reader transport/UI and shared-Edit cross-tab regressions are integrated below;
+review, CI and deployment completion remain tracked in #330. Browser protocol tests
+exercise real BroadcastChannel offer/commit/status traffic,
 private/blocked preference refusal, untracked live edits and post-offer cancellation. These modules do not provide
 durable exactly-once execution across owner restart/outcome retirement.
 The safe fallback and observable-backup exclusions from #325 remain unchanged.

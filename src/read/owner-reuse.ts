@@ -1,4 +1,4 @@
-/** Reader transport only for #330; the Edit/result UI is not connected yet. */
+/** Bounded reader transport for #330, connected to Edit/result UI by edit-shared.ts. */
 import type { OwnedSharedCopyCandidate } from '../editor/indexeddb';
 import {
   parseReuseMessage, ReuseRequester, REUSE_OFFER_MS, REUSE_OUTCOME_MS,
