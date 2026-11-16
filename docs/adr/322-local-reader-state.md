@@ -18,7 +18,10 @@ not a promise about future quiz/event initialization.
 
 Draft database version 6 holds documents, editOwnership and changes. Its versionchange
 handler closes connections; global clear deletes the entire `typebridge` database.
-`privateSessionOn()` fails closed when preferences cannot be read. Per-document private
+`privateSessionOn()` uses its last successfully observed value when a preference read fails;
+without a cached value it defaults to private. A cached non-private value can therefore
+survive a failed read. The stricter proposed reader-write gate below must separately
+track read success rather than treating this helper as proof of a successful read. Per-document private
 flags and revision-zero private identities must remain protected. Existing host activation
 can show an already-open document but does not prove its in-memory source equals its row.
 
@@ -40,7 +43,9 @@ Editable equality (#325) is deliberately different: compare effective imported t
 exact text and documentFormat using one shared import-fields helper. Preserve the current
 blank-title fallback and actual import trimming policy; do not add normalization. Hints,
 reader values, history and provenance are excluded. Among provably safe exact matches,
-choose oldest created timestamp then lexical document ID. An unrelated exact local match
+choose lexical document ID for all rows, including legacy documents. StoredDraft has
+updatedAt, not createdAt; neither updatedAt nor enumeration order represents creation
+time, and this policy requires no creation-timestamp migration. An unrelated exact local match
 is eligible; a formerly imported but changed document is not.
 
 ## Storage and limits
