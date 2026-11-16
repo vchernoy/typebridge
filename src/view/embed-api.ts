@@ -58,6 +58,10 @@ export type HostPageApi = {
   __typebridgeHostRename: (windowId: string) => void;
   /** Document ids open in other windows (for the picker's "open elsewhere" mark). */
   __typebridgeOpenDocumentIds: (exceptWindowId?: string) => string[];
+  /** #330: exact live owning iframe only; no create/open/transfer fallback. */
+  __typebridgeHasExistingEditor: (windowId: string, documentId: string, source: Window) => boolean;
+  /** Internal host selection only, not a guarantee of browser foreground focus. */
+  __typebridgeActivateExistingEditor: (windowId: string, documentId: string, source: Window) => boolean;
   /** Titles open in other windows (for distinct Untitled defaults). */
   __typebridgeOpenTitles: (exceptWindowId?: string) => string[];
   /** Open the host Settings panel, optionally focusing a control by id. */
