@@ -5,7 +5,7 @@ const { listeners, failed } = vi.hoisted(() => ({ listeners: [] as Array<(detail
 vi.mock('../editor/clear-data', async original => ({ ...await original<typeof import('../editor/clear-data')>(),
   onStorageClear: (fn: (detail: StorageClear & { local: boolean }) => void) => listeners.push(fn), notifyStorageClear: failed }));
 afterEach(() => vi.unstubAllGlobals());
-beforeEach(() => { listeners.length = 0; failed.mockReset(); });
+beforeEach(() => { listeners.length = 0; failed.mockReset(); vi.stubGlobal('localStorage', storage({})); });
 function storage(data: Record<string, string>, log: string[] = [], fail = false): Storage {
   return Object.defineProperties({ ...data }, {
     getItem: { value: function (this: Record<string, string>, k: string) { return this[k] ?? null; } },
@@ -43,4 +43,27 @@ it('delegates an embedded editor to its host after stopping it', () => {
 it('consumes invalid one-shot notices without showing a success message', () => {
   const data = storage({ [CLEARED_NOTICE_KEY]: 'invalid' }); expect(takeClearedNotice(data)).toBeUndefined(); expect(data.getItem(CLEARED_NOTICE_KEY)).toBeNull();
   expect(clearedNoticeText('here')).toBe('All local data was cleared'); expect(clearedNoticeText('elsewhere')).toBe('Storage was cleared in another tab');
+});
+
+it('removes layout repersisted after the initiating erase once old writers are stopped', () => {
+  const log: string[] = [];
+  const local = storage({ 'typebridge.host.windows.v1': 'old two-window layout', 'typebridge.appearance.v1': 'dark' }, log);
+  const session = storage({}, log);
+  vi.stubGlobal('localStorage', local); vi.stubGlobal('sessionStorage', session);
+  const reload = vi.fn(() => { expect(local.getItem('typebridge.host.windows.v1')).toBeNull(); log.push('reload'); });
+  installStorageClearReload({ stop: () => {
+    log.push('stop'); local.setItem('typebridge.host.windows.v1', 'last old writer snapshot');
+  }, reload });
+  listeners[0]({ nonce: 'late-layout', local: false });
+  expect(log).toEqual(['stop', 'set:typebridge.host.windows.v1', 'remove:typebridge.host.windows.v1', 'set:' + CLEARED_NOTICE_KEY, 'reload']);
+  expect(local.getItem('typebridge.appearance.v1')).toBe('dark');
+  expect(reload).toHaveBeenCalledOnce(); expect(failed).not.toHaveBeenCalled();
+});
+it('reports failure instead of a success reload when stale local metadata cannot be removed', () => {
+  vi.stubGlobal('localStorage', storage({ 'typebridge.pendingDraft.v1': 'old' }, [], true));
+  const session = storage({}); vi.stubGlobal('sessionStorage', session);
+  const reload = vi.fn(); installStorageClearReload({ stop: () => {}, reload });
+  listeners[0]({ nonce: 'local-denied', local: false });
+  expect(reload).not.toHaveBeenCalled(); expect(session.getItem(CLEARED_NOTICE_KEY)).toBeNull();
+  expect(failed).toHaveBeenCalledWith(undefined, true);
 });

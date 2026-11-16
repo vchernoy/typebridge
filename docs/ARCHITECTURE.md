@@ -99,7 +99,7 @@ A successful global clear stops each editor’s saver/change writer, closes its 
 
 The content-free one-shot session flag `typebridge.clearedNotice.v1` is `here` in the clearing page and `elsewhere` in peers. Boot consumes/removes it and shows “All local data was cleared” or “Storage was cleared in another tab”. The host consumes its shared flag before creating its default main iframe and passes the notice in memory. A partial failure does not reload and propagates “Some local data could not be cleared”, allowing retry.
 
-Only known TypeBridge content keys are removed from local/session storage: journals, reload backups (including retired namespaces), active hints, positions, legacy drafts/search text and host layout. Settings, Private session, other applications’ storage and offline app assets are kept. A metadata-only channel plus transient storage event notifies other tabs; each tab removes its own session data. Host caches suppress cleared identities until the full host reload replaces them. No entered text is transmitted or logged.
+Only known TypeBridge content keys are removed from local/session storage: journals, reload backups (including retired namespaces), active hints, positions, legacy drafts/search text and host layout. Settings, Private session, other applications’ storage and offline app assets are kept. A metadata-only channel plus transient storage event notifies other tabs; after stopping its old writers, each receiver removes content metadata from local storage again (a peer may have repersisted layout since the initiating erase), then removes its own session data. Host caches suppress cleared identities until the full host reload replaces them. No entered text is transmitted or logged.
 
 ### Markdown rendering (#244)
 

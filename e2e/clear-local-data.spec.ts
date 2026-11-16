@@ -111,7 +111,7 @@ test('clear-all failure is reported without pretending the saved data was remove
   await expect(page.locator('#editor')).toHaveValue('Retained after failed clear');
 });
 
-for (const clearSource of ['host', 'tab'] as const) test(`host and two tabs reload after clearing two host windows; notices are one-shot and saving resumes (${clearSource})`, async ({ page, context }) => {
+for (const clearSource of ['host', 'tab', 'tab-late-layout'] as const) test(`host and two tabs reload after clearing two host windows; notices are one-shot and saving resumes (${clearSource})`, async ({ page, context }) => {
   await page.goto('/');
   const frame = page.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(frame.locator('#editor')).toBeEnabled();
@@ -128,6 +128,22 @@ for (const clearSource of ['host', 'tab'] as const) test(`host and two tabs relo
   const tabs = await Promise.all([context.newPage(), context.newPage()]);
   for (const tab of tabs) { await tab.goto(`/editor.html?doc=${id}`); await expect(tab.locator('#editor')).toHaveValue('CLEAR CANARY host'); }
   const before = await Promise.all(tabs.map(tab => tab.locator('html').getAttribute('data-instance-id')));
+  if (clearSource === 'tab-late-layout') {
+    const oldLayout = await page.evaluate(() => localStorage.getItem('typebridge.host.windows.v1'));
+    if (!oldLayout) throw new Error('Expected the old two-window layout');
+    await tabs[0].evaluate(oldLayout => {
+      const remove = Storage.prototype.removeItem; const set = Storage.prototype.setItem;
+      let replayed = false;
+      Storage.prototype.removeItem = function (key) {
+        remove.call(this, key);
+        // Model the observed ordering: another old host persist lands after the
+        // clearing tab erases layout but before the host receives the clear event.
+        if (this === localStorage && key === 'typebridge.host.windows.v1' && !replayed) {
+          replayed = true; set.call(this, key, oldLayout);
+        }
+      };
+    }, oldLayout);
+  }
   await clearAll(clearSource === 'host' ? page : tabs[0]);
   await expect(frame.getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
   await expect(page.locator('iframe.host-editor')).toHaveCount(1);
@@ -141,7 +157,7 @@ for (const clearSource of ['host', 'tab'] as const) test(`host and two tabs relo
   await expect(frame.locator('#save-indicator')).toHaveText('Saved');
   for (const [i, tab] of tabs.entries()) {
     await ready(tab); await expect(tab.locator('html')).not.toHaveAttribute('data-instance-id', before[i]!);
-    await expect(tab.getByText(clearSource === 'tab' && i === 0 ? 'All local data was cleared' : 'Storage was cleared in another tab', { exact: true })).toBeVisible();
+    await expect(tab.getByText(clearSource !== 'host' && i === 0 ? 'All local data was cleared' : 'Storage was cleared in another tab', { exact: true })).toBeVisible();
     expect(await tab.evaluate(() => sessionStorage.getItem('typebridge.clearedNotice.v1'))).toBeNull();
     await save(tab, 'Fresh tab ' + i);
   }
