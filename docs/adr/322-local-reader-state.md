@@ -149,6 +149,10 @@ host openDocument activation/cap handling remains the presentation path. Report 
 existing document” versus “Saved a new copy” accurately; saving can succeed when four
 windows prevent opening. Sender-disabled Edit remains disabled.
 
+The [active-owner protocol proposal](330-active-owner-reuse.md) records the bounded
+confirmation/activation contract for #330. It is not implemented; the safe fallback
+from #329 remains in force until separately reviewed implementation ships.
+
 ## Acceptance matrix and review gates
 
 | Slice | Required regression evidence |
