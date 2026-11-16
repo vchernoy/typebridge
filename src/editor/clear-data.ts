@@ -1,3 +1,4 @@
+import { advanceLayoutEpoch } from '../host/layout-storage';
 /** Content-only erasure (#257 step 4). Preferences and offline app assets are retained. */
 import { invalidateSharedRemembering } from './shared-invalidation';
 export const STORAGE_CLEAR_KEY = 'typebridge.storageClear.v1';
@@ -7,7 +8,7 @@ const prefixes = ['typebridge.recovery.v1.', 'typebridge.pendingDraft.', 'typebr
   'typebridge.writingPosition.v1.', 'typebridge.find.query.v1', 'typebridge.find.replace.v1', 'typebridge.drafts.v1', 'typebridge.reloadDiscard.', 'typebridge.reloadDiscardPending.'];
 export function clearContentMetadata(storage: Storage): void {
   for (const key of Object.keys(storage)) {
-    if (key === 'typebridge.host.windows.v1' || prefixes.some(prefix => key.startsWith(prefix))) storage.removeItem(key);
+    if ((key === 'typebridge.host.windows.v1' || key.startsWith('typebridge.host.windows.v1.')) || prefixes.some(prefix => key.startsWith(prefix))) storage.removeItem(key);
   }
 }
 export function clearDocumentMetadata(storage: Storage, id: string): void {
@@ -19,7 +20,7 @@ export function clearDocumentMetadata(storage: Storage, id: string): void {
       let item: { id?: string; documentId?: string } | null;
       try { item = JSON.parse(raw ?? 'null'); } catch { continue; /* Unrelated corrupt backup. */ }
       if (item?.id === id || item?.documentId === id) storage.removeItem(key);
-    } else if (key === 'typebridge.host.windows.v1' && raw) {
+    } else if ((key === 'typebridge.host.windows.v1' || key.startsWith('typebridge.host.windows.v1.')) && raw) {
       const layout = JSON.parse(raw);
       if (Array.isArray(layout.windows)) {
         for (const win of layout.windows) if (win.documentId === id) delete win.documentId;
@@ -66,6 +67,7 @@ export function deleteContentDatabase(blocked: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
     // Readers still decoding have no connection to receive versionchange. Cancel them
     // durably before deletion, rather than relying on the later clear notification.
+    advanceLayoutEpoch(localStorage);
     invalidateSharedRemembering();
     const request = indexedDB.deleteDatabase('typebridge');
     request.onblocked = blocked;

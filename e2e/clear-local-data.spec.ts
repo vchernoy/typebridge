@@ -408,3 +408,51 @@ test('two global clears in a row each reload into a fresh editable document', as
   }
   await save(page, 'Fresh after two clears');
 });
+
+test('late old hosts cannot restore erased layout or sweep fresh failed-save recovery', async ({ page, context }) => {
+  await page.addInitScript(() => {
+    const dispatch = window.dispatchEvent.bind(window);
+    let held: Event | undefined;
+    window.dispatchEvent = event => {
+      if (event.type === 'typebridge-storage-cleared' && !(event as CustomEvent).detail?.failed) { held = event; return true; }
+      return dispatch(event);
+    };
+    (window as unknown as { releaseClear: () => void }).releaseClear = () => { if (held) dispatch(held); };
+  });
+  await page.goto('/');
+  await expect(page.frameLocator('.host-window[data-window-id="main"] iframe').locator('#editor')).toBeEnabled();
+  await page.getByRole('button', { name: 'New window', exact: true }).click();
+  await expect(page.locator('iframe.host-editor')).toHaveCount(2);
+  const source = await context.newPage(); await source.goto('/editor.html'); await ready(source);
+  await clearAll(source);
+  await expect(source.getByText('All local data was cleared', { exact: true })).toBeVisible();
+  // Force the real old manager's unload persist before delivering its clear notification.
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  expect(await source.evaluate(() => localStorage.getItem('typebridge.host.windows.v1'))).toBeNull();
+  const fresh = await context.newPage(); await fresh.goto('/');
+  const frame = fresh.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(frame.locator('#editor')).toBeEnabled();
+  await expect(fresh.locator('iframe.host-editor')).toHaveCount(1);
+  await frame.locator('#editor').fill('Fresh initially saved');
+  await expect(frame.locator('#save-indicator')).toHaveText('Saved');
+  await frame.locator('#editor').evaluate(() => {
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+    IDBObjectStore.prototype.add = function () { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  });
+  await frame.locator('#editor').fill('Fresh failed save needs emergency recovery');
+  await expect.poll(() => fresh.evaluate(() => Object.entries(localStorage).some(([key, raw]) => key.startsWith('typebridge.recovery.v1.') && raw.includes('Fresh failed save needs emergency recovery')))).toBe(true);
+  await fresh.getByRole('button', { name: 'Tile side by side' }).click();
+  const snapshot = () => fresh.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('typebridge.recovery.v1.') || key.startsWith('typebridge.host.windows.v1'))));
+  await fresh.clock.install(); await fresh.clock.pauseAt(new Date());
+  const before = await snapshot();
+  expect(Object.keys(before).some(key => key.startsWith('typebridge.host.windows.v1.'))).toBe(true);
+  const atReload = await page.evaluate(() => new Promise<Record<string, string>>(resolve => {
+    window.addEventListener('beforeunload', () => resolve(Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('typebridge.recovery.v1.') || key.startsWith('typebridge.host.windows.v1')))), { once: true });
+    (window as unknown as { releaseClear: () => void }).releaseClear();
+  }));
+  expect(atReload).toEqual(before);
+  await expect(page.locator('iframe.host-editor')).toHaveCount(1);
+  await expect(page.frameLocator('.host-window[data-window-id="main"] iframe').getByText('Storage was cleared in another tab', { exact: true })).toBeVisible();
+  // The late receiver preserved both byte-for-byte before the normal replacement boot.
+  expect(await fresh.evaluate(() => Object.values(localStorage).some(raw => raw.includes('Fresh failed save needs emergency recovery')))).toBe(true);
+});

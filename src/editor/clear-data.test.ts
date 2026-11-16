@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearContentMetadata, clearDocumentMetadata, parseStorageClear, deleteContentDatabase } from './clear-data';
+import { LAYOUT_EPOCH_KEY } from '../host/layout-storage';
 import { SHARED_REMOVAL_KEY } from './shared-invalidation';
 afterEach(() => vi.unstubAllGlobals());
 function storage(data: Record<string, string>, failingKey?: string): Storage {
@@ -83,4 +84,21 @@ it.each(['typebridge.pendingDraft.v1', 'typebridge.recovery.v1.owner'])('propaga
   const data = storage({ [key]: raw }, key);
   expect(() => clearDocumentMetadata(data, 'a')).toThrow('Removal denied');
   expect(data.getItem(key)).toBe(raw);
+});
+
+it('refuses database deletion when layout generation cannot advance', async () => {
+  const data = storage({}); const set = data.setItem.bind(data);
+  vi.stubGlobal('localStorage', { ...data, setItem: (key: string, value: string) => { if (key === LAYOUT_EPOCH_KEY) throw new Error('Epoch denied'); set(key, value); } });
+  const remove = vi.fn(); vi.stubGlobal('indexedDB', { deleteDatabase: remove });
+  await expect(deleteContentDatabase(() => {})).rejects.toThrow('Epoch denied');
+  expect(remove).not.toHaveBeenCalled();
+});
+
+it('clears document IDs in epoch layouts and removes every layout slot on global clear', () => {
+  const key = 'typebridge.host.windows.v1.epoch';
+  const data = storage({ [key]: JSON.stringify({ windows: [{ id: 'main', documentId: 'a' }, { id: 'w2', documentId: 'b' }] }), [LAYOUT_EPOCH_KEY]: 'epoch' });
+  clearDocumentMetadata(data, 'a');
+  expect(JSON.parse(data.getItem(key)!)).toEqual({ windows: [{ id: 'main' }, { id: 'w2', documentId: 'b' }] });
+  clearContentMetadata(data);
+  expect(data.getItem(key)).toBeNull(); expect(data.getItem(LAYOUT_EPOCH_KEY)).toBe('epoch');
 });

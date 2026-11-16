@@ -44,3 +44,13 @@ it('consumes invalid one-shot notices without showing a success message', () => 
   const data = storage({ [CLEARED_NOTICE_KEY]: 'invalid' }); expect(takeClearedNotice(data)).toBeUndefined(); expect(data.getItem(CLEARED_NOTICE_KEY)).toBeNull();
   expect(clearedNoticeText('here')).toBe('All local data was cleared'); expect(clearedNoticeText('elsewhere')).toBe('Storage was cleared in another tab');
 });
+
+it('preserves fresh local recovery and layout when an old clear notification arrives late', () => {
+  const raw = JSON.stringify({ text: 'fresh unsaved recovery' });
+  const local = storage({ 'typebridge.recovery.v1.fresh': raw, 'typebridge.host.windows.v1.new-epoch': 'fresh layout' });
+  vi.stubGlobal('localStorage', local); vi.stubGlobal('sessionStorage', storage({}));
+  const before = JSON.stringify(local), reload = vi.fn();
+  installStorageClearReload({ stop: () => {}, reload });
+  listeners[0]({ nonce: 'late-old-clear', local: false });
+  expect(JSON.stringify(local)).toBe(before); expect(reload).toHaveBeenCalledOnce();
+});

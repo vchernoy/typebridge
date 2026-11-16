@@ -1,3 +1,4 @@
+import { captureLayoutStorage } from './layout-storage';
 import { clearedNoticeText, installStorageClearReload, takeClearedNotice } from '../ui/storage-clear-reload';
 /**
  * #175 step 5–7 host page: free-layout editor windows, update notice, and Settings.
@@ -59,8 +60,9 @@ function allEditorWorkspaces(): HTMLElement[] {
 // A tab that ran the single editor at `/` before the cutover keeps its document, unsaved
 // reload backup and caret: move that session state into the window that shows first.
 try {
-  const ids = readHostLayout(localStorage)?.windows.map(win => win.id) ?? [];
-  const focusId = readHostLayout(localStorage)?.focusWindowId;
+  const saved = readHostLayout(captureLayoutStorage(localStorage));
+  const ids = saved?.windows.map(win => win.id) ?? [];
+  const focusId = saved?.focusWindowId;
   migrateStandaloneSession(sessionStorage, (focusId && ids.includes(focusId) ? focusId : ids[0]) ?? 'main');
 } catch { /* Blocked storage: windows start without the old session hints. */ }
 
