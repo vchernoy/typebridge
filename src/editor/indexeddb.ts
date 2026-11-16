@@ -48,9 +48,10 @@ const DATABASE = 'typebridge';
  * Version 4 (#256, reverted) added a discardMarkers store; version 5 removes it again, so
  * browsers that already upgraded to 4 keep opening the database (#257).
  * Version 6 replaces the text/title log with field-tagged value-or-change records.
- * No log migration: clear changes during upgrade. Missing find/replace in rows means empty.
+ * No log migration before v6: clear older changes during upgrade. Missing find/replace means empty.
+ * Version 7 adds received shared links and reserved reader sidecars; preserve v6 change records.
  */
-export const DATABASE_VERSION = 6;
+export const DATABASE_VERSION = 7;
 /** Store added by version 4 and removed by version 5. */
 const REMOVED_DISCARD_MARKERS = 'discardMarkers';
 const STORE = 'documents';
@@ -119,12 +120,14 @@ export function openDraftDatabase(onVersionChange?: (cleared?: boolean) => void)
   return new Promise((resolve, reject) => {
     let blocked = false;
     const open = indexedDB.open(DATABASE, DATABASE_VERSION);
-    open.onupgradeneeded = () => {
+    open.onupgradeneeded = event => {
       const db = open.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(OWNERSHIP)) db.createObjectStore(OWNERSHIP, { keyPath: 'documentId' });
       if (!db.objectStoreNames.contains(CHANGES)) db.createObjectStore(CHANGES, { keyPath: ['documentId', 'seq'] });
-      else open.transaction!.objectStore(CHANGES).clear();
+      else if (event.oldVersion < 6) open.transaction!.objectStore(CHANGES).clear();
+      if (!db.objectStoreNames.contains('sharedItems')) db.createObjectStore('sharedItems', { keyPath: 'id' }).createIndex('digest', 'digest');
+      if (!db.objectStoreNames.contains('readerStates')) db.createObjectStore('readerStates', { keyPath: 'id' });
       if (db.objectStoreNames.contains(REMOVED_DISCARD_MARKERS)) db.deleteObjectStore(REMOVED_DISCARD_MARKERS);
     };
     open.onsuccess = () => {

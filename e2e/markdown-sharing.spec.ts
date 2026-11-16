@@ -10,7 +10,7 @@ async function link(text = markdown, view: 'source' | 'rendered' = 'rendered'): 
   return '/read.html#doc=' + result.payload;
 }
 
-test('Markdown link is live, has minimal chrome, stores nothing and copies its format', async ({ page }) => {
+test('Markdown link is live, has minimal chrome, remembers source but not inputs and copies its format', async ({ page }) => {
   await page.goto(await link());
   await expect(page.locator('#read-text .active-doc')).toBeVisible();
   await page.locator('#read-text input').fill('5');
@@ -18,8 +18,10 @@ test('Markdown link is live, has minimal chrome, stores nothing and copies its f
   await expect(page.locator('#read-text math')).toContainText('15');
   await expect(page.locator('#read-view, .read-label')).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeVisible();
-  expect(await page.evaluate(async () => ({ local: localStorage.length, session: sessionStorage.length, db: await indexedDB.databases() })))
-    .toEqual({ local: 0, session: 0, db: [] });
+  await expect(page.locator('#shared-memory-status')).toHaveText('Remembered in Shared with me on this device.');
+  expect(await readStoredDocs(page)).toEqual([]);
+  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })))
+    .toEqual({ local: 0, session: 0 });
   await page.reload();
   await expect(page.locator('#read-text input')).toHaveValue('2');
   await page.locator('#edit-copy').click();

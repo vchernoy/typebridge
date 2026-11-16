@@ -326,3 +326,29 @@
     display: none;
   }
 }
+
+#shared-library ul {
+  max-height: 12rem;
+  overflow: auto;
+  padding-left: 0;
+  list-style: none;
+}
+#shared-library li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block: 8px;
+}
+#shared-library a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#shared-library button {
+  flex-shrink: 0;
+}
+#shared-search {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}

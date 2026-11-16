@@ -1,3 +1,4 @@
+import { setupRememberShared } from './remember-shared';
 /**
  * Reading page for share links (#39): `/#doc=…` forwards here (inline script in index.html).
  * It looks like a plain read-only web page: the title, the text and a quiet Edit link. Nothing is
@@ -132,18 +133,21 @@ async function saveCopy(shared: SharedDocument): Promise<void> {
   }
 }
 
+const remembered = setupRememberShared(stopLive);
+
 /** Bumped on every render: a slow decode of an earlier link must not replace a newer one. */
 let renderGeneration = 0;
 async function render(): Promise<void> {
   stopLive();
   const generation = ++renderGeneration;
   const hash = location.hash;
+  remembered.show();
   // Never leave the previous document's Edit a copy armed while another link decodes.
   editCopy.hidden = true;
   editCopy.onclick = null;
   const result = await decodeSharePayload(sharePayloadFromHash(hash));
   if (generation !== renderGeneration || location.hash !== hash) return;
-  if (result.ok) showDocument(result.document, result.knownFormat);
+  if (result.ok) { showDocument(result.document, result.knownFormat); remembered.show(sharePayloadFromHash(hash)); }
   else showFailure(result.reason);
 }
 

@@ -1,3 +1,4 @@
+import { setupRememberSharedPreference } from '../ui/shared-library';
 import { setupClearLocalData } from '../ui/clear-local-data';
 /**
  * #175 step 7: one Settings panel on the host page.
@@ -42,6 +43,7 @@ export function installHostSettings(deps: {
 }): HostSettingsApi {
   setupSettings();
   setupClearLocalData();
+  setupRememberSharedPreference();
 
   const appearance = setupAppearance(preferenceSaved, { prefsOrigin: PREFS_ORIGIN });
   const layout = setupWindowLayoutSetting(preferenceSaved, { prefsOrigin: PREFS_ORIGIN });
