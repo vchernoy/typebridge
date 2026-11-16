@@ -72,3 +72,12 @@ connectivity, and later rendering works offline after those assets have been use
 Rendered reading uses compact number controls sized from their declared ranges, with sentence-sized, normal-weight input text. Math prefers Fira Math, with locally installed STIX Two Math, Cambria Math or Latin Modern Math as fallbacks. TypeBridge bundles Fira Math 0.3.4 (99,332-byte WOFF2, SIL OFL 1.1; [licence](../public/fonts/FiraMath-OFL.txt)) for devices without it. The renderer loads it from this site only when math needs it, tries local Fira Math first, and caches the asset on demand for offline use after its first online render. Fraction fences use a MathML minimum derived from their enclosed layout height, refreshed after font loading and live math changes; explicit authored size limits are preserved. Plain documents load no math font; active-md itself remains font-free. Long display formulas scroll in their HTML wrapper, with a fading edge only where more content remains. Short formulas have no fade.
 
 The six callout kinds have distinct theme-aware borders, tinted backgrounds and title colours; details keep a neutral border. Shared-page Edit and TypeBridge attribution links use the theme accent, hover emphasis and keyboard focus outline. These presentation changes do not save reader input values or change the shared source.
+
+
+## Planned local shared library and reader state (#322)
+
+The [research design](adr/322-local-reader-state.md) proposes automatic local remembering,
+separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
+reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
+This is a proposal for review, not implemented behavior: reading currently writes no
+storage and calc inputs remain temporary. Quiz attempts wait for the upstream state API.
