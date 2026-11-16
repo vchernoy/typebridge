@@ -2,12 +2,9 @@
 import { openDraftDatabase } from './indexeddb';
 import { decodeSharePayload, SHARE_PAYLOAD_MAX_CHARS } from './share-link';
 import { AUTOSAVE_PREF_KEY } from './drafts';
+import { sharedRemovalToken, invalidateSharedRemembering } from './shared-invalidation';
+export { SHARED_REMOVAL_KEY, sharedRemovalToken } from './shared-invalidation';
 export const REMEMBER_SHARED_KEY = 'typebridge.rememberShared.v1';
-// Content-free cancellation marker, captured before decoding or opening IndexedDB.
-export const SHARED_REMOVAL_KEY = 'typebridge.sharedRemoval.v1';
-export function sharedRemovalToken(): string | undefined {
-  try { return localStorage.getItem(SHARED_REMOVAL_KEY) ?? ''; } catch { return undefined; }
-}
 export const SHARED_ITEMS = 'sharedItems';
 export const SHARED_MAX_ITEMS = 100;
 export const SHARED_MAX_BYTES = 10 * 1024 * 1024;
@@ -83,7 +80,7 @@ export async function listSharedItems(db: IDBDatabase): Promise<SharedItem[]> {
 export async function removeSharedItem(db: IDBDatabase, id: string): Promise<void> {
   // Publish before any await: work still decoding/opening must not adopt the new epoch.
   // If this write fails, refuse removal rather than promising invalidation we cannot enforce.
-  localStorage.setItem(SHARED_REMOVAL_KEY, crypto.randomUUID());
+  invalidateSharedRemembering();
   const tx = db.transaction([SHARED_ITEMS, 'readerStates'], 'readwrite'); const done = finished(tx); void done.catch(() => undefined);
   try {
     const epochs = tx.objectStore('readerStates');

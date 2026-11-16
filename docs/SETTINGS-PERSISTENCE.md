@@ -41,9 +41,9 @@ removes its sidecar and invalidates pending remembers; global clear deletes thes
 and suppresses automatic re-remembering of old reader URLs on the resulting reload.
 Reader input values remain memory-only until #324/#326; no saved quiz attempts are implied.
 
-Removal publishes a content-free localStorage cancellation token before opening its write
-transaction. Readers capture it before initial decoding (and explicit Remember captures a
+Removal and global Clear local data publish a content-free localStorage cancellation
+token before their write transaction or database deletion. Readers capture it before initial decoding (and explicit Remember captures a
 fresh token); validation/open/hash delays cannot adopt a later removal as their baseline.
 The transactional epoch still orders removals against final writes. An unreadable token
-denies remembering; an unwritable token refuses removal with an error. The marker contains
+denies remembering; an unwritable token refuses removal/erasure with an error. The marker contains
 no document identity or content and may survive content erasure.

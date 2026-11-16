@@ -218,11 +218,27 @@ test('phone library links wrap and removal remains keyboard accessible', async (
   await expect(summary).toBeFocused();
 });
 
-for (const phase of ['initial decode', 'remember validation', 'database open'] as const) {
-  test(`removal cancels a reader held during ${phase}, before its epoch snapshot`, async ({ page, context }) => {
-    const p = await payload(); await page.goto('/read.html#doc=' + p); await remembered(page);
-    const held = await context.newPage();
-    await held.addInitScript(phase => {
+type RememberPhase = 'initial decode' | 'remember validation' | 'database open';
+async function holdRemember(page: Page, phase: RememberPhase, suppressClear = false) {
+  await page.addInitScript(({ phase, suppressClear }) => {
+      if (suppressClear) {
+        // Hold peer notification delivery independently of database deletion.
+        const add = window.addEventListener.bind(window);
+        window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) => {
+          if (!listener) return;
+          if (type !== 'storage') return add(type, listener, options);
+          add(type, event => {
+            if ((event as StorageEvent).key === 'typebridge.storageClear.v1') return;
+            if (typeof listener === 'function') listener.call(window, event); else listener.handleEvent(event);
+          }, options);
+        }) as typeof window.addEventListener;
+        const NativeChannel = BroadcastChannel;
+        window.BroadcastChannel = class extends NativeChannel {
+          addEventListener(...args: Parameters<BroadcastChannel['addEventListener']>) {
+            if (this.name !== 'typebridge.storage.v1') super.addEventListener(...args);
+          }
+        };
+      }
       const hold = () => new Promise<void>(resolve => {
         (window as unknown as { releaseRemember: () => void }).releaseRemember = resolve;
       });
@@ -256,7 +272,14 @@ for (const phase of ['initial decode', 'remember validation', 'database open'] a
           }
         };
       }
-    }, phase);
+  }, { phase, suppressClear });
+}
+
+for (const phase of ['initial decode', 'remember validation', 'database open'] as const) {
+  test(`removal cancels a reader held during ${phase}, before its epoch snapshot`, async ({ page, context }) => {
+    const p = await payload(); await page.goto('/read.html#doc=' + p); await remembered(page);
+    const held = await context.newPage();
+    await holdRemember(held, phase);
     await held.goto('/read.html#doc=' + p);
     await expect.poll(() => held.evaluate(() => typeof (window as unknown as { releaseRemember?: unknown }).releaseRemember)).toBe('function');
     await page.goto('/editor.html'); await expect(page.locator('#editor')).toBeEnabled();
@@ -270,5 +293,28 @@ for (const phase of ['initial decode', 'remember validation', 'database open'] a
     // A fresh deliberate open still remembers the source after removal.
     const fresh = await context.newPage(); await fresh.goto('/read.html#doc=' + p); await remembered(fresh);
     expect(await rows(fresh)).toHaveLength(1);
+  });
+}
+
+
+for (const phase of ['initial decode', 'remember validation'] as const) {
+  test(`global clear cancels a reader held during ${phase} before peer notification arrives`, async ({ page, context }) => {
+    const p = await payload(); await page.goto('/read.html#doc=' + p); await remembered(page);
+    const held = await context.newPage(); await holdRemember(held, phase, true);
+    await held.goto('/read.html#doc=' + p);
+    await expect.poll(() => held.evaluate(() => typeof (window as unknown as { releaseRemember?: unknown }).releaseRemember)).toBe('function');
+    await page.goto('/editor.html'); await expect(page.locator('#editor')).toBeEnabled();
+    await page.locator('#settings-open').click(); await page.locator('#clear-local-data').click();
+    await page.getByRole('button', { name: 'Clear local data', exact: true }).click();
+    await expect(page.getByText('All local data was cleared', { exact: true })).toBeVisible();
+    expect(await rows(page)).toEqual([]);
+    await held.evaluate(() => (window as unknown as { releaseRemember: () => void }).releaseRemember());
+    await expect(held.locator('#shared-memory-status')).toContainText('Remembering cancelled');
+    await expect(held.locator('#read-text')).toHaveText('Exact received text\n', { useInnerText: false });
+    expect(await rows(page)).toEqual([]);
+    // Explicit consent after erasure can remember the still-readable link again.
+    await held.getByText('Local shared library', { exact: true }).click();
+    await held.getByRole('button', { name: 'Remember this document' }).click(); await remembered(held);
+    expect(await rows(page)).toHaveLength(1);
   });
 }
