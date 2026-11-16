@@ -653,3 +653,67 @@ for (const abort of [false, true]) {
     }
   });
 }
+
+for (const variant of ['exact', 'private', 'revision', 'fence', 'owner', 'pending', 'covered', 'legacy-format', 'bad-format', 'missing'] as const) {
+  test(`owned shared-copy readonly snapshot: ${variant}`, async ({ page }) => {
+    await page.goto('/editor.html');
+    await expect(page.locator('#editor')).toBeEnabled();
+    await page.addScriptTag({ content: compiledDatabaseModule() });
+    const result = await page.evaluate(async variant => {
+      const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+      const db = await api.openDraftDatabase();
+      const id = 'reuse-inspection-fixture';
+      const row = { id, title: 'Title', text: 'Exact text\n', format: 'markdown', revision: 2, upTo: 1, updatedAt: 123,
+        history: { preserved: true }, ...(variant === 'private' ? { private: true } : {}),
+        ...(variant === 'bad-format' ? { format: 'unsupported-future-format' } : {}),
+        ...(variant === 'legacy-format' ? { format: undefined } : {}) };
+      const tx = db.transaction(['documents', 'editOwnership', 'changes'], 'readwrite');
+      if (variant !== 'missing') tx.objectStore('documents').put(row);
+      tx.objectStore('editOwnership').put({ documentId: id, ownerInstanceId: 'owner', fence: 3, updatedAt: 0 });
+      if (variant === 'pending' || variant === 'covered') tx.objectStore('changes').put({ documentId: id, seq: variant === 'pending' ? 2 : 1, untouched: true });
+      await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error); });
+      const readAll = async () => {
+        const tx = db.transaction(['documents', 'editOwnership', 'changes'], 'readonly');
+        return Promise.all(['documents', 'editOwnership', 'changes'].map(store => new Promise<unknown[]>((resolve, reject) => {
+          const get = tx.objectStore(store).getAll(); get.onsuccess = () => resolve(get.result); get.onerror = () => reject(get.error);
+        })));
+      };
+      const before = await readAll();
+      const proof = await api.inspectOwnedSharedCopy(db, { documentId: id, revision: variant === 'revision' ? 9 : 2,
+        ownerInstanceId: variant === 'owner' ? 'other' : 'owner', fence: variant === 'fence' ? 9 : 3 });
+      const after = await readAll();
+      const abort = new AbortController(); abort.abort();
+      let aborted = false;
+      try { await api.inspectOwnedSharedCopy(db, { documentId: id, revision: 2, ownerInstanceId: 'owner', fence: 3 }, abort.signal); }
+      catch (error) { aborted = error instanceof DOMException && error.name === 'AbortError'; }
+      db.close();
+      return { proof, unchanged: JSON.stringify(before) === JSON.stringify(after), aborted };
+    }, variant);
+    expect(result.unchanged).toBe(true);
+    expect(result.aborted).toBe(true);
+    if (variant === 'exact' || variant === 'covered' || variant === 'legacy-format') {
+      expect(result.proof).toEqual({ documentId: 'reuse-inspection-fixture', title: 'Title', text: 'Exact text\n',
+        revision: 2, ownerInstanceId: 'owner', fence: 3, format: variant === 'legacy-format' ? 'plain' : 'markdown' });
+    } else expect(result.proof).toBeUndefined();
+  });
+}
+
+test('owned shared-copy inspection aborts an in-flight readonly transaction', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.addScriptTag({ content: compiledDatabaseModule() });
+  const result = await page.evaluate(async () => {
+    const api = (window as unknown as { TypeBridgeDb: typeof import('../src/editor/indexeddb') }).TypeBridgeDb;
+    const db = await api.openDraftDatabase();
+    const before = await api.listStoredDrafts(db);
+    const abort = new AbortController();
+    const pending = api.inspectOwnedSharedCopy(db, { documentId: 'cancelled-fixture', revision: 1, ownerInstanceId: 'owner', fence: 1 }, abort.signal);
+    abort.abort();
+    let aborted = false;
+    try { await pending; } catch (error) { aborted = error instanceof DOMException && error.name === 'AbortError'; }
+    const after = await api.listStoredDrafts(db);
+    db.close();
+    return { aborted, unchanged: JSON.stringify(before) === JSON.stringify(after) };
+  });
+  expect(result).toEqual({ aborted: true, unchanged: true });
+});

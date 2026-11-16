@@ -15,8 +15,17 @@ Its injected inspection/eligibility/activation hooks still need real editor adap
 At most 16 unsettled inspections are retained, including providers that ignore abort;
 a stuck provider can exhaust those slots until it settles or the page is destroyed.
 Invalidation never frees an unsettled slot early or lets its result activate later.
-Reader transport/UI, fresh storage/live-source/privacy/fence adapters, host activation
-and browser integration regressions remain #330 work. These modules do not provide
+`inspectOwnedSharedCopy` reads document, owner fence and change-log keys in one
+readonly transaction on the caller's existing connection. It rejects missing/private,
+revision/fence mismatches, unsupported formats and unapplied records, and returns
+only local source/identity evidence (no history). Abort cancels inspection; no save,
+claim, release, pruning, schema or connection lifecycle changes are performed.
+`sharedReuseReady` compares fresh live source/title/format and owner/revision/fence
+against that snapshot, requiring positive storage/privacy/recovery/activation evidence
+and refusing dirty/composing/saving/transition states. Its booleans still need real
+editor adapters, including a successful current privacy read and current lock proof.
+Reader transport/UI, editor adapters, host activation and cross-tab browser integration
+regressions remain #330 work. These modules do not provide
 durable exactly-once execution across owner restart/outcome retirement.
 The safe fallback and observable-backup exclusions from #325 remain unchanged.
 
