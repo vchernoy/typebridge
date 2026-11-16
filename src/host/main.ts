@@ -109,6 +109,8 @@ const manager = installWindowManager({
 exposeHostPageApi({
   __typebridgeReloadAfterStorageClear: reloadAfterStorageClear,
   __typebridgeHostWindows: () => manager.windows(),
+  __typebridgeHasExistingEditor: (windowId, documentId, source) => manager.hasExistingEditor(windowId, documentId, source),
+  __typebridgeActivateExistingEditor: (windowId, documentId, source) => manager.activateExistingEditor(windowId, documentId, source),
   __typebridgeHostLayoutMode: () => manager.layoutMode(),
   __typebridgeHostFocusMode: (enabled, sourceWindowId) => {
     manager.setHostFocusMode(enabled, sourceWindowId);

@@ -87,6 +87,10 @@ export type WindowManager = {
    * for it. Leaves host Focus first, so `full` only means every window is open (the cap).
    */
   openDocument: (documentId: string) => 'shown' | 'opened' | 'full';
+  /** #330: verify exact live iframe identity without changing layout or focus. */
+  hasExistingEditor: (windowId: string, documentId: string, source: Window) => boolean;
+  /** Select only that existing editor; never open, replace or transfer a document. */
+  activateExistingEditor: (windowId: string, documentId: string, source: Window) => boolean;
   closeWindow: (id: string) => Promise<boolean>;
   tileSideBySide: () => void;
   tileStacked: () => void;
@@ -788,8 +792,28 @@ export function installWindowManager(deps: WindowManagerDeps): WindowManager {
     persist();
   };
 
+  const hasExistingEditor = (windowId: string, documentId: string, source: Window): boolean => {
+    if (disposed || storageCleared || !documentId || closingIds.has(windowId)
+        || closeInFlight.has(windowId) || confirmModalOpen()) return false;
+    const frame = frames.get(windowId);
+    const shell = shells.get(windowId);
+    if (!layouts.some(win => win.id === windowId) || !frame?.isConnected || !shell?.isConnected
+        || frame.contentWindow !== source) return false;
+    try {
+      // Deliberately no layout/sessionStorage fallback: those can name an old
+      // document while the iframe is loading, switching or unavailable.
+      return editorWindowApi(frame.contentWindow)?.__typebridgeStoredDocumentId?.() === documentId;
+    } catch { return false; }
+  };
+
   const api: WindowManager = {
     windows: () => layouts.slice(),
+    hasExistingEditor,
+    activateExistingEditor: (windowId, documentId, source) => {
+      if (!hasExistingEditor(windowId, documentId, source)) return false;
+      setActive(windowId);
+      return true;
+    },
     openDocumentIds: (exceptWindowId?: string) => {
       const ids: string[] = [];
       for (const win of layouts) {
