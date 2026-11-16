@@ -1,7 +1,7 @@
 # Active-owner shared-copy reuse (#330)
 
-Status: protocol core implemented in `src/view/shared-copy-protocol.ts`; active-owner
-reuse is not enabled. Research baseline: main `7c6cccc` (#329).
+Status: hosted owner endpoint is installed; shared Edit requester integration is
+not enabled. Research baseline: main `7c6cccc` (#329).
 The pure core validates metadata, bounds in-memory offers/outcomes, prevents duplicate
 activation within retained outcomes, and models indeterminate requester results with
 explicit status reconciliation. Unit tests cover expiry, cancellation, capacity,
@@ -10,8 +10,12 @@ identity mismatch, partial failures and lost/late results.
 BroadcastChannel transport. It reserves bounded ledger entries before asynchronous
 inspection, reruns synchronous live eligibility before activation, invalidates work
 by lifecycle generation, aborts timed-out/cancelled inspections, and replays terminal
-outcomes for status/duplicate commits. The controller is not installed by the app.
-Its injected inspection/eligibility/activation hooks still need real editor adapters.
+outcomes for status/duplicate commits. `editor-shared-reuse.ts` installs the controller in hosted editing windows only.
+Its real adapter uses the existing connection, non-mutating held-fence credentials,
+current source/title/format, successful current privacy read, local recovery inspection,
+IME/save/transition gates and exact host activation. Stored fences alone never authorize
+activation. Ownership object, database and workspace/storage generations must survive
+the asynchronous inspection unchanged.
 At most 16 unsettled inspections are retained, including providers that ignore abort;
 a stuck provider can exhaust those slots until it settles or the page is destroyed.
 Invalidation never frees an unsettled slot early or lets its result activate later.
@@ -22,17 +26,24 @@ only local source/identity evidence (no history). Abort cancels inspection; no s
 claim, release, pruning, schema or connection lifecycle changes are performed.
 `sharedReuseReady` compares fresh live source/title/format and owner/revision/fence
 against that snapshot, requiring positive storage/privacy/recovery/activation evidence
-and refusing dirty/composing/saving/transition states. Its booleans still need real
-editor adapters, including a successful current privacy read and current lock proof.
+and refusing dirty/composing/saving/transition states. The hosted adapter supplies current evidence, including a successful
+privacy read and credentials from the currently held ownership object.
 The host now exposes separate `hasExistingEditor` / `activateExistingEditor` hooks.
 They require the exact live iframe Window, window ID and live document probe, refuse
 modal/closing/cleared/unavailable hosts, and never fall back to session/layout identity
 or open a new window. Activation only selects the existing host window (including in
 Focus and at the four-window cap, maximizing the selected window while preserving
 its pre-Focus geometry for restoration); it does not promise browser foreground focus.
-These hooks are not yet invoked by the owner reuse controller.
-Reader transport/UI, editor adapters and cross-tab browser integration regressions
-remain #330 work. These modules do not provide
+The hosted owner controller invokes these hooks after the final live check.
+User edit/action events, preference changes and navigation invalidate offers; pagehide
+closes the channel, pageshow recreates it for restored pages, and storage clear disposes
+it permanently. Reuse probes never call writeFence or acquire/save/flush anything. A memory-only
+journal snapshot left behind after durable cleanup is not pending recovery when its
+fields exactly match the current clean document; observable persisted backups still
+block reuse. No journal is removed or modified by the adapter.
+Reader transport/UI and full shared-Edit cross-tab acceptance regressions remain #330
+work. Browser protocol tests exercise real BroadcastChannel offer/commit/status traffic,
+private/blocked preference refusal, untracked live edits and post-offer cancellation. These modules do not provide
 durable exactly-once execution across owner restart/outcome retirement.
 The safe fallback and observable-backup exclusions from #325 remain unchanged.
 
@@ -169,10 +180,10 @@ saved copy. Sender-disabled Edit does not probe or create anything.
 
 ## Required implementation and tests
 
-The bounded parser/state machine and opt-in owner transport exist; connect owner readiness
-to current model fields, privacy, IME, save and lifecycle gates; add a host activation
-hook that does not perform yield/steal; integrate reader fallback. Those editor/reader
-adapters are not implemented merely because this document describes them. Keep source writes and backup mutation out of
+The bounded protocol, hosted owner adapter and exact host activation hook now exist.
+Finish reader candidate probing, result/indeterminate UI and safe fallback integration,
+then validate the complete shared-Edit regression matrix below. Owner protocol tests
+alone do not establish that shared Edit has shipped this behavior. Keep source writes and backup mutation out of
 this protocol. Reject unknown versions and malformed/oversized identity fields.
 
 Regression matrix:

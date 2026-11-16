@@ -10,6 +10,8 @@ export type EditOwnership = {
    * EditOwnershipLostError after release or loss.
    */
   writeFence(): Promise<WriteFence>;
+  /** Read held credentials only; never claims a deferred fence or writes storage. */
+  peekFence(): WriteFence | undefined;
   /** Give up the fence, then the lock. Safe to call more than once. */
   release(): Promise<void>;
 };
@@ -53,6 +55,7 @@ export function acquireEditOwnership(options: {
     };
     const ownership: EditOwnership = {
       documentId,
+      peekFence: () => !released && fence ? { ...fence } : undefined,
       async writeFence() {
         if (released) throw new EditOwnershipLostError();
         const current = fence ?? await (claiming ??= claim().finally(() => { claiming = undefined; }));

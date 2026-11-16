@@ -68,10 +68,16 @@ describe('acquireEditOwnership', () => {
       documentId: DOC, instanceId: 'new', onLost: () => undefined, deferClaim: true });
     if (result.status !== 'acquired') throw new Error('not acquired');
     expect(storage.fences.size).toBe(0);
+    expect(result.ownership.peekFence()).toBeUndefined();
+    expect(storage.fences.size).toBe(0);
     const [a, b] = await Promise.all([result.ownership.writeFence(), result.ownership.writeFence()]);
     expect(a).toEqual(b); expect(a.fence).toBe(1);
     expect(storage.fences.get(DOC)).toBe(1);
+    const peek = result.ownership.peekFence()!;
+    peek.fence = 999;
+    expect(result.ownership.peekFence()).toEqual({ instanceId: 'new', fence: 1 });
     await result.ownership.release();
+    expect(result.ownership.peekFence()).toBeUndefined();
   });
   it('releases a deferred claim that was still in flight when privacy released ownership', async () => {
     const result = await acquireEditOwnership({ db, locks: locks as unknown as LockManager,
@@ -128,6 +134,7 @@ describe('acquireEditOwnership', () => {
     locks.steal(LOCK);
     await flush();
     expect(lost).toHaveBeenCalledTimes(1);
+    expect(first.ownership.peekFence()).toBeUndefined();
     await expect(first.ownership.writeFence()).rejects.toMatchObject({ name: 'EditOwnershipLostError' });
 
     const quiet = vi.fn();
@@ -178,6 +185,7 @@ describe('acquireEditOwnership', () => {
     });
     await flush();
     expect(lost).toHaveBeenCalledTimes(1);
+    expect(first.ownership.peekFence()).toBeUndefined();
     expect(second.status).toBe('acquired');
     if (second.status !== 'acquired') return;
     await expect(second.ownership.writeFence()).resolves.toEqual({ instanceId: 'b', fence: 2 });
