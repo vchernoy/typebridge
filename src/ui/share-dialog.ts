@@ -57,6 +57,12 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   previewText.className = 'share-preview-text';
   previewText.textContent = sharePreview(text) || '(empty)';
   preview.append(previewTitle, previewText);
+  const previewDisclosure = document.createElement('details');
+  previewDisclosure.className = 'share-preview-disclosure';
+  const previewSummary = document.createElement('summary');
+  previewSummary.id = 'share-preview-toggle';
+  previewSummary.textContent = 'Document preview';
+  previewDisclosure.append(previewSummary, preview);
   // Preview anchors must not navigate away from the editor or replace its fragment.
   previewText.addEventListener('click', event => {
     if (!(event.target instanceof Element)) return;
@@ -77,7 +83,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     previewText.className = 'share-preview-text';
     previewText.textContent = sharePreview(text) || '(empty)';
     preview.setAttribute('aria-label', format === 'markdown' ? 'Document source preview' : 'What the reader sees');
-    if (view !== 'rendered') return;
+    if (!previewDisclosure.open || view !== 'rendered') return;
     try {
       const { renderDocument } = await import('../view/active-renderer');
       if (current !== previewGeneration) return;
@@ -92,7 +98,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
       previewText.textContent = 'Rendered preview unavailable. Source: ' + (sharePreview(text) || '(empty)');
     }
   };
-  void updatePreview();
+  previewDisclosure.addEventListener('toggle', () => { void updatePreview(); });
 
   const editLabel = document.createElement('label');
   editLabel.className = 'share-option';
@@ -188,7 +194,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   row.append(link, copy);
   content.append(privacy, linkLabel, row, status, editLabel, headingLabel);
   if (format === 'markdown') content.append(viewLabel);
-  content.append(preview);
+  content.append(previewDisclosure);
   try {
     await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', closeInHeader: true, returnFocus: deps.returnFocus() });
   } finally {

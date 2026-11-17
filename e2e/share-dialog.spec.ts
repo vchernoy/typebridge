@@ -8,6 +8,51 @@ import { readStoredDocs } from './storage-helpers';
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Share link', exact: true });
 const linkField = (page: Page) => dialog(page).getByRole('textbox', { name: 'Link' });
 
+test('preview disclosure loads on demand and cancellation cannot revive a collapsed preview (#351)', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 320, height: 568 } });
+  try {
+    const page = await context.newPage();
+    const requests: string[] = [];
+    let release: (() => Promise<void>) | undefined;
+    let completed = false;
+    await page.route('**/assets/active-renderer-*.js', async route => {
+      requests.push(route.request().url());
+      await new Promise<void>(resolve => { release = async () => { await route.continue(); resolve(); }; });
+    });
+    page.on('requestfinished', request => { if (/\/assets\/active-renderer-.*\.js/.test(request.url())) completed = true; });
+    const source = '# Disclosure fixture\n\n```calc\ninput x = 2\n```\n\n:input[x] :value[x]';
+    await setText(page, 'Disclosure', source);
+    await page.locator('#doc-menu-open').click();
+    await page.locator('#document-format').selectOption('markdown');
+    await page.locator('#share-link').click();
+    const sheet = dialog(page);
+    const toggle = sheet.locator('#share-preview-toggle');
+    await expect(sheet.locator('.share-preview')).toBeHidden();
+    await expect(sheet.locator('#share-copy')).toBeEnabled();
+    expect(requests).toEqual([]);
+    expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({ path: '/tmp/351-preview-collapsed.png', fullPage: true });
+    await toggle.focus(); await page.keyboard.press('Enter');
+    await expect.poll(() => !!release).toBe(true);
+    await page.keyboard.press('Space');
+    await expect(sheet.locator('details')).not.toHaveAttribute('open', '');
+    await release!();
+    await expect.poll(() => completed).toBe(true);
+    await expect(sheet.locator('.active-doc')).toHaveCount(0);
+    await page.keyboard.press('Enter');
+    await expect(sheet.getByRole('heading', { name: 'Disclosure fixture' })).toBeVisible();
+    const input = sheet.locator('[data-active-input="x"]');
+    await input.fill('9');
+    expect((await decodeShown(page)).decoded).toMatchObject({ ok: true, document: { text: source } });
+    await toggle.click(); await expect(sheet.locator('.active-doc')).toHaveCount(0);
+    await toggle.click(); await expect(input).toHaveValue('2');
+    expect(requests).toHaveLength(1);
+    await page.screenshot({ path: '/tmp/351-preview-expanded.png', fullPage: true });
+    await page.keyboard.press('Escape'); await expect(sheet).toHaveCount(0);
+    await expect(page.locator('#doc-menu-open')).toBeFocused();
+  } finally { await context.close(); }
+});
+
 async function setText(page: Page, title: string, text: string): Promise<void> {
   await page.goto('/editor.html');
   const field = page.locator('#editor');
@@ -106,11 +151,11 @@ test('Copy link copies or explains, and every control is reachable with Tab', as
   // Focus starts on Close; Tab cycles through the controls and wraps.
   await dialog(page).getByRole('button', { name: 'Close' }).focus();
   const order: string[] = [];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     await page.keyboard.press('Tab');
     order.push(await page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent || ''));
   }
-  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'share-heading', 'confirm-dialog-close']);
+  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'share-heading', 'share-preview-toggle', 'confirm-dialog-close']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 });
@@ -181,6 +226,7 @@ for (const viewport of [{ width: 390, height: 640 }, { width: 320, height: 480 }
     const copy = dialog(page).getByRole('button', { name: 'Copy link' });
     await expect(copy).toBeEnabled();
     // The primary action must be above the secondary preview, not buried after it.
+    await dialog(page).locator('#share-preview-toggle').click();
     const rowBox = await dialog(page).locator('.share-link-row').boundingBox();
     const previewBox = await dialog(page).locator('.share-preview').boundingBox();
     expect(rowBox!.y + rowBox!.height).toBeLessThanOrEqual(previewBox!.y);
@@ -235,6 +281,7 @@ test('Markdown share preview follows the reader view and header X closes with fo
   await page.locator('#document-format').selectOption('markdown');
   await page.locator('#share-link').click();
   const sheet = dialog(page);
+  await sheet.locator('#share-preview-toggle').click();
   const rendered = sheet.getByLabel('Rendered document preview');
   await expect(rendered.getByRole('heading', { name: 'Preview heading' })).toBeVisible();
   await expect(rendered.locator('strong').filter({ hasText: 'Formatted preview' })).toBeVisible();
@@ -273,6 +320,7 @@ test('a failed rendered preview shows source while leaving the generated reader 
   await page.locator('#doc-menu-open').click();
   await page.locator('#document-format').selectOption('markdown');
   await page.locator('#share-link').click();
+  await dialog(page).locator('#share-preview-toggle').click();
   await expect(dialog(page).getByLabel('Document source preview')).toContainText('Rendered preview unavailable. Source: **Source remains available**');
   expect((await decodeShown(page)).decoded).toMatchObject({ ok: true, document: { view: 'rendered' } });
   await page.keyboard.press('Escape');
@@ -296,6 +344,7 @@ for (const format of ['plain', 'markdown'] as const) {
     }
     const checkbox = dialog(page).getByRole('checkbox', { name: 'Show title on the page', exact: true });
     await expect(checkbox).toBeChecked();
+    await dialog(page).locator('#share-preview-toggle').click();
     const previewTitle = dialog(page).locator('.share-preview > strong');
     await expect(previewTitle).toBeVisible();
     const before = await readStoredDocs(page);
