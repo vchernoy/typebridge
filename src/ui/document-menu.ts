@@ -16,8 +16,14 @@ export function setupDocumentMenu(deps?: {
   const button = document.querySelector<HTMLButtonElement>('#doc-menu-open')!;
   const list = document.querySelector<HTMLSelectElement>('#drafts')!;
   const search = document.querySelector<HTMLInputElement>('#doc-search');
+  const fit = (): void => {
+    if (panel.hidden) return;
+    panel.style.maxHeight = `${Math.max(44, innerHeight - panel.getBoundingClientRect().top - 12)}px`;
+    panel.style.overflowY = 'auto';
+  };
   function open(): void {
     panel.hidden = false;
+    fit();
     button.setAttribute('aria-expanded', 'true');
     deps?.onOpen?.();
     if (search) {
@@ -31,6 +37,9 @@ export function setupDocumentMenu(deps?: {
   function close(returnFocus: boolean): void {
     if (panel.hidden) return;
     panel.hidden = true;
+    const tools = panel.querySelector<HTMLElement>('#more-menu');
+    if (tools) tools.hidden = true;
+    panel.querySelector('#more-open')?.setAttribute('aria-expanded', 'false');
     button.setAttribute('aria-expanded', 'false');
     if (search) {
       search.value = '';
@@ -39,6 +48,9 @@ export function setupDocumentMenu(deps?: {
     if (returnFocus) button.focus();
   }
   button.addEventListener('click', () => { if (panel.hidden) open(); else close(true); });
+  window.addEventListener('resize', fit);
+  // Format/view/privacy chrome can wrap without a viewport resize.
+  new ResizeObserver(fit).observe(button.closest('.doc')!);
   registerEscapeLayer(panel, 20, () => close(true));
   document.addEventListener('pointerdown', event => {
     const target = event.target as Node | null;

@@ -191,8 +191,9 @@ export async function documentAction(page: Page, selector: string): Promise<void
   await page.locator(selector).click();
 }
 
-/** Open the toolbar's ⋯ menu and choose an item (#123, step 4); the item closes the menu. */
+/** Open Documents → Tools and choose an item (#351); the item closes the menu. */
 export async function moreAction(page: Page, selector: string): Promise<void> {
+  await openDocuments(page);
   const menu = page.locator('#more-menu');
   if (await menu.isHidden()) await page.locator('#more-open').click();
   await expect(menu).toBeVisible();

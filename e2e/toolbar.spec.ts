@@ -1,13 +1,15 @@
-import { answerNextConfirmation } from './settings-helpers';
+import { answerNextConfirmation, openDocuments } from './settings-helpers';
 import { expect, test } from '@playwright/test';
 
 test('the toolbar holds editing actions; Focus and Settings sit in the top bar (#123)', async ({ page }) => {
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
   const toolbar = page.getByRole('toolbar', { name: 'Editing' });
-  for (const name of ['Undo', 'Redo', 'To Cyrillic', 'To Latin', 'Find', 'Copy', 'More actions']) {
+  for (const name of ['Undo', 'Redo', 'To Cyrillic', 'To Latin', 'Find', 'Copy']) {
     await expect(toolbar.getByRole('button', { name, exact: true })).toBeVisible();
   }
+  await expect(page.getByRole('button', { name: 'Share document', exact: true })).toBeVisible();
+  expect(await toolbar.getByRole('button').count()).toBe(6);
   const topbar = page.locator('header.topbar');
   await expect(topbar.getByRole('button', { name: 'Focus mode' })).toBeVisible();
   await expect(topbar.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
@@ -21,8 +23,9 @@ test('the ⋯ menu works with the keyboard and closes cleanly (#123)', async ({ 
   const field = page.locator('#editor');
   await expect(field).toBeEnabled();
   await field.fill('Текст');
-  const more = page.getByRole('button', { name: 'More actions' });
-  const menu = page.getByRole('menu', { name: 'More actions' });
+  const more = page.getByRole('button', { name: 'Editing tools' });
+  const menu = page.getByRole('menu', { name: 'Editing tools' });
+  await openDocuments(page);
   await more.click();
   await expect(menu).toBeVisible();
   await expect(more).toHaveAttribute('aria-expanded', 'true');
@@ -38,6 +41,7 @@ test('the ⋯ menu works with the keyboard and closes cleanly (#123)', async ({ 
   await expect(more).toBeFocused();
   await expect(page.locator('body')).not.toHaveClass(/focus-mode/);
   // Go to line… opens the go-to bar.
+  await openDocuments(page);
   await more.click();
   await page.getByRole('menuitem', { name: 'Go to line…' }).click();
   await expect(menu).toBeHidden();
@@ -45,18 +49,22 @@ test('the ⋯ menu works with the keyboard and closes cleanly (#123)', async ({ 
   await expect(page.locator('#goto-line')).toBeFocused();
   // Clear text… asks first; Cancel keeps the text, OK clears it.
   const confirmation1 = answerNextConfirmation(page, false);
+  await openDocuments(page);
   await more.click();
   await page.getByRole('menuitem', { name: 'Clear text…' }).click();
   await confirmation1;
   await expect(field).toHaveValue('Текст');
-  await expect(more).toBeFocused();
+  await expect(page.locator('#doc-menu-open')).toBeFocused();
   const confirmation2 = answerNextConfirmation(page, true);
+  await openDocuments(page);
   await more.click();
   await page.getByRole('menuitem', { name: 'Clear text…' }).click();
   await confirmation2;
   await expect(field).toHaveValue('');
   // A click outside closes it.
+  await openDocuments(page);
   await more.click();
-  await field.click();
+  await page.locator('.brand').click();
   await expect(menu).toBeHidden();
+  await expect(page.locator('#doc-menu')).toBeHidden();
 });

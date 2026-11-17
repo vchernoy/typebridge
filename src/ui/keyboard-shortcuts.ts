@@ -4,7 +4,7 @@ import { openHostSettings, openSettingsTo } from './settings';
 
 export function setupKeyboardShortcuts(): void {
   const trigger = document.querySelector<HTMLButtonElement>('#keyboard-shortcuts')!;
-  const more = document.querySelector<HTMLButtonElement>('#more-open')!;
+  const opener = document.querySelector<HTMLButtonElement>('#doc-menu-open')!;
   const shortcut = document.querySelector<HTMLSelectElement>('#translit-shortcut');
   const apple = isApplePlatform();
   const label = (key: keyof typeof SHORTCUTS): string => formatShortcut(SHORTCUTS[key], apple);
@@ -64,10 +64,10 @@ export function setupKeyboardShortcuts(): void {
       message: content,
       confirmLabel: 'Change typing shortcut',
       cancelLabel: 'Close',
-      returnFocus: more,
+      returnFocus: opener,
     });
     if (!change) return;
-    if (document.documentElement.dataset.embed === '1' && openHostSettings('translit-shortcut', more)) return;
-    if (shortcut) openSettingsTo(shortcut, more);
+    if (document.documentElement.dataset.embed === '1' && openHostSettings('translit-shortcut', opener)) return;
+    if (shortcut) openSettingsTo(shortcut, opener);
   });
 }

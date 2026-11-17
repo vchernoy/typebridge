@@ -51,6 +51,12 @@
 .more-menu [role="menuitem"]:focus-visible {
   background: var(--button-background);
 }
+#doc-menu .more-menu {
+  position: static;
+  min-width: 0;
+  margin-top: 6px;
+  box-shadow: none;
+}
 #clear {
   color: var(--warning);
 }

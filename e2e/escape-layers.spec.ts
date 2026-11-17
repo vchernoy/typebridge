@@ -33,6 +33,7 @@ test('Settings, menu and Find close one layer at a time in plan order (#132)', a
   await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#find-open').click();
   await page.locator('#settings-open').click();
+  await page.locator('#doc-menu-open').click();
   await page.locator('#more-open').click();
   await page.keyboard.press('Escape');
   await expect(page.locator('#settings-panel')).toBeHidden();
@@ -41,6 +42,9 @@ test('Settings, menu and Find close one layer at a time in plan order (#132)', a
   await page.keyboard.press('Escape');
   await expect(page.locator('#more-menu')).toBeHidden();
   await expect(page.locator('#more-open')).toBeFocused();
+  await expect(page.locator('#find-bar')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#doc-menu')).toBeHidden();
   await expect(page.locator('#find-bar')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('#find-bar')).toBeHidden();
@@ -57,6 +61,7 @@ test('confirm dialog consumes Escape before Settings; next Escape closes Setting
   await page.locator('#settings-open').click();
   await expect(page.locator('#settings-panel')).toBeVisible();
   // Open a confirm from More while Settings is open; Escape dismisses confirm first.
+  await page.locator('#doc-menu-open').click();
   await page.locator('#more-open').click();
   await page.locator('#clear').click();
   await expect(page.locator('.confirm-dialog')).toBeVisible();
