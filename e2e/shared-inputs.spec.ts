@@ -50,7 +50,12 @@ test('concurrent readers require explicit conflict resolution; reset defeats sta
   await other.locator('#read-text input').fill('7');
   await other.locator('#reader-input-keep').click();
   await expect.poll(async () => (await states(other))[0]?.inputs.find(([name]) => name === 'x')?.[1]).toBe(7);
-  await page.locator('#reader-input-load').click(); await ready(page, '7', '10');
+  await page.evaluate(() => {
+    document.querySelector<HTMLButtonElement>('#reader-input-load')!.click();
+    document.querySelector<HTMLElement>('details summary')!.focus();
+  });
+  await ready(page, '7', '10');
+  await expect(page.locator('details summary')).toBeFocused();
   await page.locator('#reader-input-reset').click(); await ready(page);
   await expect.poll(async () => (await states(page))[0]?.inputs).toEqual([]);
   await expect(other.locator('#reader-input-load')).toBeVisible();

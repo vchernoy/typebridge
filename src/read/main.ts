@@ -15,7 +15,7 @@ import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type Shar
 let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
 let inputs: Awaited<ReturnType<typeof prepareSharedInputs>> | undefined;
 let viewGeneration = 0;
-let focusInputReset = false;
+let focusInputReset: string | undefined;
 function stopLive(): void { document.querySelector('#reader-input-state')?.setAttribute('hidden', ''); viewGeneration++; inputs?.destroy(); inputs = undefined; live?.destroy(); live = undefined; }
 
 const title = document.querySelector<HTMLElement>('#read-title')!;
@@ -72,7 +72,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Prom
           panel: document.querySelector<HTMLElement>('#reader-input-state')!, status: document.querySelector<HTMLElement>('#reader-input-status')!,
           reset: document.querySelector<HTMLButtonElement>('#reader-input-reset')!, load: document.querySelector<HTMLButtonElement>('#reader-input-load')!,
           keep: document.querySelector<HTMLButtonElement>('#reader-input-keep')!,
-        }, () => { focusInputReset = true; void render(); });
+        }, () => { focusInputReset = location.hash; void render(); });
       if (generation !== viewGeneration) { attachment.destroy(); return; }
       inputs = attachment;
       const stage = document.createElement('div'); stage.style.visibility = 'hidden'; body.replaceChildren(stage);
@@ -81,7 +81,8 @@ function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Prom
       await mounted.settled();
       if (generation !== viewGeneration) return;
       attachment.bind(mounted); stage.style.removeProperty('visibility');
-      if (focusInputReset) { focusInputReset = false; document.querySelector<HTMLButtonElement>('#reader-input-reset')!.focus({ preventScroll: true }); }
+      if (focusInputReset === location.hash && document.activeElement === document.body) document.querySelector<HTMLButtonElement>('#reader-input-reset')!.focus({ preventScroll: true });
+      focusInputReset = undefined;
     } catch {
       if (generation === viewGeneration) {
         inputs?.destroy(); inputs = undefined; live?.destroy(); live = undefined;
@@ -134,6 +135,7 @@ async function render(): Promise<void> {
   stopLive();
   const generation = ++renderGeneration;
   const hash = location.hash;
+  if (focusInputReset !== hash) focusInputReset = undefined;
   editActions.show(undefined, hash);
   remembered.show();
   // Never leave the previous document's Edit a copy armed while another link decodes.
