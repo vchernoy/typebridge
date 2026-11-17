@@ -5,6 +5,12 @@ still lists individual received links. This proposal neither enables input-beari
 links nor claims grouping, transactional group removal or deployment is implemented.
 Builds on the agreed identity model in #350 and the gated snapshot contract in #349.
 
+A pure grouping/search model is prepared in `src/editor/shared-groups.ts`. It consumes
+already-validated received records, compares complete title/text/format fields, keeps
+original link references, assigns creation-based ordinals and searches only immutable
+incoming fields. It performs no decoding, sidecar access, storage or rendering. No
+production caller uses it yet; UI, safe removal and v2 integration remain separate.
+
 ## Current boundary
 
 `src/ui/shared-library.ts` decodes each remembered payload and renders one title link
