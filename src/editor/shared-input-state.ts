@@ -2,19 +2,9 @@
 import { openDraftDatabase } from './indexeddb';
 import { readerStorageAllowed, SHARED_ITEMS, type SharedItem } from './shared-library';
 import { sharedRemovalToken } from './shared-invalidation';
-export const INPUT_LIMIT = 256;
-export const INPUT_BYTES = 64 * 1024;
+import { INPUT_BYTES, numericInputs } from './numeric-inputs';
+export { INPUT_LIMIT, INPUT_BYTES, numericInputs } from './numeric-inputs';
 export type InputRecord = { id: string; version: 1; revision: number; inputs: [string, number][] };
-export function numericInputs(value: unknown): Map<string, number> | undefined {
-  if (!Array.isArray(value) || value.length > INPUT_LIMIT) return;
-  const result = new Map<string, number>();
-  for (const entry of value) {
-    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || !entry[0] || entry[0].length > 128
-        || typeof entry[1] !== 'number' || !Number.isFinite(entry[1]) || result.has(entry[0])) return;
-    result.set(entry[0], entry[1]);
-  }
-  return new TextEncoder().encode(JSON.stringify([...result])).byteLength <= INPUT_BYTES ? result : undefined;
-}
 export function inputRecord(value: unknown, id: string): InputRecord | undefined {
   if (!value || typeof value !== 'object') return;
   const row = value as InputRecord;

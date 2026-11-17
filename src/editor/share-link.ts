@@ -1,9 +1,11 @@
+import { inspectInputSnapshot, type InputSnapshot, type SnapshotFailure } from './input-snapshot';
 /**
  * Portable share links (#39): a document travels inside the link's `#doc=` fragment, so
  * nothing is uploaded and the fragment never reaches a server. The payload is versioned
- * (`1.` prefix), JSON, UTF-8, deflate-compressed and base64url-encoded.
+ * (`1.` by default; reserved opt-in `2.` snapshot codec), JSON, UTF-8, deflate and base64url.
  *
- * Only the title, the text, the document format and presentation hints travel. Undo
+ * Production defaults carry title, text, format and presentation hints. The opt-in
+ * numeric wire foundation must not be enabled on routes before initialization is supported. Undo
  * history and settings stay local. Decoding treats every link as untrusted input: it enforces
  * size limits before and during decompression and validates the shape. A format this build
  * does not know is still decoded, so the reader can show its raw text (see #244).
@@ -11,6 +13,10 @@
 
 /** Format of the current payload, written as the fragment's prefix. */
 export const SHARE_LINK_VERSION = 1;
+/** Reserved numeric-snapshot wire version; production routes remain opt-out until initialization ships. */
+export const SNAPSHOT_SHARE_LINK_VERSION = 2;
+/** Integration capability only: leave unset until reader initialization supports snapshots. */
+export type ShareCodecOptions = { inputSnapshots?: boolean };
 /** Fragment parameter name: `#doc=1.…`. */
 export const SHARE_FRAGMENT_KEY = 'doc';
 /** Formats this build can render. Others are shown as raw text. */
@@ -26,7 +32,7 @@ export const SHARE_TITLE_MAX = 150;
 
 export type ShareView = 'source' | 'rendered';
 
-/** What a share link carries. Presentation hints only: nothing here is access control. */
+/** Document data and presentation hints. Hiding an Edit action is not access control. */
 export type SharedDocument = {
   title: string;
   text: string;
@@ -38,11 +44,13 @@ export type SharedDocument = {
   edit: boolean;
   /** False hides the visible page title; omitted means shown (old-link default). */
   heading?: false;
+  /** Codec foundation only; requires explicit inputSnapshots capability. */
+  inputs?: InputSnapshot;
 };
 
 export type DecodeFailure = 'missing' | 'version' | 'too-large' | 'malformed';
 /** A link is only offered when this build can open it again: same limits as decoding. */
-export type EncodedShare = { ok: true; payload: string } | { ok: false; reason: 'too-large' | 'format' };
+export type EncodedShare = { ok: true; payload: string } | { ok: false; reason: 'format' | SnapshotFailure };
 export type DecodedShare =
   | { ok: true; document: SharedDocument; knownFormat: boolean }
   | { ok: false; reason: DecodeFailure };
@@ -102,9 +110,16 @@ async function decompress(bytes: Uint8Array<ArrayBuffer>, maxBytes: number): Pro
  * JSON (very repetitive text compresses below the payload limit but still cannot be opened),
  * or a payload longer than SHARE_PAYLOAD_MAX_CHARS.
  */
-export async function encodeSharePayload(document: SharedDocument): Promise<EncodedShare> {
+export async function encodeSharePayload(document: SharedDocument, options: ShareCodecOptions = {}): Promise<EncodedShare> {
   // Same format rule as decoding, so no link carries a format this build would reject.
   if (!FORMAT_PATTERN.test(document.format)) return { ok: false, reason: 'format' };
+  let inputs: InputSnapshot | undefined;
+  if (document.inputs !== undefined) {
+    if (!options.inputSnapshots) return { ok: false, reason: 'version' };
+    const checked = inspectInputSnapshot(document.inputs);
+    if (!checked.ok) return checked;
+    inputs = checked.snapshot;
+  }
   const json = JSON.stringify({
     title: document.title.slice(0, SHARE_TITLE_MAX),
     text: document.text,
@@ -112,12 +127,13 @@ export async function encodeSharePayload(document: SharedDocument): Promise<Enco
     view: document.view,
     edit: document.edit,
     ...(document.heading === false ? { heading: false } : {}),
+    ...(inputs ? { inputs } : {}),
   });
   const bytes = new TextEncoder().encode(json);
   if (bytes.byteLength > SHARE_DECOMPRESSED_MAX_BYTES) return { ok: false, reason: 'too-large' };
   const encoded = bytesToBase64Url(await compress(bytes));
   if (encoded.length > SHARE_PAYLOAD_MAX_CHARS) return { ok: false, reason: 'too-large' };
-  return { ok: true, payload: `${SHARE_LINK_VERSION}.${encoded}` };
+  return { ok: true, payload: `${inputs ? SNAPSHOT_SHARE_LINK_VERSION : SHARE_LINK_VERSION}.${encoded}` };
 }
 
 /** A full link to `base` (the site root) that opens `payload` as a shared document. */
@@ -139,7 +155,7 @@ export function shareLinkLength(url: string): 'ok' | 'long' {
   return url.length > SHARE_LINK_WARN_CHARS ? 'long' : 'ok';
 }
 
-/** Validate decoded JSON into a SharedDocument, or undefined when its shape is wrong. */
+/** Validate legacy document fields; only the version/capability decoder interprets numeric inputs. */
 export function parseSharedDocument(value: unknown): SharedDocument | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
@@ -158,11 +174,12 @@ export function parseSharedDocument(value: unknown): SharedDocument | undefined 
 }
 
 /** Decode a `#doc=` payload. Never throws: every failure has a reason the page can explain. */
-export async function decodeSharePayload(payload: string | undefined): Promise<DecodedShare> {
+export async function decodeSharePayload(payload: string | undefined, options: ShareCodecOptions = {}): Promise<DecodedShare> {
   if (!payload) return { ok: false, reason: 'missing' };
   const dot = payload.indexOf('.');
   if (dot <= 0) return { ok: false, reason: 'malformed' };
-  if (payload.slice(0, dot) !== String(SHARE_LINK_VERSION)) return { ok: false, reason: 'version' };
+  const version = payload.slice(0, dot);
+  if (version !== String(SHARE_LINK_VERSION) && !(version === String(SNAPSHOT_SHARE_LINK_VERSION) && options.inputSnapshots)) return { ok: false, reason: 'version' };
   const encoded = payload.slice(dot + 1);
   if (encoded.length > SHARE_PAYLOAD_MAX_CHARS) return { ok: false, reason: 'too-large' };
   const bytes = base64UrlToBytes(encoded);
@@ -175,5 +192,10 @@ export async function decodeSharePayload(payload: string | undefined): Promise<D
   catch { return { ok: false, reason: 'malformed' }; }
   const document = parseSharedDocument(json);
   if (!document) return { ok: false, reason: 'malformed' };
+  if (version === String(SNAPSHOT_SHARE_LINK_VERSION)) {
+    const checked = inspectInputSnapshot((json as Record<string, unknown>).inputs);
+    if (!checked.ok) return checked;
+    document.inputs = checked.snapshot;
+  }
   return { ok: true, document, knownFormat: (KNOWN_SHARE_FORMATS as readonly string[]).includes(document.format) };
 }

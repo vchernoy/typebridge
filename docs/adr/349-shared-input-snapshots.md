@@ -1,9 +1,21 @@
 # Shared numeric snapshots (#349)
 
-Status: proposed contract for independent review, not implemented or shipped.
+Status: proposed end-to-end contract. A codec-only foundation is prepared below;
+parameter capture, receiver initialization and copy behavior are not implemented.
 Builds on the issue's initial research and the reviewed #351 Share-flow design.
 Immutable grouping identity is the maintainer's agreed policy; the wire and lifecycle
 choices below are recommendations, not evidence of product approval or implementation.
+
+## Codec foundation boundary
+
+The codec can inspect/encode/decode a bounded v2 envelope only with an explicit
+`inputSnapshots` integration capability. Existing calls omit it and continue rejecting
+v2 with `version`; the production UI still creates v1 source-only links. This prevents
+an unready reader accepting parameters that its renderer would then ignore. Empty
+snapshots are preserved; schema/byte failures are distinct. The storage validator is
+shared through a pure module; no IndexedDB/DOM/rendering dependency enters the codec.
+Do not enable the capability on product routes before the initialization/capture and
+copy policies below are implemented and independently reviewed.
 
 ## Compatibility evidence
 
