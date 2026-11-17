@@ -4,6 +4,7 @@ import { decodeSharePayload, SHARE_PAYLOAD_MAX_CHARS } from './share-link';
 import { AUTOSAVE_PREF_KEY } from './drafts';
 import { sharedRemovalToken, invalidateSharedRemembering } from './shared-invalidation';
 export { SHARED_REMOVAL_KEY, sharedRemovalToken } from './shared-invalidation';
+export const REMEMBER_SHARED_EVENT = 'typebridge-remember-shared';
 export const REMEMBER_SHARED_KEY = 'typebridge.rememberShared.v1';
 export const SHARED_ITEMS = 'sharedItems';
 export const SHARED_MAX_ITEMS = 100;
@@ -19,6 +20,7 @@ export function rememberPreference(storage?: Pick<Storage, 'getItem'>): boolean 
 }
 export function setRememberPreference(on: boolean): void {
   localStorage.setItem(REMEMBER_SHARED_KEY, on ? 'on' : 'off');
+  window.dispatchEvent(new Event(REMEMBER_SHARED_EVENT));
 }
 const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
   r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);

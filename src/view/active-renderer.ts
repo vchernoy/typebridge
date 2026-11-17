@@ -6,11 +6,11 @@ import '@vchernoy/active-runtime/style.css';
 import './active-renderer.css';
 import { fitFractionFences } from './math-fences';
 
-export function renderDocument(root: HTMLElement, text: string, locale: string) {
+export function renderDocument(root: HTMLElement, text: string, locale: string, initialInputs?: ReadonlyMap<string, number>) {
   const result = renderActive(text, { locale });
   // Only the package's sanitized output crosses this HTML boundary. Never source text.
   root.innerHTML = result.html;
-  const live = mount(root, { locale, loadKatex: async () => katex });
+  const live = mount(root, { locale, initialInputs, loadKatex: async () => katex });
   const formulas = Array.from(root.querySelectorAll<HTMLElement>('.active-math-display'));
   const sizedFences = new WeakSet<Element>();
   const updateOverflow = (targets = formulas) => {
@@ -66,7 +66,7 @@ export function renderDocument(root: HTMLElement, text: string, locale: string) 
   fonts.addEventListener('loadingdone', fontLoaded);
   fitFractionFences(root, sizedFences);
   updateOverflow();
-  return { destroy: () => {
+  return { session: live.session, settled: () => live.settled(), resetInputs: () => live.resetInputs(), destroy: () => {
     destroyed = true;
     if (frame !== undefined) cancelAnimationFrame(frame);
     pendingMath.clear();

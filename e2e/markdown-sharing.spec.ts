@@ -10,7 +10,7 @@ async function link(text = markdown, view: 'source' | 'rendered' = 'rendered'): 
   return '/read.html#doc=' + result.payload;
 }
 
-test('Markdown link is live, has minimal chrome, remembers source but not inputs and copies its format', async ({ page }) => {
+test('Markdown link is live, has minimal chrome, remembers source and accepted inputs and copies its format', async ({ page }) => {
   await page.goto(await link());
   await expect(page.locator('#read-text .active-doc')).toBeVisible();
   await page.locator('#read-text input').fill('5');
@@ -22,8 +22,9 @@ test('Markdown link is live, has minimal chrome, remembers source but not inputs
   expect(await readStoredDocs(page)).toEqual([]);
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })))
     .toEqual({ local: 0, session: 0 });
+  await expect(page.locator('#reader-input-status')).toHaveText('Inputs saved on this device.');
   await page.reload();
-  await expect(page.locator('#read-text input')).toHaveValue('2');
+  await expect(page.locator('#read-text input')).toHaveValue('5');
   await page.locator('#edit-copy').click();
   await expect(page.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
   await expect.poll(async () => (await readStoredDocs(page, true)).some(row => row.format === 'markdown' && row.text === markdown)).toBe(true);

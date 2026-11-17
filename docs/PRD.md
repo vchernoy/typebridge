@@ -38,7 +38,7 @@ The [research design](adr/322-local-reader-state.md) proposes automatic local re
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
 The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
-calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document inputs (#326) and quiz attempts (#327) remain later work.
 
 
 Received share links are automatically remembered on this browser/device unless opted out

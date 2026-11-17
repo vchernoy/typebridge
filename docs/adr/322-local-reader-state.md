@@ -1,7 +1,8 @@
 # Local shared library and reader state (#322)
 
-Status: research design. The #323 received-library slice is implemented separately;
-reader-input and quiz persistence remain later work. Evidence below records the research
+Status: research baseline below. #323 library and #324 shared numeric inputs are implemented;
+#326 editable inputs and #327 quiz persistence remain later work. The implemented #324 bounds
+are 256 inputs / 64 KiB per shared item, within the 100-item library, superseding the proposed bounds below. Evidence below records the research
 baseline, not a current feature inventory.
 Evidence baseline: main `67a2f35`, ActiveMD packages pinned to `0.4.0`.
 Delivery order: #323 → #324 → #325 → #326; #327 waits for active-md#48.

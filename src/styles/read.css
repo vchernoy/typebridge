@@ -92,3 +92,16 @@ body.read-page {
 .read-edit-actions button {
   min-height: 44px;
 }
+
+#reader-input-state:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#reader-input-state p {
+  flex-basis: 100%;
+}
+#reader-input-state button {
+  min-height: 44px;
+  max-width: 100%;
+}

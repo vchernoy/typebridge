@@ -93,13 +93,12 @@ The [research design](adr/322-local-reader-state.md) proposes automatic local re
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
 The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
-calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document inputs (#326) and quiz attempts (#327) remain later work.
 
 
 Documents → Shared with me lists received links separately from editable documents, with
 a search field, read-only links labelled as opening a new tab, and named Remove buttons.
 Settings and the reader's Local shared library disclosure expose “Remember shared documents
-on this device”; the explanation explicitly says inputs remain temporary
-until their separate implementation. Private session overrides remembering. Saved local
+and reader inputs on this device”; shared-reader numeric state is separate from source. Private session overrides remembering. Saved local
 items remain until removal; turning remembering back on requires explicit Remember for
 the current page. Failure/full/private status is honest and never blocks reading.

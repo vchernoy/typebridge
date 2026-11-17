@@ -52,12 +52,12 @@ Every control in the dialog is reachable with Tab; Escape or Close returns to �
 
 ## Reading page
 
-`/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page shows the title and document, with a quiet **Edit** hyperlink beside the title when the sender allowed editing, and **Written with TypeBridge** below the document. It honors the sender’s source/rendered view choice without a reading toolbar. Source presentation preserves the text, line breaks and spaces as written. Rendered Markdown dynamically loads active-md and inserts only its sanitized output, with KaTeX `trust: false` and MathML output. Raw HTML is dropped, dangerous links are filtered, and remote images are links that require a click. If rendering fails, the page automatically shows the source with a notice. Calc input values are temporary; they are never saved, journaled or shared. Only `{{…}}` placeholders inside math and `:value[…]` bindings are live; typed-in numbers stay as written, including numbers in a second `aligned` block. For example, `{{final | fixed:2}}` updates with the same formatting as `:value[final]{format=fixed:2}`. It opens offline once TypeBridge itself (`/` or the editor) has been opened in that browser, which installs offline support; the reading page does not install it, so opening only share links does not.
+`/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page shows the title and document, with a quiet **Edit** hyperlink beside the title when the sender allowed editing, and **Written with TypeBridge** below the document. It honors the sender’s source/rendered view choice without a reading toolbar. Source presentation preserves the text, line breaks and spaces as written. Rendered Markdown dynamically loads active-md and inserts only its sanitized output, with KaTeX `trust: false` and MathML output. Raw HTML is dropped, dangerous links are filtered, and remote images are links that require a click. If rendering fails, the page automatically shows the source with a notice. Accepted shared numeric inputs can be saved in a separate local record as described below; they are never journaled into source or shared in links. Editable Preview inputs remain temporary. Only `{{…}}` placeholders inside math and `:value[…]` bindings are live; typed-in numbers stay as written, including numbers in a second `aligned` block. For example, `{{final | fixed:2}}` updates with the same formatting as `:value[final]{format=fixed:2}`. It opens offline once TypeBridge itself (`/` or the editor) has been opened in that browser, which installs offline support; the reading page does not install it, so opening only share links does not.
 
 Markdown titles typeset inline `$…$` in the visible page heading, including with a source body. Titles do not interpret Markdown or live `{{…}}` bindings; display fences and invalid TeX remain plain text. The browser tab, title input, Documents list, share preview and export names keep the original plain title, with the same 150-character limit. Plain documents are unchanged.
 
-- **Valid received links are remembered locally by default** in Documents → Shared with me, separately from editable drafts. The Local shared library disclosure on the reader explains this and offers the same remembering preference as Settings. Private session or opt-out prevents automatic content writes; failed preference reads deny writes. Existing items remain until removed. Re-enabling does not save this page retroactively: use Remember explicitly or reopen in a fresh page. Calc inputs are still temporary.
-- **Edit** (shown unless the sender turned it off) can select an exact clean existing editor after fresh owner/source/privacy/lock checks. It leaves the shared page open and preserves temporary calc inputs on both surfaces. The status says to switch to the existing TypeBridge window if the browser did not bring its tab forward. No source, history or backups are changed.
+- **Valid received links are remembered locally by default** in Documents → Shared with me, separately from editable drafts. The Local shared library disclosure on the reader explains this and offers the same remembering preference as Settings. Private session or opt-out prevents automatic content writes; failed preference reads deny writes. Existing items remain until removed. Re-enabling does not save this page retroactively: use Remember explicitly or reopen in a fresh page. Accepted shared-reader numeric inputs are saved separately when permitted (see below).
+- **Edit** (shown unless the sender turned it off) can select an exact clean existing editor after fresh owner/source/privacy/lock checks. It leaves the shared page open and preserves current calc inputs on both surfaces. The status says to switch to the existing TypeBridge window if the browser did not bring its tab forward. No source, history or backups are changed.
 - If no activation commit was sent, or the owner confirms non-activation, Edit uses the atomic safe-copy fallback: reuse an exact unowned match or save a new document. Private/owned/recovery candidates and unapplied changes stay ineligible in that fallback. Recovery inspection is a conservative localStorage/own-sessionStorage snapshot, not an atomic cross-storage guarantee; unreadable storage disables reuse, and no backup is deleted. Unowned matches use lexical document ID order. It opens `/?open=<id>` and reports whether an existing document was opened or a new copy saved; at the four-window cap the copy is saved with guidance to open it from Documents after closing a window.
 - **An unknown activation result never automatically creates a copy.** Edit stays disabled for that unresolved action; **Check status** asks about the same activation without retrying it. **Create new copy** warns that the existing document may already be open and asks for confirmation before making a separate copy. Late old replies cannot change that new action. Hash/navigation/privacy/clear changes cancel pending work; a restored page keeps an unresolved warning in memory, with Check status disabled if its old transport was abandoned. Protocol state is not saved across a full reload. Sender-disabled Edit does not probe or create anything.
 - **A link that cannot be opened explains why:** it has no document, it was made by a newer version, it is too large, or it is incomplete or damaged (messengers sometimes cut long links). A format this version cannot show yet is displayed as its raw text with a notice.
@@ -82,7 +82,7 @@ The [research design](adr/322-local-reader-state.md) proposes automatic local re
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
 The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
-calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document inputs (#326) and quiz attempts (#327) remain later work.
 
 
 ## Local Shared with me library (#323)
@@ -114,3 +114,34 @@ fresh token); validation/open/hash delays cannot adopt a later removal as their 
 The transactional epoch still orders removals against final writes. An unreadable token
 denies remembering; an unwritable token refuses removal/erasure with an error. The marker contains
 no document identity or content and may survive content erasure.
+
+
+## Shared reader inputs (#324)
+
+Rendered shared pages restore accepted numeric inputs, including model-only inputs, from
+one versioned record keyed by the exact remembered shared item. Source, payload, authored
+defaults, editable documents and history are unchanged; values never enter a shared URL.
+The runtime validates names and current ranges before the staged reading area is revealed.
+Invalid/incompatible records use defaults and stay memory-only; storage loading is bounded
+to two seconds so a blocked database does not prevent reading. No renderer is loaded for
+plain/source reading. Editable Preview persistence and quiz answers remain separate work.
+
+The default-on remembering preference and Private session gate both library and input
+writes. Preference read failure denies writes. Opt-out/privacy/removal freezes that mount's
+saving; re-enabling does not retroactively save its private values. Reopen to start a new
+allowed mount. Existing saved values remain until reset, item removal or global clear.
+
+Only accepted model snapshots are saved, after 500 ms debounce. Invalid control text is
+never persisted. Each record permits 256 finite numeric pairs, 128-character names and
+64 KiB UTF-8; the 100-item library bounds shared sidecars to at most 6.25 MiB. Oversize,
+quota and other failures leave current values usable in memory. Hidden-page flushing is best effort; navigation/destroy cancels queued work.
+Closing, reloading or crashing before a transaction completes can lose recent changes;
+wait for Inputs saved on this device before leaving.
+
+Whole-snapshot revision CAS prevents stale tabs overwriting saved values. Metadata-only
+notifications show Load saved values / Keep these values; remote edits never replace the
+current controls automatically. Keep explicitly rereads the winning revision before retry;
+another concurrent change can conflict again. Reset inputs to defaults writes an empty
+snapshot with a new revision, so an old queued save cannot undo reset. Removal deletes the
+item and sidecar atomically and invalidates pending writers; global clear closes old readers
+and reloads them through the existing clear lifecycle. No tombstones outlive removed items.

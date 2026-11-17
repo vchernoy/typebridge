@@ -34,6 +34,12 @@
       <p id="read-notice" class="read-notice" hidden></p>
       <div id="read-text" class="read-text"></div>
       <p id="read-status" class="read-status" role="status" aria-live="polite"></p>
+      <section id="reader-input-state" hidden aria-label="Local reader inputs">
+        <p id="reader-input-status" role="status"></p>
+        <button id="reader-input-reset" type="button">Reset inputs to defaults</button>
+        <button id="reader-input-load" type="button" hidden>Load saved values</button>
+        <button id="reader-input-keep" type="button" hidden>Keep these values</button>
+      </section>
       <div id="read-edit-actions" class="read-edit-actions" hidden>
         <button id="check-owner-status" type="button">Check status</button>
         <button id="create-new-copy" type="button">Create new copy</button>
