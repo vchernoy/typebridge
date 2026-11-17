@@ -83,6 +83,11 @@
                 <span aria-hidden="true" class="view-icon">👁</span><span class="view-label">Preview</span>
               </button>
             </div>
+            <button id="share-open" type="button" aria-label="Share document" title="Share document">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 16V3m-4 4 4-4 4 4M5 12v8h14v-8" /></svg
+              ><span class="share-label">Share</span>
+            </button>
             <span id="private-marker" class="private-marker" hidden>Private</span>
             <span id="viewer-badge" class="viewer-badge" hidden>Saved version · Read-only</span>
             <div id="doc-menu" class="doc-menu" role="dialog" aria-label="Documents" hidden>
@@ -117,6 +122,33 @@
                 <button id="share-link" type="button">Share link…</button>
                 <button id="clear-document-data" type="button">Clear this document’s saved data…</button>
                 <button id="delete-draft" type="button">Delete…</button>
+              </div>
+              <div class="more-wrap">
+                <button
+                  id="more-open"
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-controls="more-menu"
+                  aria-label="Editing tools"
+                  title="Editing tools"
+                >
+                  Tools…
+                </button>
+                <div id="more-menu" class="more-menu" role="menu" aria-label="Editing tools" hidden>
+                  <button
+                    id="goto-open"
+                    type="button"
+                    role="menuitem"
+                    aria-expanded="false"
+                    aria-controls="goto-bar"
+                    title="Go to line (Cmd/Ctrl+G)"
+                  >
+                    Go to line…
+                  </button>
+                  <button id="clear" type="button" role="menuitem">Clear text…</button>
+                  <button id="keyboard-shortcuts" type="button" role="menuitem">Keyboard shortcuts…</button>
+                </div>
               </div>
               <input id="import-file" type="file" accept=".txt,.json,.typebridge.json" hidden />
             </div>
@@ -222,33 +254,6 @@
                 <path d="M16 8V4H4v12h4" /></svg
               ><span class="phone-button-label">Copy</span>
             </button>
-            <div class="more-wrap">
-              <button
-                id="more-open"
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded="false"
-                aria-controls="more-menu"
-                aria-label="More actions"
-                title="More actions"
-              >
-                ⋯
-              </button>
-              <div id="more-menu" class="more-menu" role="menu" aria-label="More actions" hidden>
-                <button
-                  id="goto-open"
-                  type="button"
-                  role="menuitem"
-                  aria-expanded="false"
-                  aria-controls="goto-bar"
-                  title="Go to line (Cmd/Ctrl+G)"
-                >
-                  Go to line…
-                </button>
-                <button id="clear" type="button" role="menuitem">Clear text…</button>
-                <button id="keyboard-shortcuts" type="button" role="menuitem">Keyboard shortcuts…</button>
-              </div>
-            </div>
           </div>
         </div>
         <aside

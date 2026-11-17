@@ -437,7 +437,7 @@ document.querySelector<HTMLButtonElement>('#clear')!.addEventListener('click', a
   const target = activeEditableSession();
   if (!target.field.value) return;
   const returnFocusField = target.field;
-  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? returnFocusField : document.querySelector<HTMLButtonElement>('#more-open')! })) {
+  if (await askConfirmChoice({ title: 'Clear text?', message: 'Clear the text? You can undo this action.', confirmLabel: 'Clear text', cancelLabel: 'Keep editing', returnFocus: accepted => accepted ? returnFocusField : document.querySelector<HTMLButtonElement>('#doc-menu-open')! })) {
     if (!('contentRevision' in started) || !contentCommandStillCurrent(started as CommandGeneration & { contentRevision: number }, liveCommandState())) {
       announceAction('Clear cancelled — the pane or text changed.');
       return;
@@ -1208,15 +1208,16 @@ setupExportImport({
     return switchDraft(result.draft.id);
   },
 });
-// Documents → Share link… (#39): the shown title and text, like Export.
-document.querySelector<HTMLButtonElement>('#share-link')!.addEventListener('click', () => {
+// Share document / Documents → Share link: the shown title and text, like Export.
+for (const selector of ['#share-link', '#share-open']) document.querySelector<HTMLButtonElement>(selector)!.addEventListener('click', event => {
+  const opener = selector === '#share-open' ? event.currentTarget as HTMLElement : document.querySelector<HTMLButtonElement>('#doc-menu-open')!;
   void openShareDialog({
     surface: () => ({
     title: draftTitle.value.trim() || UNTITLED_TITLE,
     text: field.value, format: state.active.format,
   }),
     base: () => new URL('/', location.href).toString(),
-    returnFocus: () => document.querySelector<HTMLButtonElement>('#doc-menu-open')!,
+    returnFocus: () => opener,
   });
 });
 const leaveGuards = createLeaveGuards(state, {

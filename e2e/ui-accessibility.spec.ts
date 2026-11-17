@@ -92,7 +92,7 @@ test('names, descriptions, modal ownership and focus return remain usable (#137 
     expect(await dialog.evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
   }
   await page.keyboard.press('Escape');
-  await expect(page.locator('#more-open')).toBeFocused();
+  await expect(page.locator('#doc-menu-open')).toBeFocused();
   await expect(page.locator('main')).not.toHaveAttribute('inert');
 });
 
@@ -115,6 +115,7 @@ test('forced colors keeps panel boundaries and keyboard focus visible (#137 U10)
   await page.emulateMedia({ forcedColors: 'active' });
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#doc-menu-open').click();
   await page.locator('#more-open').focus();
   await page.keyboard.press('Enter');
   const item = page.getByRole('menuitem', { name: 'Go to line…', exact: true });

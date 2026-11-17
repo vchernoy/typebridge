@@ -41,7 +41,7 @@ for (const action of ['clear', 'delete', 'import', 'switch'] as const) {
       const before = action === 'switch' ? 'Unsaved text' : 'Original text';
       const after = action === 'import' ? 'Imported text' : '';
       await expect(editor).toHaveValue(accept ? after : before);
-      if (!accept) await expect(page.locator(action === 'clear' ? '#more-open' : '#doc-menu-open')).toBeFocused();
+      if (!accept) await expect(page.locator('#doc-menu-open')).toBeFocused();
       if (action === 'clear' && accept) {
         await expect(editor).toBeFocused();
         await editor.press('ControlOrMeta+z');

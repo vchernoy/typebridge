@@ -25,6 +25,19 @@
   flex: 1 1 260px;
   min-width: 0;
 }
+#share-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+}
+@media (max-width: 640px) {
+  #share-open .share-label {
+    display: none;
+  }
+}
 /* Title, ▾ and Autosave share one line that never wraps; only the title shrinks inside it.
    The save state follows this group and wraps when it doesn't fit, so switching Autosave
    ("Not saved", "Private") never squeezes the group or moves the checkbox. The group leaves

@@ -25,7 +25,7 @@ for (const width of [390, 1280]) {
     const title = page.getByRole('textbox', { name: 'Document title' });
     const menu = page.getByRole('button', { name: 'Documents', exact: true });
     // The same controls as Normal mode, with Exit focus; the rest of the top bar is hidden.
-    for (const control of [title, menu, page.locator('#save-indicator'), page.locator('#enabled'), page.locator('#exit-focus')]) {
+    for (const control of [title, menu, page.locator('#save-indicator'), page.locator('#share-open'), page.locator('#enabled'), page.locator('#exit-focus')]) {
       await expect(control).toBeVisible();
       const box = (await control.boundingBox())!;
       expect(box.x + box.width).toBeLessThanOrEqual(width);
@@ -35,7 +35,7 @@ for (const width of [390, 1280]) {
     // One line above the editor on wide screens: title, ▾, Autosave, the save icon, the switch and Exit.
     const oneRow = async () => {
       if (width < 1000) return;
-      const rows = await Promise.all(['#draft-title', '#doc-menu-open', '#autosave', '#save-indicator', '#enabled', '#exit-focus'].map(async id => {
+      const rows = await Promise.all(['#draft-title', '#doc-menu-open', '#autosave', '#save-indicator', '#share-open', '#enabled', '#exit-focus'].map(async id => {
         const box = (await page.locator(id).boundingBox())!;
         return box.y + box.height / 2;
       }));
@@ -50,9 +50,16 @@ for (const width of [390, 1280]) {
     await selectDocument(page, first);
     await expect(page.locator('#editor')).toHaveValue('Первый текст');
     await expect(page.locator('body')).toHaveClass(/focus-mode/);
-    // The long title ellipsizes; it never pushes ▾ or Autosave onto another line.
+    // The long title ellipsizes; it never pushes ▾, Autosave or Share onto another line.
     await expect(title).toHaveValue(/^Длинное название/);
     await oneRow();
+    const share = page.locator('#share-open');
+    expect((await share.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await share.click();
+    await expect(page.getByRole('dialog', { name: 'Share link', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(share).toBeFocused();
+    await page.screenshot({ path: `/tmp/355-focus-long-${width}.png`, fullPage: true });
     // Escape inside the menu closes it but keeps Focus mode.
     await openDocuments(page);
     await page.keyboard.press('Escape');

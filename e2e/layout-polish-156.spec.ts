@@ -6,7 +6,7 @@ test('editing toolbar stays one row at 390px (#156)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto('/editor.html');
   await expect(page.locator('#editor')).toBeEnabled();
-  const ids = ['#undo', '#redo', '#convert-cyrillic', '#convert-latin', '#find-open', '#copy', '#more-open'];
+  const ids = ['#undo', '#redo', '#convert-cyrillic', '#convert-latin', '#find-open', '#copy'];
   const mids = await Promise.all(ids.map(async id => {
     const box = (await page.locator(id).boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(390);

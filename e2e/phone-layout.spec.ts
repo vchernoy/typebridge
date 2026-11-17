@@ -17,7 +17,7 @@ for (const width of [320, 390]) {
     }
     // Every control stays inside the screen; at 390 px the switch, Focus and Settings
     // also share one row (at 320 px wider system fonts may wrap them, which is fine).
-    for (const id of ["#enabled", "#focus-mode", "#settings-open", "#more-open"]) {
+    for (const id of ["#enabled", "#focus-mode", "#settings-open", "#share-open"]) {
       const box = await page.locator(id).boundingBox();
       expect(box!.x + box!.width).toBeLessThanOrEqual(width);
     }
@@ -31,7 +31,7 @@ for (const width of [320, 390]) {
       expect(Math.max(...rows) - Math.min(...rows)).toBeLessThanOrEqual(4);
     }
     await expect(
-      page.getByRole("toolbar", { name: "Editing" }).getByRole("button", { name: "More actions" }),
+      page.getByRole("button", { name: "Share document", exact: true }),
     ).toBeVisible();
     // The editor starts high on the screen once the layout settles. WebKit in CI can wrap
     // one extra 44px row for a moment after boot; a lasting wrap still fails here.
@@ -55,7 +55,7 @@ test("phone layout wraps instead of overflowing when text is enlarged (#123)", a
   await page.goto("/editor.html");
   await expect(page.locator("#editor")).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
-  for (const id of ["#enabled", "#focus-mode", "#settings-open", "#more-open"]) {
+  for (const id of ["#enabled", "#focus-mode", "#settings-open", "#share-open"]) {
     const box = await page.locator(id).boundingBox();
     expect(box!.x + box!.width).toBeLessThanOrEqual(320);
   }
@@ -84,7 +84,7 @@ test("390px plain editor fits with font downloads unavailable (#304)", async ({ 
     return {
       font: getComputedStyle(header).fontFamily,
       editor: rect("#editor"),
-      controls: ["#enabled", "#focus-mode", "#settings-open", "#more-open"].map(rect),
+      controls: ["#enabled", "#focus-mode", "#settings-open", "#share-open"].map(rect),
       overflow: document.documentElement.scrollWidth - innerWidth,
     };
   });

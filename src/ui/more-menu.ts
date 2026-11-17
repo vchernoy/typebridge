@@ -1,7 +1,7 @@
 /**
- * The toolbar's ⋯ menu (#123, step 4): Go to line and Clear text. Opening focuses the
+ * Documents → Tools (#351): Go to line, Clear text and Keyboard shortcuts. Opening focuses the
  * first item; Up/Down/Home/End move between items; Escape closes it and returns focus
- * to ⋯; choosing an item or clicking outside closes it.
+ * to Tools; choosing an item or clicking outside closes it.
  */
 import { registerEscapeLayer } from './escape-layers';
 
@@ -9,7 +9,7 @@ export function setupMoreMenu(): void {
   const button = document.querySelector<HTMLButtonElement>('#more-open')!;
   const menu = document.querySelector<HTMLElement>('#more-menu')!;
   const items = (): HTMLButtonElement[] => [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-  // Align to the button's right edge, or its left edge if that would leave the screen.
+  // Retain the menu positioning fallback; Documents uses an in-flow menu.
   function place(): void {
     menu.style.left = ''; menu.style.right = '';
     if (menu.getBoundingClientRect().left < 8) { menu.style.left = '0'; menu.style.right = 'auto'; }
@@ -27,7 +27,7 @@ export function setupMoreMenu(): void {
     if (returnFocus) button.focus();
   }
   button.addEventListener('click', () => { if (menu.hidden) open(); else close(true); });
-  registerEscapeLayer(menu, 20, () => close(true));
+  registerEscapeLayer(menu, 21, () => close(true));
   menu.addEventListener('keydown', event => {
     if (event.isComposing || event.defaultPrevented) return;
     const list = items();
@@ -39,9 +39,13 @@ export function setupMoreMenu(): void {
     else if (event.key === 'End') move(list.length - 1);
     else if (event.key === 'Tab') close(false);
   });
-  // Give focus back to ⋯ when an item hides the menu; Go to line then moves it to its
-  // field, and Clear text to the editor once confirmed.
-  for (const item of items()) item.addEventListener('click', () => close(true));
+  // Choosing a tool closes Documents and restores its opener; Go to line then
+  // moves focus to its field, and Clear text to the editor once confirmed.
+  for (const item of items()) item.addEventListener('click', () => {
+    close(false);
+    if (!document.querySelector<HTMLElement>('#doc-menu')!.hidden) document.querySelector<HTMLButtonElement>('#doc-menu-open')!.click();
+  });
+  document.querySelector('#doc-menu-open')!.addEventListener('click', () => close(false));
   document.addEventListener('pointerdown', event => {
     const target = event.target as Node | null;
     if (!menu.hidden && target && !menu.contains(target) && !button.contains(target)) close(false);

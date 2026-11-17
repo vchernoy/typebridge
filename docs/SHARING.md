@@ -38,7 +38,7 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 
 ## Share link… (sender)
 
-**▾ Documents → Share link…** shares the title and text shown in that window, including unsaved changes, like Export. The dialog:
+**Share document** in the common title area (also **▾ Documents → Share link…**) shares the title and text shown in that window, including unsaved changes, like Export. The dialog:
 
 - says plainly: "Anyone with the link can read this document. The text travels inside the link itself; nothing is uploaded. The link also stays in your browser history and wherever you paste it."
 - offers a collapsed **Document preview** disclosure for the title and start of the text; rendered dependencies load only when opened, and collapsing destroys the preview runtime;
@@ -48,7 +48,7 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 - shows the link in a read-only field and **Copy link** (if the browser refuses clipboard access, the link is selected for the device's copy command);
 - warns when the link is longer than 2,000 characters, and refuses a document too large for a link, suggesting Export instead.
 
-Every control in the dialog is reachable with Tab; Escape or Close returns to ▾.
+Every control in the dialog is reachable with Tab; Escape or Close returns to the actual Share opener (Share document or ▾). The direct path is Share document → Copy link: two activations, including in source, Rendered, comparison and Focus windows. Sharing does not acquire source editing ownership.
 
 ## Reading page
 

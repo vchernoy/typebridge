@@ -17,7 +17,7 @@ for (const apple of [false, true]) {
     await expect(dialog).toContainText(`Some systems reserve ${apple ? '⌃⇧Space' : 'Ctrl+Shift+Space'}`);
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect(page.locator('#more-open')).toBeFocused();
+    await expect(page.locator('#doc-menu-open')).toBeFocused();
     await moreAction(page, '#keyboard-shortcuts');
     await dialog.getByRole('button', { name: 'Change typing shortcut', exact: true }).click();
     await expect(page.locator('#settings-panel')).toBeVisible();
@@ -25,7 +25,7 @@ for (const apple of [false, true]) {
     await page.locator('#translit-shortcut').selectOption('f8');
     await page.locator('#settings-close').click();
     await expect(page.locator('#settings-panel')).toBeHidden();
-    await expect(page.locator('#more-open')).toBeFocused();
+    await expect(page.locator('#doc-menu-open')).toBeFocused();
     await moreAction(page, '#keyboard-shortcuts');
     await expect(dialog.locator('dl.shortcut-list dd').first()).toHaveText(apple ? '⇧⌘F8' : 'Ctrl+Shift+F8');
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
