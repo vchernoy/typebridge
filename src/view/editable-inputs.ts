@@ -5,11 +5,12 @@ import { onStorageClear } from '../editor/clear-data';
 import { PREFS_EVENT } from './prefs-sync';
 import type { StoredDraft } from '../editor/indexeddb';
 import type { renderDocument } from './active-renderer';
+import { inspectInputSnapshot, type InputSnapshot } from '../editor/input-snapshot';
 type Live = ReturnType<typeof renderDocument>;
 export type EditableInputAccess = { db?: IDBDatabase; draft: StoredDraft; public: boolean; canEditInputs: boolean };
 /** Memory belongs to document IDs in this editor, never to source strings or DOM controls. */
 export function createEditableInputs(access: () => EditableInputAccess, reload: () => void) {
-  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number; base: number; conflict: boolean; reset: boolean; epoch?: string }>();
+  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number; base: number; conflict: boolean; reset: boolean; epoch?: string; ready: boolean; acceptedEpoch?: string }>();
   const panel = document.createElement('div'); panel.hidden = true; panel.id = 'editable-input-state';
   const status = document.createElement('p'); status.id = 'editable-input-status'; status.setAttribute('role', 'status');
   const reset = document.createElement('button'); reset.type = 'button'; reset.id = 'editable-input-reset'; reset.textContent = 'Reset inputs to defaults';
@@ -25,6 +26,16 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
   });
   onStorageClear(detail => { if (!detail.documentId) { freeze(); cache.clear(); } else { cache.delete(detail.documentId); if (access().draft.id === detail.documentId) freezeCurrent?.(); } });
   return {
+    /** Accepted memory only; callers must also validate its source context. No sidecar lookup. */
+    capture(): InputSnapshot | undefined {
+      const state = access(), memory = cache.get(state.draft.id);
+      // Observing private/failed policy proof must not leave a queued public write
+      // alive. The accepted in-memory values remain available for explicit sharing.
+      if (!state.public && memory) { memory.frozen = true; freezeCurrent?.(); }
+      if (!memory?.ready || memory.acceptedEpoch !== (state.draft.inputEpoch ?? '')) return;
+      const snapshot = inspectInputSnapshot({ version: 1, values: [...memory.values] });
+      return snapshot.ok ? snapshot.snapshot : undefined;
+    },
     check() { if (!access().public) { const entry = cache.get(access().draft.id); if (entry) { entry.frozen = true; freezeCurrent?.(); } } },
     async prepare(id: string, current: () => boolean) {
       stop?.(); panel.hidden = true; load.hidden = true;
@@ -39,9 +50,10 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
       const hadMemory = !!entry;
       if (!entry) {
         if (cache.size >= 100) cache.delete(cache.keys().next().value!);
-        entry = { values: new Map(), frozen: !access().public, pending: false, version: 0, base: 0, conflict: false, reset: false }; cache.set(id, entry);
+        entry = { values: new Map(), frozen: !access().public, pending: false, version: 0, base: 0, conflict: false, reset: false, ready: false }; cache.set(id, entry);
       }
       const memory = entry;
+      memory.ready = false;
       let store: Awaited<ReturnType<typeof openEditableInputs>>;
       const clearTimer = () => { clearTimeout(timer); timer = undefined; };
       const valid = () => {
@@ -68,6 +80,7 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
       };
       stop = cancel; freezeCurrent = temporary;
       const initial = access();
+      const initialEpoch = initial.draft.inputEpoch ?? '';
       if (valid() && initial.db && initial.draft.revision > 0) {
         const pending = openEditableInputs(initial.db, id, () => loading && valid(), () => valid() && access().canEditInputs);
         try {
@@ -76,6 +89,9 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
         } catch { temporary(); }
         finally { clearTimeout(deadline); }
       }
+      // Keep the observed policy even when a retirement/conflict freezes the writer.
+      // Falling back to an older UI epoch would make retired memory look current.
+      const acceptedEpoch = store?.epoch ?? initialEpoch;
       if (!valid()) { store?.close(); store = undefined; }
       // A privacy cycle or delete/recreate retires every cached input snapshot,
       // even when its numeric CAS revision did not change while this view was away.
@@ -110,6 +126,7 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
           if (!ownsPanel()) return;
           live = value;
           const accepted = numericInputs([...value.session.inputValues()]);
+          memory.ready = !!accepted; memory.acceptedEpoch = acceptedEpoch;
           if (!accepted) { temporary(); memory.values = new Map(); } else memory.values = accepted;
           panel.hidden = value.session.inputValues().size === 0;
           status.textContent = store && access().canEditInputs ? 'Inputs are saved separately from source.' : 'Inputs are temporary in this editor.';
@@ -120,8 +137,9 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
             if (!active || !current()) return;
             const values = value.session.inputValues(); const next = JSON.stringify([...values]);
             if (next === observed) return; observed = next;
-            if (!numericInputs([...values])) { temporary(); return; }
+            if (!numericInputs([...values])) { memory.ready = false; temporary(); return; }
             memory.values = new Map(values); memory.pending = true; memory.reset = false; memory.version++;
+            memory.ready = true; memory.acceptedEpoch = acceptedEpoch;
             if (valid() && store && access().canEditInputs) { dirty = true; status.textContent = 'Saving inputs…'; clearTimer(); timer = setTimeout(() => { void write(); }, 500); }
           });
           if (memory.pending && valid() && store && access().canEditInputs) { dirty = true; timer = setTimeout(() => { void write(); }, 500); }
@@ -130,8 +148,9 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
             if (!ownsPanel() || writing) return;
             live?.resetInputs();
             const defaults = numericInputs([...value.session.inputValues()]);
-            if (!defaults) { temporary(); memory.values = new Map(); return; }
+            if (!defaults) { memory.ready = false; temporary(); memory.values = new Map(); return; }
             memory.values = defaults; memory.pending = true; memory.reset = true; memory.version++;
+            memory.ready = true; memory.acceptedEpoch = acceptedEpoch;
             if (valid() && store && access().canEditInputs) { dirty = true; void write(new Map()); }
             else status.textContent = memory.conflict ? 'Saved inputs changed. Load saved inputs to continue saving.' : 'Inputs reset to authored defaults in this editor.';
           };

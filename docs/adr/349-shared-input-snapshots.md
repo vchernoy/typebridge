@@ -1,8 +1,8 @@
 # Shared numeric snapshots (#349)
 
-Status: proposed end-to-end contract. Gated codec and receiver foundations are
-prepared below; product-route initialization, parameter capture and copy behavior
-are not implemented.
+Status: proposed end-to-end contract. Gated codec, receiver and accepted-memory
+capture foundations are prepared below; product-route initialization, Share parameter
+controls, saved-baseline fallback and editable-copy initialization are not implemented.
 Builds on the issue's initial research and the reviewed #351 Share-flow design.
 Immutable grouping identity is the maintainer's agreed policy; the wire and lifecycle
 choices below are recommendations, not evidence of product approval or implementation.
@@ -25,6 +25,19 @@ Browser fixtures exercise the real adapter and renderer through the first visibl
 controls/math/conditions, local precedence, empty reset and temporary fallback.
 Production callers still omit the snapshot and reject v2; this is preparation, not
 an enabled end-to-end parameter-sharing feature.
+
+The editable-input controller can synchronously copy a bounded accepted numeric
+snapshot after model initialization, including model-only inputs and empty state.
+The view coordinator additionally requires the current document, policy epoch and
+exact last-rendered source. It retains capture in source view when that context is
+unchanged; absent/loading/changed-source/retired state is unavailable rather than
+guessed. Capture does not query sidecars, write content or acquire source ownership.
+Existing input-update paths gain no extra policy reads. This is an accepted-memory
+capability only: no source-window saved-baseline lookup, compatibility rebasing or
+product Share/v2 opt-in is enabled by it.
+If capture itself observes denied/private persistence policy, it retires the queued
+writer through the existing memory-only path. Accepted local values remain available
+for explicit sharing; recovery cannot retroactively save them.
 
 ## Compatibility evidence
 

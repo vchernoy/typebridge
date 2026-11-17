@@ -26,6 +26,8 @@ export function setupMarkdownView(deps: {
   let generation = 0;
   let previous = '';
   let live: ReturnType<typeof import('./active-renderer').renderDocument> | undefined;
+  let acceptedSource: { id: string; text: string } | undefined;
+  let pageActive = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = (): void => { generation++; clearTimeout(timer); attachment?.destroy(); attachment = undefined; live?.destroy(); live = undefined; };
   function edit(): void {
@@ -40,14 +42,15 @@ export function setupMarkdownView(deps: {
     try {
       const { renderDocument } = await import('./active-renderer');
       if (generation !== started) return;
-      const prepared = await inputState.prepare(deps.shown().id, () => generation === started);
+      const documentId = deps.shown().id;
+      const prepared = await inputState.prepare(documentId, () => generation === started);
       if (generation !== started) { prepared.destroy(); return; }
       attachment = prepared;
       const stage = document.createElement('div'); stage.style.visibility = 'hidden'; root.replaceChildren(stage);
       live = renderDocument(stage, text, navigator.language, prepared.initialInputs);
       await live.settled();
       if (generation !== started) return;
-      prepared.bind(live); stage.style.removeProperty('visibility');
+      prepared.bind(live); acceptedSource = { id: documentId, text }; stage.style.removeProperty('visibility');
       if (focusInputs === deps.shown().id && document.activeElement === document.body) document.querySelector<HTMLButtonElement>('#editable-input-reset')?.focus({ preventScroll: true });
       focusInputs = undefined;
       for (const message of live.messages) {
@@ -71,7 +74,7 @@ export function setupMarkdownView(deps: {
       }
       problems.hidden = !live.messages.length;
     } catch {
-      if (generation === started) { attachment?.destroy(); attachment = undefined; live?.destroy(); live = undefined; root.textContent = 'Could not render this document. Switch to Edit to read the source.'; }
+      if (generation === started) { acceptedSource = undefined; attachment?.destroy(); attachment = undefined; live?.destroy(); live = undefined; root.textContent = 'Could not render this document. Switch to Edit to read the source.'; }
     }
   }
   function sync(): void {
@@ -100,7 +103,14 @@ export function setupMarkdownView(deps: {
     });
   }
   for (const event of ['input', 'historychange']) field.addEventListener(event, sync);
-  window.addEventListener('pagehide', stop);
-  window.addEventListener('pageshow', event => { if (event.persisted) { previous = ''; sync(); } });
-  return { sync, edit };
+  window.addEventListener('pagehide', () => { pageActive = false; stop(); });
+  window.addEventListener('pageshow', event => { if (event.persisted) { pageActive = true; previous = ''; sync(); } });
+  return { sync, edit,
+    /** Preparation for explicit parameter sharing. Product Share routes still omit inputs. */
+    captureInputs() {
+      const draft = deps.shown();
+      if (!pageActive || documentFormat(draft) !== 'markdown' || acceptedSource?.id !== draft.id || acceptedSource.text !== deps.text()) return;
+      return inputState.capture();
+    },
+  };
 }
