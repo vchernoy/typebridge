@@ -16,19 +16,24 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
   const load = document.createElement('button'); load.type = 'button'; load.id = 'editable-input-load'; load.textContent = 'Load saved inputs'; load.hidden = true;
   panel.append(status, reset, load); document.querySelector('#rendered-document')!.after(panel);
   let stop: (() => void) | undefined;
-  const freeze = () => { for (const entry of cache.values()) entry.frozen = true; stop?.(); };
+  let freezeCurrent: (() => void) | undefined;
+  const freeze = () => { for (const entry of cache.values()) entry.frozen = true; freezeCurrent?.(); };
   window.addEventListener('storage', event => { if (event.key === null || event.key === AUTOSAVE_PREF_KEY) freeze(); });
   window.addEventListener(PREFS_EVENT, event => {
     const name = (event as CustomEvent<{ name?: string }>).detail?.name;
     if (name === 'autosave' || name === 'reset') freeze();
   });
-  onStorageClear(detail => { if (!detail.documentId) { freeze(); cache.clear(); } else { cache.delete(detail.documentId); if (access().draft.id === detail.documentId) stop?.(); } });
+  onStorageClear(detail => { if (!detail.documentId) { freeze(); cache.clear(); } else { cache.delete(detail.documentId); if (access().draft.id === detail.documentId) freezeCurrent?.(); } });
   return {
-    check() { if (!access().public) { const entry = cache.get(access().draft.id); if (entry) { entry.frozen = true; stop?.(); } } },
+    check() { if (!access().public) { const entry = cache.get(access().draft.id); if (entry) { entry.frozen = true; freezeCurrent?.(); } } },
     async prepare(id: string, current: () => boolean) {
       stop?.(); panel.hidden = true; load.hidden = true;
       let active = true, dirty = false, writing = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      let loading = true;
+      let finishLoading!: () => void;
+      const cancelled = new Promise<undefined>(resolve => { finishLoading = () => resolve(undefined); });
       let live: Live | undefined, unsubscribe: (() => void) | undefined;
       let entry = cache.get(id);
       const hadMemory = !!entry;
@@ -44,20 +49,29 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
         if (!access().public) { temporary(); return false; }
         return !memory.frozen;
       };
-      const ownsPanel = () => stop === temporary && active && current() && access().draft.id === id;
-      const temporary = () => { memory.frozen = true; memory.conflict = false; clearTimer(); store?.close(); store = undefined; if (ownsPanel()) { load.hidden = true; status.textContent = 'Inputs are temporary in this editor. Reload this editor to enable saving.'; } };
+      const ownsPanel = () => stop === cancel && active && current() && access().draft.id === id;
+      const endLoading = () => { loading = false; clearTimeout(deadline); finishLoading(); };
+      // Cancellation retires this attachment, not the document's cached permission.
+      function cancel() {
+        active = false; endLoading(); clearTimer(); unsubscribe?.(); store?.close(); store = undefined;
+        if (stop === cancel) { stop = undefined; freezeCurrent = undefined; panel.hidden = true; }
+      }
+      const temporary = () => {
+        // A late cancelled read/timeout must not freeze a replacement that shares memory.
+        if (!ownsPanel()) return;
+        memory.frozen = true; memory.conflict = false; endLoading(); clearTimer(); store?.close(); store = undefined;
+        load.hidden = true; status.textContent = 'Inputs are temporary in this editor. Reload this editor to enable saving.';
+      };
       const showConflict = () => {
         temporary(); memory.conflict = true;
         if (ownsPanel()) { load.hidden = false; status.textContent = 'Saved inputs changed. Load saved inputs to continue saving.'; }
       };
-      stop = temporary;
+      stop = cancel; freezeCurrent = temporary;
       const initial = access();
       if (valid() && initial.db && initial.draft.revision > 0) {
-        let loading = true;
-        let deadline: ReturnType<typeof setTimeout> | undefined;
         const pending = openEditableInputs(initial.db, id, () => loading && valid(), () => valid() ? access().fence : undefined);
         try {
-          store = await Promise.race([pending, new Promise<undefined>(resolve => { deadline = setTimeout(() => { loading = false; resolve(undefined); }, 2000); })]);
+          store = await Promise.race([pending, cancelled, new Promise<undefined>(resolve => { deadline = setTimeout(() => { loading = false; resolve(undefined); }, 2000); })]);
           if (!loading) { temporary(); void pending.then(late => late?.close(), () => undefined); }
         } catch { temporary(); }
         finally { clearTimeout(deadline); }
@@ -118,7 +132,7 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
             else status.textContent = memory.conflict ? 'Saved inputs changed. Load saved inputs to continue saving.' : 'Inputs reset to authored defaults in this editor.';
           };
         },
-        destroy() { active = false; clearTimer(); unsubscribe?.(); store?.close(); if (stop === temporary) { stop = undefined; panel.hidden = true; } },
+        destroy: cancel,
       };
     },
   };

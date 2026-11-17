@@ -14,6 +14,14 @@ async function preview(page: Page) {
 }
 const input = (page: Page) => page.locator('#rendered-document input[data-active-input="x"]');
 const status = (page: Page) => page.locator('#editable-input-status');
+async function holdEditableRead(page: Page, id: string) {
+  return page.evaluate(id=>{
+    const get=IDBObjectStore.prototype.get; const view=window as unknown as {heldRemountRead:boolean;releaseRemountRead?:()=>void};
+    IDBObjectStore.prototype.get=function(key){const r=get.call(this,key);if(this.name==='documents' && key===id && !view.heldRemountRead) {
+      r.addEventListener('success',event=>{event.stopImmediatePropagation();view.heldRemountRead=true;view.releaseRemountRead=()=>{r.onsuccess?.call(r,new Event('success'));};},{once:true});
+    }return r;};
+  },id);
+}
 async function states(page: Page) {
   return page.evaluate(() => new Promise<Array<{id: string; inputs: [string,number][]}>>(resolve => {
     const r = indexedDB.open('typebridge'); r.onsuccess = () => { const db = r.result, q = db.transaction('readerStates').objectStore('readerStates').getAll(); q.onsuccess = () => { db.close(); resolve(q.result.filter(row => row.id.startsWith('editable:'))); }; };
@@ -171,4 +179,33 @@ test('an interrupted reset keeps its empty-snapshot intent and original CAS base
   await page.locator('#editable-input-reset').click(); await expect(page.locator('#editor')).toBeVisible();
   await preview(page); await expect(input(page)).toHaveValue('2'); await expect(status(page)).toHaveText('Inputs saved on this device.');
   expect((await states(page))[0]).toMatchObject({revision:2,inputs:[]});
+});
+
+for (const completion of ['release','timeout'] as const) test(`cancelled public preparation restores and keeps saving on rapid remount: ${completion}`, async ({page}) => {
+  const id=await makeDocument(page);await preview(page);await input(page).fill('5');await expect(status(page)).toHaveText('Inputs saved on this device.');
+  await page.locator('#document-view-edit').click();await page.reload();await expect(page.locator('#editor')).toHaveValue(source);await expect(page.locator('#editor')).toBeEditable();
+  await holdEditableRead(page,id);
+  await page.clock.install({time:new Date('2026-11-17T05:00:00Z')});await page.clock.pauseAt(new Date('2026-11-17T05:00:01Z'));
+  await page.locator('#document-view-preview').click();await page.clock.runFor(150);
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {heldRemountRead:boolean}).heldRemountRead)).toBe(true);
+  await page.locator('#document-view-edit').click();await page.locator('#document-view-preview').click();await page.clock.runFor(150);
+  await expect(input(page)).toHaveValue('5');
+  if(completion==='release')await page.evaluate(()=>(window as unknown as {releaseRemountRead:()=>void}).releaseRemountRead());
+  await page.clock.runFor(2100);await expect(page.locator('#editable-input-reset')).toBeVisible();await expect(input(page)).toHaveValue('5');
+  await input(page).fill('7');await page.clock.runFor(1000);await expect(status(page)).toHaveText('Inputs saved on this device.');
+  expect((await states(page))[0].inputs).toEqual([['x',7],['seed',3]]);
+  await page.locator('#document-view-edit').click();await page.locator('#document-view-preview').click();await page.clock.runFor(150);await expect(input(page)).toHaveValue('7');
+});
+
+test('a genuine active storage timeout stays memory-only after the old read recovers', async ({page}) => {
+  const id=await makeDocument(page);await preview(page);await input(page).fill('5');await expect(status(page)).toHaveText('Inputs saved on this device.');
+  await page.locator('#document-view-edit').click();await page.reload();await expect(page.locator('#editor')).toHaveValue(source);await expect(page.locator('#editor')).toBeEditable();
+  const before=await states(page);await holdEditableRead(page,id);
+  await page.clock.install({time:new Date('2026-11-17T05:00:00Z')});await page.clock.pauseAt(new Date('2026-11-17T05:00:01Z'));
+  await page.locator('#document-view-preview').click();await page.clock.runFor(150);
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {heldRemountRead:boolean}).heldRemountRead)).toBe(true);
+  await page.clock.runFor(2100);await expect(input(page)).toHaveValue('2');await expect(status(page)).toContainText('temporary');
+  await page.evaluate(()=>(window as unknown as {releaseRemountRead:()=>void}).releaseRemountRead());await input(page).fill('7');
+  await page.locator('#document-view-edit').click();await page.locator('#document-view-preview').click();await page.clock.runFor(150);await expect(input(page)).toHaveValue('7');
+  await input(page).fill('8');await page.clock.runFor(1000);await expect(status(page)).toContainText('temporary');expect(await states(page)).toEqual(before);
 });
