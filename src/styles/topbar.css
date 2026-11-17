@@ -380,7 +380,8 @@
 #shared-library button {
   flex-shrink: 0;
 }
-#shared-search {
+#shared-search,
+#shared-library .shared-original-link {
   min-height: 44px;
   padding: 8px;
   border: 1px solid var(--control-border);

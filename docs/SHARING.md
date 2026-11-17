@@ -97,7 +97,12 @@ same title, source and format appear in expandable groups; different presentatio
 remain individual received links. Single items keep a direct title link. Search covers
 immutable source/title/format and presentation labels, with matching groups expanded
 temporarily. It never searches this recipient's saved input sidecars. Every link opens
-its original read-only page in a new tab; Actions reveals individual Remove. Group
+its original read-only page in a new tab. Actions can copy that exact received payload
+as a link on this site's origin, or confirm individual removal. Copy never includes
+recipient-local inputs or current editable/private source. If clipboard access fails,
+a selected read-only original URL allows manual copying. Individual removal checks
+the expected payload inside its transaction; changed records require review rather
+than deleting an unconfirmed replacement. Group
 actions offers confirmed removal of all received links and their saved reader inputs,
 while preserving editable copies. Changed membership requires a fresh decision;
 storage failures cannot commit partial group removal. Input-bearing v2 links remain

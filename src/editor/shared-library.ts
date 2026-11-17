@@ -79,16 +79,20 @@ export async function listSharedItems(db: IDBDatabase): Promise<SharedItem[]> {
   const rows = await request(tx.objectStore(SHARED_ITEMS).getAll()); await done;
   return rows.filter(validItem).sort((a, b) => b.lastOpenedAt - a.lastOpenedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
-export async function removeSharedItem(db: IDBDatabase, id: string): Promise<void> {
+export async function removeSharedItem(db: IDBDatabase, id: string, expectedPayload?: string): Promise<'removed' | 'changed'> {
   // Publish before any await: work still decoding/opening must not adopt the new epoch.
   // If this write fails, refuse removal rather than promising invalidation we cannot enforce.
   invalidateSharedRemembering();
   const tx = db.transaction([SHARED_ITEMS, 'readerStates'], 'readwrite'); const done = finished(tx); void done.catch(() => undefined);
   try {
+    if (expectedPayload !== undefined) {
+      const item = await request(tx.objectStore(SHARED_ITEMS).get(id));
+      if (item?.payload !== expectedPayload) { await done; return 'changed'; }
+    }
     const epochs = tx.objectStore('readerStates');
     const epoch = await request(epochs.get('libraryEpoch'));
     epochs.put({ id: 'libraryEpoch', revision: (epoch?.revision ?? 0) + 1 });
-    tx.objectStore(SHARED_ITEMS).delete(id); epochs.delete('shared:' + id); await done;
+    tx.objectStore(SHARED_ITEMS).delete(id); epochs.delete('shared:' + id); await done; return 'removed';
   } catch (error) { try { tx.abort(); } catch { /* Already settled. */ } throw error; }
 }
 

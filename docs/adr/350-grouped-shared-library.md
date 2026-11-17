@@ -11,9 +11,10 @@ already-validated received records, compares complete title/text/format fields, 
 original link references, assigns creation-based ordinals and searches only immutable
 incoming fields. It performs no decoding, sidecar access, storage or rendering.
 The library UI consumes this model for grouping/search. Group actions confirms and
-removes the captured group atomically. Copy original link, individual-removal
-confirmation and v2 integration remain separate steps; individual removal retains
-its existing behavior inside Actions.
+removes the captured group atomically. Per-link Actions copies the exact original
+payload or confirms individual removal. Copy has a selected read-only URL fallback;
+the per-item transaction refuses a changed payload after confirmation. V2 integration
+and remaining production acceptance are separate steps.
 
 ## Current boundary
 
@@ -86,6 +87,19 @@ Per-link Actions contains **Copy original link** and **Remove received link**. C
 uses only that original link and visible success/failure feedback; it does not
 acquire source ownership or construct a new snapshot. Existing reader reopening and
 editable-copy reuse policies remain unchanged.
+
+Copy constructs the current origin's `/read.html#doc=` URL with the unchanged stored
+payload. No recipient-side inputs, private editor state or reconstructed source enter
+it. Clipboard access occurs only on explicit activation; failure exposes a selected
+read-only URL for manual copying. Late callbacks from replaced rows cannot overwrite
+new search feedback or focus. Unavailable/unsupported stored payloads have removal
+only, with no copy action exposing their raw data.
+
+Individual removal captures the selected ID/payload before its safe-default dialog,
+then rechecks the payload inside the existing deletion transaction. A changed or
+missing row is not deleted and does not advance the library epoch; existing removal
+invalidation still cancels old writers. Cancel does not invoke removal or invalidate
+writers. Failures preserve the row and return the enabled retry action.
 
 Expanded groups expose one **Group actions** disclosure with **Remove all N received
 links**. There is no editable-copy action at group level, because a group has no
