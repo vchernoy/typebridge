@@ -5,15 +5,17 @@ import { SHARED_REMOVAL_KEY } from '../editor/shared-invalidation';
 import { AUTOSAVE_PREF_KEY } from '../editor/drafts';
 import { PREFS_EVENT } from '../view/prefs-sync';
 import type { renderDocument } from '../view/active-renderer';
+import type { InputSnapshot } from '../editor/input-snapshot';
 type Live = ReturnType<typeof renderDocument>;
 type UI = { panel: HTMLElement; status: HTMLElement; reset: HTMLButtonElement; load: HTMLButtonElement; keep: HTMLButtonElement };
 const CHANNEL = 'typebridge-reader-inputs.v1';
 export async function prepareSharedInputs(payload: string, remembered: Promise<void> | undefined,
-  current: () => boolean, canStore: () => boolean, ui: UI, reload: () => void) {
+  current: () => boolean, canStore: () => boolean, ui: UI, reload: () => void, incoming?: InputSnapshot) {
   let active = true, frozen = false, conflict = false, saving = false, dirty = false, muted = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let store: SharedInputs | undefined, live: Live | undefined, unsubscribe: (() => void) | undefined;
   let channel: BroadcastChannel | undefined;
+  let storageFailed = false;
   const valid = (): boolean => {
     if (!active || !current() || frozen) return false;
     if (!readerStorageAllowed()) { memory(); return false; }
@@ -49,13 +51,15 @@ export async function prepareSharedInputs(payload: string, remembered: Promise<v
     })();
     try {
       store = await Promise.race([pending, new Promise<undefined>(resolve => {
-        deadline = setTimeout(() => { loadCurrent = false; resolve(undefined); }, 2000);
+        deadline = setTimeout(() => { loadCurrent = false; storageFailed = true; resolve(undefined); }, 2000);
       })]);
-    } catch { /* Defaults remain usable; no persistent write proof. */ }
+    } catch { storageFailed = true; /* Reading stays usable; no persistent write proof. */ }
     finally { if (deadline !== undefined) clearTimeout(deadline); }
   }
   if (!current() || frozen) { store?.close(); store = undefined; }
-  const initialInputs = store?.inputs;
+  // An empty saved reset is a real snapshot, not permission to reapply link values.
+  // Only a validated codec snapshot may be supplied; current product routes omit it.
+  const initialInputs = store?.hasSnapshot ? store.inputs : incoming ? new Map(incoming.values) : store?.inputs;
   // A restored history page may read a saved baseline without rearming writes
   // disabled by its prior lifecycle/privacy transition.
   if (!canStore()) { store?.close(); store = undefined; }
@@ -100,7 +104,8 @@ export async function prepareSharedInputs(payload: string, remembered: Promise<v
     bind(value: Live) {
       live = value; ui.panel.hidden = value.session.inputValues().size === 0;
       actions(false); controls(false);
-      ui.status.textContent = store ? 'Inputs are saved locally for this shared document.' : 'Inputs are temporary in this page.';
+      ui.status.textContent = store ? 'Inputs are saved locally for this shared document.'
+        : incoming && storageFailed ? 'Saved inputs are unavailable. Link parameters are temporary in this page.' : 'Inputs are temporary in this page.';
       observed = JSON.stringify([...value.session.inputValues()]);
       unsubscribe = value.session.subscribe(() => {
         if (muted || !active || !current()) return;

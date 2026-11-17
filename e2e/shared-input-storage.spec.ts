@@ -27,7 +27,9 @@ for (const operation of ['reset', 'remove', 'cancel-write', 'preference'] as con
       let allowed = true;
       const a = (await api.openSharedInputs(payload, () => allowed, () => {}))!;
       const b = (await api.openSharedInputs(payload, () => true, () => {}))!;
+      const absent = a.hasSnapshot;
       const first = await a.save(new Map([['x', 5]]));
+      const present = a.hasSnapshot;
       const stale = await b.save(new Map([['x', 7]]));
       await b.read();
       let outcome: string;
@@ -51,11 +53,13 @@ for (const operation of ['reset', 'remove', 'cancel-write', 'preference'] as con
         catch { outcome = 'aborted'; }
         finally { IDBObjectStore.prototype.put = put; }
       }
+      const refreshed = b.hasSnapshot;
       a.close(); b.close();
       const rows = await new Promise<unknown[]>(resolve => { const r = indexedDB.open('typebridge'); r.onsuccess = () => { const db = r.result; const q = db.transaction('readerStates').objectStore('readerStates').getAll(); q.onsuccess = () => { db.close(); resolve(q.result.filter(row => row.id.startsWith('shared:')).map(row => row.inputs)); }; }; });
-      return { first, stale, outcome, rows };
+      return { first, stale, outcome, rows, absent, present, refreshed };
     }, { payload: result.payload, operation });
     expect(values.first).toBe('saved'); expect(values.stale).toBe('conflict');
+    expect(values.absent).toBe(false); expect(values.present).toBe(true); expect(values.refreshed).toBe(true);
     expect(values.outcome).toBe(operation === 'reset' ? 'conflict' : operation === 'remove' || operation === 'preference' ? 'cancelled' : 'aborted');
     expect(values.rows).toEqual(operation === 'reset' ? [[]] : operation === 'remove' ? [] : [[['x', 5]]]);
   });

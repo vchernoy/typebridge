@@ -55,7 +55,7 @@ export async function openSharedInputs(payload: string, current: () => boolean, 
       return new Map(next?.inputs ?? []);
     };
     return {
-      id: item.id, get revision() { return revision; }, inputs: new Map(saved?.inputs ?? []), read,
+      id: item.id, get revision() { return revision; }, get hasSnapshot() { return revision > 0; }, inputs: new Map(saved?.inputs ?? []), read,
       async save(inputs: ReadonlyMap<string, number>): Promise<InputSave> {
         const values = [...inputs];
         if (!numericInputs(values)) throw new Error('Reader inputs exceed the storage limit');
