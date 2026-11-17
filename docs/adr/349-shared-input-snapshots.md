@@ -1,7 +1,8 @@
 # Shared numeric snapshots (#349)
 
-Status: proposed end-to-end contract. A codec-only foundation is prepared below;
-parameter capture, receiver initialization and copy behavior are not implemented.
+Status: proposed end-to-end contract. Gated codec and receiver foundations are
+prepared below; product-route initialization, parameter capture and copy behavior
+are not implemented.
 Builds on the issue's initial research and the reviewed #351 Share-flow design.
 Immutable grouping identity is the maintainer's agreed policy; the wire and lifecycle
 choices below are recommendations, not evidence of product approval or implementation.
@@ -16,6 +17,14 @@ snapshots are preserved; schema/byte failures are distinct. The storage validato
 shared through a pure module; no IndexedDB/DOM/rendering dependency enters the codec.
 Do not enable the capability on product routes before the initialization/capture and
 copy policies below are implemented and independently reviewed.
+
+The shared-reader adapter accepts an optional validated snapshot for integration
+tests. It distinguishes absent local state from an empty saved reset using record
+existence, chooses one whole baseline, and freezes persistence after failed reads.
+Browser fixtures exercise the real adapter and renderer through the first visible
+controls/math/conditions, local precedence, empty reset and temporary fallback.
+Production callers still omit the snapshot and reject v2; this is preparation, not
+an enabled end-to-end parameter-sharing feature.
 
 ## Compatibility evidence
 
