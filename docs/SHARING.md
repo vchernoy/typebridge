@@ -52,7 +52,7 @@ Every control in the dialog is reachable with Tab; Escape or Close returns to �
 
 ## Reading page
 
-`/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page shows the title and document, with a quiet **Edit** hyperlink beside the title when the sender allowed editing, and **Written with TypeBridge** below the document. It honors the sender’s source/rendered view choice without a reading toolbar. Source presentation preserves the text, line breaks and spaces as written. Rendered Markdown dynamically loads active-md and inserts only its sanitized output, with KaTeX `trust: false` and MathML output. Raw HTML is dropped, dangerous links are filtered, and remote images are links that require a click. If rendering fails, the page automatically shows the source with a notice. Accepted shared numeric inputs can be saved in a separate local record as described below; they are never journaled into source or shared in links. Editable Preview inputs remain temporary. Only `{{…}}` placeholders inside math and `:value[…]` bindings are live; typed-in numbers stay as written, including numbers in a second `aligned` block. For example, `{{final | fixed:2}}` updates with the same formatting as `:value[final]{format=fixed:2}`. It opens offline once TypeBridge itself (`/` or the editor) has been opened in that browser, which installs offline support; the reading page does not install it, so opening only share links does not.
+`/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page shows the title and document, with a quiet **Edit** hyperlink beside the title when the sender allowed editing, and **Written with TypeBridge** below the document. It honors the sender’s source/rendered view choice without a reading toolbar. Source presentation preserves the text, line breaks and spaces as written. Rendered Markdown dynamically loads active-md and inserts only its sanitized output, with KaTeX `trust: false` and MathML output. Raw HTML is dropped, dangerous links are filtered, and remote images are links that require a click. If rendering fails, the page automatically shows the source with a notice. Accepted shared numeric inputs can be saved in a separate local record as described below; they are never journaled into source or shared in links. Editable Preview inputs are stored separately when permitted, as described below. Only `{{…}}` placeholders inside math and `:value[…]` bindings are live; typed-in numbers stay as written, including numbers in a second `aligned` block. For example, `{{final | fixed:2}}` updates with the same formatting as `:value[final]{format=fixed:2}`. It opens offline once TypeBridge itself (`/` or the editor) has been opened in that browser, which installs offline support; the reading page does not install it, so opening only share links does not.
 
 Markdown titles typeset inline `$…$` in the visible page heading, including with a source body. Titles do not interpret Markdown or live `{{…}}` bindings; display fences and invalid TeX remain plain text. The browser tab, title input, Documents list, share preview and export names keep the original plain title, with the same 150-character limit. Plain documents are unchanged.
 
@@ -82,7 +82,7 @@ The [research design](adr/322-local-reader-state.md) proposes automatic local re
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
 The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
-Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document inputs (#326) and quiz attempts (#327) remain later work.
+Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document numeric inputs are persisted separately in #326; quiz attempts (#327) remain later work.
 
 
 ## Local Shared with me library (#323)
@@ -124,7 +124,7 @@ defaults, editable documents and history are unchanged; values never enter a sha
 The runtime validates names and current ranges before the staged reading area is revealed.
 Invalid/incompatible records use defaults and stay memory-only; storage loading is bounded
 to two seconds so a blocked database does not prevent reading. No renderer is loaded for
-plain/source reading. Editable Preview persistence and quiz answers remain separate work.
+plain/source reading. Editable Preview persistence is described below; quiz answers remain separate work.
 
 The default-on remembering preference and Private session gate both library and input
 writes. Preference read failure denies writes. Opt-out/privacy/removal freezes that mount's
@@ -145,3 +145,10 @@ another concurrent change can conflict again. Reset inputs to defaults writes an
 snapshot with a new revision, so an old queued save cannot undo reset. Removal deletes the
 item and sidecar atomically and invalidates pending writers; global clear closes old readers
 and reloads them through the existing clear lifecycle. No tombstones outlive removed items.
+
+
+## Editable rendered inputs (#326)
+
+Each saved editable document has its own local numeric input state, separate from source, history and shared links. Switching Edit/Rendered, remounting after source edits and reopening restores compatible input names and current ranges. Two documents with identical Markdown remain independent. Plain documents still load no renderer.
+
+Autosave-off/private and unsaved documents keep inputs in memory. Only the current editing owner can save sidecars; a read-only window can restore the public baseline and explore values locally. Privacy or preference-read failure freezes that editor's cached state even after re-enabling: reload to resume permitted saving from the public baseline. Storage failure leaves the current inputs usable. Wait for Inputs saved on this device before leaving; rapid navigation or a crash can lose the latest changes. Reset inputs to defaults clears only the numeric sidecar; deleting/clearing a document removes it too. Quiz answers are not included.

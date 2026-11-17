@@ -478,7 +478,7 @@ export async function deleteStoredDraft(
   owner?: WriteFence,
   dropOwnership = false,
 ): Promise<boolean> {
-  const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES] : [STORE, CHANGES], 'readwrite');
+  const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES, 'readerStates'] : [STORE, CHANGES, 'readerStates'], 'readwrite');
   const done = finished(tx);
   try {
     await assertEditOwner(tx, id, owner);
@@ -486,6 +486,7 @@ export async function deleteStoredDraft(
     const current = await request(store.get(id)) as StoredDraft | undefined;
     if ((current?.revision ?? 0) !== revision) { await done; return false; }
     if (current) await request(store.delete(id));
+    await request(tx.objectStore('readerStates').delete('editable:' + id));
     // The change log continued the deleted text; it must never be replayed onto a later one.
     await request(tx.objectStore(CHANGES).delete(changesOf(id)));
     if (owner && dropOwnership) await request(tx.objectStore(OWNERSHIP).delete(id));

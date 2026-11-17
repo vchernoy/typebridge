@@ -1,7 +1,7 @@
 # Local shared library and reader state (#322)
 
 Status: research baseline below. #323 library and #324 shared numeric inputs are implemented;
-#326 editable inputs and #327 quiz persistence remain later work. The implemented #324 bounds
+#326 editable numeric inputs are implemented separately; #327 quiz persistence remains later work. The implemented #324 bounds
 are 256 inputs / 64 KiB per shared item, within the 100-item library, superseding the proposed bounds below. Evidence below records the research
 baseline, not a current feature inventory.
 Evidence baseline: main `67a2f35`, ActiveMD packages pinned to `0.4.0`.

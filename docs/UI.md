@@ -93,7 +93,7 @@ The [research design](adr/322-local-reader-state.md) proposes automatic local re
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
 The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
-Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document inputs (#326) and quiz attempts (#327) remain later work.
+Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document numeric inputs are persisted separately in #326; quiz attempts (#327) remain later work.
 
 
 Documents → Shared with me lists received links separately from editable documents, with
@@ -102,3 +102,6 @@ Settings and the reader's Local shared library disclosure expose “Remember sha
 and reader inputs on this device”; shared-reader numeric state is separate from source. Private session overrides remembering. Saved local
 items remain until removal; turning remembering back on requires explicit Remember for
 the current page. Failure/full/private status is honest and never blocks reading.
+
+
+Rendered editable Markdown with numeric inputs shows a separate input-save status and Reset inputs to defaults. These controls do not modify source or its Undo/Redo. A revision conflict preserves current controls in memory and offers Load saved inputs; it does not replace values automatically. Private, unsaved, read-only and failed-storage cases remain usable with a temporary-input status.
