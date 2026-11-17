@@ -104,8 +104,8 @@ function showConfirmChoice(options: ConfirmChoiceOptions): Promise<boolean> {
     // Controls inside structured content (e.g. the Share link field and checkbox) join the
     // cycle in document order, before the actions.
     const messageControls = (): HTMLElement[] => [...message.querySelectorAll<HTMLElement>(
-      'button, input, select, textarea, a[href]',
-    )].filter(element => !(element as HTMLButtonElement).disabled && !element.hidden);
+      'button, input, select, textarea, a[href], summary',
+    )].filter(element => !(element as HTMLButtonElement).disabled && !element.hidden && element.getClientRects().length > 0);
     const focusables = (): HTMLElement[] =>
       [...(headerClose ? [cancel] : []), ...(message.tabIndex >= 0 ? [message] : []), ...messageControls(), ...(headerClose ? [] : [cancel]), ...(options.confirmLabel === undefined ? [] : [confirm])];
 

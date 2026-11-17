@@ -111,6 +111,15 @@
   background: var(--background);
   overflow-wrap: anywhere;
 }
+.share-preview-disclosure > summary {
+  min-height: 44px;
+  padding-block: 10px;
+  cursor: pointer;
+}
+.share-preview-disclosure > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .share-preview-text {
   /* Preview is secondary: multiline source must not bury the sharing controls. */
   display: -webkit-box;
