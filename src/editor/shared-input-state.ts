@@ -30,9 +30,15 @@ const finished = (tx: IDBTransaction) => new Promise<void>((resolve, reject) => 
 export type InputSave = 'saved' | 'conflict' | 'cancelled';
 export async function openSharedInputs(payload: string, current: () => boolean, invalidated: () => void) {
   const removal = sharedRemovalToken();
-  const allowed = () => current() && readerStorageAllowed() && removal !== undefined && sharedRemovalToken() === removal;
-  if (!allowed()) return;
   let ended = false;
+  const allowed = (): boolean => {
+    if (ended || !current()) return false;
+    if (!readerStorageAllowed() || removal === undefined || sharedRemovalToken() !== removal) {
+      ended = true; invalidated(); return false;
+    }
+    return true;
+  };
+  if (!allowed()) return;
   const db = await openDraftDatabase(() => { ended = true; invalidated(); });
   const valid = () => !ended && allowed();
   try {

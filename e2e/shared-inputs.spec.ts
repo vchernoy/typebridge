@@ -249,3 +249,31 @@ test('history restore reads saved values without rearming writes from the abando
   await page.locator('#reader-input-reset').click(); await ready(page);
   expect((await states(page))[0].inputs).toEqual([['x', 5], ['seed', 3]]);
 });
+
+test('transient preference failure never retroactively saves either input after recovery', async ({ page }) => {
+  const encoded = await encodeSharePayload({ title: 'Transient preference fixture', text: source.replace(':input[x] :value[y]', ':input[x] :input[seed] :value[y]'), format: 'markdown', view: 'rendered', edit: false });
+  if (!encoded.ok) throw new Error('Encoding failed');
+  await page.goto('/read.html#doc=' + encoded.payload);
+  const x = page.locator('#read-text input[data-active-input="x"]');
+  const seed = page.locator('#read-text input[data-active-input="seed"]');
+  await expect(x).toHaveValue('2'); await expect(seed).toHaveValue('3');
+  await expect(page.locator('#reader-input-status')).toContainText('saved locally');
+  await page.clock.install();
+  await page.evaluate(() => {
+    const view = window as unknown as { denyReaderPreferences: boolean }; view.denyReaderPreferences = true;
+    const get = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (key) {
+      if (key === 'typebridge.autosave.v1' && view.denyReaderPreferences) throw new Error('Temporary preference denial');
+      return get.call(this, key);
+    };
+  });
+  await x.fill('5');
+  await expect(page.locator('#read-text output')).toHaveText('8');
+  await page.evaluate(() => { (window as unknown as { denyReaderPreferences: boolean }).denyReaderPreferences = false; });
+  await seed.fill('7');
+  await expect(page.locator('#read-text output')).toHaveText('12');
+  await page.clock.fastForward(1000);
+  await expect(page.locator('#reader-input-status')).toContainText('temporary');
+  expect(await states(page)).toEqual([]);
+  await page.reload(); await expect(x).toHaveValue('2'); await expect(seed).toHaveValue('3');
+});

@@ -15,7 +15,7 @@ async function fixtureCode() {
   if (!code || code.type !== 'chunk') throw new Error('No fixture');
   return bundle = code.code;
 }
-for (const operation of ['reset', 'remove', 'cancel-write'] as const) {
+for (const operation of ['reset', 'remove', 'cancel-write', 'preference'] as const) {
   test(`transactional reader CAS/rollback without notification delivery: ${operation}`, async ({ page }) => {
     const result = await encodeSharePayload({ title: 'CAS fixture', text: 'Plain text', format: 'plain', view: 'source', edit: false });
     if (!result.ok) throw new Error('Encoding failed');
@@ -37,6 +37,11 @@ for (const operation of ['reset', 'remove', 'cancel-write'] as const) {
         localStorage.setItem('typebridge.sharedRemoval.v1', crypto.randomUUID());
         await new Promise<void>(resolve => { const r = indexedDB.open('typebridge'); r.onsuccess = () => { const db = r.result; const tx = db.transaction(['sharedItems', 'readerStates'], 'readwrite'); tx.objectStore('sharedItems').delete(a.id); tx.objectStore('readerStates').delete('shared:' + a.id); tx.oncomplete = () => { db.close(); resolve(); }; }; });
         outcome = await a.save(new Map([['x', 8]]));
+      } else if (operation === 'preference') {
+        const get = Storage.prototype.getItem;
+        Storage.prototype.getItem = function (key) { if (key === 'typebridge.autosave.v1') throw new Error('Denied'); return get.call(this, key); };
+        try { await a.save(new Map([['x', 8]])); } finally { Storage.prototype.getItem = get; }
+        outcome = await a.save(new Map([['x', 9]]));
       } else {
         const put = IDBObjectStore.prototype.put;
         IDBObjectStore.prototype.put = function (value, key) {
@@ -51,7 +56,7 @@ for (const operation of ['reset', 'remove', 'cancel-write'] as const) {
       return { first, stale, outcome, rows };
     }, { payload: result.payload, operation });
     expect(values.first).toBe('saved'); expect(values.stale).toBe('conflict');
-    expect(values.outcome).toBe(operation === 'reset' ? 'conflict' : operation === 'remove' ? 'cancelled' : 'aborted');
+    expect(values.outcome).toBe(operation === 'reset' ? 'conflict' : operation === 'remove' || operation === 'preference' ? 'cancelled' : 'aborted');
     expect(values.rows).toEqual(operation === 'reset' ? [[]] : operation === 'remove' ? [] : [[['x', 5]]]);
   });
 }

@@ -14,7 +14,11 @@ export async function prepareSharedInputs(payload: string, remembered: Promise<v
   let timer: ReturnType<typeof setTimeout> | undefined;
   let store: SharedInputs | undefined, live: Live | undefined, unsubscribe: (() => void) | undefined;
   let channel: BroadcastChannel | undefined;
-  const valid = () => active && current() && !frozen && readerStorageAllowed();
+  const valid = (): boolean => {
+    if (!active || !current() || frozen) return false;
+    if (!readerStorageAllowed()) { memory(); return false; }
+    return true;
+  };
   const clearTimer = () => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
   const actions = (show: boolean) => { ui.load.hidden = !show; ui.keep.hidden = !show; };
   const memory = () => {
