@@ -126,6 +126,19 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   }
   viewSelect.value = view;
   viewLabel.append(viewSelect);
+  const readerOptions = document.createElement('details');
+  readerOptions.className = 'share-reader-options';
+  const optionsSummary = document.createElement('summary');
+  optionsSummary.id = 'share-options-toggle';
+  const optionValues = document.createElement('span');
+  optionValues.className = 'share-option-values';
+  optionsSummary.append('Reader options', optionValues);
+  readerOptions.append(optionsSummary, editLabel, headingLabel);
+  if (format === 'markdown') readerOptions.append(viewLabel);
+  const describeOptions = (): void => {
+    optionValues.textContent = `${view === 'rendered' ? 'Rendered page' : 'Source'} · ${showHeading ? 'Title shown' : 'Title hidden'} · ${edit.checked ? 'Edit a copy shown' : 'Edit a copy hidden'}`;
+  };
+  describeOptions();
 
   const linkLabel = document.createElement('label');
   linkLabel.htmlFor = 'share-url';
@@ -155,6 +168,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   let generation = 0;
   const regenerate = (): void => {
     view = format === 'markdown' && viewSelect.value === 'rendered' ? 'rendered' : 'source';
+    describeOptions();
     const current = ++generation;
     copy.disabled = true;
     link.value = '';
@@ -192,8 +206,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const row = document.createElement('div');
   row.className = 'share-link-row';
   row.append(link, copy);
-  content.append(privacy, linkLabel, row, status, editLabel, headingLabel);
-  if (format === 'markdown') content.append(viewLabel);
+  content.append(privacy, linkLabel, row, status, readerOptions);
   content.append(previewDisclosure);
   try {
     await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', closeInHeader: true, returnFocus: deps.returnFocus() });

@@ -78,6 +78,7 @@ test('share dialog sends real format and selected reader view', async ({ page })
   const field = dialog.locator('#share-url');
   const decode = async () => decodeSharePayload(sharePayloadFromHash(new URL(await field.inputValue()).hash));
   await expect.poll(decode).toMatchObject({ ok: true, document: { text: markdown, format: 'markdown', view: 'rendered' } });
+  await dialog.locator('#share-options-toggle').click();
   await dialog.locator('#share-view').selectOption('source');
   await expect(dialog.locator('#share-copy')).toBeEnabled();
   await expect.poll(decode).toMatchObject({ ok: true, document: { format: 'markdown', view: 'source' } });

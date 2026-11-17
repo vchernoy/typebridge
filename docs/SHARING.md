@@ -42,7 +42,7 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 
 - says plainly: "Anyone with the link can read this document. The text travels inside the link itself; nothing is uploaded. The link also stays in your browser history and wherever you paste it."
 - offers a collapsed **Document preview** disclosure for the title and start of the text; rendered dependencies load only when opened, and collapsing destroys the preview runtime;
-- for Markdown, has **Readers see: Rendered page / Source**, defaulting to Rendered; plain documents keep source presentation;
+- groups presentation hints under collapsed **Reader options**, with selected settings summarized while closed; for Markdown, has **Readers see: Rendered page / Source**, defaulting to Rendered; plain documents keep source presentation;
 - has **Show title on the page** (on by default); turning it off hides the title in both the preview and reading page, while retaining a visually hidden accessible heading, the tab title and the Edit copy’s name;
 - has **Readers can edit a copy** (on by default; off hides Edit a copy on the reading page, which is presentation only);
 - shows the link in a read-only field and **Copy link** (if the browser refuses clipboard access, the link is selected for the device's copy command);
