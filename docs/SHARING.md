@@ -92,8 +92,14 @@ root/read.html route. Different compressed payloads or hints remain distinct. SH
 only a lookup value; full payload equality is checked in the write transaction. Reopening
 updates last-opened time without adding a row. Unknown formats retain source fallback.
 
-Documents has a separate searchable Shared with me collection with links opening the
-original read-only page in a new tab and Remove actions. Removing an item also removes its
+Documents has a separate searchable Shared with me collection. Links with exactly the
+same title, source and format appear in expandable groups; different presentation hints
+remain individual received links. Single items keep a direct title link. Search covers
+immutable source/title/format and presentation labels, with matching groups expanded
+temporarily. It never searches this recipient's saved input sidecars. Every link opens
+its original read-only page in a new tab; Actions reveals individual Remove. Group-wide
+removal and input-bearing v2 links are not enabled. Unavailable stored links remain
+visible with a safe individual removal action. Removing an item also removes its
 reserved reader sidecar, never an independent editable copy. No account, sender identity
 or cross-device sync is implied. A maximum of 100 items / 10 MiB of payloads is retained;
 capacity, quota or storage failure leaves the link readable but not remembered. No silent
