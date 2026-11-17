@@ -118,6 +118,11 @@ no document identity or content and may survive content erasure.
 
 ## Shared reader inputs (#324)
 
+Explicitly sharing an input snapshot is still planned under #349. The
+[snapshot contract proposal](adr/349-shared-input-snapshots.md) records compatibility,
+initialization/reset precedence and copy/privacy boundaries; it is not implemented.
+Current generated links continue to share source and presentation hints only.
+
 Rendered shared pages restore accepted numeric inputs, including model-only inputs, from
 one versioned record keyed by the exact remembered shared item. Source, payload, authored
 defaults, editable documents and history are unchanged; values never enter a shared URL.
