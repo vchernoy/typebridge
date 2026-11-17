@@ -120,3 +120,15 @@ button:disabled {
 #caret-position {
   white-space: nowrap;
 }
+
+#editable-input-state:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#editable-input-state p {
+  flex-basis: 100%;
+}
+#editable-input-state button {
+  max-width: 100%;
+}

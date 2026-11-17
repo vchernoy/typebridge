@@ -15,10 +15,10 @@ export function numericInputs(value: unknown): Map<string, number> | undefined {
   }
   return new TextEncoder().encode(JSON.stringify([...result])).byteLength <= INPUT_BYTES ? result : undefined;
 }
-function record(value: unknown, id: string): InputRecord | undefined {
+export function inputRecord(value: unknown, id: string): InputRecord | undefined {
   if (!value || typeof value !== 'object') return;
   const row = value as InputRecord;
-  if (row.id !== id || id.length > 135 || row.version !== 1 || !Number.isSafeInteger(row.revision) || row.revision < 1 || !numericInputs(row.inputs)) return;
+  if (row.id !== id || id.length > 137 || row.version !== 1 || !Number.isSafeInteger(row.revision) || row.revision < 1 || !numericInputs(row.inputs)) return;
   return new TextEncoder().encode(JSON.stringify({ id, version: 1, revision: row.revision, inputs: row.inputs })).byteLength <= INPUT_BYTES ? row : undefined;
 }
 const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
@@ -50,7 +50,7 @@ export async function openSharedInputs(payload: string, current: () => boolean, 
     const id = 'shared:' + item.id;
     const raw = await request(tx.objectStore('readerStates').get(id)); await done;
     if (!valid()) { db.close(); return; }
-    let saved = record(raw, id);
+    let saved = inputRecord(raw, id);
     if (raw !== undefined && !saved) throw new Error('Saved reader state is incompatible');
     let revision = saved?.revision ?? 0;
     const read = async (): Promise<Map<string, number>> => {
@@ -59,7 +59,7 @@ export async function openSharedInputs(payload: string, current: () => boolean, 
       const itemNow = await request(tx.objectStore(SHARED_ITEMS).get(item.id)) as SharedItem | undefined;
       const rawNow = await request(tx.objectStore('readerStates').get(id)); await done;
       if (!valid() || itemNow?.payload !== payload) throw new Error('Shared item was removed');
-      const next = record(rawNow, id);
+      const next = inputRecord(rawNow, id);
       if (rawNow !== undefined && !next) throw new Error('Saved reader state is incompatible');
       saved = next; revision = next?.revision ?? 0;
       return new Map(next?.inputs ?? []);
@@ -74,13 +74,13 @@ export async function openSharedInputs(payload: string, current: () => boolean, 
         try {
           const itemNow = await request(tx.objectStore(SHARED_ITEMS).get(item.id)) as SharedItem | undefined;
           const store = tx.objectStore('readerStates'); const rawNow = await request(store.get(id));
-          const next = record(rawNow, id);
+          const next = inputRecord(rawNow, id);
           if (!valid() || itemNow?.payload !== payload) { await done; return 'cancelled'; }
           if ((rawNow !== undefined && !next) || (next?.revision ?? 0) !== revision) { await done; return 'conflict'; }
           const written = revision + 1;
           if (!Number.isSafeInteger(written)) throw new Error('Reader revision exhausted');
           const row: InputRecord = { id, version: 1, revision: written, inputs: values };
-          if (!record(row, id)) throw new Error('Reader state exceeds the storage limit');
+          if (!inputRecord(row, id)) throw new Error('Reader state exceeds the storage limit');
           await request(store.put(row));
           if (!valid()) { tx.abort(); await done; return 'cancelled'; }
           await done; revision = written; return 'saved';

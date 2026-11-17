@@ -30,7 +30,15 @@ export type StoredDraft = {
    * document reopens private.
    */
   private?: boolean;
+  /** Input-policy generation; changes on creation or entering document-private mode. */
+  inputEpoch?: string;
 };
+/** Policy belongs to the document; stale source snapshots must not roll it back. */
+function withInputPolicy(next: StoredDraft, current?: StoredDraft): StoredDraft {
+  const epoch = !current || (next.private && !current.private) ? crypto.randomUUID() : current.inputEpoch;
+  if (epoch === undefined) delete next.inputEpoch; else next.inputEpoch = epoch;
+  return next;
+}
 export type CommitResult =
   | { ok: true; draft: StoredDraft }
   | { ok: false; reason: 'conflict'; current: StoredDraft | undefined };
@@ -93,7 +101,7 @@ async function replayOtherRuns(tx: IDBTransaction, current: StoredDraft | undefi
 /** Keep all four recovered fields as a new document "<title> (recovered)". */
 async function addRecoveredCopy(tx: IDBTransaction, lost: LostState, recoveryId: string, now: number): Promise<StoredDraft> {
   const copy: StoredDraft = { ...lost, id: recoveryId, title: lost.title + ' (recovered)', updatedAt: now, revision: 1, upTo: 0 };
-  await request(tx.objectStore(STORE).add(copy));
+  await request(tx.objectStore(STORE).add(withInputPolicy(copy)));
   return copy;
 }
 
@@ -280,7 +288,7 @@ export async function reuseOrCreateSharedCopy(
     }
     const draft: StoredDraft = { ...copy, ...documentFields(copy), revision: 1, upTo: 0 };
     assertCurrent();
-    await request(store.add(draft));
+    await request(store.add(withInputPolicy(draft)));
     assertCurrent();
     await done;
     assertCurrent();
@@ -309,7 +317,7 @@ export async function commitDraft(
       await done;
       return { ok: false, reason: 'conflict', current };
     }
-    const next: StoredDraft = { ...draft, ...documentFields(draft), revision: expectedRevision + 1 };
+    const next = withInputPolicy({ ...draft, ...documentFields(draft), revision: expectedRevision + 1 }, current);
     await request(store.put(next));
     await done;
     return { ok: true, draft: next };
@@ -362,6 +370,7 @@ export async function commitOrCreateConflictCopy(
     const next: StoredDraft = conflict
       ? { ...draft, ...documentFields(draft), id: copyId, title: draft.title + ' (conflict copy)', revision: 1, upTo: 0 }
       : { ...draft, ...documentFields(draft), revision: expectedRevision + 1, upTo: draft.upTo ?? 0 };
+    withInputPolicy(next, conflict ? undefined : current);
     let recovered: StoredDraft | undefined;
     if (conflict) {
       await request(store.add(next));
@@ -431,6 +440,7 @@ export async function updateDocumentPrivateFlag(
     const next: StoredDraft = { ...current };
     if (privateFlag) next.private = true;
     else delete next.private;
+    withInputPolicy(next, current);
     await request(store.put(next));
     await done;
     return { ok: true, draft: next };
@@ -478,7 +488,7 @@ export async function deleteStoredDraft(
   owner?: WriteFence,
   dropOwnership = false,
 ): Promise<boolean> {
-  const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES] : [STORE, CHANGES], 'readwrite');
+  const tx = db.transaction(owner ? [STORE, OWNERSHIP, CHANGES, 'readerStates'] : [STORE, CHANGES, 'readerStates'], 'readwrite');
   const done = finished(tx);
   try {
     await assertEditOwner(tx, id, owner);
@@ -486,6 +496,7 @@ export async function deleteStoredDraft(
     const current = await request(store.get(id)) as StoredDraft | undefined;
     if ((current?.revision ?? 0) !== revision) { await done; return false; }
     if (current) await request(store.delete(id));
+    await request(tx.objectStore('readerStates').delete('editable:' + id));
     // The change log continued the deleted text; it must never be replayed onto a later one.
     await request(tx.objectStore(CHANGES).delete(changesOf(id)));
     if (owner && dropOwnership) await request(tx.objectStore(OWNERSHIP).delete(id));

@@ -41,7 +41,7 @@ async function rendered(page: Page): Promise<void> {
   await expect(page.locator('#rendered-document .active-doc')).toBeVisible();
 }
 
-test('Markdown format persists; rendered calc and MathML are temporary reader state', async ({ page }) => {
+test('Markdown format persists; rendered calc inputs persist separately from source', async ({ page }) => {
   await markdown(page);
   await rendered(page);
   const root = page.locator('#rendered-document');
@@ -53,11 +53,12 @@ test('Markdown format persists; rendered calc and MathML are temporary reader st
   await input.dispatchEvent('input');
   await expect(root.locator('output')).toHaveText('12');
   await expect(root.locator('math').first()).toContainText('12');
+  await expect(page.locator('#editable-input-status')).toHaveText('Inputs saved on this device.');
   const rows = await readStoredDocs(page, true);
   expect(rows[0]).toMatchObject({ text: source, format: 'markdown' });
   await page.reload();
   await expect(page.locator('#rendered-document .active-doc')).toBeVisible();
-  await expect(page.locator('#rendered-document input')).toHaveValue('2');
+  await expect(page.locator('#rendered-document input')).toHaveValue('4');
   expect(await readStoredDocs(page, true)).toEqual(rows);
   await page.locator('#doc-menu-open').click();
   await expect(page.locator('#document-format')).toHaveValue('markdown');

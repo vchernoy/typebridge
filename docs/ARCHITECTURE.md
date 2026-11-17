@@ -132,7 +132,7 @@ The [research design](adr/322-local-reader-state.md) proposes automatic local re
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
 The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
-Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document inputs (#326) and quiz attempts (#327) remain later work.
+Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document numeric inputs are persisted separately in #326; quiz attempts (#327) remain later work.
 
 
 ### Received-link storage (#323)
@@ -161,7 +161,7 @@ Shared Edit uses `read/edit-shared.ts` for per-page action generations, current 
 guards, result/unknown UI and abortable atomic-copy fallback. Owned candidates use the
 bounded metadata-only reuse transport and the editor's fresh owner/source/fence/lifecycle
 proof before exact host selection (ADR #330). Protocol outcomes/warnings stay in memory;
-source/history, recovery and temporary renderer inputs are not rewritten by activation.
+source/history, recovery and renderer inputs are not rewritten by activation.
 
 
 Shared numeric input persistence is implemented by `editor/shared-input-state.ts` and
@@ -173,3 +173,18 @@ The lazy renderer exposes its supported runtime session/initialInputs/settled/re
 boundary; a connected visibility-hidden stage settles before reveal and subscription.
 Subscriptions, timers, channels and DB connections are ended with each reader generation.
 See SHARING.md for limits, conflicts and best-effort flush/durability behavior.
+
+
+### Editable numeric reader state (#326)
+
+`readerStates` stores `editable:<document ID>` numeric records using the same bounded envelope as shared inputs (256 finite pairs, 64 KiB). Source/title/history/revision and share/export payloads are untouched. Each editor caches at most 100 document snapshots in memory across Preview remounts; current runtime names/types/ranges validate restored values before the connected hidden stage is revealed. A full editor reload starts a fresh cache. Source punctuation and title changes do not invalidate ordinary inputs. Removed or incompatible inputs are skipped.
+
+Only saved, public documents may have sidecars. Each write checks document existence/private flag and input-policy generation in the same readwrite transaction, then uses whole-snapshot numeric-state revision CAS. Rendered windows, including source-read-only/comparison windows, have an independent input-edit capability and never acquire or alter source editing ownership to save inputs. Source and numeric state can be edited through different windows of the same document; source/history saves do not rewrite sidecars. Concurrent numeric writers preserve local controls and require explicit conflict resolution instead of silent stale overwrite. The memory cache retains the CAS base belonging to its snapshot across remounts and ownership handoff; reopening storage never rebases pending values. A newer baseline enters explicit conflict without a write. A pending snapshot’s base advances only after its successful commit; explicit Load saved inputs discards the pending snapshot and reads a new baseline. Clean caches may refresh values and baseline together on remount. Conflict remains visible across remounts and local reset. Reset retains its empty-snapshot intent if interrupted, and commits with a new revision. Document deletion (including Clear saved data and Autosave Delete) removes its sidecar in the same transaction; global clear deletes the database.
+
+500 ms saves are best effort; wait for Inputs saved on this device before leaving. View remounts retain pending changes in memory. Navigation cancels stale mounts and writes; their pending values cannot target another ID. Private/Autosave-off values stay in memory. Privacy or failed preference proof permanently freezes the cached document's writing for this editor session, including after re-enabling; reload the editor to restore the prior public baseline and rearm permitted writes. Storage load has a two-second deadline; timeout, incompatible state or write failure leaves inputs usable in memory. No source recovery/journal stores contain numeric reader state. Quiz attempt persistence remains #327.
+
+Each attachment owns the shared numeric-state panel only while its stop callback is current. Late prepare completion, timeout and destroy cannot hide or update a newer attachment’s controls.
+
+Ordinary Edit/Rendered cancellation retires the attachment, pending load and subscriptions without freezing cached permissions. Privacy, failed preference proof, active storage timeout and actual storage failure use a separate permanent freeze path. Cancelled read completions cannot freeze a replacement using the same document cache.
+
+The optional document `inputEpoch` metadata is assigned on creation/recreation and advanced when entering document-private mode (including the flag-only fallback). Normal source saves preserve the stored epoch, rather than restoring stale metadata from a source snapshot. Legacy missing epochs are an empty baseline. Input mounts and cached snapshots retain their epoch; a private cycle or deletion/recreation retires old writers even if numeric CAS did not change or an advisory notification was missed. This is document policy metadata, not source content, Undo/Redo, a source-owner fence or a share/export field.

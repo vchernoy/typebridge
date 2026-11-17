@@ -1,8 +1,10 @@
+import { createEditableInputs, type EditableInputAccess } from './editable-inputs';
 import { documentFormat } from '../editor/document-fields';
 import type { StoredDraft } from '../editor/indexeddb';
 
 export function setupMarkdownView(deps: {
   key: string;
+  inputAccess: () => EditableInputAccess;
   shown: () => StoredDraft;
   text: () => string;
   changedView: (rendered: boolean) => void;
@@ -16,13 +18,16 @@ export function setupMarkdownView(deps: {
   const problems = document.querySelector<HTMLElement>('#render-problems')!;
   const list = document.querySelector<HTMLElement>('#render-problem-list')!;
   const field = document.querySelector<HTMLTextAreaElement>('#editor')!;
+  let focusInputs: string | undefined;
+  const inputState = createEditableInputs(deps.inputAccess, () => { focusInputs = deps.shown().id; previous = ''; sync(); });
+  let attachment: Awaited<ReturnType<typeof inputState.prepare>> | undefined;
   let preferred = 'edit';
   try { if (sessionStorage.getItem(deps.key) === 'rendered') preferred = 'rendered'; } catch { /* Edit fallback. */ }
   let generation = 0;
   let previous = '';
   let live: ReturnType<typeof import('./active-renderer').renderDocument> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const stop = (): void => { generation++; clearTimeout(timer); live?.destroy(); live = undefined; };
+  const stop = (): void => { generation++; clearTimeout(timer); attachment?.destroy(); attachment = undefined; live?.destroy(); live = undefined; };
   function edit(): void {
     preferred = 'edit';
     try { sessionStorage.setItem(deps.key, preferred); } catch { /* Per-window preference is optional. */ }
@@ -35,7 +40,16 @@ export function setupMarkdownView(deps: {
     try {
       const { renderDocument } = await import('./active-renderer');
       if (generation !== started) return;
-      live = renderDocument(root, text, navigator.language);
+      const prepared = await inputState.prepare(deps.shown().id, () => generation === started);
+      if (generation !== started) { prepared.destroy(); return; }
+      attachment = prepared;
+      const stage = document.createElement('div'); stage.style.visibility = 'hidden'; root.replaceChildren(stage);
+      live = renderDocument(stage, text, navigator.language, prepared.initialInputs);
+      await live.settled();
+      if (generation !== started) return;
+      prepared.bind(live); stage.style.removeProperty('visibility');
+      if (focusInputs === deps.shown().id && document.activeElement === document.body) document.querySelector<HTMLButtonElement>('#editable-input-reset')?.focus({ preventScroll: true });
+      focusInputs = undefined;
       for (const message of live.messages) {
         const li = document.createElement('li');
         const button = document.createElement('button');
@@ -57,10 +71,11 @@ export function setupMarkdownView(deps: {
       }
       problems.hidden = !live.messages.length;
     } catch {
-      if (generation === started) root.textContent = 'Could not render this document. Switch to Edit to read the source.';
+      if (generation === started) { attachment?.destroy(); attachment = undefined; live?.destroy(); live = undefined; root.textContent = 'Could not render this document. Switch to Edit to read the source.'; }
     }
   }
   function sync(): void {
+    inputState.check();
     const draft = deps.shown();
     const markdown = documentFormat(draft) === 'markdown';
     const rendered = markdown && preferred === 'rendered';

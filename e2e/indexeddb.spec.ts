@@ -220,12 +220,14 @@ for (const operation of ['direct', 'save'] as const) {
         else await api.commitOrCreateConflictCopy(db, changed, 1, crypto.randomUUID());
       } catch { rejected = true; }
       finally { IDBObjectStore.prototype.put = put; }
-      try { return { requestSucceeded, rejected, stored: await api.getStoredDraft(db, base.id), base }; }
+      try { return { requestSucceeded, rejected, stored: await api.getStoredDraft(db, base.id), committed: initial.draft }; }
       finally { db.close(); }
     }, operation);
     expect(result.requestSucceeded).toBe(true);
     expect(result.rejected).toBe(true);
-    expect(result.stored).toEqual({ ...result.base, format: 'plain', revision: 1 });
+    expect(result.committed.inputEpoch).toEqual(expect.any(String));
+    expect(result.committed.inputEpoch).not.toBe('');
+    expect(result.stored).toEqual(result.committed);
   });
 }
 

@@ -1,6 +1,6 @@
 /**
  * Comparison viewer (#159 W2): a read-only window that shows the last saved version of one
- * document (`/editor.html?doc=…&mode=view`). It never saves; it can switch to other saved
+ * document (`/editor.html?doc=…&mode=view`). It never saves source; Rendered inputs have a separate capability. It can switch to other saved
  * documents and shows a missing state when the document is gone or the link is invalid.
  */
 import { newDraft } from '../editor/drafts';
@@ -38,7 +38,7 @@ export type ViewerDeps = {
 export function createViewerMode(state: EditorState, deps: ViewerDeps) {
   const viewerBadge = document.querySelector<HTMLElement>('#viewer-badge')!;
   const viewerNotice = document.querySelector<HTMLElement>('#viewer-notice')!;
-  const VIEWER_STATUS = 'Read-only view of the saved version. Nothing is saved from this window.';
+  const VIEWER_STATUS = 'Read-only view of the saved version. Source is read-only in this window.';
   const VIEWER_MISSING = 'This saved document is no longer available, or the link is not valid. Choose another saved document from Documents. Nothing was created.';
   const VIEWER_STORAGE = 'Browser storage is unavailable in this window, so the saved document cannot be shown. Nothing was changed.';
   const VIEWER_DISABLED_CONTROLS = ['clear-document-data', 'rename-draft', 'new-draft', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',

@@ -1,7 +1,7 @@
 # Local shared library and reader state (#322)
 
 Status: research baseline below. #323 library and #324 shared numeric inputs are implemented;
-#326 editable inputs and #327 quiz persistence remain later work. The implemented #324 bounds
+#326 editable numeric inputs are implemented separately; #327 quiz persistence remains later work. The implemented #324 bounds
 are 256 inputs / 64 KiB per shared item, within the 100-item library, superseding the proposed bounds below. Evidence below records the research
 baseline, not a current feature inventory.
 Evidence baseline: main `67a2f35`, ActiveMD packages pinned to `0.4.0`.
@@ -171,3 +171,7 @@ Chromium/Firefox/WebKit CI. Preserve existing safety assertions. Deployment of t
 main artifact is separate from PR CI and from manual device/assistive-technology evidence.
 The numerical limits and UI/privacy policies here are proposed decisions for review, not
 measurements or already-shipped guarantees.
+
+## Implemented editable input capability decision (#326)
+
+Source and input values are sibling document state governed by document Autosave/privacy/deletion policy. Window presentation selects the editing capability. Rendered inputs may persist while another window owns source, including from comparison windows. Input writes do not inspect or acquire source ownership: transactional document-policy generation/existence/private checks and independent numeric-state CAS protect concurrency. Cached pending snapshots retain their own numeric CAS base and policy generation through remounts; source privacy cycles retire prior generations. Source histories/change logs remain independent; typed input histories and share-link snapshots are separate scope.

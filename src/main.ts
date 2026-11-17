@@ -1164,6 +1164,12 @@ setupComparisonOpen({
 
 markdownView = setupMarkdownView({
   key: scopeSessionKey('typebridge.documentView.v1', windowId),
+  inputAccess: () => {
+    let allowed = false;
+    try { allowed = localStorage.getItem(AUTOSAVE_PREF_KEY) !== 'off' && mayWrite(); } catch { /* Failed preference proof denies inputs. */ }
+    return { db: state.storageCleared ? undefined : state.db, draft: state.active, public: allowed,
+      canEditInputs: renderedMode && !state.storageCleared && !state.deletedElsewhere && !state.viewMissing };
+  },
   shown: () => state.active, text: () => field.value,
   canChangeView: () => ![editor, titleEditor, findEditor, replaceEditor].some(input => input.composing),
   changedView: rendered => {
