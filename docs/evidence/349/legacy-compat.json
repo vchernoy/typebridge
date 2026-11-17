@@ -1,0 +1,11 @@
+{
+  "baseline": "081353a",
+  "v1_with_extra_inputs": {
+    "accepted": true,
+    "retained_input_envelope": false
+  },
+  "v2_prefix": {
+    "ok": false,
+    "reason": "version"
+  }
+}
