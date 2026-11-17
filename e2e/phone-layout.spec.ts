@@ -60,3 +60,41 @@ test("phone layout wraps instead of overflowing when text is enlarged (#123)", a
     expect(box!.x + box!.width).toBeLessThanOrEqual(320);
   }
 });
+
+test("390px plain editor fits with font downloads unavailable (#304)", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  const fontRequests: string[] = [];
+  await page.route("**/*", async (route) => {
+    if (route.request().resourceType() === "font") {
+      fontRequests.push(route.request().url());
+      await route.abort();
+    } else await route.continue();
+  });
+  await page.goto("/editor.html");
+  await expect(page.locator("#editor")).toBeEnabled();
+  // Plain editor chrome uses system-ui. A future font dependency must not
+  // silently turn this into a network-dependent layout or readiness assertion.
+  expect(fontRequests).toEqual([]);
+  const geometry = await page.locator("header.topbar").evaluate((header) => {
+    const rect = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector)!;
+      const box = element.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    };
+    return {
+      font: getComputedStyle(header).fontFamily,
+      editor: rect("#editor"),
+      controls: ["#enabled", "#focus-mode", "#settings-open", "#more-open"].map(rect),
+      overflow: document.documentElement.scrollWidth - innerWidth,
+    };
+  });
+  await test.info().attach("phone-layout-geometry", {
+    body: JSON.stringify(geometry, null, 2),
+    contentType: "application/json",
+  });
+  expect(geometry.editor.y).toBeLessThan(300);
+  expect(geometry.overflow).toBeLessThanOrEqual(0);
+  for (const box of geometry.controls) {
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+  }
+});
