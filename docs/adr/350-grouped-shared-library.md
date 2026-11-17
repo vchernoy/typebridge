@@ -2,17 +2,18 @@
 
 Status: interaction design with a static prototype and partial UI implementation.
 The library groups supported received links and uses secondary Actions for existing
-individual removal. This does not enable input-bearing links, transactional group
-removal or claim deployment/production acceptance.
+individual removal. Confirmed atomic group removal is implemented as described below;
+input-bearing links and deployment/production acceptance remain separate.
 Builds on the agreed identity model in #350 and the gated snapshot contract in #349.
 
 A pure grouping/search model is prepared in `src/editor/shared-groups.ts`. It consumes
 already-validated received records, compares complete title/text/format fields, keeps
 original link references, assigns creation-based ordinals and searches only immutable
 incoming fields. It performs no decoding, sidecar access, storage or rendering.
-The library UI consumes this model for grouping/search. New group-wide removal,
-Copy original link, removal confirmation and v2 integration remain separate steps;
-individual removal retains its existing behavior inside Actions.
+The library UI consumes this model for grouping/search. Group actions confirms and
+removes the captured group atomically. Copy original link, individual-removal
+confirmation and v2 integration remain separate steps; individual removal retains
+its existing behavior inside Actions.
 
 ## Current boundary
 
@@ -97,9 +98,11 @@ Initial focus and Escape choose **Cancel**. Confirm is **Remove 3 links**. Singl
 removal uses singular wording and preserves every other variant. Successful removal
 returns focus to the surviving group summary or next/previous title link; when empty,
 to search. Do not return focus to a deleted row. A failure retains the current rows,
-dialog context and a visible error; never report success before transaction commit.
+group context and a visible error; never report success before transaction commit.
+The confirmation closes before committing; a failure restores the enabled removal
+action so the person can retry after reading the library's error status.
 
-Group removal needs a new atomic transaction over the exact captured item set and
+Group removal uses an atomic transaction over the exact captured item set and
 their sidecars, plus the existing invalidation/epoch protocol. Re-read group
 membership before deleting: if membership changed, cancel without deleting anything,
 refresh and ask again. Do not loop individual remove calls, silently omit failed
@@ -113,6 +116,15 @@ widen them. Existing quotas still count original variants/bytes, not group count
 Unsupported/corrupt payloads must produce an honest unavailable-item indication and
 safe removal path without exposing raw content or silently pretending the collection
 is complete. Storage failure leaves shared links usable and does not evict records.
+
+Implementation note: `removeSharedGroup` copies the confirmed fields/member set,
+reads received identities and the library epoch in one readonly transaction, then
+decodes and compares full grouping fields before invalidation. Its write transaction
+rechecks the epoch and complete received identity set, deletes only captured IDs and
+their sidecars, and advances the epoch atomically. Any concurrent new/changed received
+identity conservatively requires refresh/reconfirmation, even if it might belong to
+another group; recency-only updates do not. Read/proof/write failure cannot commit a
+partial deletion. Existing invalidation cancels stale sidecar/remembering writers.
 
 ## Accessibility and narrow screens
 

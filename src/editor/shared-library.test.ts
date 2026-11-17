@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readerStorageAllowed, rememberPreference, rememberShared, sharedRemovalToken, SHARED_REMOVAL_KEY, removeSharedItem } from './shared-library';
+import { readerStorageAllowed, rememberPreference, rememberShared, sharedRemovalToken, SHARED_REMOVAL_KEY, removeSharedItem, removeSharedGroup } from './shared-library';
 describe('reader persistence policy', () => {
   it('requires successful reads of both gates, including after a previous non-private result', () => {
     const saved = { getItem: () => null };
@@ -18,6 +18,14 @@ describe('reader persistence policy', () => {
 
 
 afterEach(() => vi.unstubAllGlobals());
+describe('confirmed group deletion', () => {
+  it.each([{ expected: [] }, { expected: [{ id: 'same', payload: 'original' }, { id: 'same', payload: 'original' }] }])('refuses empty or duplicate member sets before storage/invalidation: %j', async ({ expected }) => {
+    const transaction = vi.fn(), setItem = vi.fn(); vi.stubGlobal('localStorage', { setItem });
+    expect(await removeSharedGroup({ transaction } as unknown as IDBDatabase,
+      { title: 'Title', text: 'Source', format: 'plain' }, expected)).toBe('changed');
+    expect(transaction).not.toHaveBeenCalled(); expect(setItem).not.toHaveBeenCalled();
+  });
+});
 describe('removal cancellation before asynchronous remembering', () => {
   it('rejects a stale marker before decoding or opening storage', async () => {
     let token = 'before';

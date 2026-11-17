@@ -97,8 +97,11 @@ same title, source and format appear in expandable groups; different presentatio
 remain individual received links. Single items keep a direct title link. Search covers
 immutable source/title/format and presentation labels, with matching groups expanded
 temporarily. It never searches this recipient's saved input sidecars. Every link opens
-its original read-only page in a new tab; Actions reveals individual Remove. Group-wide
-removal and input-bearing v2 links are not enabled. Unavailable stored links remain
+its original read-only page in a new tab; Actions reveals individual Remove. Group
+actions offers confirmed removal of all received links and their saved reader inputs,
+while preserving editable copies. Changed membership requires a fresh decision;
+storage failures cannot commit partial group removal. Input-bearing v2 links remain
+disabled. Unavailable stored links remain
 visible with a safe individual removal action. Removing an item also removes its
 reserved reader sidecar, never an independent editable copy. No account, sender identity
 or cross-device sync is implied. A maximum of 100 items / 10 MiB of payloads is retained;
