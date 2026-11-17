@@ -1,3 +1,4 @@
+import { prepareSharedInputs } from './shared-inputs';
 import { setupSharedEdit } from './edit-shared';
 import { setupRememberShared } from './remember-shared';
 /**
@@ -12,8 +13,10 @@ import { readingView } from './view';
 import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type SharedDocument } from '../editor/share-link';
 
 let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
+let inputs: Awaited<ReturnType<typeof prepareSharedInputs>> | undefined;
 let viewGeneration = 0;
-function stopLive(): void { viewGeneration++; live?.destroy(); live = undefined; }
+let focusInputReset = false;
+function stopLive(): void { document.querySelector('#reader-input-state')?.setAttribute('hidden', ''); viewGeneration++; inputs?.destroy(); inputs = undefined; live?.destroy(); live = undefined; }
 
 const title = document.querySelector<HTMLElement>('#read-title')!;
 const notice = document.querySelector<HTMLElement>('#read-notice')!;
@@ -47,7 +50,7 @@ function showFailure(reason: DecodeFailure): void {
   editCopy.hidden = true;
 }
 
-function showDocument(shared: SharedDocument, knownFormat: boolean): void {
+function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Promise<void>): void {
   const heading = shared.title.trim() || 'Untitled document';
   document.title = `${heading} · TypeBridge`;
   title.textContent = heading;
@@ -58,14 +61,31 @@ function showDocument(shared: SharedDocument, knownFormat: boolean): void {
     const generation = viewGeneration;
     const rendered = view === 'rendered';
     body.className = rendered ? 'active-reading' : 'read-text';
+    document.querySelector<HTMLElement>('#reader-input-state')!.hidden = true;
     if (!rendered) { body.textContent = shared.text; return; }
     body.textContent = 'Rendering…';
     try {
       const { renderDocument } = await import('../view/active-renderer');
       if (generation !== viewGeneration) return;
-      live = renderDocument(body, shared.text, navigator.language);
+      const attachment = await prepareSharedInputs(sharePayloadFromHash(location.hash) ?? '', ready,
+        () => generation === viewGeneration, remembered.canStoreInputs, {
+          panel: document.querySelector<HTMLElement>('#reader-input-state')!, status: document.querySelector<HTMLElement>('#reader-input-status')!,
+          reset: document.querySelector<HTMLButtonElement>('#reader-input-reset')!, load: document.querySelector<HTMLButtonElement>('#reader-input-load')!,
+          keep: document.querySelector<HTMLButtonElement>('#reader-input-keep')!,
+        }, () => { focusInputReset = true; void render(); });
+      if (generation !== viewGeneration) { attachment.destroy(); return; }
+      inputs = attachment;
+      const stage = document.createElement('div'); stage.style.visibility = 'hidden'; body.replaceChildren(stage);
+      const mounted = renderDocument(stage, shared.text, navigator.language, attachment.initialInputs);
+      live = mounted;
+      await mounted.settled();
+      if (generation !== viewGeneration) return;
+      attachment.bind(mounted); stage.style.removeProperty('visibility');
+      if (focusInputReset) { focusInputReset = false; document.querySelector<HTMLButtonElement>('#reader-input-reset')!.focus({ preventScroll: true }); }
     } catch {
       if (generation === viewGeneration) {
+        inputs?.destroy(); inputs = undefined; live?.destroy(); live = undefined;
+        document.querySelector<HTMLElement>('#reader-input-state')!.hidden = true;
         body.className = 'read-text';
         body.textContent = shared.text;
         notice.textContent = 'Could not render this document. Showing its text as written.';
@@ -121,7 +141,7 @@ async function render(): Promise<void> {
 
   const result = await decodeSharePayload(sharePayloadFromHash(hash));
   if (generation !== renderGeneration || location.hash !== hash) return;
-  if (result.ok) { showDocument(result.document, result.knownFormat); remembered.show(sharePayloadFromHash(hash)); }
+  if (result.ok) { const ready = remembered.show(sharePayloadFromHash(hash)); showDocument(result.document, result.knownFormat, ready); }
   else showFailure(result.reason);
 }
 

@@ -5,8 +5,8 @@ import { installStorageClearReload, takeClearedNotice } from '../ui/storage-clea
 export function setupRememberShared(stopRenderer: () => void) {
   const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Local shared library';
   const label = document.createElement('label'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = 'remember-shared'; checkbox.checked = rememberPreference();
-  label.append(checkbox, ' Remember shared documents on this device');
-  const explanation = document.createElement('p'); explanation.textContent = 'Valid opened links are remembered on this browser/device unless Private session is on. Nothing is uploaded. Reader inputs remain temporary. Remove received items from Documents → Shared with me; editable copies stay separate.';
+  label.append(checkbox, ' Remember shared documents and reader inputs on this device');
+  const explanation = document.createElement('p'); explanation.textContent = 'Valid opened links are remembered on this browser/device unless Private session is on. Nothing is uploaded. Accepted numeric reader inputs are saved separately when allowed; private or opted-out pages keep them only in memory. Remove received items from Documents → Shared with me; editable copies stay separate.';
   const status = document.createElement('p'); status.id = 'shared-memory-status'; status.setAttribute('role', 'status');
   const remember = document.createElement('button'); remember.type = 'button'; remember.textContent = 'Remember this document';
   details.append(summary, label, explanation, remember, status); document.querySelector('.read-main')!.append(details);
@@ -37,9 +37,10 @@ export function setupRememberShared(stopRenderer: () => void) {
   });
   window.addEventListener('pagehide', () => { invalidate(); });
   return {
+    canStoreInputs: () => !ended && automatic && readerStorageAllowed(),
     show(value?: string) { if (!value) removalToken = sharedRemovalToken(); generation++; payload = value; remember.disabled = !value; status.textContent = ''; if (value) {
       if (!readerStorageAllowed()) { automatic = false; status.textContent = 'Not remembered. Private session or remembering is off.'; }
-      else void save(false);
+      else return save(false);
     } },
   };
 }

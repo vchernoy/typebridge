@@ -132,7 +132,7 @@ The [research design](adr/322-local-reader-state.md) proposes automatic local re
 separate reader-input sidecars, privacy/opt-out and deletion rules, and safe editable-copy
 reuse. It records current API limitations and the ordered #323–#326 acceptance matrix.
 The shared-library slice (#323) implements automatic remembering with an explicit opt-out;
-calc inputs remain temporary. Reader-input persistence and quiz attempts remain later work.
+Shared rendered numeric inputs are persisted separately in #324 when permitted; editable-document inputs (#326) and quiz attempts (#327) remain later work.
 
 
 ### Received-link storage (#323)
@@ -162,3 +162,14 @@ guards, result/unknown UI and abortable atomic-copy fallback. Owned candidates u
 bounded metadata-only reuse transport and the editor's fresh owner/source/fence/lifecycle
 proof before exact host selection (ADR #330). Protocol outcomes/warnings stay in memory;
 source/history, recovery and temporary renderer inputs are not rewritten by activation.
+
+
+Shared numeric input persistence is implemented by `editor/shared-input-state.ts` and
+`read/shared-inputs.ts`. It reuses database v7's readerStates store (`shared:<item-id>`),
+requires the original immutable item in the same transaction, and checks the existing
+removal token plus successful current preference reads around writes. Revision CAS orders
+whole snapshots/reset, while item deletion atomically removes state and rejects stale saves.
+The lazy renderer exposes its supported runtime session/initialInputs/settled/resetInputs
+boundary; a connected visibility-hidden stage settles before reveal and subscription.
+Subscriptions, timers, channels and DB connections are ended with each reader generation.
+See SHARING.md for limits, conflicts and best-effort flush/durability behavior.
