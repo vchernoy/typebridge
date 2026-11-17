@@ -55,6 +55,16 @@ body.focus-mode .top-actions {
   width: auto;
   margin-left: auto;
 }
+@media (min-width: 1000px) {
+  /* Fixed common actions keep their space; only the title group shrinks. */
+  body.focus-mode .doc {
+    flex-wrap: nowrap;
+  }
+  body.focus-mode .doc-main {
+    flex: 1 1 0;
+    max-width: none;
+  }
+}
 body.focus-mode #editor {
   width: 100%;
   max-width: 900px;
