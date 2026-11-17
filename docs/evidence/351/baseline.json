@@ -1,0 +1,413 @@
+[
+  {
+    "width": 320,
+    "height": 568,
+    "view": "source",
+    "actionsToCopy": 3,
+    "shareBefore": {
+      "x": 38,
+      "y": 615,
+      "width": 122.46875,
+      "height": 44,
+      "inViewport": false,
+      "scrollY": 6,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 92
+        },
+        {
+          "tag": "HEADER",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 152
+        },
+        {
+          "tag": "SECTION",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 803,
+          "clientHeight": 717
+        },
+        {
+          "tag": "MAIN",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 743
+        },
+        {
+          "tag": "BODY",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 743
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 6,
+          "scrollHeight": 816,
+          "clientHeight": 568
+        }
+      ]
+    },
+    "copyBefore": {
+      "x": 172.671875,
+      "y": 267.3125,
+      "width": 104.328125,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "confirm-dialog-message",
+          "scrollTop": 0,
+          "scrollHeight": 474,
+          "clientHeight": 424
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 743,
+          "clientHeight": 568
+        }
+      ]
+    },
+    "escapeReturnsFocus": true,
+    "clipboard": "isolated success stub; no OS clipboard claim"
+  },
+  {
+    "width": 320,
+    "height": 568,
+    "view": "rendered",
+    "actionsToCopy": 3,
+    "shareBefore": {
+      "x": 38,
+      "y": 621,
+      "width": 122.46875,
+      "height": 44,
+      "inViewport": false,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 92
+        },
+        {
+          "tag": "HEADER",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 152
+        },
+        {
+          "tag": "SECTION",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 803,
+          "clientHeight": 650
+        },
+        {
+          "tag": "MAIN",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 676
+        },
+        {
+          "tag": "BODY",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 676
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 568
+        }
+      ]
+    },
+    "copyBefore": {
+      "x": 172.671875,
+      "y": 267.3125,
+      "width": 104.328125,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 74,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "confirm-dialog-message",
+          "scrollTop": 0,
+          "scrollHeight": 573,
+          "clientHeight": 424
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 74,
+          "scrollHeight": 676,
+          "clientHeight": 568
+        }
+      ]
+    },
+    "escapeReturnsFocus": true,
+    "clipboard": "isolated success stub; no OS clipboard claim"
+  },
+  {
+    "width": 320,
+    "height": 800,
+    "view": "source",
+    "actionsToCopy": 3,
+    "shareBefore": {
+      "x": 38,
+      "y": 621,
+      "width": 122.46875,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 92
+        },
+        {
+          "tag": "HEADER",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 152
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 847,
+          "clientHeight": 800
+        }
+      ]
+    },
+    "copyBefore": {
+      "x": 172.671875,
+      "y": 358.40625,
+      "width": 104.328125,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 847,
+          "clientHeight": 800
+        }
+      ]
+    },
+    "escapeReturnsFocus": true,
+    "clipboard": "isolated success stub; no OS clipboard claim"
+  },
+  {
+    "width": 320,
+    "height": 800,
+    "view": "rendered",
+    "actionsToCopy": 3,
+    "shareBefore": {
+      "x": 38,
+      "y": 621,
+      "width": 122.46875,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 92
+        },
+        {
+          "tag": "HEADER",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 789,
+          "clientHeight": 152
+        },
+        {
+          "tag": "SECTION",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 803,
+          "clientHeight": 650
+        },
+        {
+          "tag": "MAIN",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 676
+        },
+        {
+          "tag": "BODY",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 676
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 816,
+          "clientHeight": 800
+        }
+      ]
+    },
+    "copyBefore": {
+      "x": 172.671875,
+      "y": 308.78125,
+      "width": 104.328125,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": []
+    },
+    "escapeReturnsFocus": true,
+    "clipboard": "isolated success stub; no OS clipboard claim"
+  },
+  {
+    "width": 1440,
+    "height": 800,
+    "view": "source",
+    "actionsToCopy": 3,
+    "shareBefore": {
+      "x": 334.09375,
+      "y": 499,
+      "width": 122.46875,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 607,
+          "clientHeight": 46
+        },
+        {
+          "tag": "HEADER",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 607,
+          "clientHeight": 60
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 806,
+          "clientHeight": 800
+        }
+      ]
+    },
+    "copyBefore": {
+      "x": 802.671875,
+      "y": 335.21875,
+      "width": 104.328125,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "HTML",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 806,
+          "clientHeight": 800
+        }
+      ]
+    },
+    "escapeReturnsFocus": true,
+    "clipboard": "isolated success stub; no OS clipboard claim"
+  },
+  {
+    "width": 1440,
+    "height": 800,
+    "view": "rendered",
+    "actionsToCopy": 3,
+    "shareBefore": {
+      "x": 334.09375,
+      "y": 499,
+      "width": 122.46875,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": [
+        {
+          "tag": "DIV",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 607,
+          "clientHeight": 46
+        },
+        {
+          "tag": "HEADER",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 607,
+          "clientHeight": 60
+        },
+        {
+          "tag": "SECTION",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 635,
+          "clientHeight": 470
+        },
+        {
+          "tag": "MAIN",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 692,
+          "clientHeight": 584
+        },
+        {
+          "tag": "BODY",
+          "id": "",
+          "scrollTop": 0,
+          "scrollHeight": 692,
+          "clientHeight": 584
+        }
+      ]
+    },
+    "copyBefore": {
+      "x": 802.671875,
+      "y": 302.765625,
+      "width": 104.328125,
+      "height": 44,
+      "inViewport": true,
+      "scrollY": 0,
+      "scrollAncestors": []
+    },
+    "escapeReturnsFocus": true,
+    "clipboard": "isolated success stub; no OS clipboard claim"
+  }
+]
