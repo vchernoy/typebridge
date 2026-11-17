@@ -39,6 +39,11 @@ If capture itself observes denied/private persistence policy, it retires the que
 writer through the existing memory-only path. Accepted local values remain available
 for explicit sharing; recovery cannot retroactively save them.
 
+Observed storage epochs remain in the document-scoped cache after writer retirement,
+including subsequent preparations that cannot reopen storage. A stale UI epoch cannot
+relabel that cache through repeated Edit/Rendered remounts. Only the current active
+attachment records an observation; canceled preparations cannot replace it.
+
 ## Compatibility evidence
 
 Baseline main `081353a`: `share-link.ts` serializes only source/title/format/hints;

@@ -103,6 +103,12 @@ test('an observed storage-policy retirement cannot be relabeled with the stale U
   await page.locator('#document-view-preview').click(); await expect(page.locator('#rendered-document input')).toHaveValue('8');
   await expect(page.locator('#editable-input-status')).toContainText('temporary');
   expect(await capture(page)).toBeUndefined();
+  for (let round = 0; round < 3; round++) {
+    await page.locator('#document-view-edit').click(); await page.locator('#document-view-preview').click();
+    await expect(page.locator('#rendered-document input')).toHaveValue('8'); await expect(page.locator('#rendered-document input')).toBeVisible();
+    await expect(page.locator('#editable-input-status')).toContainText('temporary');
+    expect(await capture(page)).toBeUndefined();
+  }
   const before = await operations();
   await page.evaluate(() => (window as unknown as { AcceptedInputFixture: BrowserFixture }).AcceptedInputFixture.changeEpoch());
   expect(await capture(page)).toEqual(expected(8));

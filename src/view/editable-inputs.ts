@@ -10,7 +10,7 @@ type Live = ReturnType<typeof renderDocument>;
 export type EditableInputAccess = { db?: IDBDatabase; draft: StoredDraft; public: boolean; canEditInputs: boolean };
 /** Memory belongs to document IDs in this editor, never to source strings or DOM controls. */
 export function createEditableInputs(access: () => EditableInputAccess, reload: () => void) {
-  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number; base: number; conflict: boolean; reset: boolean; epoch?: string; ready: boolean; acceptedEpoch?: string }>();
+  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number; base: number; conflict: boolean; reset: boolean; epoch?: string; ready: boolean; acceptedEpoch?: string; observedEpoch?: string }>();
   const panel = document.createElement('div'); panel.hidden = true; panel.id = 'editable-input-state';
   const status = document.createElement('p'); status.id = 'editable-input-status'; status.setAttribute('role', 'status');
   const reset = document.createElement('button'); reset.type = 'button'; reset.id = 'editable-input-reset'; reset.textContent = 'Reset inputs to defaults';
@@ -91,7 +91,9 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
       }
       // Keep the observed policy even when a retirement/conflict freezes the writer.
       // Falling back to an older UI epoch would make retired memory look current.
-      const acceptedEpoch = store?.epoch ?? initialEpoch;
+      // Retain authoritative storage evidence after a retired writer skips reopening.
+      if (store && active && current() && stop === cancel) memory.observedEpoch = store.epoch;
+      const acceptedEpoch = memory.observedEpoch ?? initialEpoch;
       if (!valid()) { store?.close(); store = undefined; }
       // A privacy cycle or delete/recreate retires every cached input snapshot,
       // even when its numeric CAS revision did not change while this view was away.
