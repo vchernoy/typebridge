@@ -100,6 +100,7 @@ test('removing an item cancels its old reader state without resurrecting it', as
   await editor.locator('#doc-menu-open').click(); await editor.getByText('Shared with me', { exact: true }).click();
   await editor.locator('#shared-library .shared-actions > summary').click();
   await editor.getByRole('button', { name: 'Remove shared document State fixture', exact: true }).click();
+  await editor.getByRole('dialog', { name: 'Remove received link?', exact: true }).getByRole('button', { name: 'Remove link', exact: true }).click();
   await expect(page.locator('#reader-input-status')).toContainText('temporary');
   await page.locator('#read-text input').fill('7');
   await page.locator('#reader-input-reset').click(); await ready(page);

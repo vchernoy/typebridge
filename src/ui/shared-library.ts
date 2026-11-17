@@ -44,18 +44,50 @@ export function setupSharedLibrary(database: () => IDBDatabase | undefined): { r
     const details = document.createElement('details'); details.className = 'shared-actions'; details.dataset.sharedActions = row.id;
     const toggle = tagged(document.createElement('summary'), row.id + ':actions', group); toggle.textContent = 'Actions';
     toggle.setAttribute('aria-label', 'Actions for ' + title + (ordinal ? ', received link ' + ordinal : ''));
+    details.append(toggle);
+    if (group) {
+      const copy = tagged(document.createElement('button'), row.id + ':copy', group); copy.type = 'button'; copy.textContent = 'Copy original link';
+      copy.setAttribute('aria-label', 'Copy original link for ' + title + (ordinal ? ', received link ' + ordinal : ''));
+      const manual = tagged(document.createElement('input'), row.id + ':manual', group); manual.type = 'text'; manual.readOnly = true; manual.hidden = true;
+      manual.className = 'shared-original-link'; manual.setAttribute('aria-label', 'Original link for ' + title + (ordinal ? ', received link ' + ordinal : ''));
+      let copying = false;
+      copy.addEventListener('click', () => { void (async () => {
+        if (copying) return; copying = true; manual.hidden = true;
+        const original = new URL('/read.html#doc=' + row.payload, location.origin).href;
+        const focused = document.activeElement; status.textContent = 'Copying original link…';
+        try {
+          await navigator.clipboard.writeText(original);
+          if (copy.isConnected) status.textContent = 'Original link copied.';
+        } catch {
+          if (!copy.isConnected) return;
+          manual.value = original; manual.hidden = false;
+          status.textContent = 'Could not copy automatically. Select and copy the original link below.';
+          if (document.activeElement === focused || document.activeElement === document.body) { focus(manual); if (manual === document.activeElement) manual.select(); }
+        } finally { copying = false; }
+      })(); });
+      details.append(copy, manual);
+    }
     const remove = tagged(document.createElement('button'), row.id + ':remove', group); remove.type = 'button'; remove.textContent = 'Remove';
     remove.setAttribute('aria-label', 'Remove shared document ' + title + (ordinal ? ', received link ' + ordinal : ''));
+    let pending = false;
     remove.addEventListener('click', () => { void (async () => {
+      if (pending) return; pending = true;
+      const expected = { id: row.id, payload: row.payload };
       const index = visibleLinks().indexOf(details.closest('li')!.querySelector('a')!);
-      remove.disabled = true;
       try {
+        const accepted = await askConfirmChoice({ title: 'Remove received link?',
+          message: `Remove this received link for ${title} from this browser? Its saved reader inputs will also be removed. Other received links and editable copies stay unchanged.`,
+          confirmLabel: 'Remove link', cancelLabel: 'Cancel', returnFocus: remove });
+        if (!accepted) return;
+        remove.disabled = true;
         const db = database(); if (!db) throw new Error('Storage unavailable');
-        await removeSharedItem(db, row.id); await refresh();
+        const result = await removeSharedItem(db, expected.id, expected.payload); await refresh();
+        if (result === 'changed') status.textContent = 'This received link changed. Review it before removing it again.';
         if (document.activeElement === document.body) fallback(group, index);
-      } catch { remove.disabled = false; status.textContent = 'Could not remove this item.'; if (document.activeElement === document.body) focus(remove); }
+      } catch { status.textContent = 'Could not remove this item.'; }
+      finally { pending = false; remove.disabled = false; if (document.activeElement === document.body && remove.isConnected) focus(remove); }
     })(); });
-    details.append(toggle, remove); return details;
+    details.append(remove); return details;
   }
   function variantRow(variant: SharedVariant, group: SharedGroup): HTMLLIElement {
     const { item, document: doc, ordinal } = variant; const singleton = group.variants.length === 1;

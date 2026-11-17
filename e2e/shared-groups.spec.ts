@@ -87,11 +87,13 @@ test('individual removal preserves sibling sidecar/editable source and focuses t
     Storage.prototype.setItem = function (key, value) { if (key === 'typebridge.sharedRemoval.v1') throw new Error('Denied'); return set.call(this, key, value); };
   });
   await remove.click();
+  await page.getByRole('dialog', { name: 'Remove received link?', exact: true }).getByRole('button', { name: 'Remove link', exact: true }).click();
   await expect(page.locator('#shared-library [role="status"]')).toHaveText('Could not remove this item.');
   await expect(remove).toBeEnabled(); await expect(remove).toBeFocused();
   expect(await rows(page)).toHaveLength(2);
   await page.evaluate(() => (window as unknown as { restoreRemovalStorage: () => void }).restoreRemovalStorage());
   await remove.click();
+  await page.getByRole('dialog', { name: 'Remove received link?', exact: true }).getByRole('button', { name: 'Remove link', exact: true }).click();
   await expect(group).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Group fixture (shared, opens a new tab)', exact: true })).toBeFocused();
   expect(await rows(page)).toHaveLength(1);
@@ -111,6 +113,9 @@ test('incompatible stored payloads remain visible and individually removable wit
   await expect(page.locator('#shared-library')).toContainText('Unavailable received link');
   await expect(page.locator('#shared-library')).not.toContainText('privateMarker');
   const row = page.locator('#shared-library li').filter({ hasText: 'Unavailable received link' });
-  await row.locator('summary').click(); await row.getByRole('button', { name: 'Remove shared document Unavailable received link' }).click();
+  await row.locator('summary').click();
+  await expect(row.getByRole('button', { name: /Copy original link/ })).toHaveCount(0);
+  await row.getByRole('button', { name: 'Remove shared document Unavailable received link' }).click();
+  await page.getByRole('dialog', { name: 'Remove received link?', exact: true }).getByRole('button', { name: 'Remove link', exact: true }).click();
   await expect(row).toHaveCount(0); expect(await rows(page)).toHaveLength(1);
 });
