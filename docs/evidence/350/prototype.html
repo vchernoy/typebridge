@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grouped shared library — proposal</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 12px; font: 16px/1.5 system-ui, sans-serif; color: #17212b; background: #f4f6f8; }
+  main { max-width: 620px; margin: auto; padding: 16px; background: white; border: 1px solid #bac4ce; border-radius: 12px; }
+  h1 { font-size: 1.3rem; margin-top: 0; }
+  p { margin: 8px 0; }
+  small, .meta { color: #465362; }
+  label, input { display: block; width: 100%; }
+  input { min-height: 44px; padding: 8px; font: inherit; }
+  ul { list-style: none; padding: 0; margin: 12px 0; }
+  li { padding: 8px 0; border-top: 1px solid #d9dfe5; min-width: 0; }
+  summary, a, button { min-height: 44px; padding: 10px 4px; overflow-wrap: anywhere; }
+  summary { cursor: pointer; }
+  summary small { display: block; margin-left: 16px; }
+  a { display: block; color: #1248a0; }
+  button { display: block; font: inherit; width: 100%; background: white; color: #17212b; border: 1px solid #8795a5; border-radius: 6px; margin: 4px 0; text-align: left; }
+  button.danger { color: #a01818; }
+  .variants { padding-left: 16px; }
+  .meta { overflow-wrap: anywhere; }
+  :focus-visible { outline: 3px solid #185dcc; outline-offset: 2px; }
+  dialog { width: min(440px, calc(100% - 24px)); max-height: calc(100dvh - 24px); overflow: auto; border: 1px solid #8795a5; border-radius: 12px; padding: 20px; }
+  dialog::backdrop { background: #0007; }
+  dialog h2 { font-size: 1.15rem; }
+</style>
+<main>
+  <h1>Shared with me</h1>
+  <p><strong>Design prototype.</strong> Synthetic examples; no stored documents, clipboard or real links.</p>
+  <p>Local to this browser. Editable copies are separate.</p>
+  <label for="search">Search shared documents and link parameters</label>
+  <input id="search" type="search">
+  <p id="status" role="status"></p>
+  <ul id="groups"></ul>
+</main>
+<dialog aria-labelledby="confirm-title" aria-describedby="confirm-description">
+  <h2 id="confirm-title">Remove received links?</h2>
+  <p id="confirm-description"></p>
+  <button id="cancel" autofocus>Cancel</button>
+  <button id="confirm" class="danger"></button>
+</dialog>
+<script type="module">
+  // Fixed examples illustrate interaction only; not a codec or grouping implementation.
+  const examples = [
+    { id: 'loan', title: 'Loan calculator', source: 'Compare loan payments', format: 'Markdown', variants: [
+      { id: 'one', label: 'Received link 1', parameters: 'rate = 0.05, seed = 7', hints: 'Rendered · Read only · Heading shown' },
+      { id: 'two', label: 'Received link 2', parameters: 'rate = 0.07, seed = 11', hints: 'Rendered · Read only · Heading shown' },
+      { id: 'three', label: 'Received link 3', parameters: 'Authored defaults', hints: 'Source · Editing allowed · Heading shown' },
+    ] },
+    { id: 'long', title: 'A very long document title that must remain readable on a small phone without hiding its available actions', source: 'Notes for the next workshop', format: 'Plain text', variants: [
+      { id: 'four', label: 'Received link 1', parameters: 'Authored defaults', hints: 'Source · Read only · Heading hidden' },
+    ] },
+  ];
+  const list = document.querySelector('#groups'), search = document.querySelector('#search'), status = document.querySelector('#status');
+  const dialog = document.querySelector('dialog'), cancel = document.querySelector('#cancel'), confirm = document.querySelector('#confirm');
+  const expanded = new Set();
+  let filtering = false;
+  let pending, opener;
+  const text = (tag, value, className) => { const el = document.createElement(tag); el.textContent = value; if (className) el.className = className; return el; };
+  function ask(group, variant, button) {
+    pending = { group, variant }; opener = button;
+    const count = variant ? 1 : group.variants.length;
+    document.querySelector('#confirm-description').textContent = `Remove ${variant ? 'this received link' : `all ${count} received links`} for ${group.title} from this browser? Their saved reader inputs will also be removed. Editable copies stay unchanged.`;
+    confirm.textContent = count === 1 ? 'Remove link' : `Remove ${count} links`;
+    dialog.showModal(); cancel.focus();
+  }
+  function actions(group, variant) {
+    const details = document.createElement('details');
+    const summary = text('summary', variant ? 'Actions' : 'Group actions');
+    summary.setAttribute('aria-label', variant ? `Actions for ${group.title}, ${variant.label.toLowerCase()}` : `Group actions for ${group.title}`);
+    details.append(summary);
+    if (variant) {
+      const copy = text('button', 'Copy original link');
+      copy.onclick = () => { status.textContent = 'Prototype: original link would be copied. No clipboard access.'; };
+      details.append(copy);
+    }
+    const remove = text('button', variant ? 'Remove received link' : `Remove all ${group.variants.length} received links`, 'danger');
+    remove.onclick = () => ask(group, variant, remove); details.append(remove); return details;
+  }
+  function variantRow(group, variant, singleton) {
+    const li = document.createElement('li'); li.dataset.variant = variant.id;
+    const link = text('a', singleton ? group.title : variant.label); link.href = `#example-${variant.id}`;
+    link.setAttribute('aria-label', `${group.title}, ${variant.label.toLowerCase()} (opens a new tab)`);
+    link.onclick = event => { event.preventDefault(); status.textContent = 'Prototype: original received link would open in a new tab.'; };
+    li.append(link, text('p', variant.parameters, 'meta'), text('p', variant.hints, 'meta'), actions(group, variant));
+    return li;
+  }
+  function render() {
+    const query = search.value.toLowerCase();
+    // Native toggle events are queued. Snapshot the current visual expansion before
+    // search replaces nodes, even when typing immediately follows a keyboard toggle.
+    if (!filtering) for (const details of list.querySelectorAll('[data-group]')) {
+      if (details.open) expanded.add(details.dataset.group); else expanded.delete(details.dataset.group);
+    }
+    filtering = !!query;
+    list.replaceChildren(); let shown = 0;
+    for (const group of examples) {
+      const wholeMatch = `${group.title}\n${group.source}\n${group.format}`.toLowerCase().includes(query);
+      const matches = group.variants.filter(v => wholeMatch || `${v.parameters}\n${v.hints}`.toLowerCase().includes(query));
+      if (!matches.length) continue;
+      shown++;
+      if (group.variants.length === 1) { list.append(variantRow(group, matches[0], true)); continue; }
+      const li = document.createElement('li'), details = document.createElement('details'); details.dataset.group = group.id;
+      details.open = !!query || expanded.has(group.id);
+      const label = `${group.title} · ${matches.length === group.variants.length ? matches.length : `${matches.length} of ${group.variants.length}`} received links`;
+      const summary = text('summary', label); summary.append(text('small', group.format)); details.append(summary);
+      details.addEventListener('toggle', () => { if (details.isConnected && !search.value) { if (details.open) expanded.add(group.id); else expanded.delete(group.id); } });
+      const variants = document.createElement('ul'); variants.className = 'variants';
+      for (const variant of matches) variants.append(variantRow(group, variant, false));
+      details.append(variants, actions(group)); li.append(details); list.append(li);
+    }
+    status.textContent = shown ? `${shown} shared document groups shown.` : 'No matching shared documents.';
+  }
+  search.addEventListener('input', render);
+  cancel.onclick = () => dialog.close();
+  dialog.addEventListener('close', () => { opener?.focus(); pending = undefined; });
+  confirm.onclick = () => {
+    if (!pending) return;
+    const { group, variant } = pending;
+    if (variant) group.variants = group.variants.filter(v => v !== variant);
+    else group.variants = [];
+    dialog.close(); render();
+    const target = list.querySelector(`[data-group="${group.id}"] > summary`) ?? list.querySelector('a') ?? search;
+    opener = undefined; target.focus(); status.textContent = 'Prototype removal completed. Editable copies unchanged.';
+  };
+  render();
+</script>
+</html>
