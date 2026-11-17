@@ -67,13 +67,29 @@ test('failed preference proof latches the document into memory-only across remou
   await page.clock.install(); await page.clock.fastForward(1000);
   expect(await states(page)).toEqual([]); await expect(status(page)).toContainText('temporary');
 });
-test('a read-only second window restores baseline but cannot change persisted input state', async ({ page, context }) => {
-  const id = await makeDocument(page); await preview(page); await input(page).fill('5'); await expect(status(page)).toHaveText('Inputs saved on this device.');
-  const before = await states(page);
-  const other = await context.newPage(); await other.goto('/editor.html?doc=' + id);
-  await expect(other.locator('#editor')).toHaveAttribute('readonly', '');
-  await preview(other); await expect(input(other)).toHaveValue('5'); await input(other).fill('8');
-  await other.clock.install(); await other.clock.fastForward(1000); expect(await states(other)).toEqual(before);
+for (const comparison of [false,true]) test(`Rendered window saves inputs without source ownership (comparison=${comparison})`, async ({page,context}) => {
+  const id=await makeDocument(page);
+  await page.clock.install({time:new Date('2026-11-17T05:00:00Z')});await page.clock.pauseAt(new Date('2026-11-17T05:00:01Z'));
+  const other=await context.newPage();await other.goto('/editor.html?doc='+id+(comparison?'&mode=view':''));
+  await expect(other.locator('#editor')).toHaveValue(source);await expect(other.locator('#editor')).toHaveAttribute('readonly','');
+  await other.locator('#document-view-preview').click();await other.clock.runFor(150);await expect(input(other)).toHaveValue('2');
+  const owner=()=>page.evaluate(id=>new Promise<{ownerInstanceId:string;fence:number}>(resolve=>{const r=indexedDB.open('typebridge');r.onsuccess=()=>{const db=r.result,q=db.transaction('editOwnership').objectStore('editOwnership').get(id);q.onsuccess=()=>{db.close();resolve({ownerInstanceId:q.result.ownerInstanceId,fence:q.result.fence});};};}),id);
+  const held=await owner();
+  await page.evaluate(()=>{(window as unknown as {__typebridgeDelayPersistMs:number}).__typebridgeDelayPersistMs=5000;});
+  const edited=source+'\nUnsaved source stays in its owner.';await page.locator('#editor').fill(edited);
+  const before=await readStoredDocs(page,true);
+  await input(other).fill('7');await other.clock.runFor(1000);await expect(status(other)).toHaveText('Inputs saved on this device.');
+  expect(await owner()).toEqual(held);expect(await readStoredDocs(page,true)).toEqual(before);await expect(page.locator('#editor')).toHaveValue(edited);
+  await expect(page.locator('#save-indicator')).toHaveText('Saving…');
+  await other.reload();await expect(other.locator('#document-view')).toBeVisible();await other.clock.runFor(150);await expect(input(other)).toHaveValue('7');
+  expect((await states(other))[0].inputs).toEqual([['x',7],['seed',3]]);expect(await owner()).toEqual(held);
+  await page.evaluate(()=>{(window as unknown as {__typebridgeDelayPersistMs:number}).__typebridgeDelayPersistMs=0;});
+  await page.clock.runFor(6000);await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  await page.locator('#editor').fill(edited+' Still editable.');await page.clock.runFor(350);await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  expect(await owner()).toEqual(held);expect((await states(other))[0].inputs).toEqual([['x',7],['seed',3]]);
+  await expect(other.locator('#editor')).toHaveValue(edited+' Still editable.');await other.clock.runFor(150);await expect(input(other)).toHaveValue('7');
+  await input(other).fill('8');await other.clock.runFor(1000);await expect(status(other)).toHaveText('Inputs saved on this device.');
+  expect(await owner()).toEqual(held);expect((await states(other))[0].inputs).toEqual([['x',8],['seed',3]]);
 });
 
 test('clear-document removes only the editable sidecar atomically with its source', async ({ page }) => {
@@ -208,4 +224,45 @@ test('a genuine active storage timeout stays memory-only after the old read reco
   await page.evaluate(()=>(window as unknown as {releaseRemountRead:()=>void}).releaseRemountRead());await input(page).fill('7');
   await page.locator('#document-view-edit').click();await page.locator('#document-view-preview').click();await page.clock.runFor(150);await expect(input(page)).toHaveValue('7');
   await input(page).fill('8');await page.clock.runFor(1000);await expect(status(page)).toContainText('temporary');expect(await states(page)).toEqual(before);
+});
+
+test('two Rendered writers use independent numeric CAS without taking source ownership', async ({page,context}) => {
+  const id=await makeDocument(page);
+  const other=await context.newPage(), third=await context.newPage();
+  for(const reader of [other,third]){await reader.goto('/editor.html?doc='+id+'&mode=view');await expect(reader.locator('#editor')).toHaveValue(source);await preview(reader);}
+  const owners=()=>page.evaluate(id=>new Promise<string>(resolve=>{const r=indexedDB.open('typebridge');r.onsuccess=()=>{const db=r.result,q=db.transaction('editOwnership').objectStore('editOwnership').get(id);q.onsuccess=()=>{db.close();resolve(JSON.stringify({owner:q.result.ownerInstanceId,fence:q.result.fence}));};};}),id);
+  const before=await owners();await input(other).fill('5');await expect(status(other)).toHaveText('Inputs saved on this device.');
+  const saved=await states(other);await input(third).fill('7');await expect(status(third)).toContainText('Saved inputs changed');expect(await states(third)).toEqual(saved);
+  await third.locator('#editable-input-load').click();await expect(input(third)).toHaveValue('5');await input(third).fill('8');await expect(status(third)).toHaveText('Inputs saved on this device.');
+  const newer=await states(third);await input(other).fill('6');await expect(status(other)).toContainText('Saved inputs changed');expect(await states(other)).toEqual(newer);
+  expect(await owners()).toBe(before);await expect(page.locator('#editor')).toBeEditable();
+});
+test('document privacy in source owner freezes another Rendered window without retrospective saving', async ({page,context}) => {
+  const id=await makeDocument(page);const other=await context.newPage();await other.goto('/editor.html?doc='+id);await expect(other.locator('#editor')).toHaveValue(source);await preview(other);
+  await input(other).fill('5');await expect(status(other)).toHaveText('Inputs saved on this device.');const before=await states(other);
+  await setAutosave(page,false);await expect(other.locator('#autosave')).not.toBeChecked();
+  await input(other).fill('8');await expect(status(other)).toContainText('temporary');
+  await setAutosave(page,true);await expect(other.locator('#autosave')).toBeChecked();await input(other).fill('9');
+  await other.clock.install();await other.clock.fastForward(1000);expect(await states(other)).toEqual(before);await expect(status(other)).toContainText('temporary');
+  await other.reload();await expect(other.locator('#document-view')).toBeVisible();await other.clock.runFor(150);await expect(input(other)).toHaveValue('5');
+});
+test('a retired document policy generation freezes pending cache even with unchanged numeric revision', async ({page}) => {
+  const id=await makeDocument(page);await preview(page);await input(page).fill('5');await expect(status(page)).toHaveText('Inputs saved on this device.');
+  await page.clock.install({time:new Date('2026-11-17T05:00:00Z')});await page.clock.pauseAt(new Date('2026-11-17T05:00:01Z'));
+  await input(page).fill('8');await page.locator('#document-view-edit').click();const before=await states(page);
+  // Simulate a missed privacy cycle: public again, unchanged numeric CAS, new policy generation.
+  await page.evaluate(id=>new Promise<void>(resolve=>{const r=indexedDB.open('typebridge');r.onsuccess=()=>{const db=r.result,tx=db.transaction('documents','readwrite'),q=tx.objectStore('documents').get(id);q.onsuccess=()=>tx.objectStore('documents').put({...q.result,inputEpoch:crypto.randomUUID()});tx.oncomplete=()=>{db.close();resolve();};};}),id);
+  await page.locator('#document-view-preview').click();await page.clock.runFor(150);await expect(input(page)).toHaveValue('8');await expect(status(page)).toContainText('temporary');
+  await input(page).fill('9');await page.clock.runFor(1000);expect(await states(page)).toEqual(before);
+  await page.reload();await expect(page.locator('#document-view')).toBeVisible();await page.clock.runFor(150);await expect(input(page)).toHaveValue('5');
+});
+
+test('a stale public view observing a private row cannot rearm cached inputs after privacy ends', async ({page}) => {
+  const id=await makeDocument(page);
+  const flag=(value:boolean)=>page.evaluate(({id,value})=>new Promise<void>(resolve=>{const r=indexedDB.open('typebridge');r.onsuccess=()=>{const db=r.result,tx=db.transaction('documents','readwrite'),q=tx.objectStore('documents').get(id);q.onsuccess=()=>tx.objectStore('documents').put({...q.result,private:value,inputEpoch:q.result.inputEpoch+'-retired'});tx.oncomplete=()=>{db.close();resolve();};};}),{id,value});
+  // No advisory signal: the displayed source is stale, but the authoritative row is private.
+  await flag(true);await preview(page);await input(page).fill('8');await expect(status(page)).toContainText('temporary');
+  await page.locator('#document-view-edit').click();await flag(false);await preview(page);await expect(input(page)).toHaveValue('8');
+  await input(page).fill('9');await page.clock.install();await page.clock.fastForward(1000);
+  expect(await states(page)).toEqual([]);await expect(status(page)).toContainText('temporary');
 });

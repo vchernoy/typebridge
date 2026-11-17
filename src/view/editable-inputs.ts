@@ -3,13 +3,13 @@ import { numericInputs } from '../editor/shared-input-state';
 import { AUTOSAVE_PREF_KEY } from '../editor/drafts';
 import { onStorageClear } from '../editor/clear-data';
 import { PREFS_EVENT } from './prefs-sync';
-import type { StoredDraft, WriteFence } from '../editor/indexeddb';
+import type { StoredDraft } from '../editor/indexeddb';
 import type { renderDocument } from './active-renderer';
 type Live = ReturnType<typeof renderDocument>;
-export type EditableInputAccess = { db?: IDBDatabase; draft: StoredDraft; public: boolean; fence?: WriteFence };
+export type EditableInputAccess = { db?: IDBDatabase; draft: StoredDraft; public: boolean; canEditInputs: boolean };
 /** Memory belongs to document IDs in this editor, never to source strings or DOM controls. */
 export function createEditableInputs(access: () => EditableInputAccess, reload: () => void) {
-  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number; base: number; conflict: boolean; reset: boolean }>();
+  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number; base: number; conflict: boolean; reset: boolean; epoch?: string }>();
   const panel = document.createElement('div'); panel.hidden = true; panel.id = 'editable-input-state';
   const status = document.createElement('p'); status.id = 'editable-input-status'; status.setAttribute('role', 'status');
   const reset = document.createElement('button'); reset.type = 'button'; reset.id = 'editable-input-reset'; reset.textContent = 'Reset inputs to defaults';
@@ -69,7 +69,7 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
       stop = cancel; freezeCurrent = temporary;
       const initial = access();
       if (valid() && initial.db && initial.draft.revision > 0) {
-        const pending = openEditableInputs(initial.db, id, () => loading && valid(), () => valid() ? access().fence : undefined);
+        const pending = openEditableInputs(initial.db, id, () => loading && valid(), () => valid() && access().canEditInputs);
         try {
           store = await Promise.race([pending, cancelled, new Promise<undefined>(resolve => { deadline = setTimeout(() => { loading = false; resolve(undefined); }, 2000); })]);
           if (!loading) { temporary(); void pending.then(late => late?.close(), () => undefined); }
@@ -77,6 +77,10 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
         finally { clearTimeout(deadline); }
       }
       if (!valid()) { store?.close(); store = undefined; }
+      // A privacy cycle or delete/recreate retires every cached input snapshot,
+      // even when its numeric CAS revision did not change while this view was away.
+      if (store && memory.epoch !== undefined && memory.epoch !== store.epoch) temporary();
+      if (store) memory.epoch = store.epoch;
       if (store && (!hadMemory || (!memory.pending && memory.base !== store.revision))) {
         memory.values = new Map(store.inputs); memory.base = store.revision;
       }
@@ -108,7 +112,7 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
           const accepted = numericInputs([...value.session.inputValues()]);
           if (!accepted) { temporary(); memory.values = new Map(); } else memory.values = accepted;
           panel.hidden = value.session.inputValues().size === 0;
-          status.textContent = store && access().fence ? 'Inputs are saved separately from source.' : 'Inputs are temporary in this editor.';
+          status.textContent = store && access().canEditInputs ? 'Inputs are saved separately from source.' : 'Inputs are temporary in this editor.';
           load.hidden = !memory.conflict;
           if (memory.conflict) status.textContent = 'Saved inputs changed. Load saved inputs to continue saving.';
           let observed = JSON.stringify([...memory.values]);
@@ -118,9 +122,9 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
             if (next === observed) return; observed = next;
             if (!numericInputs([...values])) { temporary(); return; }
             memory.values = new Map(values); memory.pending = true; memory.reset = false; memory.version++;
-            if (valid() && store && access().fence) { dirty = true; status.textContent = 'Saving inputs…'; clearTimer(); timer = setTimeout(() => { void write(); }, 500); }
+            if (valid() && store && access().canEditInputs) { dirty = true; status.textContent = 'Saving inputs…'; clearTimer(); timer = setTimeout(() => { void write(); }, 500); }
           });
-          if (memory.pending && valid() && store && access().fence) { dirty = true; timer = setTimeout(() => { void write(); }, 500); }
+          if (memory.pending && valid() && store && access().canEditInputs) { dirty = true; timer = setTimeout(() => { void write(); }, 500); }
           load.onclick = () => { if (ownsPanel() && !writing && access().public) { cache.delete(id); reload(); } };
           reset.onclick = () => {
             if (!ownsPanel() || writing) return;
@@ -128,7 +132,7 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
             const defaults = numericInputs([...value.session.inputValues()]);
             if (!defaults) { temporary(); memory.values = new Map(); return; }
             memory.values = defaults; memory.pending = true; memory.reset = true; memory.version++;
-            if (valid() && store && access().fence) { dirty = true; void write(new Map()); }
+            if (valid() && store && access().canEditInputs) { dirty = true; void write(new Map()); }
             else status.textContent = memory.conflict ? 'Saved inputs changed. Load saved inputs to continue saving.' : 'Inputs reset to authored defaults in this editor.';
           };
         },

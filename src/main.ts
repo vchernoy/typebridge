@@ -1168,7 +1168,7 @@ markdownView = setupMarkdownView({
     let allowed = false;
     try { allowed = localStorage.getItem(AUTOSAVE_PREF_KEY) !== 'off' && mayWrite(); } catch { /* Failed preference proof denies inputs. */ }
     return { db: state.storageCleared ? undefined : state.db, draft: state.active, public: allowed,
-      fence: !viewMode && !state.editBlock && !state.transitioning && !state.deleting && !state.transferFrozen && state.ownership?.documentId === state.active.id ? state.ownership.peekFence() : undefined };
+      canEditInputs: renderedMode && !state.storageCleared && !state.deletedElsewhere && !state.viewMissing };
   },
   shown: () => state.active, text: () => field.value,
   canChangeView: () => ![editor, titleEditor, findEditor, replaceEditor].some(input => input.composing),

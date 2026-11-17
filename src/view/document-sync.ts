@@ -189,7 +189,7 @@ export function createDocumentSync(state: EditorState, status: StatusLine, deps:
       deps.writingPosition.save();
       if (deps.viewMode) {
         deps.viewer.showDocument(stored);
-        status.setSaveStatus('Updated to the latest saved version. Nothing is saved from this window.');
+        status.setSaveStatus('Updated to the latest saved version. Source is read-only in this window.');
       } else {
         state.active = stored;
         deps.showDraft();

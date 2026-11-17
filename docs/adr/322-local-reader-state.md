@@ -171,3 +171,7 @@ Chromium/Firefox/WebKit CI. Preserve existing safety assertions. Deployment of t
 main artifact is separate from PR CI and from manual device/assistive-technology evidence.
 The numerical limits and UI/privacy policies here are proposed decisions for review, not
 measurements or already-shipped guarantees.
+
+## Implemented editable input capability decision (#326)
+
+Source and input values are sibling document state governed by document Autosave/privacy/deletion policy. Window presentation selects the editing capability. Rendered inputs may persist while another window owns source, including from comparison windows. Input writes do not inspect or acquire source ownership: transactional document-policy generation/existence/private checks and independent numeric-state CAS protect concurrency. Cached pending snapshots retain their own numeric CAS base and policy generation through remounts; source privacy cycles retire prior generations. Source histories/change logs remain independent; typed input histories and share-link snapshots are separate scope.
