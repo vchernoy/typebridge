@@ -9,7 +9,7 @@ async function fixture() {
   const output = (Array.isArray(built)?built:[built]).flatMap(item => 'output' in item ? item.output : []).find(item => item.type === 'chunk');
   if (!output || output.type !== 'chunk') throw new Error('Missing fixture'); return bundle=output.code;
 }
-for (const operation of ['fence','private','cancel-put','delete','cas'] as const) test(`editable sidecar transaction guards: ${operation}`, async ({page}) => {
+for (const operation of ['fence','private','cancel-put','delete','cas','stale-base'] as const) test(`editable sidecar transaction guards: ${operation}`, async ({page}) => {
   await page.goto('/editor.html'); await expect(page.locator('#editor')).toBeEnabled(); await page.locator('#editor').fill('Guard fixture'); await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const id = await page.locator('#drafts').inputValue(); await page.addScriptTag({content:await fixture()});
   const result = await page.evaluate(async ({id,operation}) => {
@@ -21,7 +21,10 @@ for (const operation of ['fence','private','cancel-put','delete','cas'] as const
     const b=(await api.openEditableInputs(db,id,()=>true,()=>fence))!;
     await a.save(new Map([['x',5]]));
     let outcome: string;
-    if (operation === 'cas') outcome = await b.save(new Map([['x',9]]));
+    if (operation === 'stale-base') {
+      const reopened=(await api.openEditableInputs(db,id,()=>true,()=>fence))!;
+      outcome=await reopened.save(new Map([['x',9]]),0); reopened.close();
+    } else if (operation === 'cas') outcome = await b.save(new Map([['x',9]]));
     else if (operation === 'cancel-put') {
       const put=IDBObjectStore.prototype.put;
       IDBObjectStore.prototype.put=function(value,key){const r=put.call(this,value,key);if(value?.id==='editable:'+id)r.addEventListener('success',()=>{current=false;});return r;};
@@ -36,5 +39,5 @@ for (const operation of ['fence','private','cancel-put','delete','cas'] as const
     const inputs=await new Promise<unknown>(resolve=>{const q=db.transaction('readerStates').objectStore('readerStates').get('editable:'+id);q.onsuccess=()=>resolve(q.result.inputs);});
     a.close();b.close();db.close(); return {outcome,inputs};
   },{id,operation});
-  expect(result.outcome).toBe(operation==='cas'?'conflict':'cancelled');expect(result.inputs).toEqual([['x',5]]);
+  expect(result.outcome).toBe(operation==='cas'||operation==='stale-base'?'conflict':'cancelled');expect(result.inputs).toEqual([['x',5]]);
 });

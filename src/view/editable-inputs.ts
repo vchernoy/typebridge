@@ -9,7 +9,7 @@ type Live = ReturnType<typeof renderDocument>;
 export type EditableInputAccess = { db?: IDBDatabase; draft: StoredDraft; public: boolean; fence?: WriteFence };
 /** Memory belongs to document IDs in this editor, never to source strings or DOM controls. */
 export function createEditableInputs(access: () => EditableInputAccess, reload: () => void) {
-  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number }>();
+  const cache = new Map<string, { values: Map<string, number>; frozen: boolean; pending: boolean; version: number; base: number; conflict: boolean; reset: boolean }>();
   const panel = document.createElement('div'); panel.hidden = true; panel.id = 'editable-input-state';
   const status = document.createElement('p'); status.id = 'editable-input-status'; status.setAttribute('role', 'status');
   const reset = document.createElement('button'); reset.type = 'button'; reset.id = 'editable-input-reset'; reset.textContent = 'Reset inputs to defaults';
@@ -34,7 +34,7 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
       const hadMemory = !!entry;
       if (!entry) {
         if (cache.size >= 100) cache.delete(cache.keys().next().value!);
-        entry = { values: new Map(), frozen: !access().public, pending: false, version: 0 }; cache.set(id, entry);
+        entry = { values: new Map(), frozen: !access().public, pending: false, version: 0, base: 0, conflict: false, reset: false }; cache.set(id, entry);
       }
       const memory = entry;
       let store: Awaited<ReturnType<typeof openEditableInputs>>;
@@ -44,7 +44,12 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
         if (!access().public) { temporary(); return false; }
         return !memory.frozen;
       };
-      const temporary = () => { memory.frozen = true; clearTimer(); store?.close(); store = undefined; if (active && current()) status.textContent = 'Inputs are temporary in this editor. Reload this editor to enable saving.'; };
+      const ownsPanel = () => stop === temporary && active && current() && access().draft.id === id;
+      const temporary = () => { memory.frozen = true; memory.conflict = false; clearTimer(); store?.close(); store = undefined; if (ownsPanel()) { load.hidden = true; status.textContent = 'Inputs are temporary in this editor. Reload this editor to enable saving.'; } };
+      const showConflict = () => {
+        temporary(); memory.conflict = true;
+        if (ownsPanel()) { load.hidden = false; status.textContent = 'Saved inputs changed. Load saved inputs to continue saving.'; }
+      };
       stop = temporary;
       const initial = access();
       if (valid() && initial.db && initial.draft.revision > 0) {
@@ -58,50 +63,62 @@ export function createEditableInputs(access: () => EditableInputAccess, reload: 
         finally { clearTimeout(deadline); }
       }
       if (!valid()) { store?.close(); store = undefined; }
-      if (!hadMemory && store) memory.values = new Map(store.inputs);
-      const write = async (values: ReadonlyMap<string, number> = memory.values) => {
+      if (store && (!hadMemory || (!memory.pending && memory.base !== store.revision))) {
+        memory.values = new Map(store.inputs); memory.base = store.revision;
+      }
+      // A reopened connection's revision is not proof that cached pending values
+      // were based on it. Keep their original CAS base until commit or explicit load.
+      if (store && memory.pending && memory.base !== store.revision) showConflict();
+      const write = async (values: ReadonlyMap<string, number> = memory.reset ? new Map() : memory.values) => {
         clearTimer(); if (!dirty || !store || !valid() || writing) return;
         writing = true; dirty = false; const version = memory.version;
         try {
-          const result = await store.save(values);
-          if (!active || !current()) return;
+          const writer = store;
+          const result = await writer.save(values, memory.base);
+          if (result === 'saved') {
+            memory.base = Math.max(memory.base, writer.revision);
+            if (memory.version === version) { memory.pending = false; memory.reset = false; }
+          }
+          if (!ownsPanel()) return;
           if (result !== 'saved') {
-            temporary(); load.hidden = result !== 'conflict';
-            status.textContent = result === 'conflict' ? 'Saved inputs changed. Load saved inputs to continue saving.' : 'Inputs are temporary in this editor.';
-          } else { if (memory.version === version) memory.pending = false; status.textContent = dirty ? 'Saving inputs…' : 'Inputs saved on this device.'; }
-        } catch { if (active && current()) temporary(); }
+            if (result === 'conflict') showConflict(); else temporary();
+          } else status.textContent = dirty ? 'Saving inputs…' : 'Inputs saved on this device.';
+        } catch { if (ownsPanel()) temporary(); }
         finally { writing = false; if (dirty && valid() && store) timer = setTimeout(() => { void write(); }, 500); }
       };
       return {
         initialInputs: memory.values,
         bind(value: Live) {
+          if (!ownsPanel()) return;
           live = value;
           const accepted = numericInputs([...value.session.inputValues()]);
           if (!accepted) { temporary(); memory.values = new Map(); } else memory.values = accepted;
           panel.hidden = value.session.inputValues().size === 0;
           status.textContent = store && access().fence ? 'Inputs are saved separately from source.' : 'Inputs are temporary in this editor.';
+          load.hidden = !memory.conflict;
+          if (memory.conflict) status.textContent = 'Saved inputs changed. Load saved inputs to continue saving.';
           let observed = JSON.stringify([...memory.values]);
           unsubscribe = value.session.subscribe(() => {
             if (!active || !current()) return;
             const values = value.session.inputValues(); const next = JSON.stringify([...values]);
             if (next === observed) return; observed = next;
             if (!numericInputs([...values])) { temporary(); return; }
-            memory.values = new Map(values); memory.pending = true; memory.version++;
+            memory.values = new Map(values); memory.pending = true; memory.reset = false; memory.version++;
             if (valid() && store && access().fence) { dirty = true; status.textContent = 'Saving inputs…'; clearTimer(); timer = setTimeout(() => { void write(); }, 500); }
           });
           if (memory.pending && valid() && store && access().fence) { dirty = true; timer = setTimeout(() => { void write(); }, 500); }
-          load.onclick = () => { if (!writing) { cache.delete(id); reload(); } };
+          load.onclick = () => { if (ownsPanel() && !writing && access().public) { cache.delete(id); reload(); } };
           reset.onclick = () => {
-            if (!active || !current() || writing) return;
+            if (!ownsPanel() || writing) return;
             live?.resetInputs();
             const defaults = numericInputs([...value.session.inputValues()]);
             if (!defaults) { temporary(); memory.values = new Map(); return; }
-            memory.values = defaults; memory.pending = true; memory.version++;
+            memory.values = defaults; memory.pending = true; memory.reset = true; memory.version++;
             if (valid() && store && access().fence) { dirty = true; void write(new Map()); }
-            else status.textContent = 'Inputs reset to authored defaults in this editor.';
+            else status.textContent = memory.conflict ? 'Saved inputs changed. Load saved inputs to continue saving.' : 'Inputs reset to authored defaults in this editor.';
           };
         },
-        destroy() { active = false; clearTimer(); unsubscribe?.(); store?.close(); if (stop === temporary) stop = undefined; panel.hidden = true; },
+        destroy() { active = false; clearTimer(); unsubscribe?.(); store?.close(); if (stop === temporary) { stop = undefined; panel.hidden = true; } },
       };
     },
   };

@@ -20,7 +20,8 @@ export async function openEditableInputs(db: IDBDatabase, documentId: string, cu
   let revision = saved?.revision ?? 0;
   return {
     inputs: new Map(saved?.inputs ?? []),
-    async save(values: ReadonlyMap<string, number>): Promise<InputSave> {
+    get revision() { return revision; },
+    async save(values: ReadonlyMap<string, number>, expectedRevision = revision): Promise<InputSave> {
       if (!valid()) return 'cancelled';
       const owner = fence();
       if (!owner) return 'cancelled';
@@ -34,8 +35,8 @@ export async function openEditableInputs(db: IDBDatabase, documentId: string, cu
         const store = tx.objectStore('readerStates'); const raw = await request(store.get(id)); const previous = inputRecord(raw, id);
         const now = fence();
         if (!valid() || !row || row.private || !now || now.fence !== owner.fence || now.instanceId !== owner.instanceId || !ownershipFenceAllowsWrite(held, owner.instanceId, owner.fence)) { await done; return 'cancelled'; }
-        if ((raw !== undefined && !previous) || (previous?.revision ?? 0) !== revision) { await done; return 'conflict'; }
-        const next: InputRecord = { id, version: 1, revision: revision + 1, inputs };
+        if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || (raw !== undefined && !previous) || (previous?.revision ?? 0) !== expectedRevision) { await done; return 'conflict'; }
+        const next: InputRecord = { id, version: 1, revision: expectedRevision + 1, inputs };
         if (!inputRecord(next, id)) throw new Error('Reader state exceeds limits');
         await request(store.put(next));
         const final = fence();

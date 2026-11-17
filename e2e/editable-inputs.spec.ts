@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { setAutosave } from './settings-helpers';
+import { setAutosave, selectDocument, documentAction } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 const source = '# Calc\n\n```calc\ninput x = 2 in 0..10\ninput seed = 3\ny = x + seed\n```\n\n:input[x] :value[y]\n';
 async function makeDocument(page: Page) {
@@ -109,4 +109,66 @@ test('numeric state controls fit 320px and reset is keyboard accessible', async 
   await input(page).fill('5');await expect(status(page)).toHaveText('Inputs saved on this device.');
   await reset.focus();await page.keyboard.press('Enter');await expect(input(page)).toHaveValue('2');await expect(reset).toBeFocused();
   await page.screenshot({path:'/tmp/tb326-phone.png',fullPage:true});
+});
+
+test('pending CAS baseline survives real owner handoff, repeated remounts and local reset', async ({page, context}) => {
+  const id = await makeDocument(page); await preview(page);
+  await page.clock.install({time:new Date('2026-11-17T05:00:00Z')}); await page.clock.pauseAt(new Date('2026-11-17T05:00:01Z'));
+  await input(page).fill('5'); await page.locator('#document-view-edit').click();
+  await documentAction(page,'#new-draft'); await expect(page.locator('#drafts')).not.toHaveValue(id);
+  const other = await context.newPage(); await other.goto('/editor.html?doc='+id);
+  await expect(other.locator('#editor')).toBeEditable(); await other.locator('#document-view-preview').click(); await other.clock.runFor(150); await expect(input(other)).toBeVisible();
+  await input(other).fill('9'); await other.clock.runFor(1000); await expect(status(other)).toHaveText('Inputs saved on this device.');
+  const durable = await states(other);
+  await other.locator('#document-view-edit').click(); await documentAction(other,'#new-draft');
+  await selectDocument(page,id); await expect(page.locator('#editor')).toBeEditable();
+  const renderAgain = async () => { await page.locator('#document-view-preview').click(); await page.clock.runFor(150); await expect(input(page)).toBeVisible(); };
+  await renderAgain(); await expect(input(page)).toHaveValue('5'); await page.clock.runFor(1000);
+  expect(await states(page)).toEqual(durable); await expect(status(page)).toContainText('Saved inputs changed');
+  await page.locator('#document-view-edit').click(); await renderAgain(); await page.clock.runFor(1000);
+  expect(await states(page)).toEqual(durable); await expect(page.locator('#editable-input-load')).toBeVisible();
+  await page.locator('#editable-input-reset').click(); await expect(input(page)).toHaveValue('2'); await page.clock.runFor(1000);
+  expect(await states(page)).toEqual(durable);
+  await page.locator('#document-view-edit').click(); await renderAgain(); await page.clock.runFor(1000);
+  expect(await states(page)).toEqual(durable);
+  await page.locator('#editable-input-load').click(); await page.clock.runFor(150); await expect(input(page)).toHaveValue('9');
+  await input(page).fill('7'); await page.clock.runFor(1000); await expect(status(page)).toHaveText('Inputs saved on this device.');
+  expect((await states(page))[0].inputs).toEqual([['x',7],['seed',3]]);
+});
+for (const completion of ['release','timeout'] as const) test(`late public prepare cannot hide private preview controls: ${completion}`, async ({page}) => {
+  const first = await makeDocument(page);
+  await documentAction(page,'#new-draft'); await page.locator('#editor').fill(source.replace('input x = 2','input x = 8'));
+  await page.locator('#doc-menu-open').click(); await page.locator('#document-format').selectOption('markdown'); await page.locator('#doc-menu-open').click();
+  await expect(page.locator('#save-indicator')).toHaveText('Saved'); const second = await page.locator('#drafts').inputValue();
+  await setAutosave(page,false); await preview(page); await input(page).fill('6'); await page.locator('#document-view-edit').click();
+  await selectDocument(page,first);
+  await page.evaluate(id => {
+    const get=IDBObjectStore.prototype.get; const view=window as unknown as {heldInputsRead:boolean;releaseInputsRead?:()=>void};
+    IDBObjectStore.prototype.get=function(key){const r=get.call(this,key); if(this.name==='documents' && key===id && !view.heldInputsRead) {
+      r.addEventListener('success',event=>{event.stopImmediatePropagation();view.heldInputsRead=true;view.releaseInputsRead=()=>{r.onsuccess?.call(r,new Event('success'));};},{once:true});
+    } return r;};
+  },first);
+  await page.clock.install({time:new Date('2026-11-17T05:00:00Z')}); await page.clock.pauseAt(new Date('2026-11-17T05:00:01Z'));
+  await page.locator('#document-view-preview').click(); await page.clock.runFor(150);
+  await expect.poll(()=>page.evaluate(()=>(window as unknown as {heldInputsRead:boolean}).heldInputsRead)).toBe(true);
+  await selectDocument(page,second); await page.clock.runFor(150); await expect(input(page)).toHaveValue('6');
+  await expect(page.locator('#editable-input-reset')).toBeVisible(); const before = await readStoredDocs(page,true), inputBefore = await states(page);
+  if(completion==='release') await page.evaluate(()=>(window as unknown as {releaseInputsRead:()=>void}).releaseInputsRead());
+  await page.clock.runFor(2100);
+  await expect(status(page)).toBeVisible(); await expect(page.locator('#editable-input-reset')).toBeVisible();
+  await page.locator('#editable-input-reset').click(); await expect(input(page)).toHaveValue('8');
+  expect(await readStoredDocs(page,true)).toEqual(before); expect(await states(page)).toEqual(inputBefore);
+});
+
+test('an interrupted reset keeps its empty-snapshot intent and original CAS base on remount', async ({page}) => {
+  await makeDocument(page); await preview(page); await input(page).fill('5'); await expect(status(page)).toHaveText('Inputs saved on this device.');
+  await page.evaluate(() => {
+    const put=IDBObjectStore.prototype.put; let intercepted=false;
+    IDBObjectStore.prototype.put=function(value,key){const r=put.call(this,value,key); if(this.name==='readerStates' && value?.id?.startsWith('editable:') && !intercepted) {
+      intercepted=true; r.addEventListener('success',()=>document.querySelector<HTMLButtonElement>('#document-view-edit')!.click(),{once:true});
+    } return r;};
+  });
+  await page.locator('#editable-input-reset').click(); await expect(page.locator('#editor')).toBeVisible();
+  await preview(page); await expect(input(page)).toHaveValue('2'); await expect(status(page)).toHaveText('Inputs saved on this device.');
+  expect((await states(page))[0]).toMatchObject({revision:2,inputs:[]});
 });
