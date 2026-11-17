@@ -1,7 +1,8 @@
-import { listSharedItems, removeSharedItem, rememberPreference, setRememberPreference } from '../editor/shared-library';
+import { listSharedItems, removeSharedItem, removeSharedGroup, rememberPreference, setRememberPreference } from '../editor/shared-library';
 import { decodeSharePayload } from '../editor/share-link';
 import { groupSharedDocuments, searchSharedGroups, sharedVariantHints, type ReceivedDocument, type SharedGroup, type SharedVariant } from '../editor/shared-groups';
 import type { SharedItem } from '../editor/shared-library';
+import { askConfirmChoice } from './confirm-dialog';
 
 export function setupRememberSharedPreference(): void {
   const checkbox = document.querySelector<HTMLInputElement>('#remember-shared');
@@ -72,6 +73,32 @@ export function setupSharedLibrary(database: () => IDBDatabase | undefined): { r
   function format(value: string): string {
     return value === 'plain' ? 'Plain text' : value === 'markdown' ? 'Markdown' : value + ' (source only)';
   }
+  function groupActions(group: SharedGroup, key: string): HTMLDetailsElement {
+    const details = document.createElement('details'); details.className = 'shared-actions'; details.dataset.sharedActions = key + ':group';
+    const title = heading(group.title), count = group.variants.length;
+    const toggle = tagged(document.createElement('summary'), key + ':group-actions', group); toggle.textContent = 'Group actions';
+    toggle.setAttribute('aria-label', 'Group actions for ' + title);
+    const remove = tagged(document.createElement('button'), key + ':group-remove', group); remove.type = 'button';
+    remove.textContent = 'Remove all ' + count + ' received links'; let pending = false;
+    remove.addEventListener('click', () => { void (async () => {
+      if (pending) return; pending = true;
+      const expected = group.variants.map(({ item }) => ({ id: item.id, payload: item.payload }));
+      const index = visibleLinks().indexOf(details.closest('li')!.querySelector('a')!);
+      try {
+        const accepted = await askConfirmChoice({ title: 'Remove received links?',
+          message: `Remove all ${count} received links for ${title} from this browser? Their saved reader inputs will also be removed. Editable copies stay unchanged.`,
+          confirmLabel: `Remove ${count} links`, cancelLabel: 'Cancel', returnFocus: remove });
+        if (!accepted) return;
+        remove.disabled = true;
+        const db = database(); if (!db) throw new Error('Storage unavailable');
+        const result = await removeSharedGroup(db, group, expected); await refresh();
+        if (result === 'changed') status.textContent = 'The shared library changed. Review the group before removing it again.';
+        if (document.activeElement === document.body) fallback(group, index);
+      } catch { status.textContent = 'Could not remove this group. No partial removal was committed.'; }
+      finally { pending = false; remove.disabled = false; if (document.activeElement === document.body && remove.isConnected) focus(remove); }
+    })(); });
+    details.append(toggle, remove); return details;
+  }
   async function refresh(): Promise<void> {
     const started = ++generation;
     try {
@@ -104,7 +131,7 @@ export function setupSharedLibrary(database: () => IDBDatabase | undefined): { r
         const label = document.createElement('small'); label.textContent = format(group.format); toggle.append(label);
         const children = document.createElement('ul'); children.className = 'shared-variants';
         for (const variant of variants) children.append(variantRow(variant, group));
-        details.append(toggle, children); li.append(details); fragment.append(li);
+        details.append(toggle, children, groupActions(group, key)); li.append(details); fragment.append(li);
       }
       for (const row of unavailable) {
         if (search.value && !'Unavailable received link'.toLowerCase().includes(search.value.toLowerCase())) continue;

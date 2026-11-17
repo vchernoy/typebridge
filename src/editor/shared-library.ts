@@ -91,3 +91,50 @@ export async function removeSharedItem(db: IDBDatabase, id: string): Promise<voi
     tx.objectStore(SHARED_ITEMS).delete(id); epochs.delete('shared:' + id); await done;
   } catch (error) { try { tx.abort(); } catch { /* Already settled. */ } throw error; }
 }
+
+export type SharedGroupIdentity = { readonly title: string; readonly text: string; readonly format: string };
+type ReceivedIdentity = Pick<SharedItem, 'id' | 'payload'>;
+const sameReceivedItems = (a: readonly ReceivedIdentity[], b: readonly ReceivedIdentity[]) =>
+  a.length === b.length && new Set(a.map(item => item.id)).size === a.length
+  && a.every(item => b.some(other => item.id === other.id && item.payload === other.payload));
+/** Delete a confirmed exact group atomically. Decoding never runs inside a write transaction. */
+export async function removeSharedGroup(db: IDBDatabase, group: SharedGroupIdentity,
+  expected: readonly ReceivedIdentity[]): Promise<'removed' | 'changed'> {
+  // Snapshot caller-owned data before the first await (e.g. a dialog's confirmed set).
+  const identity = { title: group.title, text: group.text, format: group.format };
+  const confirmed = expected.map(({ id, payload }) => ({ id, payload }));
+  if (!confirmed.length || confirmed.length > SHARED_MAX_ITEMS || new Set(confirmed.map(item => item.id)).size !== confirmed.length) return 'changed';
+  const token = sharedRemovalToken();
+  if (token === undefined) throw new Error('Removal cancellation unavailable');
+  const read = db.transaction([SHARED_ITEMS, 'readerStates']); const readDone = finished(read); void readDone.catch(() => undefined);
+  const observed = (await request(read.objectStore(SHARED_ITEMS).getAll())).filter(validItem);
+  const epoch = await request(read.objectStore('readerStates').get('libraryEpoch')); await readDone;
+  const revision = epoch === undefined ? 0 : epoch.revision;
+  if (!Number.isSafeInteger(revision) || revision < 0 || revision === Number.MAX_SAFE_INTEGER) throw new Error('Library epoch unavailable');
+  if (observed.length > SHARED_MAX_ITEMS) throw new Error('Shared library exceeds grouping limit');
+  const members: SharedItem[] = [];
+  for (const item of observed) {
+    const decoded = await decodeSharePayload(item.payload);
+    if (decoded.ok && decoded.document.title === identity.title && decoded.document.text === identity.text && decoded.document.format === identity.format) members.push(item);
+  }
+  if (!sameReceivedItems(confirmed, members) || sharedRemovalToken() !== token) return 'changed';
+  // Validation precedes invalidation. A subsequent transaction rechecks the epoch
+  // and entire received identity set, conservatively rejecting concurrent arrivals.
+  invalidateSharedRemembering(); const removal = sharedRemovalToken();
+  if (removal === undefined) throw new Error('Removal cancellation unavailable');
+  const tx = db.transaction([SHARED_ITEMS, 'readerStates'], 'readwrite'); const done = finished(tx); void done.catch(() => undefined);
+  try {
+    const items = tx.objectStore(SHARED_ITEMS), states = tx.objectStore('readerStates');
+    const current = (await request(items.getAll())).filter(validItem);
+    const currentEpoch = await request(states.get('libraryEpoch'));
+    if (!sameReceivedItems(observed, current) || (currentEpoch === undefined ? 0 : currentEpoch.revision) !== revision || sharedRemovalToken() !== removal) {
+      await done; return 'changed';
+    }
+    await request(states.put({ id: 'libraryEpoch', revision: revision + 1 }));
+    for (const item of confirmed) {
+      await request(items.delete(item.id)); await request(states.delete('shared:' + item.id));
+    }
+    if (sharedRemovalToken() !== removal) throw new Error('Removal invalidated');
+    await done; return 'removed';
+  } catch (error) { try { tx.abort(); } catch { /* Settled. */ } throw error; }
+}
