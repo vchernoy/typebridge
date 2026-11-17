@@ -81,6 +81,7 @@ test('Documents opens/removes shared items independently of editable copies and 
   const tab = context.waitForEvent('page'); await item.click(); const reader = await tab;
   await expect(reader.locator('#read-text')).toHaveText('Exact received text\n', { useInnerText: false }); await remembered(reader); await reader.close();
   const before = await rows(page, 'documents');
+  await page.locator('#shared-library .shared-actions > summary').first().click();
   await page.getByRole('button', { name: 'Remove shared document Received title', exact: true }).click();
   await expect(item).toHaveCount(0); expect(await rows(page)).toEqual([]); expect(await rows(page, 'documents')).toEqual(before);
 });
@@ -166,6 +167,7 @@ test('removal invalidates a previously started remember without deleting an edit
   await page.locator('#editor').fill('Independent editable copy'); await expect(page.locator('#save-indicator')).toHaveText('Saved');
   const before = await rows(page, 'documents');
   await page.locator('#doc-menu-open').click(); await page.getByText('Shared with me', { exact: true }).click();
+  await page.locator('#shared-library .shared-actions > summary').first().click();
   await page.getByRole('button', { name: 'Remove shared document Received title', exact: true }).click();
   await expect(page.locator('#shared-library')).toContainText('No remembered shared documents');
   await held.evaluate(() => (window as unknown as { releaseDigest: () => void }).releaseDigest());
@@ -209,13 +211,14 @@ test('phone library links wrap and removal remains keyboard accessible', async (
   await page.goto('/read.html#doc=' + await payload(title)); await remembered(page);
   await page.goto('/editor.html'); await expect(page.locator('#editor')).toBeEnabled();
   await page.locator('#doc-menu-open').click();
-  const summary = page.locator('#shared-library summary'); await summary.focus(); await page.keyboard.press('Enter');
+  const summary = page.locator('#shared-library > summary'); await summary.focus(); await page.keyboard.press('Enter');
+  await page.locator('#shared-library .shared-actions > summary').click();
   const remove = page.getByRole('button', { name: 'Remove shared document ' + title }); await expect(remove).toBeVisible();
   const geometry = await remove.evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }));
   expect(geometry.width).toBeGreaterThanOrEqual(44); expect(geometry.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await remove.focus(); await page.keyboard.press('Enter'); await expect(page.locator('#shared-library')).toContainText('No remembered shared documents');
-  await expect(summary).toBeFocused();
+  await expect(page.locator('#shared-search')).toBeFocused();
 });
 
 type RememberPhase = 'initial decode' | 'remember validation' | 'database open';
@@ -284,6 +287,7 @@ for (const phase of ['initial decode', 'remember validation', 'database open'] a
     await expect.poll(() => held.evaluate(() => typeof (window as unknown as { releaseRemember?: unknown }).releaseRemember)).toBe('function');
     await page.goto('/editor.html'); await expect(page.locator('#editor')).toBeEnabled();
     await page.locator('#doc-menu-open').click(); await page.getByText('Shared with me', { exact: true }).click();
+    await page.locator('#shared-library .shared-actions > summary').first().click();
     await page.getByRole('button', { name: 'Remove shared document Received title', exact: true }).click();
     await expect(page.locator('#shared-library')).toContainText('No remembered shared documents');
     await held.evaluate(() => (window as unknown as { releaseRemember: () => void }).releaseRemember());

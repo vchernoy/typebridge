@@ -340,18 +340,35 @@
   }
 }
 
-#shared-library ul {
+#shared-library > ul {
   max-height: 12rem;
   overflow: auto;
   padding-left: 0;
   list-style: none;
 }
 #shared-library li {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  display: block;
+  min-width: 0;
+  border-top: 1px solid var(--control-border);
   margin-block: 8px;
+}
+#shared-library .shared-variants {
+  list-style: none;
+  padding-left: 12px;
+}
+#shared-library summary {
+  min-height: 44px;
+  padding-block: 10px;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+#shared-library summary small {
+  display: block;
+}
+#shared-library .shared-description {
+  margin-block: 4px;
+  overflow-wrap: anywhere;
 }
 #shared-library a {
   display: flex;

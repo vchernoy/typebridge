@@ -1,20 +1,24 @@
 # Grouped Shared with me (#350)
 
-Status: proposed interaction design, with a static executable prototype. Production
-still lists individual received links. This proposal neither enables input-bearing
-links nor claims grouping, transactional group removal or deployment is implemented.
+Status: interaction design with a static prototype and partial UI implementation.
+The library groups supported received links and uses secondary Actions for existing
+individual removal. This does not enable input-bearing links, transactional group
+removal or claim deployment/production acceptance.
 Builds on the agreed identity model in #350 and the gated snapshot contract in #349.
 
 A pure grouping/search model is prepared in `src/editor/shared-groups.ts`. It consumes
 already-validated received records, compares complete title/text/format fields, keeps
 original link references, assigns creation-based ordinals and searches only immutable
-incoming fields. It performs no decoding, sidecar access, storage or rendering. No
-production caller uses it yet; UI, safe removal and v2 integration remain separate.
+incoming fields. It performs no decoding, sidecar access, storage or rendering.
+The library UI consumes this model for grouping/search. New group-wide removal,
+Copy original link, removal confirmation and v2 integration remain separate steps;
+individual removal retains its existing behavior inside Actions.
 
 ## Current boundary
 
-`src/ui/shared-library.ts` decodes each remembered payload and renders one title link
-plus one always-visible Remove button. Search covers title/source. The library is
+The previous `src/ui/shared-library.ts` rendered one title link plus one always-visible
+Remove button per payload. The current UI groups exact matches and searches immutable
+source/title/format and presentation hints, preserving expansion during search. The library is
 limited to 100 received items and 10 MiB; there is no silent eviction. Items are
 ordered by last-opened time. Each original payload owns its separate numeric sidecar.
 The library currently rejects v2 through the default decoder capability; do not
