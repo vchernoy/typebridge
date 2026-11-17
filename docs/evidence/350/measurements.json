@@ -1,0 +1,206 @@
+[
+  {
+    "browser": "chromium",
+    "width": 320,
+    "collapsed": {
+      "rowTargets": 3,
+      "height": 378
+    },
+    "viewport": 320,
+    "scroll": 320,
+    "actions": [
+      88,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      116,
+      44
+    ],
+    "checks": [
+      "keyboard expansion",
+      "collapsed tab order",
+      "incoming-only search",
+      "search expansion restore",
+      "cancel focus",
+      "single removal focus",
+      "group cancel wording",
+      "200% text",
+      "no network"
+    ],
+    "passed": true
+  },
+  {
+    "browser": "chromium",
+    "width": 1440,
+    "collapsed": {
+      "rowTargets": 3,
+      "height": 282
+    },
+    "viewport": 1440,
+    "scroll": 1440,
+    "actions": [
+      64,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      68,
+      44
+    ],
+    "checks": [
+      "keyboard expansion",
+      "collapsed tab order",
+      "incoming-only search",
+      "search expansion restore",
+      "cancel focus",
+      "single removal focus",
+      "group cancel wording",
+      "200% text",
+      "no network"
+    ],
+    "passed": true
+  },
+  {
+    "browser": "firefox",
+    "width": 320,
+    "collapsed": {
+      "rowTargets": 3,
+      "height": 355
+    },
+    "viewport": 320,
+    "scroll": 320,
+    "actions": [
+      65,
+      44,
+      45,
+      44,
+      45,
+      44,
+      45,
+      45,
+      116,
+      45
+    ],
+    "checks": [
+      "keyboard expansion",
+      "collapsed tab order",
+      "incoming-only search",
+      "search expansion restore",
+      "cancel focus",
+      "single removal focus",
+      "group cancel wording",
+      "200% text",
+      "no network"
+    ],
+    "passed": true
+  },
+  {
+    "browser": "firefox",
+    "width": 1440,
+    "collapsed": {
+      "rowTargets": 3,
+      "height": 283
+    },
+    "viewport": 1440,
+    "scroll": 1440,
+    "actions": [
+      65,
+      44,
+      45,
+      44,
+      45,
+      44,
+      45,
+      45,
+      68,
+      45
+    ],
+    "checks": [
+      "keyboard expansion",
+      "collapsed tab order",
+      "incoming-only search",
+      "search expansion restore",
+      "cancel focus",
+      "single removal focus",
+      "group cancel wording",
+      "200% text",
+      "no network"
+    ],
+    "passed": true
+  },
+  {
+    "browser": "webkit",
+    "width": 320,
+    "collapsed": {
+      "rowTargets": 3,
+      "height": 378
+    },
+    "viewport": 320,
+    "scroll": 320,
+    "actions": [
+      64,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      116,
+      44
+    ],
+    "checks": [
+      "keyboard expansion",
+      "collapsed tab order",
+      "incoming-only search",
+      "search expansion restore",
+      "cancel focus",
+      "single removal focus",
+      "group cancel wording",
+      "200% text",
+      "no network"
+    ],
+    "passed": true
+  },
+  {
+    "browser": "webkit",
+    "width": 1440,
+    "collapsed": {
+      "rowTargets": 3,
+      "height": 282
+    },
+    "viewport": 1440,
+    "scroll": 1440,
+    "actions": [
+      64,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      44,
+      68,
+      44
+    ],
+    "checks": [
+      "keyboard expansion",
+      "collapsed tab order",
+      "incoming-only search",
+      "search expansion restore",
+      "cancel focus",
+      "single removal focus",
+      "group cancel wording",
+      "200% text",
+      "no network"
+    ],
+    "passed": true
+  }
+]
