@@ -179,10 +179,12 @@ test('restored values agree on the first visible render and a late old open cann
   const seen = await page.evaluate(() => (window as unknown as { visibleReaderValues: string[] }).visibleReaderValues);
   expect(seen.length).toBeGreaterThan(0); expect(seen.every(value => value === '5')).toBe(true);
   await page.addInitScript(() => {
-    const open = indexedDB.open.bind(indexedDB); let count = 0;
-    indexedDB.open = (...args: Parameters<IDBFactory['open']>) => {
-      const request = open(...args);
-      if (++count === 2) {
+    // WebKit can lose an own-property hook on the indexedDB wrapper before its
+    // first use. Keep the hook on the realm's prototype and preserve the receiver.
+    const open = IDBFactory.prototype.open; let count = 0;
+    IDBFactory.prototype.open = function (this: IDBFactory, ...args: Parameters<IDBFactory['open']>) {
+      const request = open.apply(this, args);
+      if (args[0] === 'typebridge' && ++count === 2) {
         let handler: ((event: Event) => void) | null = null;
         Object.defineProperty(request, 'onsuccess', { get: () => handler, set: value => { handler = value; } });
         request.addEventListener('success', event => {
@@ -204,10 +206,11 @@ test('restored values agree on the first visible render and a late old open cann
 test('blocked initial state load falls back to defaults and a late open never hydrates it', async ({ page }) => {
   const url = await link(); await page.goto(url); await ready(page); await save(page, '5');
   await page.addInitScript(() => {
-    const open = indexedDB.open.bind(indexedDB); let count = 0;
-    indexedDB.open = (...args: Parameters<IDBFactory['open']>) => {
-      const request = open(...args);
-      if (++count === 2) {
+    // As above, intercept the input connection through a stable prototype hook.
+    const open = IDBFactory.prototype.open; let count = 0;
+    IDBFactory.prototype.open = function (this: IDBFactory, ...args: Parameters<IDBFactory['open']>) {
+      const request = open.apply(this, args);
+      if (args[0] === 'typebridge' && ++count === 2) {
         let handler: ((event: Event) => void) | null = null;
         Object.defineProperty(request, 'onsuccess', { get: () => handler, set: value => { handler = value; } });
         request.addEventListener('success', event => { (window as unknown as { releaseInputOpen: () => void }).releaseInputOpen = () => { handler?.call(request, event); }; }, { once: true });
