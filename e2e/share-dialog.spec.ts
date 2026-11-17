@@ -8,6 +8,44 @@ import { readStoredDocs } from './storage-helpers';
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Share link', exact: true });
 const linkField = (page: Page) => dialog(page).getByRole('textbox', { name: 'Link' });
 
+test('collapsed reader options summarize defaults and leave phone Copy reachable (#351)', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await setText(page, 'Options fixture', '**Shared source**');
+  await page.locator('#doc-menu-open').click();
+  await page.locator('#document-format').selectOption('markdown');
+  await page.locator('#share-link').click();
+  const sheet = dialog(page);
+  const toggle = sheet.locator('#share-options-toggle');
+  await expect(sheet.locator('#share-edit')).toBeHidden();
+  await expect(sheet.locator('#share-heading')).toBeHidden();
+  await expect(sheet.locator('#share-view')).toBeHidden();
+  await expect(toggle).toContainText('Rendered page · Title shown · Edit a copy shown');
+  const box = await toggle.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  const copy = sheet.locator('#share-copy');
+  const rect = await copy.boundingBox();
+  expect(rect!.y).toBeGreaterThanOrEqual(0);
+  expect(rect!.y + rect!.height).toBeLessThanOrEqual(568);
+  expect(await sheet.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+  const original = await decodeShown(page);
+  await toggle.focus(); await page.keyboard.press('Enter');
+  await expect(sheet.locator('#share-edit')).toBeVisible();
+  await sheet.locator('#share-heading').uncheck();
+  await sheet.locator('#share-view').selectOption('source');
+  await toggle.focus(); await page.keyboard.press('Space');
+  await expect(toggle).toContainText('Source · Title hidden · Edit a copy shown');
+  const changed = await decodeShown(page);
+  expect(changed.decoded).toMatchObject({ ok: true, document: { heading: false, view: 'source', edit: true, text: '**Shared source**' } });
+  expect(changed.url.hash).not.toBe(original.url.hash);
+  await page.screenshot({ path: '/tmp/351-reader-options-collapsed.png', fullPage: true });
+  await toggle.click();
+  await expect(sheet.locator('#share-heading')).not.toBeChecked();
+  await expect(sheet.locator('#share-view')).toHaveValue('source');
+  await page.screenshot({ path: '/tmp/351-reader-options-expanded.png', fullPage: true });
+  await page.keyboard.press('Escape'); await expect(sheet).toHaveCount(0);
+  await expect(page.locator('#doc-menu-open')).toBeFocused();
+});
+
 test('preview disclosure loads on demand and cancellation cannot revive a collapsed preview (#351)', async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 320, height: 568 } });
   try {
@@ -35,7 +73,7 @@ test('preview disclosure loads on demand and cancellation cannot revive a collap
     await toggle.focus(); await page.keyboard.press('Enter');
     await expect.poll(() => !!release).toBe(true);
     await page.keyboard.press('Space');
-    await expect(sheet.locator('details')).not.toHaveAttribute('open', '');
+    await expect(sheet.locator('.share-preview-disclosure')).not.toHaveAttribute('open', '');
     await release!();
     await expect.poll(() => completed).toBe(true);
     await expect(sheet.locator('.active-doc')).toHaveCount(0);
@@ -101,7 +139,9 @@ test('the sender can turn off Edit a copy for readers', async ({ page }) => {
   await setText(page, 'Только чтение', 'Текст');
   await documentAction(page, '#share-link');
   const before = await linkField(page).inputValue();
+  await dialog(page).locator('#share-options-toggle').click();
   await dialog(page).getByLabel('Readers can edit a copy').uncheck();
+  await expect(dialog(page).locator('.share-option-values')).toContainText('Edit a copy hidden');
   await expect(linkField(page)).not.toHaveValue(before);
   await expect(linkField(page)).not.toHaveValue('');
   const { decoded } = await decodeShown(page);
@@ -130,6 +170,7 @@ test('a too-large regeneration cannot copy the previous link and a later toggle 
   await documentAction(page, '#share-link');
   const { decoded: initial } = await decodeShown(page);
   expect(initial.ok && initial.document.edit).toBe(true);
+  await dialog(page).locator('#share-options-toggle').click();
   const checkbox = dialog(page).getByLabel('Readers can edit a copy');
   await page.evaluate(() => { (window as unknown as { oversizeNextCompress: boolean }).oversizeNextCompress = true; });
   await checkbox.uncheck();
@@ -151,11 +192,20 @@ test('Copy link copies or explains, and every control is reachable with Tab', as
   // Focus starts on Close; Tab cycles through the controls and wraps.
   await dialog(page).getByRole('button', { name: 'Close' }).focus();
   const order: string[] = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 5; i++) {
     await page.keyboard.press('Tab');
     order.push(await page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent || ''));
   }
-  expect(order).toEqual(['share-url', 'share-copy', 'share-edit', 'share-heading', 'share-preview-toggle', 'confirm-dialog-close']);
+  expect(order).toEqual(['share-url', 'share-copy', 'share-options-toggle', 'share-preview-toggle', 'confirm-dialog-close']);
+  await dialog(page).locator('#share-options-toggle').focus();
+  await page.keyboard.press('Enter');
+  await dialog(page).getByRole('button', { name: 'Close' }).focus();
+  const expanded: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    await page.keyboard.press('Tab');
+    expanded.push(await page.evaluate(() => document.activeElement?.id || ''));
+  }
+  expect(expanded).toEqual(['share-url', 'share-copy', 'share-options-toggle', 'share-edit', 'share-heading', 'share-preview-toggle', 'confirm-dialog-close']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 });
@@ -197,13 +247,18 @@ test('a slow regenerate never leaves a link that disagrees with the checkbox (#2
   });
   await setText(page, 'Гонка', 'Текст');
   await documentAction(page, '#share-link');
+  await dialog(page).locator('#share-options-toggle').click();
   const checkbox = dialog(page).getByLabel('Readers can edit a copy');
   await page.evaluate(() => { (window as unknown as { holdNextCompress: boolean }).holdNextCompress = true; });
   await checkbox.uncheck(); // edit: false, held
+  await dialog(page).locator('#share-options-toggle').click();
+  await expect(checkbox).toBeHidden();
+  await expect(dialog(page).locator('.share-option-values')).toContainText('Edit a copy hidden');
   await expect(dialog(page).getByRole('button', { name: 'Copy link' })).toBeDisabled();
   // No stale link stays in the field to copy by hand meanwhile.
   await expect(linkField(page)).toHaveValue('');
   await expect(linkField(page)).toHaveAttribute('placeholder', 'Updating link…');
+  await dialog(page).locator('#share-options-toggle').click();
   await checkbox.check(); // edit: true, finishes first
   await expect.poll(() => page.evaluate(() => (window as unknown as { heldCompressDone?: boolean }).heldCompressDone)).toBe(true);
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
@@ -290,6 +345,7 @@ test('Markdown share preview follows the reader view and header X closes with fo
   await rendered.getByRole('link', { name: 'Jump' }).click();
   expect(page.url()).toBe(editorUrl);
   expect((await decodeShown(page)).decoded).toMatchObject({ ok: true, document: { text, view: 'rendered' } });
+  await sheet.locator('#share-options-toggle').click();
   await sheet.getByLabel('Readers see:').selectOption('source');
   await expect(sheet.getByLabel('Document source preview')).toContainText('**Formatted preview**');
   await expect(sheet.locator('.active-doc')).toHaveCount(0);
@@ -342,6 +398,7 @@ for (const format of ['plain', 'markdown'] as const) {
     } else {
       await documentAction(page, '#share-link');
     }
+    await dialog(page).locator('#share-options-toggle').click();
     const checkbox = dialog(page).getByRole('checkbox', { name: 'Show title on the page', exact: true });
     await expect(checkbox).toBeChecked();
     await dialog(page).locator('#share-preview-toggle').click();
@@ -351,6 +408,7 @@ for (const format of ['plain', 'markdown'] as const) {
     const original = await decodeShown(page);
     expect(original.decoded.ok && original.decoded.document.heading).toBeUndefined();
     await checkbox.uncheck();
+    await expect(dialog(page).locator('.share-option-values')).toContainText('Title hidden');
     await expect(previewTitle).toBeHidden();
     const hidden = await decodeShown(page);
     expect(hidden.decoded.ok && hidden.decoded.document.heading).toBe(false);
