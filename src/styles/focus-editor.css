@@ -64,6 +64,9 @@ body.focus-mode .top-actions {
     flex: 1 1 0;
     max-width: none;
   }
+  body.focus-mode #draft-title {
+    flex: 1 1 0;
+  }
 }
 body.focus-mode #editor {
   width: 100%;
