@@ -105,3 +105,9 @@ the current page. Failure/full/private status is honest and never blocks reading
 
 
 Rendered editable Markdown with numeric inputs shows a separate input-save status and Reset inputs to defaults. These controls do not modify source or its Undo/Redo. A revision conflict preserves current controls in memory and offers Load saved inputs; it does not replace values automatically. Private, unsaved and failed-storage cases remain usable with a temporary-input status. Read-only source does not make Rendered inputs read-only: permitted Rendered/comparison windows save inputs independently while another window may edit source.
+
+The shared reading page offers Share even when Edit a copy is hidden. Its existing
+Share sheet includes an explicit default-off Include current parameters control when
+accepted live model state is available. Parameters are captured at opening, so preview
+experimentation and later source-page edits cannot change the snapshot. Reset retains
+authored-source defaults; editable-copy input initialization remains separate.

@@ -105,8 +105,7 @@ the expected payload inside its transaction; changed records require review rath
 than deleting an unconfirmed replacement. Group
 actions offers confirmed removal of all received links and their saved reader inputs,
 while preserving editable copies. Changed membership requires a fresh decision;
-storage failures cannot commit partial group removal. Input-bearing v2 links remain
-disabled. Unavailable stored links remain
+storage failures cannot commit partial group removal. Input-bearing v2 links are accepted and grouped as distinct received variants. Unavailable stored links remain
 visible with a safe individual removal action. Removing an item also removes its
 reserved reader sidecar, never an independent editable copy. No account, sender identity
 or cross-device sync is implied. A maximum of 100 items / 10 MiB of payloads is retained;
@@ -171,3 +170,26 @@ and reloads them through the existing clear lifecycle. No tombstones outlive rem
 Each saved editable document has its own local numeric input state, separate from source, history and shared links. Switching Edit/Rendered, remounting after source edits and reopening restores compatible input names and current ranges. Two documents with identical Markdown remain independent. Plain documents still load no renderer.
 
 Autosave-off/private and unsaved documents keep inputs in memory. Any permitted Rendered window can save the document’s inputs, including a comparison window or a window where source is read-only because another window edits it. This does not acquire source ownership or change source/title/history. Concurrent input edits use independent revisions and explicit conflict resolution. Privacy or preference-read failure freezes that editor's cached state even after re-enabling: reload to resume permitted saving from the public baseline. Storage failure leaves the current inputs usable. Wait for Inputs saved on this device before leaving; rapid navigation or a crash can lose the latest changes. Reset inputs to defaults clears only the numeric sidecar; deleting/clearing a document removes it too. Quiz answers are not included.
+
+## Re-share current parameters (#372)
+
+A valid shared reading page offers **Share** independently of **Edit**. It captures
+its title/source/format/presentation and the live model's accepted numeric values
+when opened. **Include current parameters** is explicit and off by default; checking
+it creates a bounded version-2 snapshot link. Unchecked links remain legacy version 1
+and use authored defaults. Invalid/uncommitted control text, computed outputs,
+history and settings are excluded. Nothing is uploaded. Private/opted-out readers
+can explicitly re-share without saving locally or taking source ownership.
+
+A new recipient initializes accepted parameters before revealing controls/results.
+Existing recipient-local saved state wins as a whole, including an empty Reset record.
+**Reset inputs to defaults** uses authored source defaults, not the link's starting
+values. The original URL/library item never changes; re-sharing creates a new immutable
+variant. Library grouping/search recognizes its incoming parameters, never local sidecars.
+Older clients reject version-2 links explicitly; source-only/plain paths load no renderer.
+Editable-copy creation/reuse retains existing source-only semantics in this slice; it
+does not overwrite a copy's numeric state or promise to copy the recipient's answers.
+
+Re-share inherits the received Edit a copy hint. If off, it stays off and its checkbox
+is disabled; if on, the recipient may keep it or turn it off for the new link. This
+is presentation behavior, not protection against manually copying visible source.

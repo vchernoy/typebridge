@@ -43,10 +43,11 @@ for (const values of [[], [['x', 7], ['seed', 0], ['__proto__', 5]]] as [string,
     const made = await encodeSharePayload(document, { inputSnapshots: true });
     if (!made.ok) throw new Error('Node fixture refused');
     const requests: string[] = []; page.on('request', request => requests.push(request.url()));
-    // The production route must still reject v2 while initialization is not wired.
+    // Product source-only routes accept v2 without mounting the renderer.
+    await page.addInitScript(() => localStorage.setItem('typebridge.rememberShared.v1', 'off'));
     await page.goto('/read.html#doc=' + made.payload);
-    await expect(page.locator('#read-title')).toHaveText('This shared document cannot be opened');
-    await expect(page.locator('#read-text')).toContainText('newer version');
+    await expect(page.locator('#read-title')).toHaveText(document.title);
+    await expect(page.locator('#read-text')).toHaveText(document.text);
     expect(await page.evaluate(() => indexedDB.databases())).toEqual([]);
     expect(requests.filter(url => /active-renderer|\.woff2/.test(url))).toEqual([]);
     await page.addScriptTag({ content: await moduleScript() });

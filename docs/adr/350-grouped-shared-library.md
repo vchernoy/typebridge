@@ -3,7 +3,8 @@
 Status: interaction design with a static prototype and partial UI implementation.
 The library groups supported received links and uses secondary Actions for existing
 individual removal. Confirmed atomic group removal is implemented as described below;
-input-bearing links and deployment/production acceptance remain separate.
+input-bearing links are recognized by the core re-share integration; final
+deployment/production acceptance remains separate.
 Builds on the agreed identity model in #350 and the gated snapshot contract in #349.
 
 A pure grouping/search model is prepared in `src/editor/shared-groups.ts`. It consumes
@@ -13,8 +14,8 @@ incoming fields. It performs no decoding, sidecar access, storage or rendering.
 The library UI consumes this model for grouping/search. Group actions confirms and
 removes the captured group atomically. Per-link Actions copies the exact original
 payload or confirms individual removal. Copy has a selected read-only URL fallback;
-the per-item transaction refuses a changed payload after confirmation. V2 integration
-and remaining production acceptance are separate steps.
+the per-item transaction refuses a changed payload after confirmation. V2 incoming parameter summaries/search are integrated without consulting local
+sidecars; remaining production acceptance stays separate.
 
 ## Current boundary
 
@@ -23,8 +24,9 @@ Remove button per payload. The current UI groups exact matches and searches immu
 source/title/format and presentation hints, preserving expansion during search. The library is
 limited to 100 received items and 10 MiB; there is no silent eviction. Items are
 ordered by last-opened time. Each original payload owns its separate numeric sidecar.
-The library currently rejects v2 through the default decoder capability; do not
-enable it merely to implement grouping or show unsupported inputs as defaults.
+The library explicitly validates v2 and preserves incoming parameters for summaries
+and search; reading-page initialization supports them. Default codec callers retain
+their version gate. Group removal validates both supported wire versions.
 
 The prototype's four synthetic received links yield three visible row controls when
 collapsed (one group summary, one singleton title and its Actions disclosure), with

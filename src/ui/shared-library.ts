@@ -97,8 +97,8 @@ export function setupSharedLibrary(database: () => IDBDatabase | undefined): { r
     link.target = '_blank'; link.rel = 'noopener';
     link.setAttribute('aria-label', title + (singleton ? '' : ', received link ' + ordinal) + ' (shared, opens a new tab)');
     const description = document.createElement('p'); description.className = 'shared-description';
-    // Production decoders still reject v2. No sidecar values are read for summaries.
-    description.textContent = 'Authored defaults · ' + sharedVariantHints(doc);
+    // Summaries use immutable incoming intent, never recipient-local sidecar values.
+    description.textContent = (doc.inputs?.values.length ? doc.inputs.values.slice(0, 2).map(([name, value]) => `${name} = ${value}`).join(' · ') + (doc.inputs.values.length > 2 ? ` · +${doc.inputs.values.length - 2} parameters` : '') : 'Authored defaults') + ' · ' + sharedVariantHints(doc);
     if (singleton) description.textContent += ' · ' + format(group.format);
     li.append(link, description, actions(item, title, group, singleton ? undefined : ordinal)); return li;
   }
@@ -137,7 +137,7 @@ export function setupSharedLibrary(database: () => IDBDatabase | undefined): { r
       const db = database(); if (!db) throw new Error('Storage unavailable');
       const rows = await listSharedItems(db); const decodedRows: ReceivedDocument[] = [], unavailable: SharedItem[] = [];
       for (const row of rows) {
-        const decoded = await decodeSharePayload(row.payload);
+        const decoded = await decodeSharePayload(row.payload, { inputSnapshots: true });
         if (started !== generation) return;
         if (decoded.ok) decodedRows.push({ item: row, document: decoded.document }); else unavailable.push(row);
       }

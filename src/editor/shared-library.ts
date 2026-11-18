@@ -41,7 +41,7 @@ export async function rememberShared(payload: string, current: () => boolean, in
   if (!current() || !readerStorageAllowed() || removalToken === undefined) return 'disabled';
   const cancelled = () => !current() || sharedRemovalToken() !== removalToken;
   if (cancelled()) return 'cancelled';
-  if (!(await decodeSharePayload(payload)).ok) return 'invalid';
+  if (!(await decodeSharePayload(payload, { inputSnapshots: true })).ok) return 'invalid';
   const bytes = new TextEncoder().encode(payload);
   if (!current() || !readerStorageAllowed()) return 'disabled';
   if (cancelled()) return 'cancelled';
@@ -118,7 +118,7 @@ export async function removeSharedGroup(db: IDBDatabase, group: SharedGroupIdent
   if (observed.length > SHARED_MAX_ITEMS) throw new Error('Shared library exceeds grouping limit');
   const members: SharedItem[] = [];
   for (const item of observed) {
-    const decoded = await decodeSharePayload(item.payload);
+    const decoded = await decodeSharePayload(item.payload, { inputSnapshots: true });
     if (decoded.ok && decoded.document.title === identity.title && decoded.document.text === identity.text && decoded.document.format === identity.format) members.push(item);
   }
   if (!sameReceivedItems(confirmed, members) || sharedRemovalToken() !== token) return 'changed';
