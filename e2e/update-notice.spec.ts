@@ -238,3 +238,42 @@ for (const width of [320, 390]) for (const enlarged of [false, true]) {
     await testInfo.attach('update-layout-geometry', { body: JSON.stringify({ width, enlarged, before, visible, after: (await editor.boundingBox())!.y }), contentType: 'application/json' });
   });
 }
+
+test('keyboard dismissal returns focus and selection to the previous editor (#11)', async ({ page }) => {
+  await waitingUpdate(page);
+  await page.goto('/editor.html');
+  const editor = page.locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.fill('Keep my selection');
+  await editor.evaluate((node: HTMLTextAreaElement) => { node.focus(); node.setSelectionRange(5, 7); });
+  const dismiss = page.locator('#update-notice').getByRole('button', { name: 'Not now', exact: true });
+  await dismiss.focus();
+  await dismiss.press('Enter');
+  await expect(page.locator('#update-notice')).toBeHidden();
+  await expect(editor).toBeFocused();
+  expect(await editor.evaluate((node: HTMLTextAreaElement) => [node.selectionStart, node.selectionEnd])).toEqual([5, 7]);
+  await expect(editor).toHaveValue('Keep my selection');
+});
+
+for (const retired of ['other', 'hidden', 'detached'] as const) {
+  test(`update dismissal does not steal focus from another control, retired target=${retired} (#11)`, async ({ page }) => {
+    await waitingUpdate(page);
+    await page.goto('/editor.html');
+    const editor = page.locator('#editor');
+    await expect(editor).toBeEnabled();
+    await editor.focus();
+    const dismiss = page.locator('#update-notice').getByRole('button', { name: 'Not now', exact: true });
+    await dismiss.focus();
+    await page.evaluate(retired => {
+      const editor = document.querySelector<HTMLElement>('#editor')!;
+      if (retired === 'hidden') editor.hidden = true;
+      else if (retired === 'detached') editor.remove();
+      else document.querySelector<HTMLElement>('#focus-mode')!.focus();
+      // Programmatic dismissal must not move focus away from a different control.
+      document.querySelector<HTMLButtonElement>('#update-notice button:last-child')!.click();
+    }, retired);
+    await expect(page.locator('#update-notice')).toBeHidden();
+    expect(await page.evaluate(() => document.activeElement?.id)).not.toBe('editor');
+    if (retired === 'other') await expect(page.locator('#focus-mode')).toBeFocused();
+  });
+}

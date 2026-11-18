@@ -8,6 +8,7 @@ Scope: the layout from #123 and its document/title, typing-mode, save-state, Set
 | --- | --- |
 | Typing switch | Real switch/checkbox state, name “Кириллица”, configured shortcut description; existing mode-switch/shortcut suites and `ui-accessibility.spec.ts` |
 | Documents and More | Labeled dialog/listbox and menu patterns, keyboard traversal, Escape and trigger focus; document-names/toolbar/focus/escape suites |
+| Update notice | Keyboard Not now dismissal returns focus and selection to the previous usable control; hidden/detached targets and focus elsewhere are preserved (`update-notice.spec.ts`). Worker transport is simulated; no screen-reader claim. |
 | Settings | Non-modal dialog permits editor focus, Escape closes Settings before Focus; Settings and accessibility suites |
 | Shared confirmations and shortcuts | Modal role, inert background, safe Escape, focus containment/return and scrollable message on short viewports; confirmation/keyboard-shortcut suites |
 | Find and save state | Named inputs/options/buttons; detailed polite status remains the announced source, compact indicator is not a duplicate live region |
