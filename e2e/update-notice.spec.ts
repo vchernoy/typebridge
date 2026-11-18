@@ -195,3 +195,46 @@ for (const late of [false, true]) for (const event of ['statechange', 'controlle
     await expect.poll(async () => (await page.locator('#editor').boundingBox())!.y).toBeLessThan(300);
   });
 }
+
+for (const width of [320, 390]) for (const enlarged of [false, true]) {
+  test(`late waiting update preserves usable phone layout at ${width}px, enlarged=${enlarged} (#304)`, async ({ page }, testInfo) => {
+    await waitingUpdate(page, { late: true, failActivation: false });
+    await page.setViewportSize({ width, height: 800 });
+    if (enlarged) await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = 'html { font-size: 24px; } body { font-size: 1rem; } button, input, label, span, select { font-size: inherit; }';
+        document.head.append(style);
+      });
+    });
+    await page.goto('/editor.html');
+    const editor = page.locator('#editor');
+    const notice = page.locator('#update-notice');
+    await expect(editor).toBeEnabled();
+    await expect(notice).toBeHidden();
+    if (!enlarged) await expect.poll(async () => (await editor.boundingBox())!.y).toBeLessThan(width < 360 ? 340 : 300);
+    const before = (await editor.boundingBox())!.y;
+    await editor.fill('Keep editing through an update');
+    await page.evaluate(() => (window as unknown as { installTestUpdate: () => void }).installTestUpdate());
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('New version available');
+    const visible = (await editor.boundingBox())!.y;
+    expect(visible).toBeGreaterThan(before);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+    for (const name of ['Reload', 'Not now']) {
+      const button = notice.getByRole('button', { name, exact: true });
+      await expect(button).toBeVisible();
+      const box = (await button.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await editor.fill('Editing still works while update waits');
+    await notice.getByRole('button', { name: 'Not now', exact: true }).click();
+    await expect(notice).toBeHidden();
+    await expect(editor).toHaveValue('Editing still works while update waits');
+    await expect.poll(async () => Math.abs((await editor.boundingBox())!.y - before)).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => sessionStorage.getItem('test.update.activated'))).toBeNull();
+    await testInfo.attach('update-layout-geometry', { body: JSON.stringify({ width, enlarged, before, visible, after: (await editor.boundingBox())!.y }), contentType: 'application/json' });
+  });
+}
