@@ -33,6 +33,11 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   dismiss.type = 'button';
   dismiss.textContent = 'Not now';
   notice.append(message, reload, dismiss);
+  let returnFocus: HTMLElement | undefined;
+  notice.addEventListener('focusin', event => {
+    const previous = event.relatedTarget;
+    if (previous instanceof HTMLElement && !notice.contains(previous)) returnFocus = previous;
+  });
   const defaultWorkspace = document.querySelector<HTMLElement>('main > section');
   if (deps.mount) deps.mount.prepend(notice);
   else defaultWorkspace?.before(notice);
@@ -86,8 +91,13 @@ export function watchForUpdates(registration: ServiceWorkerRegistration, deps: {
   watchInstalling();
   registration.addEventListener('updatefound', watchInstalling);
   dismiss.addEventListener('click', () => {
+    const ownsFocus = notice.contains(document.activeElement);
     dismissed = true;
     notice.hidden = true;
+    if (ownsFocus && returnFocus?.isConnected && !returnFocus.closest('[hidden], [inert]') &&
+        !returnFocus.matches(':disabled') && returnFocus.getClientRects().length) {
+      returnFocus.focus({ preventScroll: true });
+    }
     try { sessionStorage.setItem(DISMISSED, 'yes'); } catch { /* Remains dismissed on this page. */ }
   });
   // Keep application shortcuts from acting behind this notice while it owns focus.
