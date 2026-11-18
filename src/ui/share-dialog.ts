@@ -3,8 +3,8 @@
  * text, says plainly what sharing means, and copies the link. The link format and its limits
  * are in editor/share-link.ts; links open on the reading page (read.html).
  */
-import { documentFormat, type DocumentFormat } from '../editor/document-fields';
 import { type ShareView, encodeSharePayload, shareLinkLength, shareUrl } from '../editor/share-link';
+import { inspectInputSnapshot, type InputSnapshot } from '../editor/input-snapshot';
 import { askConfirmChoice } from './confirm-dialog';
 
 export const SHARE_PRIVACY_TEXT = 'Anyone with the link can read this document. The text travels inside the link itself; nothing is uploaded. The link also stays in your browser history and wherever you paste it.';
@@ -14,10 +14,14 @@ const PREVIEW_CHARS = 280;
 
 export type ShareDialogDeps = {
   /** Title (or the Untitled default) and text currently shown, like Export. */
-  surface: () => { title: string; text: string; format?: DocumentFormat };
+  surface: () => { title: string; text: string; format?: string; view?: ShareView; edit?: boolean; heading?: false; inputs?: InputSnapshot };
   /** The site root links point to. */
   base: () => string;
   returnFocus: () => HTMLElement;
+  /** Optional page lifecycle guard for asynchronous opening. */
+  current?: () => boolean;
+  /** Received links may retain a disabled Edit hint that recipients cannot enable. */
+  editLocked?: boolean;
 };
 
 /** A short preview of what the reader sees first. */
@@ -29,14 +33,23 @@ export function sharePreview(text: string): string {
 export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const surface = deps.surface();
   const { title, text } = surface;
-  const format = documentFormat(surface);
-  let view: ShareView = format === 'markdown' ? 'rendered' : 'source';
-  let showHeading = true;
+  const format = surface.format ?? 'plain';
+  let view: ShareView = surface.view ?? (format === 'markdown' ? 'rendered' : 'source');
+  let showHeading = surface.heading !== false;
+  const checked = surface.inputs && inspectInputSnapshot(surface.inputs);
+  const snapshot = checked && checked.ok ? checked.snapshot : undefined;
+  const include = document.createElement('input'); include.type = 'checkbox'; include.id = 'share-inputs';
+  const inputLabel = document.createElement('label'); inputLabel.className = 'share-option';
+  inputLabel.append(include, ' Include current parameters');
+  const inputSummary = document.createElement('p');
+  inputSummary.textContent = snapshot ? `${snapshot.values.length} accepted parameters available. Unchecked uses authored defaults.` : '';
+  const initialEdit = surface.edit !== false;
   const make = async (edit: boolean): Promise<string | undefined> => {
-    const encoded = await encodeSharePayload({ title, text, format, view, edit, ...(showHeading ? {} : { heading: false } as const) });
+    const encoded = await encodeSharePayload({ title, text, format, view, edit: deps.editLocked ? initialEdit : edit, ...(showHeading ? {} : { heading: false } as const), ...(include.checked && snapshot ? { inputs: snapshot } : {}) }, { inputSnapshots: true });
     return encoded.ok ? shareUrl(deps.base(), encoded.payload) : undefined;
   };
-  const first = await make(true);
+  const first = await make(initialEdit);
+  if (deps.current && !deps.current()) return;
   const content = document.createElement('div');
   content.className = 'share-dialog';
   if (!first) {
@@ -53,6 +66,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   preview.setAttribute('aria-label', format === 'markdown' ? 'Document source preview' : 'What the reader sees');
   const previewTitle = document.createElement('strong');
   previewTitle.textContent = title;
+  previewTitle.hidden = !showHeading;
   const previewText = document.createElement('div');
   previewText.className = 'share-preview-text';
   previewText.textContent = sharePreview(text) || '(empty)';
@@ -83,12 +97,12 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     previewText.className = 'share-preview-text';
     previewText.textContent = sharePreview(text) || '(empty)';
     preview.setAttribute('aria-label', format === 'markdown' ? 'Document source preview' : 'What the reader sees');
-    if (!previewDisclosure.open || view !== 'rendered') return;
+    if (!previewDisclosure.open || view !== 'rendered' || format !== 'markdown') return;
     try {
       const { renderDocument } = await import('../view/active-renderer');
       if (current !== previewGeneration) return;
       previewText.className = 'share-preview-rendered active-reading';
-      live = renderDocument(previewText, text, navigator.language);
+      live = renderDocument(previewText, text, navigator.language, include.checked && snapshot ? new Map(snapshot.values) : undefined);
       preview.setAttribute('aria-label', 'Rendered document preview');
     } catch {
       if (current !== previewGeneration) return;
@@ -105,7 +119,8 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const edit = document.createElement('input');
   edit.type = 'checkbox';
   edit.id = 'share-edit';
-  edit.checked = true;
+  edit.checked = initialEdit;
+  edit.disabled = deps.editLocked === true;
   editLabel.append(edit, ' Readers can edit a copy');
 
   const headingLabel = document.createElement('label');
@@ -113,7 +128,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const heading = document.createElement('input');
   heading.type = 'checkbox';
   heading.id = 'share-heading';
-  heading.checked = true;
+  heading.checked = showHeading;
   headingLabel.append(heading, ' Show title on the page');
 
   const viewLabel = document.createElement('label');
@@ -185,6 +200,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
       status.textContent = lengthNote();
     });
   };
+  include.addEventListener('change', () => { regenerate(); void updatePreview(); });
   edit.addEventListener('change', regenerate);
   heading.addEventListener('change', () => {
     showHeading = heading.checked;
@@ -206,11 +222,14 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const row = document.createElement('div');
   row.className = 'share-link-row';
   row.append(link, copy);
-  content.append(privacy, linkLabel, row, status, readerOptions);
+  content.append(privacy, linkLabel, row, status);
+  if (snapshot) content.append(inputLabel, inputSummary);
+  content.append(readerOptions);
   content.append(previewDisclosure);
   try {
     await askConfirmChoice({ title: 'Share link', message: content, cancelLabel: 'Close', closeInHeader: true, returnFocus: deps.returnFocus() });
   } finally {
+    ++generation;
     ++previewGeneration;
     live?.destroy();
   }

@@ -1,3 +1,5 @@
+import { openShareDialog } from '../ui/share-dialog';
+import { inspectInputSnapshot } from '../editor/input-snapshot';
 import { prepareSharedInputs } from './shared-inputs';
 import { setupSharedEdit } from './edit-shared';
 import { setupRememberShared } from './remember-shared';
@@ -15,8 +17,12 @@ import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type Shar
 let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
 let inputs: Awaited<ReturnType<typeof prepareSharedInputs>> | undefined;
 let viewGeneration = 0;
+let currentShared: SharedDocument | undefined;
+let readyToShare = false;
+let sharing = false;
+const shareButton = document.querySelector<HTMLButtonElement>('#read-share')!;
 let focusInputReset: string | undefined;
-function stopLive(): void { document.querySelector('#reader-input-state')?.setAttribute('hidden', ''); viewGeneration++; inputs?.destroy(); inputs = undefined; live?.destroy(); live = undefined; }
+function stopLive(): void { readyToShare = false; shareButton.hidden = true; document.querySelector('#reader-input-state')?.setAttribute('hidden', ''); viewGeneration++; inputs?.destroy(); inputs = undefined; live?.destroy(); live = undefined; }
 
 const title = document.querySelector<HTMLElement>('#read-title')!;
 const notice = document.querySelector<HTMLElement>('#read-notice')!;
@@ -59,10 +65,11 @@ function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Prom
   const setView = async (): Promise<void> => {
     stopLive();
     const generation = viewGeneration;
+    currentShared = shared;
     const rendered = view === 'rendered';
     body.className = rendered ? 'active-reading' : 'read-text';
     document.querySelector<HTMLElement>('#reader-input-state')!.hidden = true;
-    if (!rendered) { body.textContent = shared.text; return; }
+    if (!rendered) { body.textContent = shared.text; readyToShare = true; shareButton.hidden = false; return; }
     body.textContent = 'Rendering…';
     try {
       const { renderDocument } = await import('../view/active-renderer');
@@ -72,7 +79,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Prom
           panel: document.querySelector<HTMLElement>('#reader-input-state')!, status: document.querySelector<HTMLElement>('#reader-input-status')!,
           reset: document.querySelector<HTMLButtonElement>('#reader-input-reset')!, load: document.querySelector<HTMLButtonElement>('#reader-input-load')!,
           keep: document.querySelector<HTMLButtonElement>('#reader-input-keep')!,
-        }, () => { focusInputReset = location.hash; void render(); });
+        }, () => { focusInputReset = location.hash; void render(); }, shared.inputs);
       if (generation !== viewGeneration) { attachment.destroy(); return; }
       inputs = attachment;
       const stage = document.createElement('div'); stage.style.visibility = 'hidden'; body.replaceChildren(stage);
@@ -81,6 +88,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Prom
       await mounted.settled();
       if (generation !== viewGeneration) return;
       attachment.bind(mounted); stage.style.removeProperty('visibility');
+      readyToShare = true; shareButton.hidden = false;
       if (focusInputReset === location.hash && document.activeElement === document.body) document.querySelector<HTMLButtonElement>('#reader-input-reset')!.focus({ preventScroll: true });
       focusInputReset = undefined;
     } catch {
@@ -89,6 +97,7 @@ function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Prom
         document.querySelector<HTMLElement>('#reader-input-state')!.hidden = true;
         body.className = 'read-text';
         body.textContent = shared.text;
+        readyToShare = true; shareButton.hidden = false;
         notice.textContent = 'Could not render this document. Showing its text as written.';
         notice.hidden = false;
       }
@@ -110,6 +119,21 @@ function showDocument(shared: SharedDocument, knownFormat: boolean, ready?: Prom
   }
   editActions.show(shared);
 }
+
+// Capture accepted runtime values synchronously; never consult a saved row or mutate the URL.
+shareButton.addEventListener('click', () => {
+  if (sharing || !readyToShare || !currentShared) return;
+  sharing = true;
+  const generation = viewGeneration;
+  const hash = location.hash;
+  const shared = currentShared;
+  const accepted = live && inspectInputSnapshot({ version: 1, values: [...live.session.inputValues()] });
+  void openShareDialog({ surface: () => ({ ...shared,
+    inputs: accepted && accepted.ok ? accepted.snapshot : undefined }),
+    editLocked: !shared.edit,
+    base: () => new URL('/', location.href).toString(), returnFocus: () => shareButton, current: () => generation === viewGeneration && hash === location.hash })
+    .finally(() => { sharing = false; });
+});
 
 // Local Markdown anchors must not replace the fragment carrying the share payload.
 body.addEventListener("click", (event) => {
@@ -141,7 +165,7 @@ async function render(): Promise<void> {
   // Never leave the previous document's Edit a copy armed while another link decodes.
   editCopy.hidden = true;
 
-  const result = await decodeSharePayload(sharePayloadFromHash(hash));
+  const result = await decodeSharePayload(sharePayloadFromHash(hash), { inputSnapshots: true });
   if (generation !== renderGeneration || location.hash !== hash) return;
   if (result.ok) { const ready = remembered.show(sharePayloadFromHash(hash)); showDocument(result.document, result.knownFormat, ready); }
   else showFailure(result.reason);

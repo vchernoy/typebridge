@@ -4,8 +4,8 @@ import { inspectInputSnapshot, type InputSnapshot, type SnapshotFailure } from '
  * nothing is uploaded and the fragment never reaches a server. The payload is versioned
  * (`1.` by default; reserved opt-in `2.` snapshot codec), JSON, UTF-8, deflate and base64url.
  *
- * Production defaults carry title, text, format and presentation hints. The opt-in
- * numeric wire foundation must not be enabled on routes before initialization is supported. Undo
+ * Default calls carry title, text, format and presentation hints. Explicit numeric
+ * capability is used by routes with supported snapshot initialization. Undo
  * history and settings stay local. Decoding treats every link as untrusted input: it enforces
  * size limits before and during decompression and validates the shape. A format this build
  * does not know is still decoded, so the reader can show its raw text (see #244).
@@ -13,9 +13,9 @@ import { inspectInputSnapshot, type InputSnapshot, type SnapshotFailure } from '
 
 /** Format of the current payload, written as the fragment's prefix. */
 export const SHARE_LINK_VERSION = 1;
-/** Reserved numeric-snapshot wire version; production routes remain opt-out until initialization ships. */
+/** Numeric-snapshot wire version; routes must explicitly support initialization. */
 export const SNAPSHOT_SHARE_LINK_VERSION = 2;
-/** Integration capability only: leave unset until reader initialization supports snapshots. */
+/** Explicit integration capability for routes supporting snapshot initialization. */
 export type ShareCodecOptions = { inputSnapshots?: boolean };
 /** Fragment parameter name: `#doc=1.…`. */
 export const SHARE_FRAGMENT_KEY = 'doc';
@@ -44,7 +44,7 @@ export type SharedDocument = {
   edit: boolean;
   /** False hides the visible page title; omitted means shown (old-link default). */
   heading?: false;
-  /** Codec foundation only; requires explicit inputSnapshots capability. */
+  /** Numeric snapshot; requires explicit inputSnapshots capability. */
   inputs?: InputSnapshot;
 };
 

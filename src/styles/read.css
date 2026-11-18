@@ -105,3 +105,18 @@ body.read-page {
   min-height: 44px;
   max-width: 100%;
 }
+
+#read-share {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+#read-share[hidden] {
+  display: none;
+}
+.read-heading {
+  flex-wrap: wrap;
+}
+.read-heading .read-title {
+  flex: 1 1 12rem;
+}

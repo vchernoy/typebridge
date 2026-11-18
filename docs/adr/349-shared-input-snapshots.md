@@ -1,8 +1,9 @@
 # Shared numeric snapshots (#349)
 
-Status: proposed end-to-end contract. Gated codec, receiver and accepted-memory
-capture and compatibility foundations are prepared below; product-route initialization, Share parameter
-controls, saved-baseline fallback and editable-copy initialization are not implemented.
+Status: partial integration. Reading-page re-share, explicit parameter inclusion,
+v2 receiver initialization and library recognition are implemented in the current
+slice. Editor Share parameters, saved-baseline selection and new editable-copy
+input initialization remain separate. Deployment/acceptance is not implied.
 Builds on the issue's initial research and the reviewed #351 Share-flow design.
 Immutable grouping identity is the maintainer's agreed policy; the wire and lifecycle
 choices below are recommendations, not evidence of product approval or implementation.
@@ -10,21 +11,21 @@ choices below are recommendations, not evidence of product approval or implement
 ## Codec foundation boundary
 
 The codec can inspect/encode/decode a bounded v2 envelope only with an explicit
-`inputSnapshots` integration capability. Existing calls omit it and continue rejecting
-v2 with `version`; the production UI still creates v1 source-only links. This prevents
+`inputSnapshots` integration capability. Default codec calls still reject v2 with `version`; read-page and library integration
+explicitly opt in. The editor UI continues creating v1 source-only links. This prevents
 an unready reader accepting parameters that its renderer would then ignore. Empty
 snapshots are preserved; schema/byte failures are distinct. The storage validator is
 shared through a pure module; no IndexedDB/DOM/rendering dependency enters the codec.
-Do not enable the capability on product routes before the initialization/capture and
-copy policies below are implemented and independently reviewed.
+Keep each opt-in tied to supported initialization. Existing editable-copy behavior
+remains source-only rather than silently adopting a new input-copy policy.
 
 The shared-reader adapter accepts an optional validated snapshot for integration
 tests. It distinguishes absent local state from an empty saved reset using record
 existence, chooses one whole baseline, and freezes persistence after failed reads.
 Browser fixtures exercise the real adapter and renderer through the first visible
 controls/math/conditions, local precedence, empty reset and temporary fallback.
-Production callers still omit the snapshot and reject v2; this is preparation, not
-an enabled end-to-end parameter-sharing feature.
+The reading-page caller now supplies validated incoming snapshots; other foundation
+fixtures remain integration coverage rather than product-flow evidence.
 
 The editable-input controller can synchronously copy a bounded accepted numeric
 snapshot after model initialization, including model-only inputs and empty state.
@@ -211,3 +212,16 @@ proposal does not claim that a suitable handoff already exists.
 Each slice needs issue linkage, independent current-change review and quality plus
 Chromium/Firefox/WebKit CI. Close #349 only after the full contract is implemented,
 deployed and production verified. #350 grouping and #351 chrome remain separate.
+
+## Core re-share integration (#372)
+
+The read page now opts into validated v2 decoding and passes incoming parameters to
+its hidden-stage receiver initialization. Shared-library validation/grouping/removal
+also recognizes v2, preserving full-payload identity. The read-page Share action uses
+accepted live state only; explicit default-off inclusion opts the dialog into v2
+encoding. Editor sharing still omits snapshots in this slice. Earlier foundation-only
+product-gating notes above describe their delivery stage, superseded for these routes.
+Maintainer decision: Share is independent of Edit permission, no sender restriction;
+Reset uses authored defaults. New editable-copy value policy remains separate and its
+existing source-only behavior is unchanged. Full feature acceptance remains tracked
+in #349/#372, not claimed merely by this integration.
