@@ -1,7 +1,7 @@
 # Shared numeric snapshots (#349)
 
 Status: proposed end-to-end contract. Gated codec, receiver and accepted-memory
-capture foundations are prepared below; product-route initialization, Share parameter
+capture and compatibility foundations are prepared below; product-route initialization, Share parameter
 controls, saved-baseline fallback and editable-copy initialization are not implemented.
 Builds on the issue's initial research and the reviewed #351 Share-flow design.
 Immutable grouping identity is the maintainer's agreed policy; the wire and lifecycle
@@ -43,6 +43,16 @@ Observed storage epochs remain in the document-scoped cache after writer retirem
 including subsequent preparations that cannot reopen storage. A stale UI epoch cannot
 relabel that cache through repeated Edit/Rendered remounts. Only the current active
 attachment records an observation; canceled preparations cannot replace it.
+
+A separate lazy `compatibleInputSnapshot` preparation boundary accepts captured source
+and an explicitly supplied bounded envelope. It uses sanitized `renderActive` output
+and supported runtime initialization in a detached root, copies only accepted numeric
+inputs, and destroys the runtime immediately. Unknown/removed names and incompatible
+values use the current authored defaults; every rendered control's narrower bounds
+also apply. Invalid envelopes/source are unavailable, and no-input source has a valid
+empty snapshot. It does not inspect another document, read saved state, attach visible
+content, or enable product Share/v2. Saved-baseline selection and explicit UI integration
+remain separate prerequisites.
 
 ## Compatibility evidence
 
