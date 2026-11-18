@@ -44,6 +44,7 @@ html[data-embed="1"] .topbar {
 }
 html[data-embed="1"] .topbar > .doc {
   flex: 0 0 auto;
+  max-width: 100%;
 }
 /* Host windows hide the title, so .doc is sized by its content; a percentage cap on
    .doc-main would be circular there (WebKit wrapped the save icon onto a second line). */
@@ -118,4 +119,15 @@ body.host-page .host-settings-panel {
   position: fixed;
   /* Above free-layout windows (z compacted to 1..n) and the host notice; below confirm dialogs (1000). */
   z-index: 900;
+}
+
+/* Rendered content owns scrolling inside a fixed-height editor window. Reserve
+   the local-input controls below it, including wrapped conflict status. */
+html[data-embed="1"] #rendered-document {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+html[data-embed="1"] #editable-input-state {
+  flex-shrink: 0;
 }

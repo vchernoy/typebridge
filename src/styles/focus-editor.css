@@ -33,7 +33,7 @@ body.focus-mode .hint,
 body.focus-mode label[for="editor"] {
   display: none;
 }
-body.focus-mode section {
+body.focus-mode .workspace > section {
   box-shadow: none;
   border: 0;
   padding: clamp(12px, 2vw, 28px);

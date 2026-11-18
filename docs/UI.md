@@ -111,3 +111,8 @@ Share sheet includes an explicit default-off Include current parameters control 
 accepted live model state is available. Parameters are captured at opening, so preview
 experimentation and later source-page edits cannot change the snapshot. Reset retains
 authored-source defaults; editable-copy input initialization remains separate.
+
+Embedded Rendered views scroll their document within the editor window and reserve
+space for the local input status, Reset and Load saved controls. Focus sizing applies
+only to the outer editor shell; nested rendered sections keep their own scroll bounds
+so the final document content remains reachable above the input panel (#374).
