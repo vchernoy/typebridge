@@ -52,3 +52,36 @@ for (const scenario of ['values', 'empty', 'legacy', 'missing', 'corrupt', 'priv
     expect(result.transactions).toEqual(['denied', 'failed-proof'].includes(scenario) ? [] : [{ stores: ['documents', 'readerStates'], mode: 'readonly' }]);
   });
 }
+
+test('blocked saved-baseline read times out and cannot install a late result', async ({ page }) => {
+  await page.goto('/read.html'); await page.addScriptTag({ content: await fixtureCode() });
+  await page.clock.install();
+  await page.evaluate(async () => {
+    const api = (window as unknown as { SavedBaselineFixture: API }).SavedBaselineFixture;
+    const db = await api.openDraftDatabase();
+    const seed = db.transaction(['documents', 'readerStates'], 'readwrite');
+    seed.objectStore('documents').put({ id: 'blocked', title: 'Synthetic', text: 'Source', revision: 1, updatedAt: 1, private: false });
+    seed.objectStore('readerStates').put({ id: 'editable:blocked', version: 1, revision: 1, inputs: [['x', 5]] });
+    await new Promise<void>(resolve => { seed.oncomplete = () => resolve(); });
+    let holding = true, finished = false, aborted = false;
+    const blocker = db.transaction('documents', 'readwrite');
+    const keepAlive = () => { const request = blocker.objectStore('documents').get('blocked'); request.onsuccess = () => { if (holding) keepAlive(); }; };
+    keepAlive();
+    const transact = db.transaction.bind(db);
+    db.transaction = ((stores: string | string[], mode?: IDBTransactionMode) => {
+      const tx = transact(stores, mode); tx.addEventListener('abort', () => { aborted = true; }); return tx;
+    }) as typeof db.transaction;
+    const pending = api.readSavedInputBaseline(db, 'blocked', '', () => true, () => true).then(value => { finished = true; return value; });
+    Object.assign(window, { baselineTimeout: { pending, finished: () => finished, aborted: () => aborted, release: () => { holding = false; }, close: () => db.close() } });
+  });
+  type State = { pending: Promise<unknown>; finished: () => boolean; aborted: () => boolean; release: () => void; close: () => void };
+  expect(await page.evaluate(() => (window as unknown as { baselineTimeout: State }).baselineTimeout.finished())).toBe(false);
+  await page.clock.fastForward(2100);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { baselineTimeout: State }).baselineTimeout.finished())).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { baselineTimeout: State }).baselineTimeout.pending)).toBeUndefined();
+  // Firefox delivers a queued transaction's abort event after the earlier writer releases.
+  await page.evaluate(() => (window as unknown as { baselineTimeout: State }).baselineTimeout.release());
+  await expect.poll(() => page.evaluate(() => (window as unknown as { baselineTimeout: State }).baselineTimeout.aborted())).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { baselineTimeout: State }).baselineTimeout.pending)).toBeUndefined();
+  await page.evaluate(() => (window as unknown as { baselineTimeout: State }).baselineTimeout.close());
+});
