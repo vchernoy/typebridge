@@ -56,7 +56,9 @@ remain separate prerequisites.
 
 The separate `readSavedInputBaseline` foundation reads an existing document and its
 numeric sidecar in one readonly transaction, with caller-supplied current-generation
-and preference proof checked before and after the read. It requires public policy,
+and preference proof checked before and after the read. A two-second deadline
+aborts only this lookup's readonly transaction and discards late results, so a blocked
+store cannot hold Share preparation indefinitely. It requires public policy,
 matching document identity/epoch and valid source/input revisions and schema. An
 existing empty reset remains a saved baseline; missing/corrupt/private/retired state
 is unavailable. The result is explicitly tagged `saved`, never accepted current memory.
