@@ -54,6 +54,16 @@ empty snapshot. It does not inspect another document, read saved state, attach v
 content, or enable product Share/v2. Saved-baseline selection and explicit UI integration
 remain separate prerequisites.
 
+The separate `readSavedInputBaseline` foundation reads an existing document and its
+numeric sidecar in one readonly transaction, with caller-supplied current-generation
+and preference proof checked before and after the read. It requires public policy,
+matching document identity/epoch and valid source/input revisions and schema. An
+existing empty reset remains a saved baseline; missing/corrupt/private/retired state
+is unavailable. The result is explicitly tagged `saved`, never accepted current memory.
+Callers must retire their generation on source/navigation/privacy changes and recheck
+after later compatibility work. No product caller, automatic fallback, writes, source
+ownership acquisition or persistence rearm is added by this foundation.
+
 ## Compatibility evidence
 
 Baseline main `081353a`: `share-link.ts` serializes only source/title/format/hints;
