@@ -54,8 +54,36 @@ for (const width of [320, 1280]) for (const mode of ['standalone', 'embedded', '
     }
     await ui.locator('#editable-input-load').focus(); await page.keyboard.press('Enter');
     await expect(input).toHaveValue('9');
-    const reset = ui.locator('#editable-input-reset'); await expect(reset).toBeFocused();
+    const reset = ui.locator('#editable-input-reset'); await expect(reset, await ui.locator('html').evaluate(() => 'Active element: ' + document.activeElement?.tagName + '#' + document.activeElement?.id)).toBeFocused();
     await page.keyboard.press('Enter'); await expect(input).toHaveValue('2'); await expect(reset).toBeFocused();
     expect(await readStoredDocs(page, true)).toEqual(stored);
   });
 }
+
+test('loading saved inputs preserves a reader focus move during remount', async ({ page }) => {
+  await page.goto('/editor.html'); await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill(source);
+  await page.locator('#doc-menu-open').click(); await page.locator('#document-format').selectOption('markdown'); await page.locator('#doc-menu-open').click();
+  await expect(page.locator('#save-indicator')).toHaveText('Saved');
+  const id = await page.locator('#drafts').inputValue();
+  await page.locator('#document-view-preview').click();
+  const input = page.locator('input[data-active-input="x"]'); await expect(input).toHaveValue('2');
+  await input.fill('7'); await expect(page.locator('#editable-input-status')).toHaveText('Inputs saved on this device.');
+  await page.evaluate(id => new Promise<void>(resolve => {
+    const request = indexedDB.open('typebridge');
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction('readerStates', 'readwrite'), store = tx.objectStore('readerStates');
+      const row = store.get('editable:' + id);
+      row.onsuccess = () => store.put({ ...row.result, revision: row.result.revision + 1, inputs: [['x', 9]] });
+      tx.oncomplete = () => { db.close(); resolve(); };
+    };
+  }), id);
+  await input.fill('8'); await expect(page.locator('#editable-input-status')).toContainText('Saved inputs changed');
+  // Deliberately move focus after activation and before the delayed render starts.
+  await page.locator('#editable-input-load').evaluate(load => load.addEventListener('click', () => queueMicrotask(() => {
+    document.querySelector<HTMLButtonElement>('#doc-menu-open')!.focus();
+  }), { once: true }));
+  await page.locator('#editable-input-load').focus(); await page.keyboard.press('Enter');
+  await expect(input).toHaveValue('9');
+  await expect(page.locator('#doc-menu-open')).toBeFocused();
+});

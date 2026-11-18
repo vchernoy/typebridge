@@ -116,3 +116,6 @@ Embedded Rendered views scroll their document within the editor window and reser
 space for the local input status, Reset and Load saved controls. Focus sizing applies
 only to the outer editor shell; nested rendered sections keep their own scroll bounds
 so the final document content remains reachable above the input panel (#374).
+Loading saved inputs returns keyboard focus from the retired Load control to Reset,
+including browsers that retain focus on hidden controls; an explicit focus move to
+another control while the document remounts is preserved.
