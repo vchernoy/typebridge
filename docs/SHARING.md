@@ -193,3 +193,8 @@ does not overwrite a copy's numeric state or promise to copy the recipient's ans
 Re-share inherits the received Edit a copy hint. If off, it stays off and its checkbox
 is disabled; if on, the recipient may keep it or turn it off for the new link. This
 is presentation behavior, not protection against manually copying visible source.
+
+Edit progress, existing-window activation results and uncertain-activation recovery
+actions appear directly below the shared-page header, before long document content.
+Browsers may refuse foregrounding another tab; the result explains where the existing
+editor was opened without silently making a duplicate copy.

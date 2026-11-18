@@ -32,19 +32,19 @@
         <button id="read-share" type="button" hidden>Share</button>
         <a id="edit-copy" class="read-edit" href="#" hidden>Edit</a>
       </header>
+      <p id="read-status" class="read-status" role="status" aria-live="polite"></p>
+      <div id="read-edit-actions" class="read-edit-actions" hidden>
+        <button id="check-owner-status" type="button">Check status</button>
+        <button id="create-new-copy" type="button">Create new copy</button>
+      </div>
       <p id="read-notice" class="read-notice" hidden></p>
       <div id="read-text" class="read-text"></div>
-      <p id="read-status" class="read-status" role="status" aria-live="polite"></p>
       <section id="reader-input-state" hidden aria-label="Local reader inputs">
         <p id="reader-input-status" role="status"></p>
         <button id="reader-input-reset" type="button">Reset inputs to defaults</button>
         <button id="reader-input-load" type="button" hidden>Load saved values</button>
         <button id="reader-input-keep" type="button" hidden>Keep these values</button>
       </section>
-      <div id="read-edit-actions" class="read-edit-actions" hidden>
-        <button id="check-owner-status" type="button">Check status</button>
-        <button id="create-new-copy" type="button">Create new copy</button>
-      </div>
     </main>
     <footer class="read-footer">Written with <a href="/">TypeBridge</a></footer>
     <script type="module" src="/src/read/main.ts"></script>

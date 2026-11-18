@@ -4,7 +4,7 @@ import { fillHostEditor } from './settings-helpers';
 import { readStoredDocs } from './storage-helpers';
 
 type HeldWindow = Window & { BroadcastChannel: typeof BroadcastChannel; __allowReuseResults?: boolean; __heldReuseResults?: unknown[]; __reuseCommits?: number; __reuseProbes?: number };
-async function ownerAndReader(owner: Page, context: BrowserContext, hold = false) {
+async function ownerAndReader(owner: Page, context: BrowserContext, hold = false, text = 'Owner original source\n') {
   if (hold) await owner.addInitScript(() => {
     const view = window as HeldWindow;
     const native = BroadcastChannel.prototype.postMessage;
@@ -18,9 +18,9 @@ async function ownerAndReader(owner: Page, context: BrowserContext, hold = false
   await owner.goto('/');
   const first = owner.frameLocator('.host-window[data-window-id="main"] iframe');
   await expect(first.locator('#editor')).toBeEnabled({ timeout: 30_000 });
-  await fillHostEditor(first, 'Owner original source\n');
+  await fillHostEditor(first, text);
   await expect(first.locator('#save-indicator')).toHaveText('Saved');
-  const row = (await readStoredDocs(owner)).find(row => row.text === 'Owner original source\n')!;
+  const row = (await readStoredDocs(owner)).find(row => row.text === text)!;
   await owner.getByRole('button', { name: 'New window' }).click();
   await expect(owner.frameLocator('.host-window[data-window-id="w2"] iframe').locator('#editor')).toBeEnabled({ timeout: 30_000 });
   const encoded = await encodeSharePayload({ title: row.title, text: row.text, format: 'plain', view: 'source', edit: true });
@@ -256,3 +256,24 @@ for (const timing of ['during', 'after'] as const) {
     await reader.close();
   });
 }
+
+
+for (const uncertain of [false, true]) test(`Edit on a long shared document keeps feedback and recovery visible: uncertain=${uncertain}`, async ({ page: owner, context }) => {
+  const { reader } = await ownerAndReader(owner, context, uncertain, 'Long synthetic line\n'.repeat(150));
+  await reader.setViewportSize({ width: 390, height: 700 });
+  const before = await readStoredDocs(owner);
+  await reader.locator('#edit-copy').click();
+  const status = reader.locator('#read-status');
+  await expect(status).toContainText(uncertain ? 'Activation status is unknown' : 'Opened the existing document', { timeout: 10000 });
+  const box = (await status.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(700);
+  if (uncertain) {
+    const actions = (await reader.locator('#read-edit-actions').boundingBox())!;
+    expect(actions.y + actions.height).toBeLessThanOrEqual(700);
+    await expect(reader.locator('#check-owner-status')).toBeEnabled();
+  }
+  await reader.screenshot({ path: `/tmp/375-feedback-${uncertain}.png` });
+  await expect(reader).toHaveURL(/\/read.html#doc=/);
+  expect(await readStoredDocs(owner)).toEqual(before);
+});
