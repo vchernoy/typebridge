@@ -105,7 +105,7 @@ Only known TypeBridge content keys are removed from local/session storage: journ
 
 ### Markdown rendering (#244)
 
-`StoredDraft.format` is optional (`plain` when absent; `markdown` enables active-md 0.1.1).
+`StoredDraft.format` is optional (`plain` when absent; `markdown` enables the ActiveMD renderer).
 It shares the gap-free content change sequence with text/title/find/replace, and is included
 in conflict/recovery copies, reload backups and same-tab handoff. No IndexedDB version bump or
 migration is needed for the optional row field. Format actions use the existing privacy gate.
