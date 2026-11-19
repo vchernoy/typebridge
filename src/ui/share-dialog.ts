@@ -171,6 +171,32 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   copy.id = 'share-copy';
   copy.textContent = 'Copy link';
 
+  const embedLabel = document.createElement('label');
+  embedLabel.htmlFor = 'share-embed-code';
+  embedLabel.textContent = 'Embed on another website';
+  const embedCode = document.createElement('textarea');
+  embedCode.id = 'share-embed-code';
+  embedCode.readOnly = true;
+  embedCode.rows = 3;
+  embedCode.spellcheck = false;
+  embedCode.addEventListener('focus', () => embedCode.select());
+  const copyEmbed = document.createElement('button');
+  copyEmbed.type = 'button';
+  copyEmbed.id = 'share-copy-embed';
+  copyEmbed.textContent = 'Copy embed code';
+  const makeEmbed = (url: string): string => {
+    const target = new URL(url);
+    target.pathname = '/embed.html';
+    // Attribute-escape the entire URL before putting it in generated HTML.
+    const safeUrl = target.toString().replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+    return '<iframe src="' + safeUrl + '" width="100%" height="450" style="border:0" loading="lazy" title="Interactive document"></iframe>';
+  };
+  const updateEmbed = (): void => {
+    embedCode.value = link.value ? makeEmbed(link.value) : '';
+    copyEmbed.disabled = !embedCode.value;
+  };
+  updateEmbed();
+
   const status = document.createElement('p');
   status.className = 'share-status';
   status.setAttribute('aria-live', 'polite');
@@ -187,6 +213,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     const current = ++generation;
     copy.disabled = true;
     link.value = '';
+    updateEmbed();
     link.placeholder = 'Updating link…';
     void make(edit.checked).then(url => {
       if (current !== generation) return;
@@ -196,6 +223,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
         return;
       }
       link.value = url;
+      updateEmbed();
       copy.disabled = false;
       status.textContent = lengthNote();
     });
@@ -219,10 +247,21 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     }
   });
 
+  copyEmbed.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(embedCode.value);
+      status.textContent = 'Embed code copied.';
+    } catch {
+      embedCode.focus();
+      embedCode.select();
+      status.textContent = 'Copy unavailable. The embed code is selected; use your device’s copy command.';
+    }
+  });
+
   const row = document.createElement('div');
   row.className = 'share-link-row';
   row.append(link, copy);
-  content.append(privacy, linkLabel, row, status);
+  content.append(privacy, linkLabel, row, status, embedLabel, embedCode, copyEmbed);
   if (snapshot) content.append(inputLabel, inputSummary);
   content.append(readerOptions);
   content.append(previewDisclosure);
