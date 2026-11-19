@@ -83,6 +83,9 @@ self.addEventListener('fetch', event => {
       if (path.endsWith('/editor.html') || path.endsWith('/editor')) {
         return (await cache.match(HOME + 'editor.html')) || Response.error();
       }
+      if (path.endsWith('/embed.html') || path.endsWith('/embed')) {
+        return (await cache.match(HOME + 'embed.html')) || Response.error();
+      }
       if (path.endsWith('/read.html') || path.endsWith('/read')) {
         return (await cache.match(HOME + 'read.html')) || Response.error();
       }
@@ -119,6 +122,7 @@ export default defineConfig({
         host: 'host.html',
         // Share links (#39): `/#doc=…` forwards here.
         read: 'read.html',
+        embed: 'embed.html',
       },
     },
   },
