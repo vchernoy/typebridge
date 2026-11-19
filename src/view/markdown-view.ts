@@ -51,7 +51,11 @@ export function setupMarkdownView(deps: {
       await live.settled();
       if (generation !== started) return;
       prepared.bind(live); acceptedSource = { id: documentId, text }; stage.style.removeProperty('visibility');
-      if (focusInputs === deps.shown().id && document.activeElement === document.body) document.querySelector<HTMLButtonElement>('#editable-input-reset')?.focus({ preventScroll: true });
+      // WebKit can retain focus on the now-hidden Load button during remount.
+      // Return it to Reset, but preserve an explicit move to another control.
+      const load = document.querySelector<HTMLButtonElement>('#editable-input-load');
+      const focusRetired = document.activeElement === document.body || (load?.hidden && document.activeElement === load);
+      if (focusInputs === deps.shown().id && focusRetired) document.querySelector<HTMLButtonElement>('#editable-input-reset')?.focus({ preventScroll: true });
       focusInputs = undefined;
       for (const message of live.messages) {
         const li = document.createElement('li');
