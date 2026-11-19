@@ -196,16 +196,16 @@ test('Copy link copies or explains, and every control is reachable with Tab', as
     await page.keyboard.press('Tab');
     order.push(await page.evaluate(() => document.activeElement?.id || document.activeElement?.textContent || ''));
   }
-  expect(order).toEqual(['share-url', 'share-copy', 'share-options-toggle', 'share-preview-toggle', 'confirm-dialog-close']);
+  expect(order).toEqual(['share-url', 'share-copy', 'share-embed-toggle', 'share-options-toggle', 'share-preview-toggle']);
   await dialog(page).locator('#share-options-toggle').focus();
   await page.keyboard.press('Enter');
   await dialog(page).getByRole('button', { name: 'Close' }).focus();
   const expanded: string[] = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 8; i++) {
     await page.keyboard.press('Tab');
     expanded.push(await page.evaluate(() => document.activeElement?.id || ''));
   }
-  expect(expanded).toEqual(['share-url', 'share-copy', 'share-options-toggle', 'share-edit', 'share-heading', 'share-preview-toggle', 'confirm-dialog-close']);
+  expect(expanded).toEqual(['share-url', 'share-copy', 'share-embed-toggle', 'share-options-toggle', 'share-edit', 'share-heading', 'share-preview-toggle', 'confirm-dialog-close']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 });

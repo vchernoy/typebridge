@@ -46,9 +46,16 @@ Every link is untrusted input. Decoding never throws; it returns a reason (`miss
 - has **Show title on the page** (on by default); turning it off hides the title in both the preview and reading page, while retaining a visually hidden accessible heading, the tab title and the Edit copy’s name;
 - has **Readers can edit a copy** (on by default; off hides Edit a copy on the reading page, which is presentation only);
 - shows the link in a read-only field and **Copy link** (if the browser refuses clipboard access, the link is selected for the device's copy command);
+- offers a collapsed **Embed on another website** disclosure after the link status, with read-only iframe HTML and **Copy embed code** (see [Embedding](#embedding));
 - warns when the link is longer than 2,000 characters, and refuses a document too large for a link, suggesting Export instead.
 
 Every control in the dialog is reachable with Tab; Escape or Close returns to the actual Share opener (Share document or ▾). The direct path is Share document → Copy link: two activations, including in source, Rendered, comparison and Focus windows. Sharing does not acquire source editing ownership.
+
+## Embedding
+
+Copy embed code produces `<iframe src="…/embed.html#doc=…" width="100%" height="450" style="border:0" loading="lazy" referrerpolicy="no-referrer" title="Interactive document">`. It carries the same payload as the link, including Include current parameters, so anyone who can read the host page's HTML can decode the document, just like anyone holding the link.
+
+`embed.html` is a minimal reader for that iframe. It shows the title (hidden when the sender turned it off; `$…$` titles typeset) and the document, with the same view rule, sanitized renderer, failure messages and unknown-format notice as the reading page. It has no Edit a copy, Share, remembering or reader-input storage: it writes nothing to storage, registers no service worker and makes no requests beyond loading TypeBridge's own assets. Local anchors and footnotes scroll inside the frame without replacing the `#doc=` fragment; other links open in a new tab. The frame has a fixed height: a host page that wants another size edits the `height` attribute (automatic resizing is not implemented). Hosts that strip iframes from posted HTML (many comment boxes, chat apps and some hosted blogs) cannot show it; share the link there instead.
 
 ## Reading page
 
