@@ -68,13 +68,13 @@ Use `:::radio[Delivery]{input=delivery}` for native radio buttons or
 `:::select[Delivery]{input=delivery}` for a dropdown. Each contains
 `::option[Label]{value=number}` options under a visible group label. The calc default
 must match an option and determines the value used by Reset. Controls bound to
-the same input stay synchronized. See the [delivery calculator](examples/delivery-choices.md).
+the same input stay synchronized. See the [copyable calculators](examples/README.md), including delivery choices and a trip budget with radio travel and dropdown lodging controls.
 
 Markdown calc supports ln, log, exp, trigonometric functions, pi and e.
 
 The title row has a one-click **Edit | Preview** button group for Markdown, after the save state, which immediately follows Autosave, in both normal and Focus mode. Pressed state identifies the current view; Enter/Space operate either button. At 640 px and below, labelled text becomes pencil/eye icons with accessible names and 44 px touch targets. Plain documents have no switch.
 Each window independently remembers Edit or Preview in sessionStorage (the stored reading value remains `rendered`). Preview is a reading
-surface; its calc input values are temporary and never change the source, saved row or journal.
+surface; accepted numeric values may persist in a separate input sidecar when policy permits, and never change the Markdown source or its text history.
 Only `{{…}}` placeholders inside math and `:value[…]` bindings update when calc inputs change;
 typed-in numbers stay as written, even inside an `aligned` block. Use `{{final | fixed:2}}`
 for a formatted live math value matching `:value[final]{format=fixed:2}`.

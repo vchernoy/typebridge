@@ -17,8 +17,8 @@ GitHub Pages deployment is enabled for main. Successful Actions deployment is no
 TypeBridge bundles the published ActiveMD **0.6.0** packages, including readable
 `:edit{input=price}` and `:slider[Quantity]{input=quantity step=1}` controls,
 native numeric radio groups and dropdowns. Existing `:input[name]` syntax remains
-supported, and `:value[total]` remains an output. See the [copyable delivery example](docs/examples/delivery-choices.md)
-for synchronized radio/select/numeric controls in editor Preview or shared pages.
+supported, and `:value[total]` remains an output. See the [copyable calculators](docs/examples/README.md)
+for synchronized radio/select/numeric controls and a trip budget in editor Preview or shared pages.
 
 Calc owns defaults. Edit/slider bracket names are accessible-only; radio/select
 labels are visible. Accepted input state saves separately from source when policy

@@ -1,0 +1,20 @@
+# Active Markdown examples
+
+Use TypeBridge with the published ActiveMD 0.6.0 controls. Copy a calculator into
+the editor, choose Documents → Format → Markdown, then open Preview. Share it as
+a rendered page to let recipients use the same controls.
+
+- [Delivery choices](delivery-choices.md): radio buttons, a dropdown and number
+  field synchronized to one delivery input.
+- [Trip budget](trip-budget.md): radio travel choices and a lodging dropdown,
+  with readable numeric fields, a slider and dependent per-person costs.
+
+Author new number fields as `:edit[Accessible name]{input=name}` and sliders as
+`:slider[Accessible name]{input=name step=1}`. Bracket names are accessible-only;
+write visible wording in the surrounding prose. Radio/select brackets label the
+visible group and options. Declare defaults in calc, not on controls; a choice
+input's default must match an option. Keep `:value[total]` for output values.
+
+Accepted values save separately from source when storage policy permits. Reset
+inputs restores calc defaults. Share current values only by explicitly enabling
+that option in Share. No control change edits the authored Markdown.
