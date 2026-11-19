@@ -197,7 +197,8 @@ test('returning to the reading page from the back-forward cache makes Edit a cop
   // Leave the page before commit while database open never completes. A lifecycle
   // restore must make a fresh Edit possible without preserving the old busy state.
   await page.addInitScript(() => {
-    indexedDB.open = (() => ({}) as IDBOpenDBRequest) as typeof indexedDB.open;
+    // WebKit may return a new factory wrapper; keep the pause on its prototype.
+    IDBFactory.prototype.open = (() => ({}) as IDBOpenDBRequest) as typeof indexedDB.open;
   });
   await page.goto(await linkFor(shared()));
   await page.getByRole('link', { name: 'Edit', exact: true }).click();
