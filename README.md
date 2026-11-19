@@ -12,6 +12,20 @@ After a successful online service-worker installation, the production build can 
 
 GitHub Pages deployment is enabled for main. Successful Actions deployment is not proof of every production interaction; record browser/device checks separately. PRs are not automatically hosted previews. See [preview and deployment notes](docs/PREVIEW.md).
 
+## Active Markdown and calculators
+
+TypeBridge bundles the published ActiveMD **0.6.0** packages, including readable
+`:edit{input=price}` and `:slider[Quantity]{input=quantity step=1}` controls,
+native numeric radio groups and dropdowns. Existing `:input[name]` syntax remains
+supported, and `:value[total]` remains an output. See the [copyable delivery example](docs/examples/delivery-choices.md)
+for synchronized radio/select/numeric controls in editor Preview or shared pages.
+
+Calc owns defaults. Edit/slider bracket names are accessible-only; radio/select
+labels are visible. Accepted input state saves separately from source when policy
+permits. Reset uses authored defaults; Share includes current accepted parameters
+only when explicitly selected. Checkbox collections and a complete quiz-attempt UI
+are not provided by this upgrade.
+
 ## Workspace
 
 The top bar holds the editable document title, ▾ Documents menu, compact save state, Latin/Кириллица typing switch, Focus and Settings. The editing toolbar offers Undo/Redo, selected-text conversion, Find and Copy; its ⋯ menu contains Go to line and Clear text. Find/Replace and Go to line open on demand. Settings groups the shortcut, mapping rules, Autosave and Tab indents.
@@ -31,6 +45,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the issue, review and merge workflow.
 - [Russian mappings](docs/RUSSIAN-MAPPING.md) and [competitor research](docs/RESEARCH.md)
 - [Audit and AI handoff](https://github.com/vchernoy/typebridge/issues/71)
 
-The PRD includes historical design intent; the UI document describes the current workspace. Dual panels, portable document links, rich/Markdown preview, retained version snapshots and broader editing commands are not implemented just because they appear there. Current UX work and the audit fixes are tracked in issues; check PR merge and production verification separately.
+The PRD includes historical design intent; the UI document describes the current workspace. Dual panels, rich-text editing, retained version snapshots and broader editing commands are not implemented just because they appear there. Markdown preview and portable shared links are implemented as described above. Current UX work and the audit fixes are tracked in issues; check PR merge and production verification separately.
 
 Rendered Markdown bundles [Fira Math 0.3.4](src/view/fonts/README.md), licensed under [SIL OFL 1.1](public/fonts/FiraMath-OFL.txt). The math font loads lazily from the same origin; plain documents do not load it.
