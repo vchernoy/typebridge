@@ -171,9 +171,19 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   copy.id = 'share-copy';
   copy.textContent = 'Copy link';
 
+  // Embedding is secondary to the link, so it stays collapsed like the preview.
+  const embedDisclosure = document.createElement('details');
+  embedDisclosure.className = 'share-embed-disclosure';
+  const embedSummary = document.createElement('summary');
+  embedSummary.id = 'share-embed-toggle';
+  embedSummary.textContent = 'Embed on another website';
   const embedLabel = document.createElement('label');
   embedLabel.htmlFor = 'share-embed-code';
-  embedLabel.textContent = 'Embed on another website';
+  embedLabel.className = 'visually-hidden';
+  embedLabel.textContent = 'Embed code';
+  const embedHint = document.createElement('p');
+  embedHint.className = 'share-embed-hint';
+  embedHint.textContent = 'Paste this HTML into a page that allows iframes. The document travels in the code, like the link.';
   const embedCode = document.createElement('textarea');
   embedCode.id = 'share-embed-code';
   embedCode.readOnly = true;
@@ -189,7 +199,7 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
     target.pathname = '/embed.html';
     // Attribute-escape the entire URL before putting it in generated HTML.
     const safeUrl = target.toString().replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
-    return '<iframe src="' + safeUrl + '" width="100%" height="450" style="border:0" loading="lazy" title="Interactive document"></iframe>';
+    return '<iframe src="' + safeUrl + '" width="100%" height="450" style="border:0" loading="lazy" referrerpolicy="no-referrer" title="Interactive document"></iframe>';
   };
   const updateEmbed = (): void => {
     embedCode.value = link.value ? makeEmbed(link.value) : '';
@@ -261,7 +271,8 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   const row = document.createElement('div');
   row.className = 'share-link-row';
   row.append(link, copy);
-  content.append(privacy, linkLabel, row, status, embedLabel, embedCode, copyEmbed);
+  embedDisclosure.append(embedSummary, embedHint, embedLabel, embedCode, copyEmbed);
+  content.append(privacy, linkLabel, row, status, embedDisclosure);
   if (snapshot) content.append(inputLabel, inputSummary);
   content.append(readerOptions);
   content.append(previewDisclosure);

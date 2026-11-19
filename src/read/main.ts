@@ -12,6 +12,7 @@ import { setupRememberShared } from './remember-shared';
 import '../style.css';
 import '../styles/read.css';
 import { readingView } from './view';
+import { keepShareFragment } from './local-anchors';
 import { decodeSharePayload, sharePayloadFromHash, type DecodeFailure, type SharedDocument } from '../editor/share-link';
 
 let live: ReturnType<typeof import('../view/active-renderer').renderDocument> | undefined;
@@ -136,20 +137,7 @@ shareButton.addEventListener('click', () => {
 });
 
 // Local Markdown anchors must not replace the fragment carrying the share payload.
-body.addEventListener("click", (event) => {
-  if (!(event.target instanceof Element)) return;
-  const anchor = event.target.closest<HTMLAnchorElement>('a[href^="#"]');
-  if (!anchor || !body.contains(anchor)) return;
-  event.preventDefault();
-  let id: string;
-  try {
-    id = decodeURIComponent(anchor.hash.slice(1));
-  } catch {
-    return;
-  }
-  const target = Array.from(body.querySelectorAll("[id]")).find((element) => element.id === id);
-  target?.scrollIntoView();
-});
+keepShareFragment(body);
 
 const remembered = setupRememberShared(() => { editActions.pause(); stopLive(); });
 
