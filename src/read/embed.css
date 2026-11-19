@@ -1,0 +1,7 @@
+.embed-page .read-main {
+  width: 100%;
+  max-width: none;
+  padding: 12px 16px;
+}
+.embed-page .read-title { margin: 0 0 16px; }
+.embed-page { min-height: 0; }
