@@ -145,14 +145,15 @@ no document identity or content and may survive content erasure.
 
 ## Shared reader inputs (#324)
 
-Explicitly sharing an input snapshot is still planned under #349. The
-[snapshot contract proposal](adr/349-shared-input-snapshots.md) records compatibility,
-initialization/reset precedence and copy/privacy boundaries; it is not implemented.
-Current generated links continue to share source and presentation hints only.
+The [snapshot contract](adr/349-shared-input-snapshots.md) covers compatibility,
+initialization, reset and copy/privacy boundaries. The shared reader can already
+include accepted numeric inputs through [Re-share current parameters](#re-share-current-parameters-372).
+Editor-generated links continue to share source and presentation hints.
 
 Rendered shared pages restore accepted numeric inputs, including model-only inputs, from
 one versioned record keyed by the exact remembered shared item. Source, payload, authored
-defaults, editable documents and history are unchanged; values never enter a shared URL.
+defaults, editable documents and history stay unchanged. Local saves never write to
+the URL. Readers can explicitly include the current values when creating a new link.
 The runtime validates names and current ranges before the staged reading area is revealed.
 Invalid/incompatible records use defaults and stay memory-only; storage loading is bounded
 to two seconds so a blocked database does not prevent reading. No renderer is loaded for
