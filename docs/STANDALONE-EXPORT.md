@@ -1,9 +1,21 @@
-# Standalone interactive HTML: #386 proof of concept
+# Standalone interactive HTML (#386)
 
-This is a **viewer-only pre-merge prototype**, not an editor Export menu or a
-production asset. It does not alter `vite.config.ts`, the normal `build` command,
-service-worker precache, or Pages workflow. Production `dist` excludes its files.
-No new dependency or npm release is required.
+**In the editor:** Documents → **Export as interactive HTML** downloads one
+self-contained `<title>.html` file. It opens from disk in any modern browser,
+works offline, and keeps the document's controls, calculations and math live.
+Readers start from the calc defaults: values entered in Preview are not included
+(the maintainer-approved first policy; a snapshot option can follow later).
+
+How it is published: `npm run build` first runs `scripts/build-standalone.mjs`,
+then the normal Vite build emits its viewer template as `/standalone-template.html`
+(about 0.8 MB). The offline service worker does **not** precache it; it is cached
+on first use, like the renderer, so the first export needs a connection and later
+exports work offline. Export fills the template's inert data slot in the browser
+(`src/standalone/document.ts`); nothing is uploaded. If the template cannot be
+loaded, the editor says so and downloads nothing.
+
+The rest of this page describes the original proof of concept, its build and
+safety model, which the product route reuses unchanged.
 
 ## Try the PR artifact
 
