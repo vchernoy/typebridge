@@ -185,3 +185,49 @@
   font-family: ui-monospace, monospace;
   font-size: 0.85rem;
 }
+/* First-run welcome (#390). */
+.welcome-dialog {
+  width: min(100% - 32px, 760px);
+  max-height: calc(100dvh - 32px);
+  padding: 20px 22px;
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  background: var(--dialog-surface);
+  box-shadow: 0 16px 40px var(--dialog-shadow);
+  color: inherit;
+  overflow: auto;
+}
+.welcome-dialog::backdrop {
+  background: var(--modal-backdrop);
+}
+.welcome-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+}
+.welcome-dialog p {
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+.welcome-example {
+  display: block;
+  width: 100%;
+  height: min(52dvh, 480px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+}
+.welcome-status:empty {
+  display: none;
+}
+.welcome-status {
+  margin-top: 12px;
+}
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+.welcome-actions button {
+  min-height: 44px;
+}

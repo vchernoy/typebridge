@@ -14,6 +14,7 @@ import { readHostLayout } from './layout';
 import { migrateStandaloneSession } from './session-migration';
 import { installToolbarFit } from './toolbar-fit';
 import { installWindowManager } from './window-manager';
+import { consumeWelcomeCopy, maybeShowWelcome } from './welcome';
 
 const root = document.querySelector<HTMLElement>('#host-root')!;
 const toolbar = document.querySelector<HTMLElement>('#host-toolbar')!;
@@ -56,6 +57,9 @@ function allEditorWorkspaces(): HTMLElement[] {
     .map(editorWorkspace)
     .filter((el): el is HTMLElement => !!el);
 }
+
+// Make my copy from the first-run welcome (#390) opens in the main window, not beside the blank one.
+consumeWelcomeCopy(new URLSearchParams(location.search).get('open'));
 
 // A tab that ran the single editor at `/` before the cutover keeps its document, unsaved
 // reload backup and caret: move that session state into the window that shows first.
@@ -185,6 +189,8 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   const params = new URLSearchParams(location.search);
   const requested = params.get('open');
   const reused = params.get('reused') === '1';
+  // A first visit with no saved documents sees a working example (#390), never over an opened copy.
+  if (requested === null) void maybeShowWelcome();
   if (requested !== null) {
     params.delete('open');
     params.delete('reused');
