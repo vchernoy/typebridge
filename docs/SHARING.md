@@ -64,6 +64,9 @@ payload fragment, no referrer, and no storage/service-worker access or requests
 outside the two local origins. This is a cross-origin, same-site harness: it does
 not establish real CMS compatibility or cross-site storage-partitioning behavior.
 
+Medium integration is unverified; see the [Medium feasibility report](MEDIUM-EMBEDS.md)
+for provider requirements, fragment disclosure and the remaining published-article test.
+
 ## Reading page
 
 `/#doc=…` forwards to `/read.html#doc=…`; the fragment stays in the browser. Pasting a share link into a tab that already shows TypeBridge at `/` forwards too, since only the fragment changes. The page shows the title and document, with a quiet **Edit** hyperlink beside the title when the sender allowed editing, and **Written with TypeBridge** below the document. It honors the sender’s source/rendered view choice without a reading toolbar. Source presentation preserves the text, line breaks and spaces as written. Rendered Markdown dynamically loads active-md and inserts only its sanitized output, with KaTeX `trust: false` and MathML output. Raw HTML is dropped, dangerous links are filtered, and remote images are links that require a click. If rendering fails, the page automatically shows the source with a notice. Accepted shared numeric inputs can be saved in a separate local record as described below; they are never journaled into source or shared in links. Editable Preview inputs are stored separately when permitted, as described below. Only `{{…}}` placeholders inside math and `:value[…]` bindings are live; typed-in numbers stay as written, including numbers in a second `aligned` block. For example, `{{final | fixed:2}}` updates with the same formatting as `:value[final]{format=fixed:2}`. It opens offline once TypeBridge itself (`/` or the editor) has been opened in that browser, which installs offline support; the reading page does not install it, so opening only share links does not.
