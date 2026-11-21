@@ -48,3 +48,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the issue, review and merge workflow.
 The PRD includes historical design intent; the UI document describes the current workspace. Dual panels, rich-text editing, retained version snapshots and broader editing commands are not implemented just because they appear there. Markdown preview and portable shared links are implemented as described above. Current UX work and the audit fixes are tracked in issues; check PR merge and production verification separately.
 
 Rendered Markdown bundles [Fira Math 0.3.4](src/view/fonts/README.md), licensed under [SIL OFL 1.1](public/fonts/FiraMath-OFL.txt). The math font loads lazily from the same origin; plain documents do not load it.
+
+## Standalone export prototype
+
+The [standalone HTML research/prototype](docs/STANDALONE-EXPORT.md) has a separate
+build and downloadable PR artifact for offline testing. It is not an editor export
+menu or a change to production Pages; its current scope exports source/defaults.

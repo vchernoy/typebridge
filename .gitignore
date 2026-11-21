@@ -6,3 +6,6 @@ coverage/
 .DS_Store
 visual-evidence/
 visual-tests/expected/
+
+dist-standalone/
+standalone-test-results/
