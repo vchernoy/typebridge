@@ -46,3 +46,30 @@ test('Cancel or Escape closes the chooser without creating a document', async ({
   expect(await readStoredDocs(page)).toHaveLength(1);
   await expect(page.locator('#editor')).toHaveValue('Only note');
 });
+
+test('Escape closes the chooser without touching Find or Focus mode behind it (#398 review)', async ({ page }) => {
+  await page.goto('/editor.html');
+  await expect(page.locator('#editor')).toBeEnabled();
+  await page.locator('#editor').fill('Background note');
+  await expect.poll(async () => (await readStoredDocs(page)).length).toBe(1);
+  const dialog = page.getByRole('dialog', { name: 'New from template' });
+  // Find is open behind the chooser.
+  await page.locator('#find-open').click();
+  await expect(page.locator('#find-bar')).toBeVisible();
+  await documentAction(page, '#new-from-template');
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('#find-bar')).toBeVisible();
+  // Focus mode is on behind the chooser.
+  await page.locator('#find-text').press('Escape');
+  await expect(page.locator('#find-bar')).toBeHidden();
+  await page.locator('#focus-mode').click();
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  await documentAction(page, '#new-from-template');
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('body')).toHaveClass(/focus-mode/);
+  expect(await readStoredDocs(page)).toHaveLength(1);
+});

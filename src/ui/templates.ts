@@ -55,6 +55,10 @@ export function chooseTemplate(returnFocus: HTMLElement | null): Promise<Documen
     actions.className = 'template-actions';
     actions.append(cancel);
     dialog.append(title, list, actions);
+    // Keep keys inside the modal: page handlers (Focus mode, Find and menu Escape layers) listen
+    // on document and would otherwise take Escape and preventDefault the native dismissal.
+    // Not calling preventDefault here keeps the browser's own Escape → cancel → close.
+    dialog.addEventListener('keydown', event => event.stopPropagation());
     dialog.addEventListener('close', () => {
       dialog.remove();
       resolve(chosen);
