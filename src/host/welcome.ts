@@ -8,6 +8,7 @@ import { ACTIVE_DRAFT_KEY_BASE, newDraft } from '../editor/drafts';
 import { listStoredDrafts, openDraftDatabase, reuseOrCreateSharedCopy } from '../editor/indexeddb';
 import { encodeSharePayload } from '../editor/share-link';
 import { sharedCopyFields } from '../editor/shared-copy';
+import { notifyPrefsChanged } from '../view/prefs-sync';
 import { scopeSessionKey } from '../view/window-id';
 import { sharedCopyRecoveryExclusions } from '../read/shared-copy-recovery';
 
@@ -19,6 +20,21 @@ export const WELCOME_EXAMPLE_SOURCE = exampleSource;
 const MAIN_VIEW_KEY = scopeSessionKey('typebridge.documentView.v1', 'main');
 /** One-shot, this tab only: the copy Make my copy is opening (see consumeWelcomeCopy). */
 const WELCOME_COPY_KEY = 'typebridge.welcomeCopy.v1';
+/** The Latin/Кириллица switch (ui/transliteration.ts); absent means Кириллица for existing users. */
+const TRANSLITERATION_KEY = 'typebridge.transliteration.enabled.v1';
+
+/**
+ * A new visitor starts in Latin (#390): transliteration is an option, not the first thing a
+ * newcomer meets. Only a browser confirmed new by the welcome (no documents, never welcomed) is
+ * changed, and only when it has no saved choice, so existing users keep Кириллица.
+ */
+function startNewVisitorInLatin(): void {
+  try {
+    if (localStorage.getItem(TRANSLITERATION_KEY) !== null) return;
+    localStorage.setItem(TRANSLITERATION_KEY, 'off');
+  } catch { return; }
+  notifyPrefsChanged({ name: 'transliteration', origin: 'welcome' });
+}
 
 function seen(): boolean {
   try { return localStorage.getItem(WELCOME_SEEN_KEY) === '1'; } catch { return true; }
@@ -76,6 +92,7 @@ export async function maybeShowWelcome(): Promise<void> {
   if (seen()) return;
   if (await hasDocuments()) { markSeen(); return; }
   if (seen()) return; // Another tab chose meanwhile.
+  startNewVisitorInLatin();
   const encoded = await encodeSharePayload({ title: WELCOME_EXAMPLE_TITLE, text: WELCOME_EXAMPLE_SOURCE, format: 'markdown', view: 'rendered', edit: false });
   if (!encoded.ok) return;
 

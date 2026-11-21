@@ -107,3 +107,24 @@ test('Escape cannot dismiss the welcome while Make my copy is saving (#396 revie
   await expect(main.locator('#rendered-document').getByRole('heading', { name: 'Which phone plan is cheaper?' })).toBeVisible();
   expect(await readStoredDocs(page)).toHaveLength(1);
 });
+
+test('a new visitor starts in Latin', async ({ page }) => {
+  await page.goto('/');
+  await expect(dialog(page)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('typebridge.transliteration.enabled.v1'))).toBe('off');
+  await page.locator('#welcome-blank').click();
+  await expect(page.locator('#host-enabled')).not.toBeChecked();
+  const editor = page.frameLocator('.host-window[data-window-id="main"] iframe').locator('#editor');
+  await expect(editor).toBeEnabled();
+  await editor.pressSequentially('privet');
+  await expect(editor).toHaveValue('privet');
+});
+
+test('an explicit Кириллица choice made before the welcome is not overridden', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('seeded')) { localStorage.setItem('typebridge.transliteration.enabled.v1', 'on'); sessionStorage.setItem('seeded', '1'); }
+  });
+  await page.goto('/');
+  await expect(dialog(page)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('typebridge.transliteration.enabled.v1'))).toBe('on');
+});
