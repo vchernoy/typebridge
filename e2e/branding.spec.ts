@@ -1,9 +1,22 @@
 import { expect, test } from '@playwright/test';
 
 const files = ['favicon-16x16.png', 'favicon-32x32.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'og-image.png'];
+test('landing and editor metadata describe interactive documents', async ({ page }) => {
+  const title = 'TypeBridge — Write and share interactive documents';
+  for (const url of ['/', '/editor.html']) {
+    await page.goto(url);
+    await expect(page).toHaveTitle(title);
+    for (const selector of ['meta[property="og:title"]', 'meta[name="twitter:title"]']) {
+      await expect(page.locator(selector)).toHaveAttribute('content', title);
+    }
+    for (const selector of ['meta[name="description"]', 'meta[property="og:description"]', 'meta[name="twitter:description"]']) {
+      await expect(page.locator(selector)).toHaveAttribute('content', /interactive Markdown.*live calculations.*optional Russian transliteration/);
+    }
+  }
+});
+
 test('branding metadata points to the PNG assets and the canonical site', async ({ page }) => {
   await page.goto('/editor.html');
-  await expect(page).toHaveTitle('TypeBridge');
   await expect(page.locator('link[rel="icon"][sizes="16x16"]')).toHaveAttribute('href', '/favicon-16x16.png');
   await expect(page.locator('link[rel="icon"][sizes="32x32"]')).toHaveAttribute('href', '/favicon-32x32.png');
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/apple-touch-icon.png');
