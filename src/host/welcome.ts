@@ -61,7 +61,7 @@ async function makeCopy(): Promise<string> {
  * the copy holds the token, so a crafted link cannot reset anyone's windows.
  */
 export function consumeWelcomeCopy(openId: string | null): void {
-  let token: string | null = null;
+  let token: string | null;
   try { token = sessionStorage.getItem(WELCOME_COPY_KEY); sessionStorage.removeItem(WELCOME_COPY_KEY); } catch { return; }
   if (!token || token !== openId) return;
   try {
