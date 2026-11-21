@@ -41,12 +41,22 @@ Both plans cost \$:value[basic]{format=fixed:2} at this usage.
 :::
 ::::::
 
-:::details[How the Basic bill is worked out]
+:::::details[How the Basic bill is worked out]
 $$
 \text{Basic} = {{basicFee}} + \max({{gb}} - {{included}},\ 0) \cdot {{extraPrice}} = {{basic | fixed:2}}
 $$
+::::when[unlimitedFee <= basicFee]
+Unlimited never costs more than Basic at these prices.
+::::
+::::when[unlimitedFee > basicFee]
+:::when[extraPrice > 0]
 Above about :value[breakEven]{format=fixed:1} GB a month, Unlimited costs less.
 :::
+:::when[extraPrice <= 0]
+Extra data is free, so Basic never costs more than Unlimited at these prices.
+:::
+::::
+:::::
 
 ---
 
