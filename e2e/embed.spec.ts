@@ -41,7 +41,7 @@ test('local anchors scroll inside the embed without losing the shared document',
   await page.goto(url);
   const hash = new URL(page.url()).hash;
   await page.getByRole('link', { name: 'a heading' }).click();
-  await page.locator('#embed-content sup a[href^="#user-content-fn"]').click();
+  await page.locator('#embed-content a[data-footnote-ref]').click();
   await expect(page.getByText('The footnote.')).toBeInViewport();
   expect(new URL(page.url()).hash).toBe(hash);
   await expect(page.locator('#embed-content')).not.toContainText('cannot be opened');
