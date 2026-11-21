@@ -10,7 +10,7 @@ A shared document travels inside the link's fragment, `https://typebridge.vchern
 |---|---|
 | `title` | Document title, at most 150 characters |
 | `text` | Document text, exactly as written |
-| `format` | Document format; `plain` or `markdown` (ActiveMD 0.6.1: GFM, callouts, math and calc) |
+| `format` | Document format; `plain` or `markdown` (ActiveMD 0.6.2: GFM, callouts, math and calc) |
 | `view` | How the reading page first shows it: `source` or `rendered` (presentation only) |
 | `heading` | Optional `false` hides the visible page title; omitted or other values show it. The accessible heading, tab title and Edit copy name remain. Old readers ignore the hint. |
 | `edit` | Whether the reading page offers **Edit a copy** (presentation only; it does not protect the text) |
@@ -55,7 +55,7 @@ Every control in the dialog is reachable with Tab; Escape or Close returns to th
 
 Copy embed code produces `<iframe src="…/embed.html#doc=…" width="100%" height="450" style="border:0" loading="lazy" referrerpolicy="no-referrer" title="Interactive document">`. It carries the same payload as the link, including Include current parameters, so anyone who can read the host page's HTML can decode the document, just like anyone holding the link.
 
-`embed.html` is a minimal reader for that iframe. It shows the title (hidden when the sender turned it off; `$…$` titles typeset) and the document, with the same view rule, sanitized renderer, failure messages and unknown-format notice as the reading page. It has no Edit a copy, Share, remembering or reader-input storage: it writes nothing to storage, registers no service worker and makes no requests beyond loading TypeBridge's own assets. Local anchors and footnotes scroll inside the frame without replacing the `#doc=` fragment; other links open in a new tab. The frame has a fixed height: a host page that wants another size edits the `height` attribute (automatic resizing is not implemented). Hosts that strip iframes from posted HTML (many comment boxes, chat apps and some hosted blogs) cannot show it; share the link there instead.
+`embed.html` is a minimal reader for that iframe. It shows the title (hidden when the sender turned it off; `$…$` titles typeset) and the document, with the same view rule, sanitized renderer, failure messages and unknown-format notice as the reading page. It has no Edit a copy, Share, remembering or reader-input storage: it writes nothing to storage, registers no service worker and makes no requests beyond loading TypeBridge's own assets. Local anchors (heading links such as `[x](#heading)`, which have targets since ActiveMD 0.6.2) and footnotes scroll inside the frame without replacing the `#doc=` fragment; other links open in a new tab. The frame has a fixed height: a host page that wants another size edits the `height` attribute (automatic resizing is not implemented). Hosts that strip iframes from posted HTML (many comment boxes, chat apps and some hosted blogs) cannot show it; share the link there instead.
 
 Automated Chromium/Firefox/WebKit coverage also loads the actual embed entry inside
 a parent page served on a different loopback port. It checks same-origin-policy

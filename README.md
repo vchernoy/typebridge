@@ -21,7 +21,7 @@ GitHub Pages deployment is enabled for main. Successful Actions deployment is no
 
 ## Active Markdown and calculators
 
-TypeBridge bundles the published ActiveMD **0.6.1** packages, including readable
+TypeBridge bundles the published ActiveMD **0.6.2** packages, including readable
 `:edit{input=price}` and `:slider[Quantity]{input=quantity step=1}` controls,
 native numeric radio groups and dropdowns. Existing `:input[name]` syntax remains
 supported, and `:value[total]` remains an output. See the [copyable calculators](docs/examples/README.md)
