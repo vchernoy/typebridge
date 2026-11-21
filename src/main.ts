@@ -34,7 +34,8 @@ import { createTakeover } from './view/takeover';
 import { createTitleEditing } from './ui/title-edits';
 import { setupDeletedInput } from './view/deleted-input';
 import { setupMarkdownView } from './view/markdown-view';
-import { documentFormat } from './editor/document-fields';
+import { chooseTemplate } from './ui/templates';
+import { documentFormat, type DocumentFormat } from './editor/document-fields';
 import { createHeldEdits } from './view/held-edits';
 import { discardForHandoff } from './view/handoff-discard';
 import { installEmbedHooks } from './view/embed-hooks';
@@ -1191,6 +1192,16 @@ documentFormatSelect.addEventListener('change', () => {
   markdownView?.sync();
 });
 
+/** A new saved document with this content, then opened here (Import and templates). */
+async function createDocumentFrom({ title, text, format }: { title: string; text: string; format?: DocumentFormat }): Promise<{ opened: boolean; conflict: boolean }> {
+  const created = { ...newDraft(text), title, format };
+  // Save even when autosave is off: importing or choosing a template is an explicit save action.
+  if (!state.db) throw new Error('browser storage cannot be used');
+  const result = await commitOrCreateConflictCopy(state.db, created, 0, crypto.randomUUID());
+  postSignal('saved', result.draft.id, result.draft.revision);
+  return switchDraft(result.draft.id);
+}
+
 setupExportImport({
   exportSurface: () => ({
     title: draftTitle.value.trim() || UNTITLED_TITLE,
@@ -1199,14 +1210,20 @@ setupExportImport({
   announce: announceAction,
   isViewMode: () => viewMode,
   confirmImport: () => askConfirmChoice({ title: 'Import document?', message: 'Import as a new document? Your current document will be kept.', confirmLabel: 'Import document', cancelLabel: 'Cancel import', returnFocus: document.querySelector<HTMLButtonElement>('#doc-menu-open')! }),
-  importDocument: async ({ title, text, format }) => {
-    const imported = { ...newDraft(text), title, format };
-    // Save even when autosave is off: importing is an explicit save action.
-    if (!state.db) throw new Error('browser storage cannot be used');
-    const result = await commitOrCreateConflictCopy(state.db, imported, 0, crypto.randomUUID());
-    postSignal('saved', result.draft.id, result.draft.revision);
-    return switchDraft(result.draft.id);
-  },
+  importDocument: createDocumentFrom,
+});
+// Documents → New from template… (#390): a bundled starter becomes a new document, like Import.
+document.querySelector<HTMLButtonElement>('#new-from-template')!.addEventListener('click', () => {
+  if (viewMode) return;
+  void chooseTemplate(document.querySelector<HTMLButtonElement>('#doc-menu-open')).then(async template => {
+    if (!template) return;
+    try {
+      const switched = await createDocumentFrom({ title: template.title, text: template.text, format: template.format });
+      if (switched.opened) announceAction(`New document from the ${template.title} template.`);
+    } catch {
+      announceAction('Could not create a document from the template: browser storage cannot be used.');
+    }
+  });
 });
 // Share document / Documents → Share link: the shown title and text, like Export.
 for (const selector of ['#share-link', '#share-open']) document.querySelector<HTMLButtonElement>(selector)!.addEventListener('click', event => {
