@@ -1,0 +1,35 @@
+name: Standalone HTML prototype
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Match locked Playwright to the container
+        run: node -e "if(require('@playwright/test/package.json').version !== '1.64.1') process.exit(1)"
+      - run: npm run build:standalone-viewer
+      - run: npm run test:standalone -- --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: standalone-html-prototype
+          path: |
+            dist-standalone/
+            standalone-test-results/
+          retention-days: 7
+          if-no-files-found: error

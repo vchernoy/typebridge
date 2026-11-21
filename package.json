@@ -12,7 +12,9 @@
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "format": "prettier --write editor.html \"src/**/*.css\"",
-    "format:check": "prettier --check editor.html \"src/**/*.css\""
+    "format:check": "prettier --check editor.html \"src/**/*.css\"",
+    "build:standalone-viewer": "node scripts/build-standalone.mjs",
+    "test:standalone": "playwright test -c playwright.standalone.config.ts"
   },
   "license": "MIT",
   "type": "module",
