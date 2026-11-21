@@ -1219,7 +1219,11 @@ document.querySelector<HTMLButtonElement>('#new-from-template')!.addEventListene
     if (!template) return;
     try {
       const switched = await createDocumentFrom({ title: template.title, text: template.text, format: template.format });
-      if (switched.opened) announceAction(`New document from the ${template.title} template.`);
+      // Like Import: always confirm, and keep a conflict notice the switch flush created.
+      announceAction(
+        switched.opened ? `New document from the ${template.title} template.` : `The ${template.title} template was saved in Documents; current text was kept.`,
+        { keepConflict: switched.conflict },
+      );
     } catch {
       announceAction('Could not create a document from the template: browser storage cannot be used.');
     }
