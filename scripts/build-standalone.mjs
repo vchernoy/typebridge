@@ -5,14 +5,15 @@ import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import process from 'node:process';
+import { bundledPackageRoot } from './standalone-packages.mjs';
 
 const outDir = resolve('dist-standalone');
 const packages = new Set();
 async function bundle(entry) {
   const result = await build({ configFile: false, publicDir: false, logLevel: 'warn', plugins: [{ name: 'standalone-license-inventory', generateBundle(_, output) {
     for (const chunk of Object.values(output)) if (chunk.type === 'chunk') for (const id of Object.keys(chunk.modules)) {
-      const match = id.match(/\/node_modules\/((?:@[^/]+\/)?[^/]+)/);
-      if (match) packages.add(match[1]);
+      const root = bundledPackageRoot(id);
+      if (root) packages.add(root);
     }
   } }], build: { write: false, sourcemap: false, cssCodeSplit: false, assetsInlineLimit: Infinity,
     lib: { entry, name: 'StandaloneViewer', formats: ['iife'] }, minify: true,
@@ -31,9 +32,9 @@ async function bundle(entry) {
 const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 async function notices() {
   const texts = ['TypeBridge\n' + await readFile('LICENSE', 'utf8'), 'Fira Math 0.3.4\n' + await readFile('public/fonts/FiraMath-OFL.txt', 'utf8')];
-  for (const name of [...packages].sort()) {
-    const root = join('node_modules', name);
+  for (const root of [...packages].sort()) {
     const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+    const name = pkg.name;
     const files = (await readdir(root)).filter(file => /^(licen[cs]e|copying)([.-].*)?$/i.test(file));
     if (!files.length) {
       // remark-math6 omits the monorepo license from its npm tarball. Vendored

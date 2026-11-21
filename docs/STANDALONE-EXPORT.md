@@ -68,15 +68,17 @@ claim physical Safari/macOS/iOS or real-device verification.
   ownership or application network path is imported. Ordinary external links are
   deliberate new-tab actions. Images keep ActiveMD's link-only default.
 - License notices are embedded in every exported file. Build inventories bundled
-  npm modules and includes their license texts, TypeBridge MIT and Fira Math OFL.
+  npm modules by their actual package roots, retaining nested installs and distinct
+  versions; it does not substitute a top-level package with the same name. Notices
+  include their license texts, TypeBridge MIT and Fira Math OFL.
   `remark-math@6.0.0` omits its monorepo license from the npm tarball: a matching
   upstream MIT notice (Junyoung Choi) is vendored under `scripts/standalone-licenses`.
   Missing notices for other packages or a changed fallback version fail the build.
 
 ## Evidence and limits
 
-Initial local output: viewer template **763,160 bytes**, export harness
-**1,020,924 bytes**, 88 bundled npm package notices. Rebuild output is measured by
+Initial local output: viewer template **764,360 bytes**, export harness
+**1,022,524 bytes**, 89 bundled npm package notices. Rebuild output is measured by
 `build:standalone-viewer`; the size is not a product download budget guarantee.
 
 The offline tests download two distinct documents through the real browser Blob

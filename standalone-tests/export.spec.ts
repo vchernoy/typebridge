@@ -31,6 +31,8 @@ test('two documents exported by the same offline template open as one reactive l
     const match = html.match(/<script id="standalone-data" type="application\/octet-stream">([^<]+)<\/script>/)!;
     expect(JSON.parse(Buffer.from(match[1], 'base64').toString('utf8'))).toEqual({ title, text: source + '\n\nOnly ' + format, format });
     expect(html).toMatch(/data:font\/woff2;base64,/);
+    // The locked GFM tree bundles this nested version, not only its top-level peer.
+    expect(html).toContain('escape-string-regexp@5.0.0');
     expect(html).not.toContain('src="http'); expect(html).not.toContain('TYPEBRIDGE_STANDALONE_DATA_V1');
     const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
     const start = Date.now(); await page.goto(pathToFileURL(file).href);
