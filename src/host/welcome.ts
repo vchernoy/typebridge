@@ -110,18 +110,38 @@ export async function maybeShowWelcome(): Promise<void> {
   actions.append(copy, blank);
   dialog.append(title, intro, frame, status, actions);
 
-  const finish = (): void => { markSeen(); dialog.close(); dialog.remove(); };
-  blank.addEventListener('click', finish);
+  // While Make my copy is saving, the dialog cannot be dismissed: the save then always ends
+  // either in opening the copy or in an error shown here, never after the visitor chose blank.
+  let saving = false;
+  let done = false;
+  const finish = (): void => {
+    if (done) return;
+    done = true;
+    markSeen();
+    if (dialog.open) dialog.close();
+    dialog.remove();
+  };
+  const dismiss = (): void => { if (!saving) finish(); };
+  blank.addEventListener('click', dismiss);
   // Escape is the same as Start with a blank document, also while focus is in the example.
-  dialog.addEventListener('cancel', event => { event.preventDefault(); finish(); });
+  dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(); });
+  // Browsers may close a modal on a repeated Escape despite cancel being prevented (close
+  // watcher rules). Keep it open while saving; any other close is the blank choice.
+  dialog.addEventListener('close', () => {
+    if (done) return;
+    if (saving) { dialog.showModal(); return; }
+    finish();
+  });
   frame.addEventListener('load', () => {
     try {
       frame.contentWindow?.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && dialog.open) { event.preventDefault(); finish(); }
+        if (event.key === 'Escape' && dialog.open) { event.preventDefault(); dismiss(); }
       });
     } catch { /* Same-origin embed; Escape outside the frame still works. */ }
   });
   copy.addEventListener('click', () => {
+    if (saving) return;
+    saving = true;
     copy.disabled = true;
     blank.disabled = true;
     status.textContent = 'Saving your copy…';
@@ -132,6 +152,7 @@ export async function maybeShowWelcome(): Promise<void> {
       // The host's Edit a copy path (main.ts) opens it in the main window and reports it.
       location.assign('/?open=' + encodeURIComponent(id));
     }, () => {
+      saving = false;
       copy.disabled = false;
       blank.disabled = false;
       status.textContent = 'Could not save a copy in this browser. You can still start with a blank document.';

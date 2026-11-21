@@ -74,3 +74,36 @@ test('the welcome fits a phone screen and keeps both choices reachable', async (
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
+
+test('Escape cannot dismiss the welcome while Make my copy is saving (#396 review)', async ({ page }) => {
+  await page.goto('/');
+  await expect(dialog(page)).toBeVisible();
+  // Hold a readwrite transaction on documents so the copy's write queues behind it.
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('typebridge');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('documents', 'readwrite');
+      const store = tx.objectStore('documents');
+      let held = true;
+      (window as unknown as { releaseDocuments: () => void }).releaseDocuments = () => { held = false; };
+      const spin = (): void => { if (held) store.get('hold').onsuccess = spin; };
+      spin();
+      tx.oncomplete = () => db.close();
+      resolve();
+    };
+  }));
+  await page.locator('#welcome-copy').click();
+  await expect(page.locator('.welcome-status')).toHaveText('Saving your copy…');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await example(page).locator('body').press('Escape');
+  await expect(dialog(page)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('typebridge.welcomeSeen.v1'))).toBeNull();
+  await page.evaluate(() => (window as unknown as { releaseDocuments: () => void }).releaseDocuments());
+  // The save completes and opens the copy, as the visitor asked.
+  const main = page.frameLocator('.host-window[data-window-id="main"] iframe');
+  await expect(main.locator('#rendered-document').getByRole('heading', { name: 'Which phone plan is cheaper?' })).toBeVisible();
+  expect(await readStoredDocs(page)).toHaveLength(1);
+});
