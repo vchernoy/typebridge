@@ -945,6 +945,17 @@ for (const action of ['switch', 'delete'] as const) {
   });
 }
 
+test('a template after a conflict flush keeps the left-draft conflict notice (#398 review)', async ({ page, context }) => {
+  const { field } = await prepareConflict(page, context);
+  await field.press('End');
+  await field.pressSequentially(' — правка');
+  await documentAction(page, '#new-from-template');
+  await page.locator('#template-price-quote').click();
+  await expect(field).toHaveValue(/^# Price quote\n/);
+  await expect.poll(() => storedTexts(page)).toContain('Исходный — правка');
+  await expect(status(page)).toHaveText(CONFLICT_COPY_LEFT + ' New document from the Price quote template.');
+});
+
 test('import after a conflict flush keeps the left-draft conflict notice', async ({ page, context }) => {
   const { field } = await prepareConflict(page, context);
   await field.press('End');
