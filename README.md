@@ -1,6 +1,13 @@
 # TypeBridge
 
-TypeBridge is an open-source, local-first browser text editor with optional Russian transliteration. Write plain text or type `privet` to get `привет`; transliteration changes writing systems, not meaning. No account, backend, analytics or text uploads. MIT licensed; see [LICENSE](LICENSE).
+TypeBridge is an open-source, local-first browser editor for writing and sharing
+interactive Markdown documents. Combine prose and LaTeX with live calculations,
+sliders, radio buttons, and dropdowns. Share a rendered link so readers can change
+inputs and see the results update in their browser. Try a [copyable calculator](docs/examples/README.md).
+
+TypeBridge also supports plain text and optional Russian transliteration. Type
+`privet` to get `привет`. No account, backend, analytics or text uploads. MIT licensed.
+See [LICENSE](LICENSE).
 
 ## Current capabilities
 
