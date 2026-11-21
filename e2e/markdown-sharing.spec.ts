@@ -20,8 +20,11 @@ test('Markdown link is live, has minimal chrome, remembers source and accepted i
   await expect(page.getByRole('link', { name: 'Edit', exact: true })).toBeVisible();
   await expect(page.locator('#shared-memory-status')).toHaveText('Remembered in Shared with me on this device.');
   expect(await readStoredDocs(page)).toEqual([]);
-  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })))
-    .toEqual({ local: 0, session: 0 });
+  // The reader writes nothing; the welcome flag is pre-seeded by playwright.config.ts (#390).
+  expect(await page.evaluate(() => ({
+    local: Object.keys(localStorage).filter(key => key !== 'typebridge.welcomeSeen.v1').length,
+    session: sessionStorage.length,
+  }))).toEqual({ local: 0, session: 0 });
   await expect(page.locator('#reader-input-status')).toHaveText('Inputs saved on this device.');
   await page.reload();
   await expect(page.locator('#read-text input')).toHaveValue('5');
