@@ -7,10 +7,12 @@ import './active-renderer.css';
 import { fitFractionFences } from './math-fences';
 
 export function renderDocument(root: HTMLElement, text: string, locale: string, initialInputs?: ReadonlyMap<string, number>) {
-  const result = renderActive(text, { locale });
+  // Quizzes (ActiveMD 0.7.0): question groups render as controls; the answers stay in the
+  // returned manifest, which goes straight to the runtime and never into the HTML.
+  const result = renderActive(text, { locale, quizManifest: true });
   // Only the package's sanitized output crosses this HTML boundary. Never source text.
   root.innerHTML = result.html;
-  const live = mount(root, { locale, initialInputs, loadKatex: async () => katex });
+  const live = mount(root, { locale, initialInputs, ...(result.quiz ? { quiz: result.quiz } : {}), loadKatex: async () => katex });
   const formulas = Array.from(root.querySelectorAll<HTMLElement>('.active-math-display'));
   const sizedFences = new WeakSet<Element>();
   const updateOverflow = (targets = formulas) => {

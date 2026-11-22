@@ -1,6 +1,6 @@
 # Active Markdown examples
 
-Use TypeBridge with the published ActiveMD 0.6.2 controls. Copy a calculator into
+Use TypeBridge with the published ActiveMD 0.7.0 controls. Copy a calculator into
 the editor, choose Documents → Format → Markdown, then open Preview. Share it as
 a rendered page to let recipients use the same controls.
 
@@ -11,6 +11,8 @@ a rendered page to let recipients use the same controls.
 - [Phone plans](phone-plans.md): a form-like comparison; monthly data use and
   both plans' prices drive the two bills, a conditional verdict and the
   break-even point.
+- [Quick quiz](quick-quiz.md): numeric, single- and multiple-choice questions
+  with Check, Retry and a score; one answer follows a live calculator value.
 
 Author new number fields as `:edit[Accessible name]{input=name}` and sliders as
 `:slider[Accessible name]{input=name step=1}`. Bracket names are accessible-only;
