@@ -10,7 +10,7 @@ A shared document travels inside the link's fragment, `https://typebridge.vchern
 |---|---|
 | `title` | Document title, at most 150 characters |
 | `text` | Document text, exactly as written |
-| `format` | Document format; `plain` or `markdown` (ActiveMD 0.7.0: GFM, callouts, math, calc and quizzes) |
+| `format` | Document format; `plain` or `markdown` (ActiveMD 0.8.0: GFM, callouts, math, calc and quizzes) |
 | `view` | How the reading page first shows it: `source` or `rendered` (presentation only) |
 | `heading` | Optional `false` hides the visible page title; omitted or other values show it. The accessible heading, tab title and Edit copy name remain. Old readers ignore the hint. |
 | `edit` | Whether the reading page offers **Edit a copy** (presentation only; it does not protect the text) |

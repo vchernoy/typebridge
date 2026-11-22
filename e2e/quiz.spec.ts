@@ -30,3 +30,25 @@ test('a reader checks the quick quiz on a shared page, sees the score, and retri
   await root.getByRole('button', { name: 'Check' }).click();
   await expect(root.getByRole('group', { name: 'Question 1' })).toContainText('Correct (1 of 1)');
 });
+
+test('a seeded quiz on a shared page draws a fresh variant on Retry (ActiveMD 0.8.0)', async ({ page }) => {
+  const seeded = '```calc\ninput variant = 1 in 1..1000\na = randInt(variant, 2, 9)\nb = randInt(variant, 2, 9, 1)\n```\n\n' +
+    'Variant :value[variant]: what is :value[a] × :value[b]?\n\n:::question{type=number}\nYour product:\n\n:answer[a * b]\n:::\n\n::quiz-submit[Check]{seed=variant}\n';
+  const encoded = await encodeSharePayload({ title: 'Seeded quiz', text: seeded, format: 'markdown', view: 'rendered', edit: false });
+  if (!encoded.ok) throw new Error('Share encoding failed');
+  await page.goto('/read.html#doc=' + encoded.payload);
+  const root = page.locator('#read-text');
+  await expect(root.getByRole('button', { name: 'Check' })).toBeEnabled();
+  const read = async () => (await root.locator('output').allTextContents()).map(Number);
+  const [variant, a, b] = await read();
+  await root.getByRole('textbox', { name: 'Your answer' }).fill(String(a! * b!));
+  await root.getByRole('button', { name: 'Check' }).click();
+  await expect(root.locator('.active-quiz-status')).toHaveText('Score: 1 of 1');
+  expect((await read())[0]).toBe(variant);
+  await root.getByRole('button', { name: 'Retry' }).click();
+  await expect.poll(async () => (await read())[0]).not.toBe(variant);
+  const [, a2, b2] = await read();
+  await root.getByRole('textbox', { name: 'Your answer' }).fill(String(a2! * b2!));
+  await root.getByRole('button', { name: 'Check' }).click();
+  await expect(root.locator('.active-quiz-status')).toHaveText('Score: 1 of 1');
+});
