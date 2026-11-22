@@ -21,7 +21,7 @@ GitHub Pages deployment is enabled for main. Successful Actions deployment is no
 
 ## Active Markdown and calculators
 
-TypeBridge bundles the published ActiveMD **0.7.0** packages, including readable
+TypeBridge bundles the published ActiveMD **0.8.0** packages, including readable
 `:edit{input=price}` and `:slider[Quantity]{input=quantity step=1}` controls,
 native numeric radio groups and dropdowns. Existing `:input[name]` syntax remains
 supported, and `:value[total]` remains an output. See the [copyable calculators](docs/examples/README.md)
@@ -29,8 +29,9 @@ for synchronized radio/select/numeric controls and a trip budget in editor Previ
 Quizzes work too: `:::question` groups closed by `::quiz-submit[Check]` get Check and Retry, with
 per-question feedback and a score (see the [quick quiz](docs/examples/quick-quiz.md)). Answers are
 not shown on the page, but they are in the document's source, which a shared link carries and Edit a
-copy opens: use quizzes for self-checks, not secure tests. Randomized (`seed=`) quizzes are not
-checkable yet.
+copy opens: use quizzes for self-checks, not secure tests. A group closed with
+`::quiz-submit[Check]{seed=name}` gets a fresh random variant (`rand`/`randInt` values and choice
+order) each time it starts and on every Retry.
 
 Calc owns defaults. Edit/slider bracket names are accessible-only; radio/select
 labels are visible. Accepted input state saves separately from source when policy
