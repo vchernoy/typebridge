@@ -1,4 +1,16 @@
 import { documentFormat, type DocumentFormat } from '../editor/document-fields';
+import { DATA_SLOT, exportStandalone } from '../standalone/document';
+
+const STANDALONE_TEMPLATE_URL = '/standalone-template.html';
+
+/** A response that is not the viewer (a fallback page, say) must not stay in the offline cache. */
+async function forgetCachedTemplate(): Promise<void> {
+  try {
+    for (const name of await caches.keys()) {
+      if (name.startsWith('typebridge-')) await (await caches.open(name)).delete(STANDALONE_TEMPLATE_URL, { ignoreVary: true });
+    }
+  } catch { /* No Cache Storage here; nothing was cached. */ }
+}
 /**
  * Export (TXT, TypeBridge JSON) and Import of one document. The file formats and checks are
  * pure functions; `setupExportImport` wires the Documents menu buttons. Saving an import and
@@ -70,6 +82,41 @@ export function setupExportImport(deps: ExportImportDeps): void {
     const { title, text, format } = deps.exportSurface();
     downloadText(safeFilename(title) + '.typebridge.json', exportJson(title, text, format), 'application/json;charset=utf-8');
     deps.announce('Document exported');
+  });
+  // One self-contained HTML file that works offline (#386): the published viewer template
+  // (fetched from this site, cached for offline use after the first export) plus this document.
+  // Readers start from the calc defaults; inputs entered here are not included.
+  const exportHtml = document.querySelector<HTMLButtonElement>('#export-html')!;
+  exportHtml.addEventListener('click', async () => {
+    const { title, text, format } = deps.exportSurface();
+    exportHtml.disabled = true;
+    try {
+      let template: string;
+      try {
+        const response = await fetch(STANDALONE_TEMPLATE_URL);
+        if (!response.ok) throw new Error(String(response.status));
+        template = await response.text();
+        // Exactly one data slot: anything else is not the viewer, whatever the HTTP status said.
+        if (template.split(DATA_SLOT).length !== 2) {
+          await forgetCachedTemplate();
+          throw new Error('Not the viewer template');
+        }
+      } catch {
+        deps.announce('Could not export interactive HTML: the viewer could not be loaded. Connect to the internet and try again.');
+        return;
+      }
+      let html: string;
+      try {
+        html = exportStandalone(template, { title: title.slice(0, 150), text, format: format ?? 'plain' });
+      } catch {
+        deps.announce('Could not export interactive HTML: the document is larger than 2 MB.');
+        return;
+      }
+      downloadText(safeFilename(title) + '.html', html, 'text/html;charset=utf-8');
+      deps.announce('Interactive HTML exported');
+    } finally {
+      exportHtml.disabled = false;
+    }
   });
   const importFile = document.querySelector<HTMLInputElement>('#import-file')!;
   document.querySelector<HTMLButtonElement>('#import-draft')!.addEventListener('click', () => { if (!deps.isViewMode()) importFile.click(); });

@@ -4,6 +4,39 @@ import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const BASE = '/';
+/** The offline interactive-HTML viewer template (#386), built by scripts/build-standalone.mjs. */
+const STANDALONE_TEMPLATE = 'standalone-template.html';
+
+/**
+ * Publish the prebuilt standalone viewer template with the app, so Documents → Export as
+ * interactive HTML can fill it in the browser. `npm run build` builds it first.
+ */
+function standaloneTemplate(): Plugin {
+  return {
+    name: 'typebridge-standalone-template',
+    // `npm run dev` serves the template too, once `npm run build:standalone-viewer` has built it.
+    configureServer(server) {
+      server.middlewares.use('/' + STANDALONE_TEMPLATE, (_request, response) => {
+        void readFile('dist-standalone/viewer-template.html', 'utf8').then(source => {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8');
+          response.end(source);
+        }, () => {
+          response.statusCode = 404;
+          response.end('Run `npm run build:standalone-viewer` to build the export template for the dev server.');
+        });
+      });
+    },
+    async generateBundle() {
+      let source: string;
+      try {
+        source = await readFile('dist-standalone/viewer-template.html', 'utf8');
+      } catch {
+        throw new Error('Missing dist-standalone/viewer-template.html: run `npm run build`, which builds the standalone template first.');
+      }
+      this.emitFile({ type: 'asset', fileName: STANDALONE_TEMPLATE, source });
+    },
+  };
+}
 
 function offlineServiceWorker(): Plugin {
   let lazyAssets = new Set<string>();
@@ -33,6 +66,8 @@ function offlineServiceWorker(): Plugin {
       }
       // Shared shell dependencies stay eager; renderer-only modules and CSS load on demand.
       lazyAssets = new Set([...renderer].filter(file => !shell.has(file)));
+      // The export template is large and needed only when exporting: cache it on first use.
+      if (bundle[STANDALONE_TEMPLATE]) lazyAssets.add(STANDALONE_TEMPLATE);
     },
     async closeBundle() {
       const root = 'dist';
@@ -112,7 +147,7 @@ self.addEventListener('fetch', event => {
 
 export default defineConfig({
   base: BASE,
-  plugins: [offlineServiceWorker()],
+  plugins: [standaloneTemplate(), offlineServiceWorker()],
   build: {
     rollupOptions: {
       input: {

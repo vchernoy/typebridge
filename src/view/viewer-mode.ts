@@ -44,7 +44,7 @@ export function createViewerMode(state: EditorState, deps: ViewerDeps) {
   const VIEWER_DISABLED_CONTROLS = ['clear-document-data', 'rename-draft', 'new-draft', 'new-from-template', 'import-draft', 'delete-draft', 'open-comparison', 'undo', 'redo',
     'convert-cyrillic', 'convert-latin', 'clear', 'replace-one', 'replace-all'];
   /** Controls that only make sense while a saved document is shown. */
-  const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'copy'];
+  const VIEWER_NEEDS_DOCUMENT = ['export-txt', 'export-json', 'export-html', 'copy'];
   function applyViewerChrome(): void {
     document.body.classList.add('viewer');
     document.documentElement.dataset.role = 'viewer';
