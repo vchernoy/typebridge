@@ -59,7 +59,7 @@ A new private document that has never saved appears only in its window’s Docum
 Documents → Format chooses Plain text (the default for new and old documents) or Markdown.
 The format belongs to the document and follows ownership, Autosave/private state, recovery,
 JSON export/import and the document change sequence. A private format change stays in memory.
-Markdown uses ActiveMD 0.6.2 for GFM, callouts/details, MathML math and calc bindings.
+Markdown uses ActiveMD 0.7.0 for GFM, callouts/details, MathML math and calc bindings.
 Use `:edit{input=name}` for a numeric field or `:slider[Accessible name]{input=name step=0.1}`
 for a slider. The optional bracket label supplies an accessible name without adding prose.
 Both also have standalone `::` forms, and legacy `:input[name]` remains supported.

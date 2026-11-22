@@ -116,10 +116,11 @@ POC exports **source/default values**, not current reader input snapshots or edi
 state. The existing source, local sidecars and share codec are unchanged. Reset
 restores calc defaults; closing/reopening an export does not persist reader changes.
 Hidden branches and calc definitions remain in the embedded source; hiding content
-is not access control. Complete quizzes, future collections/charts and external media
-are not added. The template bundles the ActiveMD version TypeBridge pins (0.6.2, which
-adds heading anchors and matching footnote ids); unpublished upstream fixes are not
-silently bundled.
+is not access control: an exported quiz carries its answers inside the file's embedded
+source, unlike a shared page's HTML. Future collections/charts and external media are
+not added. The template bundles the ActiveMD version TypeBridge pins (0.7.0: heading
+anchors, matching footnote ids and quizzes with Check/Retry); unpublished upstream fixes
+are not silently bundled.
 
 After this prototype is reviewed and its downloadable artifact works offline,
 a separate product-integration slice can decide current-input snapshot policy,
