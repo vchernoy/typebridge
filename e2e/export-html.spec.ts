@@ -22,7 +22,8 @@ test('exports the current document as one HTML file that works offline from disk
   const downloading = page.waitForEvent('download');
   await documentAction(page, '#export-html');
   const download = await downloading;
-  expect(download.suggestedFilename()).toBe('Offline quote.html');
+  // WebKit replaces the space in a suggested file name with an underscore.
+  expect(download.suggestedFilename()).toMatch(/^Offline[ _]quote\.html$/);
   await expect(page.locator('#status-line')).toContainText('Interactive HTML exported');
   const file = testInfo.outputPath('export.html');
   await download.saveAs(file);
@@ -32,7 +33,8 @@ test('exports the current document as one HTML file that works offline from disk
   expect(html).not.toContain('TYPEBRIDGE_STANDALONE_DATA_V1');
 
   // Open the downloaded file with networking off: the controls and math still work.
-  const offline = await browser.newContext({ offline: true });
+  // An empty storage state: Firefox cannot apply the suite's seeded origin storage while offline.
+  const offline = await browser.newContext({ offline: true, storageState: { cookies: [], origins: [] } });
   const requests: string[] = [];
   offline.on('request', request => { if (/^https?:/.test(request.url())) requests.push(request.url()); });
   const opened = await offline.newPage();
@@ -58,6 +60,26 @@ test.describe('without the viewer', () => {
     await documentAction(page, '#export-html');
     await expect(page.locator('#status-line')).toContainText('Could not export interactive HTML: the viewer could not be loaded.');
     await expect(page.locator('#export-html')).toBeEnabled();
+    expect(downloads).toBe(0);
+  });
+
+  test('a page that is not the viewer is reported as a viewer problem, not a size problem (#399 review)', async ({ page }) => {
+    await writeMarkdown(page, 'Fallback', 'Hi');
+    await page.route('**/standalone-template.html', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<html><title>Fallback</title></html>' }));
+    let downloads = 0;
+    page.on('download', () => { downloads++; });
+    await documentAction(page, '#export-html');
+    await expect(page.locator('#status-line')).toContainText('Could not export interactive HTML: the viewer could not be loaded.');
+    await expect(page.locator('#status-line')).not.toContainText('2 MB');
+    expect(downloads).toBe(0);
+  });
+
+  test('a document over 2 MB gets the size message', async ({ page }) => {
+    await writeMarkdown(page, 'Huge', 'x'.repeat(2_100_000));
+    let downloads = 0;
+    page.on('download', () => { downloads++; });
+    await documentAction(page, '#export-html');
+    await expect(page.locator('#status-line')).toContainText('Could not export interactive HTML: the document is larger than 2 MB.');
     expect(downloads).toBe(0);
   });
 });

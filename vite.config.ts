@@ -14,7 +14,18 @@ const STANDALONE_TEMPLATE = 'standalone-template.html';
 function standaloneTemplate(): Plugin {
   return {
     name: 'typebridge-standalone-template',
-    apply: 'build',
+    // `npm run dev` serves the template too, once `npm run build:standalone-viewer` has built it.
+    configureServer(server) {
+      server.middlewares.use('/' + STANDALONE_TEMPLATE, (_request, response) => {
+        void readFile('dist-standalone/viewer-template.html', 'utf8').then(source => {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8');
+          response.end(source);
+        }, () => {
+          response.statusCode = 404;
+          response.end('Run `npm run build:standalone-viewer` to build the export template for the dev server.');
+        });
+      });
+    },
     async generateBundle() {
       let source: string;
       try {

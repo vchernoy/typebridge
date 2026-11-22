@@ -12,7 +12,11 @@ then the normal Vite build emits its viewer template as `/standalone-template.ht
 on first use, like the renderer, so the first export needs a connection and later
 exports work offline. Export fills the template's inert data slot in the browser
 (`src/standalone/document.ts`); nothing is uploaded. If the template cannot be
-loaded, the editor says so and downloads nothing.
+loaded, or the response is not the viewer (for example a fallback page), the
+editor says so, removes that response from the offline cache and downloads nothing;
+a document over 2 MB gets its own message. During development, `npm run dev` serves
+the template from `dist-standalone/` after `npm run build:standalone-viewer`, and
+answers 404 with that instruction until then.
 
 The rest of this page describes the original proof of concept, its build and
 safety model, which the product route reuses unchanged.

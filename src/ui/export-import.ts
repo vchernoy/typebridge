@@ -1,5 +1,16 @@
 import { documentFormat, type DocumentFormat } from '../editor/document-fields';
-import { exportStandalone } from '../standalone/document';
+import { DATA_SLOT, exportStandalone } from '../standalone/document';
+
+const STANDALONE_TEMPLATE_URL = '/standalone-template.html';
+
+/** A response that is not the viewer (a fallback page, say) must not stay in the offline cache. */
+async function forgetCachedTemplate(): Promise<void> {
+  try {
+    for (const name of await caches.keys()) {
+      if (name.startsWith('typebridge-')) await (await caches.open(name)).delete(STANDALONE_TEMPLATE_URL, { ignoreVary: true });
+    }
+  } catch { /* No Cache Storage here; nothing was cached. */ }
+}
 /**
  * Export (TXT, TypeBridge JSON) and Import of one document. The file formats and checks are
  * pure functions; `setupExportImport` wires the Documents menu buttons. Saving an import and
@@ -82,9 +93,14 @@ export function setupExportImport(deps: ExportImportDeps): void {
     try {
       let template: string;
       try {
-        const response = await fetch('/standalone-template.html');
+        const response = await fetch(STANDALONE_TEMPLATE_URL);
         if (!response.ok) throw new Error(String(response.status));
         template = await response.text();
+        // Exactly one data slot: anything else is not the viewer, whatever the HTTP status said.
+        if (template.split(DATA_SLOT).length !== 2) {
+          await forgetCachedTemplate();
+          throw new Error('Not the viewer template');
+        }
       } catch {
         deps.announce('Could not export interactive HTML: the viewer could not be loaded. Connect to the internet and try again.');
         return;
