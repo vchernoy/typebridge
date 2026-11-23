@@ -26,7 +26,7 @@ export function setupMarkdownView(deps: {
   let generation = 0;
   let previous = '';
   let live: ReturnType<typeof import('./active-renderer').renderDocument> | undefined;
-  let acceptedSource: { id: string; text: string } | undefined;
+  let acceptedSource: { id: string; text: string; quizSeeds: ReadonlySet<string | undefined> } | undefined;
   let pageActive = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = (): void => { generation++; clearTimeout(timer); attachment?.destroy(); attachment = undefined; live?.destroy(); live = undefined; };
@@ -50,7 +50,7 @@ export function setupMarkdownView(deps: {
       live = renderDocument(stage, text, navigator.language, prepared.initialInputs);
       await live.settled();
       if (generation !== started) return;
-      prepared.bind(live); acceptedSource = { id: documentId, text }; stage.style.removeProperty('visibility');
+      prepared.bind(live); acceptedSource = { id: documentId, text, quizSeeds: live.quizSeeds }; stage.style.removeProperty('visibility');
       // WebKit can retain focus on the now-hidden Load button during remount.
       // Return it to Reset, but preserve an explicit move to another control.
       const load = document.querySelector<HTMLButtonElement>('#editable-input-load');
@@ -110,11 +110,13 @@ export function setupMarkdownView(deps: {
   window.addEventListener('pagehide', () => { pageActive = false; stop(); });
   window.addEventListener('pageshow', event => { if (event.persisted) { pageActive = true; previous = ''; sync(); } });
   return { sync, edit,
-    /** Preparation for explicit parameter sharing. Product Share routes still omit inputs. */
+    /** Only share values accepted against this exact document and source. */
     captureInputs() {
       const draft = deps.shown();
       if (!pageActive || documentFormat(draft) !== 'markdown' || acceptedSource?.id !== draft.id || acceptedSource.text !== deps.text()) return;
-      return inputState.capture();
+      const snapshot = inputState.capture();
+      const quizSeeds = acceptedSource.quizSeeds;
+      return snapshot && { ...snapshot, values: snapshot.values.filter(([name]) => !quizSeeds.has(name)) };
     },
   };
 }

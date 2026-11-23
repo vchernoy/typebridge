@@ -1236,9 +1236,11 @@ for (const selector of ['#share-link', '#share-open']) document.querySelector<HT
     surface: () => ({
     title: draftTitle.value.trim() || UNTITLED_TITLE,
     text: field.value, format: state.active.format,
+    inputs: markdownView?.captureInputs(),
   }),
     base: () => new URL('/', location.href).toString(),
     returnFocus: () => opener,
+    explainMissingInputs: true,
   });
 });
 const leaveGuards = createLeaveGuards(state, {

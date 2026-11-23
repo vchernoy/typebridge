@@ -94,7 +94,8 @@ export function setupSharedEdit(ui: Elements) {
         // Undefined exclusions deliberately disable reuse for a separately
         // confirmed Create new copy action after an ambiguous old activation.
         const result = await reuseOrCreateSharedCopy(db, { ...newDraft(fields.text), ...fields },
-          force ? undefined : sharedCopyRecoveryExclusions(), a.abort.signal, () => current(a));
+          force ? undefined : sharedCopyRecoveryExclusions(), a.abort.signal, () => current(a),
+          a.publicAtStart && a.shared.format === 'markdown' ? a.shared.inputs : undefined);
         if (!current(a)) return;
         try {
           const channel = new BroadcastChannel(DOCUMENT_SIGNAL_CHANNEL);
@@ -121,10 +122,20 @@ export function setupSharedEdit(ui: Elements) {
     }
   }
   async function begin(force = false): Promise<void> {
-    if (!shared?.edit || (!force && busy)) return;
+    if (!shared?.edit || confirming || (!force && busy)) return;
+    const publicAtStart = publicNow();
+    if (!publicAtStart && shared.format === 'markdown' && shared.inputs?.values.length) {
+      const atVersion = version;
+      confirming = true;
+      const accepted = await askConfirmChoice({ title: 'Copy source only?',
+        message: 'Private session is on. This copy will start with authored defaults. The shared page still has its link parameters.',
+        confirmLabel: 'Copy source only', cancelLabel: 'Keep reading', returnFocus: () => ui.edit });
+      confirming = false;
+      if (!accepted || atVersion !== version || hash !== location.hash || publicNow() !== publicAtStart) return;
+    }
     const document = shared;
     abandon();
-    const a: Action = { version, hash, publicAtStart: publicNow(), shared: document, abort: new AbortController(), keepReading: false, initialDone: false, fallbackStarted: false };
+    const a: Action = { version, hash, publicAtStart, shared: document, abort: new AbortController(), keepReading: false, initialDone: false, fallbackStarted: false };
     action = a; busy = true; disableEdit(true); ui.actions.hidden = true;
     if (force) { await copy(a, true); return; }
     const deadline = Date.now() + 2000;

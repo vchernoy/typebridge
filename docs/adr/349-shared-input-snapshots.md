@@ -1,6 +1,11 @@
 # Shared numeric snapshots (#349)
 
-Status: partial integration. Reading-page re-share, explicit parameter inclusion,
+Status: editor Share supports explicit inclusion from accepted memory, and public
+new copies initialize their separate numeric state from the link. Private
+session offers a source-only copy after confirmation. Source-only editor
+windows without accepted memory do not use a saved baseline in this slice.
+
+Earlier delivery stages are recorded below. Status at the codec/reader stage: Reading-page re-share, explicit parameter inclusion,
 v2 receiver initialization and library recognition are implemented in the current
 slice. Editor Share parameters, saved-baseline selection and new editable-copy
 input initialization remain separate. Deployment/acceptance is not implied.

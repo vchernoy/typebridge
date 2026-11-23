@@ -58,7 +58,7 @@ export async function prepareSharedInputs(payload: string, remembered: Promise<v
   }
   if (!current() || frozen) { store?.close(); store = undefined; }
   // An empty saved reset is a real snapshot, not permission to reapply link values.
-  // Only a validated codec snapshot may be supplied; current product routes omit it.
+  // Only a validated codec snapshot may be supplied.
   const initialInputs = store?.hasSnapshot ? store.inputs : incoming ? new Map(incoming.values) : store?.inputs;
   // A restored history page may read a saved baseline without rearming writes
   // disabled by its prior lifecycle/privacy transition.

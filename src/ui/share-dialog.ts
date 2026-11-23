@@ -22,6 +22,7 @@ export type ShareDialogDeps = {
   current?: () => boolean;
   /** Received links may retain a disabled Edit hint that recipients cannot enable. */
   editLocked?: boolean;
+  explainMissingInputs?: boolean;
 };
 
 /** A short preview of what the reader sees first. */
@@ -273,7 +274,11 @@ export async function openShareDialog(deps: ShareDialogDeps): Promise<void> {
   row.append(link, copy);
   embedDisclosure.append(embedSummary, embedHint, embedLabel, embedCode, copyEmbed);
   content.append(privacy, linkLabel, row, status, embedDisclosure);
-  if (snapshot) content.append(inputLabel, inputSummary);
+  if (snapshot && (!deps.explainMissingInputs || snapshot.values.length)) content.append(inputLabel, inputSummary);
+  else if (format === 'markdown' && deps.explainMissingInputs && !snapshot) {
+    inputSummary.textContent = 'Current parameters are unavailable. Open Rendered view to load parameters before sharing.';
+    content.append(inputSummary);
+  }
   content.append(readerOptions);
   content.append(previewDisclosure);
   try {

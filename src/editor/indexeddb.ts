@@ -1,3 +1,5 @@
+import { inputRecord } from './numeric-inputs';
+import type { InputSnapshot } from './input-snapshot';
 import { sameSharedCopy, type SharedCopyFields } from './shared-copy';
 import { documentFields, sameFields, type DocumentFields, type DocumentFieldsInput } from './document-fields';
 import { replayDocument, type ChangeRecord } from './change-log';
@@ -260,12 +262,13 @@ export async function reuseOrCreateSharedCopy(
   excludedRecoveryIds: ReadonlySet<string> | undefined,
   signal?: AbortSignal,
   allowed: () => boolean = () => true,
+  initialInputs?: InputSnapshot,
 ): Promise<{ draft: StoredDraft; reused: boolean }> {
   const assertCurrent = (): void => {
     if (signal?.aborted || !allowed()) throw new DOMException('Copy cancelled', 'AbortError');
   };
   assertCurrent();
-  const tx = db.transaction([STORE, OWNERSHIP, CHANGES], 'readwrite');
+  const tx = db.transaction(initialInputs?.values.length ? [STORE, OWNERSHIP, CHANGES, 'readerStates'] : [STORE, OWNERSHIP, CHANGES], 'readwrite');
   const done = finished(tx);
   const abort = (): void => { try { tx.abort(); } catch { /* Already completed. */ } };
   signal?.addEventListener('abort', abort, { once: true });
@@ -290,6 +293,13 @@ export async function reuseOrCreateSharedCopy(
     assertCurrent();
     await request(store.add(withInputPolicy(draft)));
     assertCurrent();
+    if (initialInputs?.values.length) {
+      const id = 'editable:' + draft.id;
+      const row = inputRecord({ id, version: 1, revision: 1, inputs: initialInputs.values }, id);
+      if (!row) throw new Error('Copy inputs exceed local storage limits');
+      await request(tx.objectStore('readerStates').add(row));
+      assertCurrent();
+    }
     await done;
     assertCurrent();
     return { draft, reused: false };
