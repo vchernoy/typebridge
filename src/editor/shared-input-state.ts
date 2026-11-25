@@ -2,15 +2,8 @@
 import { openDraftDatabase } from './indexeddb';
 import { readerStorageAllowed, SHARED_ITEMS, type SharedItem } from './shared-library';
 import { sharedRemovalToken } from './shared-invalidation';
-import { INPUT_BYTES, numericInputs } from './numeric-inputs';
+import { inputRecord, numericInputs, type InputRecord } from './numeric-inputs';
 export { INPUT_LIMIT, INPUT_BYTES, numericInputs } from './numeric-inputs';
-export type InputRecord = { id: string; version: 1; revision: number; inputs: [string, number][] };
-export function inputRecord(value: unknown, id: string): InputRecord | undefined {
-  if (!value || typeof value !== 'object') return;
-  const row = value as InputRecord;
-  if (row.id !== id || id.length > 137 || row.version !== 1 || !Number.isSafeInteger(row.revision) || row.revision < 1 || !numericInputs(row.inputs)) return;
-  return new TextEncoder().encode(JSON.stringify({ id, version: 1, revision: row.revision, inputs: row.inputs })).byteLength <= INPUT_BYTES ? row : undefined;
-}
 const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
   r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
 });

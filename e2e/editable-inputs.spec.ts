@@ -266,3 +266,71 @@ test('a stale public view observing a private row cannot rearm cached inputs aft
   await input(page).fill('9');await page.clock.install();await page.clock.fastForward(1000);
   expect(await states(page)).toEqual([]);await expect(status(page)).toContainText('temporary');
 });
+
+test('editor shares a fixed input snapshot and Edit initializes only new copies', async ({ page, browser }) => {
+  await makeDocument(page);
+  await preview(page);
+  await input(page).fill('7');
+  await expect(page.locator('#rendered-document output')).toHaveText('10');
+  await page.locator('#share-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Share link', exact: true });
+  const parameters = dialog.getByLabel('Include current parameters');
+  const url = dialog.locator('#share-url');
+  await expect(parameters).not.toBeChecked();
+  const defaultsLink = await url.inputValue();
+  await parameters.check();
+  await expect(dialog.locator('#share-copy')).toBeEnabled();
+  const snapshotLink = await url.inputValue();
+  expect(snapshotLink).not.toBe(defaultsLink);
+  await page.keyboard.press('Escape');
+  await input(page).fill('4');
+
+  const context = await browser.newContext({ storageState: {
+    cookies: [],
+    origins: [{ origin: new URL(snapshotLink).origin, localStorage: [{ name: 'typebridge.welcomeSeen.v1', value: '1' }] }],
+  } });
+  try {
+    const recipient = await context.newPage();
+    await recipient.goto(defaultsLink);
+    await expect(recipient.locator('#read-text input')).toHaveValue('2');
+    await recipient.goto(snapshotLink);
+    await expect(recipient.locator('#read-text input')).toHaveValue('7');
+    await expect(recipient.locator('#read-text output')).toHaveText('10');
+    await recipient.locator('#read-text input').fill('9');
+    await recipient.locator('#edit-copy').click();
+    await expect(recipient.locator('.host-status')).toHaveText('Saved as a new document in your Documents.');
+    const editor = recipient.frameLocator('iframe[src*="doc="]');
+    await expect(editor.locator('#editor')).toHaveValue(source);
+    await editor.locator('#document-view-preview').click();
+    const copiedInput = editor.locator('#rendered-document input[data-active-input="x"]');
+    await expect(copiedInput).toHaveValue('7');
+    await editor.locator('#editable-input-reset').click();
+    await expect(copiedInput).toHaveValue('2');
+    await expect(editor.locator('#editable-input-status')).toHaveText('Inputs saved on this device.');
+
+    const copyId = await editor.locator('#drafts').inputValue();
+    await recipient.goto(snapshotLink);
+    await expect(recipient.locator('#edit-copy')).toBeVisible();
+    // Model an unowned copy explicitly. Navigation can leave a stale ownership
+    // fence, and the normal fallback deliberately refuses to reuse that candidate.
+    await recipient.evaluate(id => new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('typebridge');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction('editOwnership', 'readwrite');
+        tx.objectStore('editOwnership').delete(id);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); reject(tx.error); };
+      };
+    }), copyId);
+    await recipient.locator('#edit-copy').click();
+    await expect(recipient.locator('.host-status')).toHaveText('Opened an existing document from your Documents.');
+    const edit = editor.locator('#document-view-edit');
+    await expect(edit).toBeVisible();
+    if (await edit.getAttribute('aria-pressed') === 'true') await editor.locator('#document-view-preview').click();
+    await expect(copiedInput).toHaveValue('2');
+  } finally {
+    await context.close();
+  }
+});

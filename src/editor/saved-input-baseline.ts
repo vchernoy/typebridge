@@ -1,5 +1,5 @@
 /** Explicit saved-value choice only; never a substitute for accepted current memory. */
-import { inputRecord } from './shared-input-state';
+import { inputRecord } from './numeric-inputs';
 import { inspectInputSnapshot, type InputSnapshot } from './input-snapshot';
 import type { StoredDraft } from './indexeddb';
 export type SavedInputBaseline = { kind: 'saved'; snapshot: InputSnapshot; documentRevision: number; inputRevision: number };

@@ -68,7 +68,8 @@ export function renderDocument(root: HTMLElement, text: string, locale: string, 
   fonts.addEventListener('loadingdone', fontLoaded);
   fitFractionFences(root, sizedFences);
   updateOverflow();
-  return { session: live.session, settled: () => live.settled(), resetInputs: () => live.resetInputs(), destroy: () => {
+  const quizSeeds = new Set(result.quiz?.groups.map(group => group.seed));
+  return { quizSeeds, session: live.session, settled: () => live.settled(), resetInputs: () => live.resetInputs(), destroy: () => {
     destroyed = true;
     if (frame !== undefined) cancelAnimationFrame(frame);
     pendingMath.clear();

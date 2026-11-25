@@ -151,7 +151,12 @@ no document identity or content and may survive content erasure.
 The [snapshot contract](adr/349-shared-input-snapshots.md) covers compatibility,
 initialization, reset and copy/privacy boundaries. The shared reader can already
 include accepted numeric inputs through [Re-share current parameters](#re-share-current-parameters-372).
-Editor-generated links continue to share source and presentation hints.
+In the editor, open Rendered view to load the current inputs, then choose Share and
+check **Include current parameters**. The option starts unchecked. It uses the
+accepted values for the exact source at the time you open Share, including when
+you return to Edit without changing the source. If the editor has no accepted
+values for this source yet, Share can still create a source-only link. Quiz
+attempt seeds are omitted from editor-generated snapshots.
 
 Rendered shared pages restore accepted numeric inputs, including model-only inputs, from
 one versioned record keyed by the exact remembered shared item. Source, payload, authored
@@ -205,8 +210,10 @@ Existing recipient-local saved state wins as a whole, including an empty Reset r
 values. The original URL/library item never changes; re-sharing creates a new immutable
 variant. Library grouping/search recognizes its incoming parameters, never local sidecars.
 Older clients reject version-2 links explicitly; source-only/plain paths load no renderer.
-Editable-copy creation/reuse retains existing source-only semantics in this slice; it
-does not overwrite a copy's numeric state or promise to copy the recipient's answers.
+A newly created editable copy uses the link’s parameters when Private session is
+off. The copy keeps its own input state from then on. If a matching local document
+is reused, it keeps its own inputs. Reset restores authored defaults. During
+Private session, Edit asks before creating a source-only copy.
 
 Re-share inherits the received Edit a copy hint. If off, it stays off and its checkbox
 is disabled; if on, the recipient may keep it or turn it off for the new link. This

@@ -19,3 +19,11 @@ export function numericInputs(value: unknown): Map<string, number> | undefined {
   const result = inspectNumericInputs(value);
   return result.ok ? result.inputs : undefined;
 }
+
+export type InputRecord = { id: string; version: 1; revision: number; inputs: [string, number][] };
+export function inputRecord(value: unknown, id: string): InputRecord | undefined {
+  if (!value || typeof value !== 'object') return;
+  const row = value as InputRecord;
+  if (row.id !== id || id.length > 137 || row.version !== 1 || !Number.isSafeInteger(row.revision) || row.revision < 1 || !numericInputs(row.inputs)) return;
+  return new TextEncoder().encode(JSON.stringify({ id, version: 1, revision: row.revision, inputs: row.inputs })).byteLength <= INPUT_BYTES ? row : undefined;
+}

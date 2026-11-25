@@ -1,5 +1,6 @@
 /** Editable reader sidecars never modify the authoritative source or its revision. */
-import { inputRecord, numericInputs, type InputRecord, type InputSave } from './shared-input-state';
+import { inputRecord, numericInputs, type InputRecord } from './numeric-inputs';
+import type { InputSave } from './shared-input-state';
 import type { StoredDraft } from './indexeddb';
 const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 const finished = (tx: IDBTransaction) => new Promise<void>((resolve, reject) => {
