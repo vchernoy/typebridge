@@ -2,7 +2,7 @@
 
 Paste this document into TypeBridge, choose Markdown, and open Preview. The
 radio group, dropdown, and number control all edit the same delivery cost. Named Calc constants supply the default, range
-and option values.
+and option values. Each option label displays its own declared cost using `{{value}}`.
 
 ```calc
 pickup = 0
@@ -13,15 +13,15 @@ total = 100 + delivery
 ```
 
 :::radio[Delivery]{input=delivery}
-::option[Standard]{value=standard}
-::option[Express]{value=express}
-::option[Pickup]{value=pickup}
+::option[Standard (+{{value}})]{value=standard}
+::option[Express (+{{value}})]{value=express}
+::option[Pickup (+{{value}})]{value=pickup}
 :::
 
 :::select[Delivery menu]{input=delivery}
-::option[Standard]{value=standard}
-::option[Express]{value=express}
-::option[Pickup]{value=pickup}
+::option[Standard (+{{value}})]{value=standard}
+::option[Express (+{{value}})]{value=express}
+::option[Pickup (+{{value}})]{value=pickup}
 :::
 
 Total: **:value[total]**.
