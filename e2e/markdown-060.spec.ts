@@ -27,17 +27,17 @@ for (const surface of ['editor', 'reader'] as const) {
     const radio = root.getByRole('group', { name: 'Delivery', exact: true });
     const menu = root.getByRole('combobox', { name: 'Delivery menu' });
     const numeric = root.getByRole('spinbutton', { name: 'Delivery cost' });
-    await expect(radio.getByRole('radio', { name: 'Standard' })).toBeChecked();
-    await radio.getByRole('radio', { name: 'Express' }).check();
+    await expect(radio.getByRole('radio', { name: 'Standard (+10)', exact: true })).toBeChecked();
+    await radio.getByRole('radio', { name: 'Express (+25)', exact: true }).check();
     await expect(menu).toHaveValue('25');
     await expect(numeric).toHaveValue('25');
     await expect(root.locator('output')).toHaveText('125');
     await menu.selectOption('0');
-    await expect(radio.getByRole('radio', { name: 'Pickup' })).toBeChecked();
+    await expect(radio.getByRole('radio', { name: 'Pickup (+0)', exact: true })).toBeChecked();
     await expect(root.locator('output')).toHaveText('100');
 
     await page.locator(surface === 'editor' ? '#editable-input-reset' : '#reader-input-reset').click();
-    await expect(radio.getByRole('radio', { name: 'Standard' })).toBeChecked();
+    await expect(radio.getByRole('radio', { name: 'Standard (+10)', exact: true })).toBeChecked();
     await expect(menu).toHaveValue('10');
     await expect(root.locator('output')).toHaveText('110');
     if (surface === 'editor') {
