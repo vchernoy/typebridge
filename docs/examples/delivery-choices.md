@@ -1,23 +1,27 @@
 # Delivery calculator
 
 Paste this document into TypeBridge, choose Markdown, and open Preview. The
-radio group, dropdown, and number control all edit the same delivery cost.
+radio group, dropdown, and number control all edit the same delivery cost. Named Calc constants supply the default, range
+and option values.
 
 ```calc
-input delivery = 10 in 0..25
+pickup = 0
+standard = 10
+express = standard + 15
+input delivery = standard in pickup..express
 total = 100 + delivery
 ```
 
 :::radio[Delivery]{input=delivery}
-::option[Standard]{value=10}
-::option[Express]{value=25}
-::option[Pickup]{value=0}
+::option[Standard]{value=standard}
+::option[Express]{value=express}
+::option[Pickup]{value=pickup}
 :::
 
 :::select[Delivery menu]{input=delivery}
-::option[Standard]{value=10}
-::option[Express]{value=25}
-::option[Pickup]{value=0}
+::option[Standard]{value=standard}
+::option[Express]{value=express}
+::option[Pickup]{value=pickup}
 :::
 
 Total: **:value[total]**.
