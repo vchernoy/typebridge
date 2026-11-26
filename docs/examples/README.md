@@ -1,11 +1,11 @@
 # Active Markdown examples
 
-Use TypeBridge with the published ActiveMD 0.10.0 controls. Copy a calculator into
+Use TypeBridge with the published ActiveMD 0.11.0 controls. Copy a calculator into
 the editor, choose Documents → Format → Markdown, then open Preview. Share it as
 a rendered page to let recipients use the same controls.
 
 - [Delivery choices](delivery-choices.md): radio buttons, a dropdown and number
-  field synchronized to one delivery input, with named constants for its values.
+  field synchronized to one delivery input, with named constants and formatted option labels.
 - [Trip budget](trip-budget.md): radio travel choices and a lodging dropdown,
   with readable numeric fields, a slider and dependent per-person costs.
 - [Phone plans](phone-plans.md): a form-like comparison; monthly data use and

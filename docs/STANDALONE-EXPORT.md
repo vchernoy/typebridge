@@ -118,7 +118,7 @@ restores calc defaults; closing/reopening an export does not persist reader chan
 Hidden branches and calc definitions remain in the embedded source; hiding content
 is not access control: an exported quiz carries its answers inside the file's embedded
 source, unlike a shared page's HTML. Future collections/charts and external media are
-not added. The template bundles the ActiveMD version TypeBridge pins (0.10.0: heading
+not added. The template bundles the ActiveMD version TypeBridge pins (0.11.0: heading
 anchors, matching footnote ids, quizzes with Check/Retry and seeded variants); unpublished upstream fixes
 are not silently bundled.
 
