@@ -17,6 +17,11 @@
         }
         document.documentElement.dataset.colorScheme =
           choice === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : choice;
+        try {
+          if (localStorage.getItem('typebridge.sketch.v1') === 'on') document.documentElement.classList.add('active-sketch');
+        } catch {
+          /* The plain look remains when storage is blocked. */
+        }
       })();
     </script>
     <title>Shared document · TypeBridge</title>

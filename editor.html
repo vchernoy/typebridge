@@ -15,6 +15,12 @@
         }
         document.documentElement.dataset.colorScheme =
           choice === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : choice;
+        try {
+          if (localStorage.getItem("typebridge.sketch.v1") === "on")
+            document.documentElement.classList.add("active-sketch");
+        } catch {
+          /* The plain look remains when storage is blocked. */
+        }
       })();
     </script>
     <title>TypeBridge — Write and share interactive documents</title>
@@ -349,6 +355,13 @@
             </select>
             <p id="appearance-hint" class="setting-note">
               System follows your device. Your choice is saved in this browser.
+            </p>
+            <label class="toggle"
+              ><input id="sketch-controls" type="checkbox" aria-describedby="sketch-controls-hint" /> Hand-drawn
+              controls</label
+            >
+            <p id="sketch-controls-hint" class="setting-note">
+              Draws document inputs, sliders, choices and quiz buttons with sketchy outlines. Saved in this browser.
             </p>
             <div class="settings-host-only">
               <label for="window-layout">Layout</label>
