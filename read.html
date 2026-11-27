@@ -18,7 +18,8 @@
         document.documentElement.dataset.colorScheme =
           choice === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : choice;
         try {
-          if (localStorage.getItem('typebridge.sketch.v1') === 'on') document.documentElement.classList.add('active-sketch');
+          const style = localStorage.getItem('typebridge.style.v1') ?? (localStorage.getItem('typebridge.sketch.v1') === 'on' ? 'sketch' : null);
+          if (['sketch', 'brutal', 'notebook', 'chalkboard'].includes(style)) document.documentElement.dataset.activeStyle = style;
         } catch {
           /* The plain look remains when storage is blocked. */
         }

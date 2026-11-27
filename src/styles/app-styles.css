@@ -1,0 +1,320 @@
+/*
+ * Settings → Appearance → Style: the same look for the whole app as ActiveMD's styles.css gives
+ * rendered documents. <html data-active-style="…"> selects it; Plain (no attribute) changes nothing.
+ * CSS only: buttons, fields and checkboxes stay native controls. Loaded last so it can override
+ * the light/dark palette for the styles that bring their own paper (notebook, chalkboard).
+ */
+
+/* ---------- Tokens ---------- */
+
+:root[data-active-style="sketch"] {
+  --app-ink: var(--text);
+  --app-border: 2px;
+  --app-shape-1: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  --app-shape-2: 15px 255px 15px 225px / 225px 15px 255px 15px;
+  --app-shape-3: 225px 25px 205px 35px / 25px 205px 35px 225px;
+  --app-shadow: 2px 3px 0;
+  --app-shadow-hover: 3px 4px 0;
+  --app-card-shadow: 3px 4px 0;
+  --app-tilt: -0.4deg;
+  --app-button-fill: var(--button-background);
+  --app-button-text: var(--button-text);
+  --app-font: inherit;
+}
+:root[data-active-style="brutal"] {
+  --app-ink: var(--text);
+  --app-border: 3px;
+  --app-shape-1: 6px;
+  --app-shape-2: 6px;
+  --app-shape-3: 8px;
+  --app-shadow: 4px 4px 0;
+  --app-shadow-hover: 6px 6px 0;
+  --app-card-shadow: 8px 8px 0;
+  --app-tilt: 0deg;
+  --app-button-fill: #ffd23f;
+  --app-button-text: #111;
+  --app-font: inherit;
+}
+:root[data-active-style="notebook"] {
+  /* Light paper whatever the colour scheme. */
+  color-scheme: light;
+  --background: #f3efe2;
+  --surface: #fffef7;
+  --dialog-surface: #fffef7;
+  --text: #22304d;
+  --muted: #4b5a78;
+  --border: #b9d0ee;
+  --control-border: #1f3f99;
+  --panel-border: #b9d0ee;
+  --button-background: transparent;
+  --button-text: #1f3f99;
+  --accent: #1f3f99;
+  --brand: #1f3f99;
+  --warning: #9a4d06;
+  --focus: #1f3f99;
+  --switch-border: #4b5a78;
+  --switch-active-knob: #fffef7;
+  --app-ink: #1f3f99;
+  --app-border: 2px;
+  --app-shape-1: 3px;
+  --app-shape-2: 4px;
+  --app-shape-3: 4px;
+  --app-shadow: 0 0 0;
+  --app-shadow-hover: 1px 2px 0;
+  --app-card-shadow: 0 0 0;
+  --app-tilt: 0deg;
+  --app-button-fill: transparent;
+  --app-button-text: #1f3f99;
+  --app-font: "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS", cursive;
+}
+:root[data-active-style="chalkboard"] {
+  /* A dark board whatever the colour scheme. */
+  color-scheme: dark;
+  --background: #1b2b23;
+  --surface: #23392f;
+  --dialog-surface: #23392f;
+  --text: #eef2ea;
+  --muted: #c9d4c6;
+  --border: #ffffff40;
+  --control-border: #eef2eacc;
+  --panel-border: #ffffff40;
+  --button-background: transparent;
+  --button-text: #eef2ea;
+  --accent: #ffd479;
+  --brand: #ffd479;
+  --warning: #ffd479;
+  --focus: #ffd479;
+  --switch-border: #c9d4c6;
+  --switch-active-knob: #23392f;
+  --app-ink: #eef2eacc;
+  --app-border: 2px;
+  --app-shape-1: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  --app-shape-2: 15px 255px 15px 225px / 225px 15px 255px 15px;
+  --app-shape-3: 225px 25px 205px 35px / 25px 205px 35px 225px;
+  --app-shadow: 0 0 0;
+  --app-shadow-hover: 0 0 6px;
+  --app-card-shadow: 0 0 0;
+  --app-tilt: 0deg;
+  --app-button-fill: transparent;
+  --app-button-text: #eef2ea;
+  --app-font: "Chalkboard SE", "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+}
+
+/* ---------- Page surfaces ---------- */
+
+:root[data-active-style="notebook"] body {
+  background-color: var(--background);
+}
+:root[data-active-style="notebook"] :is(section:not(section section), .settings-panel, .confirm-dialog) {
+  /* Ruled paper with a red margin line. */
+  background-color: var(--surface);
+  background-image: linear-gradient(
+      90deg,
+      transparent calc(clamp(16px, 3vw, 28px) - 6px),
+      #e8a0a0 calc(clamp(16px, 3vw, 28px) - 6px),
+      #e8a0a0 calc(clamp(16px, 3vw, 28px) - 6px + 2px),
+      transparent calc(clamp(16px, 3vw, 28px) - 6px + 2px)
+    ),
+    linear-gradient(transparent calc(1.75rem - 1px), #dbe6f5 calc(1.75rem - 1px));
+  background-size:
+    100% 100%,
+    100% 1.75rem;
+}
+:root[data-active-style="chalkboard"] body {
+  background-color: var(--background);
+}
+:root[data-active-style="chalkboard"] :is(section:not(section section), .settings-panel, .confirm-dialog) {
+  background-color: var(--surface);
+  background-image: radial-gradient(ellipse at 30% 20%, #ffffff0d, transparent 60%);
+}
+:root:is([data-active-style="notebook"], [data-active-style="chalkboard"]) section section {
+  background: transparent;
+}
+/* Inside the app the card is already the paper or the board, so the document does not draw its
+   own (ActiveMD styles.css gives a standalone document one). */
+:root:is([data-active-style="notebook"], [data-active-style="chalkboard"]) .active-doc {
+  background: none;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+}
+:root:is([data-active-style="notebook"], [data-active-style="chalkboard"]) :is(h1, h2, h3) {
+  font-family: var(--app-font);
+}
+:root[data-active-style="brutal"] :is(h1, h2) {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- Shared rules (every known style) ---------- */
+
+/* Cards: sections, the settings panel and dialogs */
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  :is(section, .confirm-dialog) {
+  border: var(--app-border) solid var(--app-ink);
+  border-radius: var(--app-shape-2);
+  box-shadow: var(--app-card-shadow) var(--app-ink);
+}
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  .settings-group {
+  border-radius: var(--app-shape-1);
+}
+
+/* Buttons (text-style links and the resize grip keep their look; the document's own buttons are ActiveMD's) */
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  button:not(.text-button, .resize-grip, .active-doc *) {
+  border: var(--app-border) solid var(--app-ink);
+  border-radius: var(--app-shape-3);
+  background: var(--app-button-fill);
+  color: var(--app-button-text);
+  font-family: var(--app-font);
+  font-weight: 600;
+  box-shadow: var(--app-shadow) var(--app-ink);
+  transform: rotate(var(--app-tilt));
+}
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  button:not(.text-button, .resize-grip, .active-doc *):hover:not(:disabled) {
+  box-shadow: var(--app-shadow-hover) var(--app-ink);
+  transform: rotate(0deg) translate(-1px, -1px);
+}
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  button:not(.text-button, .resize-grip, .active-doc *):active:not(:disabled) {
+  box-shadow: none;
+  transform: translate(2px, 3px);
+}
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  button:not(.text-button, .resize-grip, .active-doc *):disabled {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+/* Fields */
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  :is(textarea, select, input:is([type="text"], [type="search"], [type="number"], [type="url"], :not([type]))):not(
+    .active-doc *
+  ) {
+  border: var(--app-border) solid var(--app-ink);
+  border-radius: var(--app-shape-1);
+}
+
+/* Checkboxes (not the typing-mode switch, which is drawn as a track) */
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  input[type="checkbox"]:not([role="switch"], .active-doc *) {
+  appearance: none;
+  flex: none;
+  width: 1.2em;
+  height: 1.2em;
+  margin: 0;
+  border: var(--app-border) solid var(--app-ink);
+  border-radius: var(--app-shape-2);
+  background: transparent;
+  color: inherit;
+  display: inline-grid;
+  place-content: center;
+  vertical-align: -0.2em;
+  cursor: pointer;
+}
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  input[type="checkbox"]:not([role="switch"], .active-doc *)::before {
+  content: "";
+  width: 0.85em;
+  height: 0.85em;
+  background: var(--app-ink);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.2 8.6c1.4 1 2.4 2.3 3.3 3.8C7.7 8.3 10.4 5 13.9 2.6' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.2 8.6c1.4 1 2.4 2.3 3.3 3.8C7.7 8.3 10.4 5 13.9 2.6' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transform: scale(0);
+}
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  input[type="checkbox"]:not([role="switch"], .active-doc *):checked::before {
+  transform: scale(1);
+}
+
+/* Focus stays obvious, drawn in the same spirit */
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  :focus-visible {
+  outline: 3px dashed var(--focus);
+  outline-offset: 3px;
+}
+:root[data-active-style="brutal"] input[type="checkbox"]:not([role="switch"], .active-doc *):checked {
+  background: var(--app-button-fill);
+}
+:root[data-active-style="brutal"] input[type="checkbox"]:not([role="switch"], .active-doc *):checked::before {
+  background: var(--app-button-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-active-style] button {
+    transform: none !important;
+  }
+}
+
+/* Forced colors: native checkboxes, so checked states stay visible. */
+@media (forced-colors: active) {
+  :root[data-active-style] input[type="checkbox"]:not([role="switch"], .active-doc *) {
+    appearance: auto;
+    width: auto;
+    height: auto;
+    border: revert;
+    background: revert;
+  }
+  :root[data-active-style] input[type="checkbox"]:not([role="switch"], .active-doc *)::before {
+    content: none;
+  }
+}

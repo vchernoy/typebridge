@@ -194,6 +194,7 @@
 }
 
 #appearance,
+#doc-style,
 #window-layout {
   min-height: 44px;
   margin: 0 8px 8px;
