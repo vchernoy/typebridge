@@ -3,6 +3,8 @@ import { renderActive } from '@vchernoy/remark-active';
 import katex from 'katex';
 import { mount } from '@vchernoy/active-runtime';
 import '@vchernoy/active-runtime/style.css';
+// Optional hand-drawn look (ActiveMD 0.12.0); inert unless <html> has .active-sketch.
+import '@vchernoy/active-runtime/sketch.css';
 import './active-renderer.css';
 import { fitFractionFences } from './math-fences';
 
