@@ -1,6 +1,6 @@
 # Active Markdown examples
 
-Use TypeBridge with the published ActiveMD 0.13.0 controls. Copy a calculator into
+Use TypeBridge with the published ActiveMD 0.13.1 controls. Copy a calculator into
 the editor, choose Documents → Format → Markdown, then open Preview. Share it as
 a rendered page to let recipients use the same controls.
 

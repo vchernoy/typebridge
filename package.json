@@ -31,9 +31,9 @@
   },
   "private": true,
   "dependencies": {
-    "@vchernoy/active-runtime": "0.13.0",
-    "@vchernoy/calc": "0.13.0",
-    "@vchernoy/remark-active": "0.13.0",
+    "@vchernoy/active-runtime": "0.13.1",
+    "@vchernoy/calc": "0.13.1",
+    "@vchernoy/remark-active": "0.13.1",
     "katex": "0.19.1"
   }
 }
