@@ -36,6 +36,12 @@
         }
         document.documentElement.dataset.colorScheme =
           choice === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : choice;
+        try {
+          const style = localStorage.getItem("typebridge.style.v1") ?? (localStorage.getItem("typebridge.sketch.v1") === "on" ? "sketch" : null);
+          if (["sketch", "brutal", "notebook", "chalkboard"].includes(style)) document.documentElement.dataset.activeStyle = style;
+        } catch {
+          /* The plain look remains when storage is blocked. */
+        }
       })();
     </script>
     <title>TypeBridge — Write and share interactive documents</title>
@@ -179,6 +185,18 @@
         </select>
         <p id="appearance-hint" class="setting-note">
           System follows your device. Your choice is saved in this browser.
+        </p>
+        <label for="doc-style">Style</label>
+        <select id="doc-style" aria-describedby="doc-style-hint">
+          <option value="plain">Plain</option>
+          <option value="sketch">Hand-drawn</option>
+          <option value="brutal">Bold (neo-brutalism)</option>
+          <option value="notebook">Notebook</option>
+          <option value="chalkboard">Chalkboard</option>
+        </select>
+        <p id="doc-style-hint" class="setting-note">
+          Changes the look of the app and of rendered documents: buttons, fields, checkboxes, choices and quiz
+          controls. Notebook and Chalkboard bring their own paper. Saved in this browser.
         </p>
         <div class="settings-host-only">
           <label for="window-layout">Layout</label>
