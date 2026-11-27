@@ -218,6 +218,20 @@
   box-shadow: none;
 }
 
+/* Toggle buttons (Edit/Preview and others with aria-pressed): the pressed one is filled with ink so
+   the selection stays visible under every style. */
+:root:is(
+    [data-active-style="sketch"],
+    [data-active-style="brutal"],
+    [data-active-style="notebook"],
+    [data-active-style="chalkboard"]
+  )
+  button[aria-pressed="true"]:not(.text-button, .resize-grip, .active-doc *) {
+  background: var(--app-ink);
+  color: var(--surface);
+  box-shadow: inset 0 -3px var(--surface);
+}
+
 /* Fields */
 :root:is(
     [data-active-style="sketch"],

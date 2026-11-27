@@ -38,6 +38,11 @@ test('Style restyles the app and rendered documents, persists, reaches shared pa
   await expect(settingsButton).toHaveCSS('border-top-width', '3px');
   expect(plainBorder).not.toBe('3px');
   await expect(page.locator('#tab-indent')).toHaveCSS('appearance', 'none');
+  // The Edit/Preview switch still shows which view is selected (#408 review).
+  const pressedFill = await page.locator('#document-view-preview').evaluate(el => getComputedStyle(el).backgroundColor);
+  const unpressedFill = await page.locator('#document-view-edit').evaluate(el => getComputedStyle(el).backgroundColor);
+  await expect(page.locator('#document-view-preview')).toHaveAttribute('aria-pressed', 'true');
+  expect(pressedFill).not.toBe(unpressedFill);
   // The typing-mode switch keeps its own drawing.
   await expect(page.locator('#enabled')).toHaveCSS('border-radius', '999px');
   await radio(page).check();
